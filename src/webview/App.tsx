@@ -24,6 +24,7 @@ import { themes, Theme } from './themes';
 import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } from './optimizationHints';
 import { saveQuery, getSavedQueries, deleteQuery, addToHistory, SavedQuery } from './queryStorage';
 import { processBatchQueries, hasMultipleQueries, getQueryPreview, QueryBatch } from './batchProcessor';
+import { generateDocumentation, exportAsMarkdown, QueryDocumentation } from './documentationGenerator';
 
 declare global {
     interface Window {
@@ -51,6 +52,8 @@ const FlowComponent: React.FC = () => {
     const [batchMode, setBatchMode] = useState<boolean>(false);
     const [batchQueries, setBatchQueries] = useState<QueryBatch[]>([]);
     const [currentQueryIndex, setCurrentQueryIndex] = useState<number>(0);
+    const [documentation, setDocumentation] = useState<QueryDocumentation | null>(null);
+    const [showDocumentation, setShowDocumentation] = useState<boolean>(false);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
@@ -103,8 +106,13 @@ const FlowComponent: React.FC = () => {
                         if (firstQuery.ast) {
                             const hints = analyzeQueryForHints(firstQuery.sql, firstQuery.ast);
                             setOptimizationHints(hints);
+
+                            // Generate documentation
+                            const doc = generateDocumentation(firstQuery.sql, firstQuery.ast);
+                            setDocumentation(doc);
                         } else {
                             setOptimizationHints([]);
+                            setDocumentation(null);
                         }
                     }
                 }
@@ -118,12 +126,16 @@ const FlowComponent: React.FC = () => {
                 setNodes(parsedNodes);
                 setEdges(parsedEdges);
 
-                // Analyze for optimization hints
+                // Analyze for optimization hints and generate documentation
                 if (ast) {
                     const hints = analyzeQueryForHints(sql, ast);
                     setOptimizationHints(hints);
+
+                    const doc = generateDocumentation(sql, ast);
+                    setDocumentation(doc);
                 } else {
                     setOptimizationHints([]);
+                    setDocumentation(null);
                 }
             }
 
@@ -185,17 +197,22 @@ const FlowComponent: React.FC = () => {
             setNodes([]);
             setEdges([]);
             setOptimizationHints([]);
+            setDocumentation(null);
         } else {
             setError('');
             setNodes(query.nodes);
             setEdges(query.edges);
 
-            // Analyze for optimization hints
+            // Analyze for optimization hints and generate documentation
             if (query.ast) {
                 const hints = analyzeQueryForHints(query.sql, query.ast);
                 setOptimizationHints(hints);
+
+                const doc = generateDocumentation(query.sql, query.ast);
+                setDocumentation(doc);
             } else {
                 setOptimizationHints([]);
+                setDocumentation(null);
             }
         }
     };
@@ -221,6 +238,19 @@ const FlowComponent: React.FC = () => {
 
     const handleFitView = () => {
         fitView({ padding: 0.2, duration: 300 });
+    };
+
+    const handleExportDocumentation = () => {
+        if (!documentation || !sqlCode) return;
+
+        const markdown = exportAsMarkdown(documentation, sqlCode);
+        const blob = new Blob([markdown], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sql-documentation-${Date.now()}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
     };
 
     const downloadImage = (dataUrl: string, extension: string) => {
@@ -499,6 +529,32 @@ const FlowComponent: React.FC = () => {
                     >
                         📂 Saved ({savedQueries.length})
                     </button>
+                    <button
+                        onClick={() => setShowDocumentation(!showDocumentation)}
+                        disabled={!documentation}
+                        style={{
+                            background: '#38b2ac',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: !documentation ? 'not-allowed' : 'pointer',
+                            opacity: !documentation ? 0.5 : 1,
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            if (documentation) {
+                                e.currentTarget.style.background = '#319795';
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#38b2ac';
+                        }}
+                    >
+                        📄 Docs
+                    </button>
                 </Panel>
 
                 {selectedNode && (
@@ -562,6 +618,257 @@ const FlowComponent: React.FC = () => {
                                     : JSON.stringify(selectedNode.data, null, 2)}
                             </div>
                         </div>
+                    </Panel>
+                )}
+
+                {showDocumentation && documentation && (
+                    <Panel position="top-left" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '350px',
+                        maxWidth: '450px',
+                        maxHeight: '500px',
+                        overflowY: 'auto',
+                        marginTop: '350px'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#38b2ac' }}>
+                                📄 Query Documentation
+                            </h4>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                    onClick={handleExportDocumentation}
+                                    style={{
+                                        background: '#38b2ac',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '4px 10px',
+                                        fontSize: '10px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#319795';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#38b2ac';
+                                    }}
+                                >
+                                    Export MD
+                                </button>
+                                <button
+                                    onClick={() => setShowDocumentation(false)}
+                                    style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#888',
+                                        cursor: 'pointer',
+                                        fontSize: '16px',
+                                        padding: '0 4px'
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style={{ fontSize: '12px' }}>
+                            {/* Summary */}
+                            <div style={{
+                                padding: '10px',
+                                marginBottom: '10px',
+                                background: 'rgba(56, 178, 172, 0.1)',
+                                borderLeft: '3px solid #38b2ac',
+                                borderRadius: '4px'
+                            }}>
+                                <div style={{ fontWeight: 600, marginBottom: '4px', color: '#38b2ac' }}>
+                                    Summary
+                                </div>
+                                <div style={{ color: '#ccc', fontSize: '11px' }}>
+                                    {documentation.summary}
+                                </div>
+                            </div>
+
+                            {/* Purpose */}
+                            <div style={{
+                                padding: '10px',
+                                marginBottom: '10px',
+                                background: 'rgba(0, 0, 0, 0.3)',
+                                borderRadius: '4px'
+                            }}>
+                                <div style={{ fontWeight: 600, marginBottom: '4px', color: '#aaa' }}>
+                                    Purpose
+                                </div>
+                                <div style={{ color: '#ccc', fontSize: '11px' }}>
+                                    {documentation.purpose}
+                                </div>
+                            </div>
+
+                            {/* Complexity */}
+                            <div style={{
+                                padding: '10px',
+                                marginBottom: '10px',
+                                background: 'rgba(0, 0, 0, 0.3)',
+                                borderRadius: '4px'
+                            }}>
+                                <div style={{ fontWeight: 600, marginBottom: '4px', color: '#aaa' }}>
+                                    Complexity: <span style={{ color: getComplexityColor(documentation.complexity) }}>
+                                        {documentation.complexity}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Tables */}
+                            {documentation.tables.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Tables ({documentation.tables.length})
+                                    </div>
+                                    {documentation.tables.map((table, idx) => (
+                                        <div key={idx} style={{
+                                            fontSize: '10px',
+                                            color: '#bbb',
+                                            marginBottom: '4px',
+                                            paddingLeft: '10px'
+                                        }}>
+                                            • <span style={{ color: '#667eea', fontWeight: 600 }}>{table.name}</span>
+                                            {table.alias && <span style={{ color: '#888' }}> (as {table.alias})</span>}
+                                            <span style={{ color: '#888' }}> - {table.role}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Joins */}
+                            {documentation.joins.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Joins ({documentation.joins.length})
+                                    </div>
+                                    {documentation.joins.map((join, idx) => (
+                                        <div key={idx} style={{
+                                            fontSize: '10px',
+                                            color: '#bbb',
+                                            marginBottom: '4px',
+                                            paddingLeft: '10px'
+                                        }}>
+                                            • <span style={{ color: '#ed8936', fontWeight: 600 }}>{join.type}</span>
+                                            {' '}{join.rightTable} on {join.condition}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Aggregations */}
+                            {documentation.aggregations.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Aggregations ({documentation.aggregations.length})
+                                    </div>
+                                    {documentation.aggregations.map((agg, idx) => (
+                                        <div key={idx} style={{
+                                            fontSize: '10px',
+                                            color: '#bbb',
+                                            marginBottom: '4px',
+                                            paddingLeft: '10px'
+                                        }}>
+                                            • <span style={{ color: '#d53f8c', fontWeight: 600 }}>{agg.function}</span>
+                                            ({agg.column}){agg.alias && ` as ${agg.alias}`}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Data Flow */}
+                            {documentation.dataFlow.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Data Flow
+                                    </div>
+                                    {documentation.dataFlow.map((step, idx) => (
+                                        <div key={idx} style={{
+                                            fontSize: '10px',
+                                            color: '#bbb',
+                                            marginBottom: '3px',
+                                            lineHeight: '1.5'
+                                        }}>
+                                            {step}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Warnings */}
+                            {documentation.warnings.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(245, 101, 101, 0.1)',
+                                    borderLeft: '3px solid #f56565',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#f56565' }}>
+                                        ⚠️ Warnings
+                                    </div>
+                                    {documentation.warnings.map((warning, idx) => (
+                                        <div key={idx} style={{
+                                            fontSize: '10px',
+                                            color: '#f56565',
+                                            marginBottom: '4px',
+                                            paddingLeft: '10px'
+                                        }}>
+                                            • {warning}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={() => setShowDocumentation(false)}
+                            style={{
+                                marginTop: '8px',
+                                width: '100%',
+                                padding: '6px',
+                                background: '#2d2d2d',
+                                color: '#aaa',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Hide Documentation
+                        </button>
                     </Panel>
                 )}
 
