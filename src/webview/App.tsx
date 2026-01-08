@@ -23,6 +23,7 @@ import { calculateQueryStats, getComplexityColor } from './queryStats';
 import { themes, Theme } from './themes';
 import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } from './optimizationHints';
 import { saveQuery, getSavedQueries, deleteQuery, addToHistory, SavedQuery } from './queryStorage';
+import { processBatchQueries, hasMultipleQueries, getQueryPreview, QueryBatch } from './batchProcessor';
 
 declare global {
     interface Window {
@@ -47,6 +48,9 @@ const FlowComponent: React.FC = () => {
     const [showHints, setShowHints] = useState<boolean>(true);
     const [showSavedQueries, setShowSavedQueries] = useState<boolean>(false);
     const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
+    const [batchMode, setBatchMode] = useState<boolean>(false);
+    const [batchQueries, setBatchQueries] = useState<QueryBatch[]>([]);
+    const [currentQueryIndex, setCurrentQueryIndex] = useState<number>(0);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
@@ -75,27 +79,65 @@ const FlowComponent: React.FC = () => {
     const visualizeSql = (sql: string, selectedDialect: SqlDialect = dialect) => {
         try {
             setError('');
-            const { nodes: parsedNodes, edges: parsedEdges, ast } = parseSqlToGraph(sql, selectedDialect);
-            setNodes(parsedNodes);
-            setEdges(parsedEdges);
+
+            // Check if this is a batch of queries
+            if (hasMultipleQueries(sql)) {
+                const batchResult = processBatchQueries(sql, selectedDialect);
+                setBatchQueries(batchResult.queries);
+                setBatchMode(true);
+                setCurrentQueryIndex(0);
+
+                // Show the first query
+                if (batchResult.queries.length > 0) {
+                    const firstQuery = batchResult.queries[0];
+                    if (firstQuery.error) {
+                        setError(`Query 1: ${firstQuery.error}`);
+                        setNodes([]);
+                        setEdges([]);
+                        setOptimizationHints([]);
+                    } else {
+                        setNodes(firstQuery.nodes);
+                        setEdges(firstQuery.edges);
+
+                        // Analyze for optimization hints
+                        if (firstQuery.ast) {
+                            const hints = analyzeQueryForHints(firstQuery.sql, firstQuery.ast);
+                            setOptimizationHints(hints);
+                        } else {
+                            setOptimizationHints([]);
+                        }
+                    }
+                }
+            } else {
+                // Single query mode
+                setBatchMode(false);
+                setBatchQueries([]);
+                setCurrentQueryIndex(0);
+
+                const { nodes: parsedNodes, edges: parsedEdges, ast } = parseSqlToGraph(sql, selectedDialect);
+                setNodes(parsedNodes);
+                setEdges(parsedEdges);
+
+                // Analyze for optimization hints
+                if (ast) {
+                    const hints = analyzeQueryForHints(sql, ast);
+                    setOptimizationHints(hints);
+                } else {
+                    setOptimizationHints([]);
+                }
+            }
 
             // Add to history
             if (sql.trim()) {
                 addToHistory(sql, selectedDialect);
-            }
-
-            // Analyze for optimization hints
-            if (ast) {
-                const hints = analyzeQueryForHints(sql, ast);
-                setOptimizationHints(hints);
-            } else {
-                setOptimizationHints([]);
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             setError(errorMessage);
             console.error('Visualization error:', err);
             setOptimizationHints([]);
+            setBatchMode(false);
+            setBatchQueries([]);
         }
     };
 
@@ -129,6 +171,32 @@ const FlowComponent: React.FC = () => {
         if (confirm('Delete this saved query?')) {
             deleteQuery(id);
             setSavedQueries(savedQueries.filter(q => q.id !== id));
+        }
+    };
+
+    const handleBatchQueryChange = (index: number) => {
+        if (index < 0 || index >= batchQueries.length) return;
+
+        setCurrentQueryIndex(index);
+        const query = batchQueries[index];
+
+        if (query.error) {
+            setError(`Query ${index + 1}: ${query.error}`);
+            setNodes([]);
+            setEdges([]);
+            setOptimizationHints([]);
+        } else {
+            setError('');
+            setNodes(query.nodes);
+            setEdges(query.edges);
+
+            // Analyze for optimization hints
+            if (query.ast) {
+                const hints = analyzeQueryForHints(query.sql, query.ast);
+                setOptimizationHints(hints);
+            } else {
+                setOptimizationHints([]);
+            }
         }
     };
 
@@ -901,6 +969,131 @@ const FlowComponent: React.FC = () => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        )}
+                    </Panel>
+                )}
+
+                {batchMode && batchQueries.length > 0 && (
+                    <Panel position="top-center" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '500px',
+                        maxWidth: '700px'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px'
+                        }}>
+                            <div style={{
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                color: '#667eea',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                Batch Mode: {batchQueries.length} {batchQueries.length === 1 ? 'Query' : 'Queries'}
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                gap: '6px',
+                                flex: 1,
+                                overflowX: 'auto',
+                                paddingBottom: '4px'
+                            }}>
+                                {batchQueries.map((query, index) => (
+                                    <button
+                                        key={query.id}
+                                        onClick={() => handleBatchQueryChange(index)}
+                                        style={{
+                                            background: currentQueryIndex === index ? '#667eea' : '#2d2d2d',
+                                            color: currentQueryIndex === index ? 'white' : '#aaa',
+                                            border: query.error ? '1px solid #f56565' : '1px solid #404040',
+                                            borderRadius: '6px',
+                                            padding: '8px 14px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            whiteSpace: 'nowrap',
+                                            transition: 'all 0.2s',
+                                            minWidth: '80px'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (currentQueryIndex !== index) {
+                                                e.currentTarget.style.background = '#404040';
+                                            }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (currentQueryIndex !== index) {
+                                                e.currentTarget.style.background = '#2d2d2d';
+                                            }
+                                        }}
+                                    >
+                                        <div>Query {index + 1}</div>
+                                        <div style={{
+                                            fontSize: '9px',
+                                            marginTop: '2px',
+                                            color: currentQueryIndex === index ? '#e0e0e0' : '#666'
+                                        }}>
+                                            {query.error ? '❌ Error' : `${query.nodes.length} nodes`}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                gap: '4px'
+                            }}>
+                                <button
+                                    onClick={() => handleBatchQueryChange(currentQueryIndex - 1)}
+                                    disabled={currentQueryIndex === 0}
+                                    style={{
+                                        background: '#2d2d2d',
+                                        color: currentQueryIndex === 0 ? '#555' : '#aaa',
+                                        border: '1px solid #404040',
+                                        borderRadius: '4px',
+                                        padding: '6px 10px',
+                                        fontSize: '12px',
+                                        cursor: currentQueryIndex === 0 ? 'not-allowed' : 'pointer',
+                                        opacity: currentQueryIndex === 0 ? 0.5 : 1
+                                    }}
+                                >
+                                    ←
+                                </button>
+                                <button
+                                    onClick={() => handleBatchQueryChange(currentQueryIndex + 1)}
+                                    disabled={currentQueryIndex === batchQueries.length - 1}
+                                    style={{
+                                        background: '#2d2d2d',
+                                        color: currentQueryIndex === batchQueries.length - 1 ? '#555' : '#aaa',
+                                        border: '1px solid #404040',
+                                        borderRadius: '4px',
+                                        padding: '6px 10px',
+                                        fontSize: '12px',
+                                        cursor: currentQueryIndex === batchQueries.length - 1 ? 'not-allowed' : 'pointer',
+                                        opacity: currentQueryIndex === batchQueries.length - 1 ? 0.5 : 1
+                                    }}
+                                >
+                                    →
+                                </button>
+                            </div>
+                        </div>
+                        {batchQueries[currentQueryIndex] && (
+                            <div style={{
+                                marginTop: '10px',
+                                padding: '8px',
+                                background: 'rgba(0, 0, 0, 0.3)',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontFamily: 'monospace',
+                                color: '#aaa',
+                                maxHeight: '60px',
+                                overflowY: 'auto'
+                            }}>
+                                {batchQueries[currentQueryIndex].sql}
                             </div>
                         )}
                     </Panel>

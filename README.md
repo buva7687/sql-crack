@@ -25,6 +25,9 @@ SQL Crack is a Visual Studio Code extension that transforms your SQL queries int
 - **Query Statistics**: Real-time complexity analysis with scoring
 - **Theme Customization**: 5 built-in color themes (Dark, Light, Ocean, Forest, Sunset)
 - **Interactive Node Selection**: Click nodes to view detailed information
+- **Query Optimization Hints**: Automatic detection of anti-patterns and performance issues
+- **Local Storage**: Save, load, and manage your favorite queries with automatic history tracking
+- **Batch Processing**: Visualize multiple queries at once with easy navigation between them
 
 ### Privacy-Focused 🔒
 - **100% Local Processing**: All parsing and visualization happens locally in VS Code
@@ -87,12 +90,47 @@ vsce package
 - ✅ **Window Functions** - OVER, PARTITION BY, ROW_NUMBER, RANK, etc.
 - ✅ **Set Operations** - UNION, INTERSECT, EXCEPT
 
+### Query Optimization Hints ⚡
+
+SQL Crack automatically analyzes your queries and provides optimization suggestions:
+
+- **Performance Issues**: Detects SELECT *, missing LIMIT, missing WHERE on UPDATE/DELETE
+- **Best Practices**: Identifies NOT IN usage, OR in WHERE clauses, functions on indexed columns
+- **Security**: Flags potential security concerns
+- **Maintainability**: Suggests improvements for code quality
+
+Hints are displayed in a dismissible panel with severity levels (Error, Warning, Info) and categorized by type.
+
+### Local Storage Features 💾
+
+Save and manage your favorite queries:
+
+- **Save Queries**: Save current query with a custom name
+- **Load Queries**: Browse and load saved queries
+- **Automatic History**: Last 20 queries automatically tracked
+- **Search**: Find queries by name, SQL content, or tags
+- **Export/Import**: Export queries as JSON for backup or sharing
+- **Storage Stats**: Monitor storage usage
+
+All data stored locally in browser localStorage for complete privacy.
+
+### Batch Processing 📊
+
+Work with multiple queries simultaneously:
+
+- **Automatic Detection**: Queries separated by semicolons are automatically detected
+- **Tab Navigation**: Switch between queries using tabs or arrow buttons
+- **Individual Stats**: Each query gets its own complexity analysis and hints
+- **Error Handling**: Failed queries are highlighted but don't block others
+- **Preview**: See SQL preview for each query in the batch navigator
+
 ### Example Files
 
 Check out the included example files:
 - `example.sql` - Basic SELECT, INSERT, UPDATE, DELETE queries
 - `example-schema.sql` - E-commerce database schema with foreign keys
 - `example-advanced.sql` - CTEs, window functions, subqueries, and UNION operations
+- `example-batch.sql` - Multiple queries demonstrating batch processing
 
 ### Example Queries
 
@@ -173,8 +211,10 @@ The extension creates different colored nodes for different SQL components:
 
 ### Panels
 - **Top-Left**: Main control panel with SQL dialect selector and theme chooser
-- **Top-Right**: Export buttons (PNG, SVG) and Fit View button
+- **Top-Center**: Optimization hints panel (when hints are available) or Batch navigator (when multiple queries detected)
+- **Top-Right**: Export buttons (PNG, SVG), Fit View, Save, and Saved Queries buttons
 - **Bottom-Left**: Node details panel (appears when clicking a node)
+- **Bottom-Center**: Saved queries panel (appears when clicking "Saved" button)
 - **Bottom-Right**: Query statistics panel with complexity analysis
 
 ### Export Options
@@ -210,19 +250,23 @@ The extension creates different colored nodes for different SQL components:
 ```
 sql-crack/
 ├── src/
-│   ├── extension.ts           # Extension activation & commands
-│   ├── visualizationPanel.ts  # WebView panel management
+│   ├── extension.ts             # Extension activation & commands
+│   ├── visualizationPanel.ts    # WebView panel management
 │   └── webview/
-│       ├── index.tsx          # React entry point
-│       ├── App.tsx            # Main React component
-│       ├── sqlParser.ts       # SQL query parsing & graph generation
-│       ├── schemaParser.ts    # CREATE TABLE parsing & ER diagrams
-│       ├── queryStats.ts      # Query complexity analysis
-│       └── themes.ts          # Color theme definitions
-├── dist/                      # Compiled output
-├── example.sql               # Basic example queries
-├── example-schema.sql        # Database schema examples
-├── example-advanced.sql      # Advanced feature examples
+│       ├── index.tsx            # React entry point
+│       ├── App.tsx              # Main React component
+│       ├── sqlParser.ts         # SQL query parsing & graph generation
+│       ├── schemaParser.ts      # CREATE TABLE parsing & ER diagrams
+│       ├── queryStats.ts        # Query complexity analysis
+│       ├── themes.ts            # Color theme definitions
+│       ├── optimizationHints.ts # Query optimization analysis
+│       ├── queryStorage.ts      # Local storage for saved queries
+│       └── batchProcessor.ts    # Batch query processing
+├── dist/                        # Compiled output
+├── example.sql                 # Basic example queries
+├── example-schema.sql          # Database schema examples
+├── example-advanced.sql        # Advanced feature examples
+├── example-batch.sql           # Batch processing examples
 ├── package.json
 ├── tsconfig.json
 └── webpack.config.js
