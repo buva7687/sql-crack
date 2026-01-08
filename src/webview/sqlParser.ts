@@ -114,16 +114,103 @@ function processStatement(statement: any, stmtIndex: number, baseYOffset: number
     let xOffset = 0;
     const yStep = 120;
 
+    // Process CTEs (WITH clause)
+    if (statement.with && statement.with.length > 0) {
+        statement.with.forEach((cte: any, idx: number) => {
+            const cteId = generateId('cte');
+            const cteName = cte.name || `CTE_${idx + 1}`;
+
+            nodes.push({
+                id: cteId,
+                data: { label: `WITH\n${cteName}` },
+                position: { x: idx * 200, y: baseYOffset },
+                style: {
+                    background: '#805ad5',
+                    color: 'white',
+                    borderRadius: 8,
+                    padding: 10,
+                    minWidth: 120,
+                    whiteSpace: 'pre-wrap',
+                    border: '2px dashed #6b46c1'
+                }
+            });
+
+            edges.push({
+                id: `${cteId}-${rootId}`,
+                source: cteId,
+                target: rootId,
+                label: 'CTE',
+                animated: true,
+                style: { strokeDasharray: '5 5', stroke: '#805ad5' }
+            });
+        });
+    }
+
+    // Check for UNION/INTERSECT/EXCEPT operations
+    if (statement._next) {
+        const setOpType = statement.set_op || 'UNION';
+        const setOpId = generateId('setop');
+
+        nodes.push({
+            id: setOpId,
+            data: { label: setOpType },
+            position: { x: 500, y: baseYOffset + 50 + yStep },
+            style: {
+                background: '#f6ad55',
+                color: 'white',
+                borderRadius: 8,
+                padding: 10,
+                minWidth: 100,
+                fontWeight: 'bold',
+                border: '2px solid #dd6b20'
+            }
+        });
+
+        edges.push({
+            id: `${rootId}-${setOpId}`,
+            source: rootId,
+            target: setOpId,
+            label: 'combines with',
+            animated: true
+        });
+
+        // Process the next query in the set operation
+        const nextResult = processStatement(statement._next, stmtIndex + 1, baseYOffset + 300);
+        nodes.push(...nextResult.nodes);
+        edges.push(...nextResult.edges);
+
+        if (nextResult.nodes.length > 0) {
+            edges.push({
+                id: `${setOpId}-${nextResult.nodes[0].id}`,
+                source: setOpId,
+                target: nextResult.nodes[0].id,
+                animated: true
+            });
+        }
+    }
+
     if (statementType === 'select') {
         // Process SELECT columns
         if (statement.columns && statement.columns.length > 0) {
             const selectId = generateId('select');
-            const columnsLabel = statement.columns.map((col: any) => {
+            const windowFunctions: string[] = [];
+            const regularColumns: string[] = [];
+
+            statement.columns.forEach((col: any) => {
                 if (col.expr && col.expr.column === '*') {
-                    return '*';
+                    regularColumns.push('*');
+                } else if (col.expr && col.expr.type === 'aggr_func' && col.expr.over) {
+                    // Window function detected
+                    const funcName = col.expr.name || 'WINDOW_FUNC';
+                    const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column).join(', ') || '';
+                    const orderBy = col.expr.over?.orderby?.map((o: any) => o.expr.column).join(', ') || '';
+                    windowFunctions.push(`${funcName}() OVER${partitionBy ? ` (PARTITION BY ${partitionBy})` : ''}`);
+                } else {
+                    regularColumns.push(col.as || col.expr?.column || 'expression');
                 }
-                return col.as || col.expr?.column || 'expression';
-            }).join(', ');
+            });
+
+            const columnsLabel = regularColumns.join(', ');
 
             nodes.push({
                 id: selectId,
@@ -146,6 +233,33 @@ function processStatement(statement: any, stmtIndex: number, baseYOffset: number
                 animated: true
             });
 
+            // Add window function nodes if present
+            if (windowFunctions.length > 0) {
+                const windowId = generateId('window');
+                nodes.push({
+                    id: windowId,
+                    data: { label: `WINDOW\n${windowFunctions.join('\\n')}` },
+                    position: { x: xOffset, y: baseYOffset + 50 + yStep * 2 },
+                    style: {
+                        background: '#d53f8c',
+                        color: 'white',
+                        borderRadius: 8,
+                        padding: 10,
+                        minWidth: 180,
+                        whiteSpace: 'pre-wrap',
+                        border: '2px solid #b83280'
+                    }
+                });
+
+                edges.push({
+                    id: `${selectId}-${windowId}`,
+                    source: selectId,
+                    target: windowId,
+                    label: 'uses',
+                    animated: true
+                });
+            }
+
             xOffset += 200;
         }
 
@@ -153,28 +267,60 @@ function processStatement(statement: any, stmtIndex: number, baseYOffset: number
         if (statement.from && statement.from.length > 0) {
             statement.from.forEach((fromItem: any, idx: number) => {
                 const fromId = generateId('from');
-                const tableName = fromItem.as || fromItem.table || 'table';
 
-                nodes.push({
-                    id: fromId,
-                    data: { label: `FROM\n${tableName}` },
-                    position: { x: xOffset, y: baseYOffset + 50 + yStep },
-                    style: {
-                        background: '#4299e1',
-                        color: 'white',
-                        borderRadius: 8,
-                        padding: 10,
-                        minWidth: 120,
-                        whiteSpace: 'pre-wrap'
-                    }
-                });
+                // Check if this is a subquery
+                if (fromItem.expr && fromItem.expr.type === 'select') {
+                    // This is a subquery
+                    const subqueryName = fromItem.as || 'subquery';
 
-                edges.push({
-                    id: `${rootId}-${fromId}`,
-                    source: rootId,
-                    target: fromId,
-                    animated: true
-                });
+                    nodes.push({
+                        id: fromId,
+                        data: { label: `FROM\n(${subqueryName})` },
+                        position: { x: xOffset, y: baseYOffset + 50 + yStep },
+                        style: {
+                            background: '#38b2ac',
+                            color: 'white',
+                            borderRadius: 8,
+                            padding: 10,
+                            minWidth: 120,
+                            whiteSpace: 'pre-wrap',
+                            border: '2px dashed #319795'
+                        }
+                    });
+
+                    edges.push({
+                        id: `${rootId}-${fromId}`,
+                        source: rootId,
+                        target: fromId,
+                        label: 'subquery',
+                        animated: true,
+                        style: { strokeDasharray: '5 5' }
+                    });
+                } else {
+                    // Regular table
+                    const tableName = fromItem.as || fromItem.table || 'table';
+
+                    nodes.push({
+                        id: fromId,
+                        data: { label: `FROM\n${tableName}` },
+                        position: { x: xOffset, y: baseYOffset + 50 + yStep },
+                        style: {
+                            background: '#4299e1',
+                            color: 'white',
+                            borderRadius: 8,
+                            padding: 10,
+                            minWidth: 120,
+                            whiteSpace: 'pre-wrap'
+                        }
+                    });
+
+                    edges.push({
+                        id: `${rootId}-${fromId}`,
+                        source: rootId,
+                        target: fromId,
+                        animated: true
+                    });
+                }
 
                 // Process JOINs
                 if (fromItem.join) {
