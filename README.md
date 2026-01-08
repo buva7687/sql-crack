@@ -6,12 +6,30 @@ SQL Crack is a Visual Studio Code extension that transforms your SQL queries int
 
 ## Features ✨
 
-- **Interactive Visualizations**: See your SQL queries as interactive node graphs
-- **JSON Crack Style**: Inspired by the popular JSON Crack tool, with similar intuitive visualization
-- **Query Analysis**: Break down SELECT, INSERT, UPDATE, DELETE statements into visual components
+### Core Visualization
+- **Interactive Node Graphs**: See your SQL queries as beautiful, interactive diagrams
+- **JSON Crack Style**: Inspired by the popular JSON Crack tool
+- **Query Analysis**: Break down SELECT, INSERT, UPDATE, DELETE statements
 - **Join Visualization**: Clearly see table relationships and JOIN operations
 - **Real-time Updates**: Visualize selected SQL code or entire files
-- **Pan & Zoom**: Navigate large queries with ease using built-in controls
+- **Pan & Zoom**: Navigate large queries with built-in controls
+
+### Advanced Features 🎯
+- **Schema Visualization (ER Diagrams)**: Parse CREATE TABLE statements and visualize database schemas with foreign key relationships
+- **CTE Support**: Common Table Expressions (WITH clauses) displayed with distinct styling
+- **Window Functions**: PARTITION BY and ORDER BY details visualized
+- **Subquery Detection**: Subqueries highlighted with special borders
+- **Set Operations**: UNION, INTERSECT, EXCEPT operations shown with connections
+- **Multi-Dialect Support**: MySQL, PostgreSQL, SQL Server (T-SQL), MariaDB, SQLite
+- **Export Capabilities**: Export visualizations to PNG or SVG (1920x1080)
+- **Query Statistics**: Real-time complexity analysis with scoring
+- **Theme Customization**: 5 built-in color themes (Dark, Light, Ocean, Forest, Sunset)
+- **Interactive Node Selection**: Click nodes to view detailed information
+
+### Privacy-Focused 🔒
+- **100% Local Processing**: All parsing and visualization happens locally in VS Code
+- **No Server Uploads**: Your SQL code never leaves your machine
+- **No External Dependencies**: Everything runs client-side in the webview
 
 ## Demo
 
@@ -59,11 +77,22 @@ vsce package
 
 ### Supported SQL Statements
 
-- ✅ **SELECT** - Columns, tables, joins, where, group by, order by, limit
+- ✅ **SELECT** - Columns, tables, joins, where, group by, order by, limit, CTEs, window functions
 - ✅ **INSERT** - Table and data insertion
 - ✅ **UPDATE** - Table updates with conditions
 - ✅ **DELETE** - Table deletions with conditions
+- ✅ **CREATE TABLE** - Schema visualization with foreign keys
 - ✅ **JOINs** - INNER, LEFT, RIGHT, FULL OUTER joins
+- ✅ **CTEs** - WITH clause (Common Table Expressions)
+- ✅ **Window Functions** - OVER, PARTITION BY, ROW_NUMBER, RANK, etc.
+- ✅ **Set Operations** - UNION, INTERSECT, EXCEPT
+
+### Example Files
+
+Check out the included example files:
+- `example.sql` - Basic SELECT, INSERT, UPDATE, DELETE queries
+- `example-schema.sql` - E-commerce database schema with foreign keys
+- `example-advanced.sql` - CTEs, window functions, subqueries, and UNION operations
 
 ### Example Queries
 
@@ -93,6 +122,35 @@ GROUP BY u.name, o.order_id
 ORDER BY o.created_at DESC;
 ```
 
+**CTE with Window Function:**
+```sql
+WITH ranked_employees AS (
+    SELECT
+        employee_id,
+        department_id,
+        salary,
+        ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) as salary_rank
+    FROM employees
+)
+SELECT * FROM ranked_employees WHERE salary_rank <= 3;
+```
+
+**Schema Definition:**
+```sql
+CREATE TABLE users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(50) NOT NULL,
+    email VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE orders (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    total_amount DECIMAL(10, 2),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
 ## Visualization Components 🎨
 
 The extension creates different colored nodes for different SQL components:
@@ -105,13 +163,45 @@ The extension creates different colored nodes for different SQL components:
 - **Pink** - GROUP BY clauses
 - **Teal** - ORDER BY clauses
 - **Orange** - LIMIT clauses
+- **Dashed Purple** - CTEs (WITH clauses)
+- **Pink** - Window Functions
+- **Dashed Teal** - Subqueries
+- **Orange** - Set Operations (UNION, INTERSECT, EXCEPT)
+- **Gradient Purple** - Schema Tables (with 🔑 for primary keys, 🔗 for foreign keys)
+
+## UI Features
+
+### Panels
+- **Top-Left**: Main control panel with SQL dialect selector and theme chooser
+- **Top-Right**: Export buttons (PNG, SVG) and Fit View button
+- **Bottom-Left**: Node details panel (appears when clicking a node)
+- **Bottom-Right**: Query statistics panel with complexity analysis
+
+### Export Options
+- **PNG Export**: High-resolution (1920x1080) PNG images
+- **SVG Export**: Vector graphics for scalable diagrams
+- **Local Processing**: All exports happen client-side
+
+### Query Statistics
+- **Complexity Levels**: Simple, Moderate, Complex, Very Complex
+- **Metrics Tracked**: Tables, Joins, CTEs, Window Functions, Subqueries, Set Operations
+- **Color-Coded Scoring**: Visual feedback on query complexity
+
+### Theme Customization
+- **Dark** - Default dark theme with purple accents
+- **Light** - Clean light theme for presentations
+- **Ocean** - Blue-teal cyberpunk theme
+- **Forest** - Green nature-inspired theme
+- **Sunset** - Pink-purple gradient theme
 
 ## Controls
 
 - **Pan**: Click and drag on the canvas
 - **Zoom**: Scroll wheel or use the +/- controls
-- **Fit View**: Reset to see all nodes
-- **Minimap**: Navigate large diagrams using the minimap in the bottom-right
+- **Fit View**: Click "Fit View" button to reset camera
+- **Node Selection**: Click any node to view details
+- **Minimap**: Navigate large diagrams using the minimap
+- **Export**: Use PNG/SVG buttons to save visualizations
 
 ## Development 🛠️
 
@@ -125,8 +215,14 @@ sql-crack/
 │   └── webview/
 │       ├── index.tsx          # React entry point
 │       ├── App.tsx            # Main React component
-│       └── sqlParser.ts       # SQL parsing & graph generation
+│       ├── sqlParser.ts       # SQL query parsing & graph generation
+│       ├── schemaParser.ts    # CREATE TABLE parsing & ER diagrams
+│       ├── queryStats.ts      # Query complexity analysis
+│       └── themes.ts          # Color theme definitions
 ├── dist/                      # Compiled output
+├── example.sql               # Basic example queries
+├── example-schema.sql        # Database schema examples
+├── example-advanced.sql      # Advanced feature examples
 ├── package.json
 ├── tsconfig.json
 └── webpack.config.js
@@ -138,7 +234,8 @@ sql-crack/
 - **TypeScript** - Type-safe development
 - **React** - UI framework
 - **ReactFlow** - Graph visualization library
-- **node-sql-parser** - SQL parsing
+- **node-sql-parser** - SQL parsing (supports multiple dialects)
+- **html-to-image** - Client-side image export
 - **Webpack** - Bundling
 
 ### Development Commands
@@ -161,37 +258,50 @@ npm run package
 
 1. Open the project in VS Code
 2. Press **F5** to launch Extension Development Host
-3. Open a SQL file in the new window
+3. Open a SQL file in the new window (try example.sql or example-schema.sql)
 4. Test the visualization command
 
 ## Configuration
 
-Currently, SQL Crack works out of the box with no configuration needed. Future versions may include customization options for:
+SQL Crack works out of the box with no configuration needed. All settings are accessible through the UI:
 
-- Color themes
-- Node styles
-- Layout algorithms
-- Supported SQL dialects
+- **SQL Dialect**: Choose from MySQL, PostgreSQL, SQL Server (T-SQL), MariaDB, SQLite
+- **Theme**: Select from 5 built-in color themes
+- **Statistics Panel**: Toggle visibility with the close button
+- **Export Settings**: Default resolution 1920x1080
 
 ## Known Limitations ⚠️
 
-- **SQL Dialects**: Primarily supports MySQL syntax (PostgreSQL, SQL Server support coming soon)
-- **Complex Subqueries**: Very deeply nested subqueries may not render optimally
-- **Large Queries**: Queries with 50+ tables may require manual layout adjustment
+- **Very Large Schemas**: Schemas with 100+ tables may require manual zoom adjustment
+- **Deeply Nested Queries**: Queries with 5+ levels of subquery nesting may need manual layout
+- **Complex Window Functions**: Some advanced window function syntax may not parse perfectly
 
 ## Roadmap 🗺️
 
-- [ ] Support for PostgreSQL, SQL Server, Oracle dialects
-- [ ] CTE (Common Table Expression) visualization
-- [ ] Subquery expansion/collapse
-- [ ] Export diagrams as PNG/SVG
-- [ ] Custom color themes
+- [x] Support for PostgreSQL, SQL Server, Oracle, SQLite dialects
+- [x] CTE (Common Table Expression) visualization
+- [x] Subquery detection and visualization
+- [x] Export diagrams as PNG/SVG
+- [x] Custom color themes
+- [x] Database schema visualization
+- [x] Query complexity analysis
+- [ ] Collapsible subquery/CTE nodes
 - [ ] Query optimization suggestions
-- [ ] Database schema import and visualization
+- [ ] Custom node layouts (tree, hierarchical, circular)
+- [ ] Dark/Light mode sync with VS Code theme
+- [ ] Save/load layout preferences
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
+
+## Privacy & Security
+
+SQL Crack is designed with privacy as a core principle:
+- **No telemetry** - We don't collect any usage data
+- **No network calls** - Everything runs locally
+- **No data storage** - Your SQL code is never saved or transmitted
+- **Open source** - All code is visible and auditable
 
 ## License
 
@@ -202,6 +312,7 @@ MIT License - see LICENSE file for details
 - Inspired by [JSON Crack](https://jsoncrack.com/)
 - Built with [ReactFlow](https://reactflow.dev/)
 - SQL parsing by [node-sql-parser](https://github.com/taozhi8833998/node-sql-parser)
+- Image export by [html-to-image](https://github.com/bubkoo/html-to-image)
 
 ## Support
 
