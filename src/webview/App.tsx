@@ -20,6 +20,7 @@ import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
 import { parseSqlToGraph, SqlDialect } from './sqlParser';
 import { calculateQueryStats, getComplexityColor } from './queryStats';
+import { themes, Theme } from './themes';
 
 declare global {
     interface Window {
@@ -39,8 +40,12 @@ const FlowComponent: React.FC = () => {
     const [dialect, setDialect] = useState<SqlDialect>('MySQL');
     const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
     const [showStats, setShowStats] = useState<boolean>(true);
+    const [themeName, setThemeName] = useState<string>('dark');
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
+
+    // Get current theme
+    const currentTheme = themes[themeName];
 
     // Calculate query statistics
     const stats = useMemo(() => calculateQueryStats(nodes, edges), [nodes, edges]);
@@ -145,7 +150,7 @@ const FlowComponent: React.FC = () => {
     };
 
     return (
-        <div ref={flowRef} style={{ width: '100%', height: '100vh', background: '#1e1e1e' }}>
+        <div ref={flowRef} style={{ width: '100%', height: '100vh', background: currentTheme.background }}>
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -192,6 +197,31 @@ const FlowComponent: React.FC = () => {
                             <option value="Transact-SQL">SQL Server (T-SQL)</option>
                             <option value="MariaDB">MariaDB</option>
                             <option value="SQLite">SQLite</option>
+                        </select>
+                    </div>
+
+                    <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '12px', color: '#aaa', display: 'block', marginBottom: '4px' }}>
+                            Theme:
+                        </label>
+                        <select
+                            value={themeName}
+                            onChange={(e) => setThemeName(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '6px 8px',
+                                fontSize: '12px',
+                                background: '#2d2d2d',
+                                color: '#fff',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                outline: 'none'
+                            }}
+                        >
+                            {Object.keys(themes).map(key => (
+                                <option key={key} value={key}>{themes[key].name}</option>
+                            ))}
                         </select>
                     </div>
 
@@ -525,7 +555,7 @@ const FlowComponent: React.FC = () => {
                     variant={BackgroundVariant.Dots}
                     gap={12}
                     size={1}
-                    color="#404040"
+                    color={currentTheme.dotColor}
                 />
             </ReactFlow>
         </div>
