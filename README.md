@@ -36,7 +36,16 @@ SQL Crack is a Visual Studio Code extension that transforms your SQL queries int
 
 ## Demo
 
-![SQL Crack Demo](https://via.placeholder.com/800x400.png?text=SQL+Crack+Visualization+Demo)
+Try SQL Crack with the included example files:
+- `example.sql` - Basic SELECT, INSERT, UPDATE, DELETE queries
+- `example-schema.sql` - E-commerce database schema with foreign keys
+- `example-advanced.sql` - CTEs, window functions, subqueries, and UNION operations
+- `example-batch.sql` - Multiple queries demonstrating batch processing
+
+**Quick Start:**
+1. Open any `.sql` file in VS Code
+2. Click the graph icon in the editor title bar
+3. Explore the interactive visualization with pan, zoom, and node selection
 
 ## Installation
 
