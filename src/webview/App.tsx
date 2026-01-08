@@ -25,6 +25,7 @@ import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } fro
 import { saveQuery, getSavedQueries, deleteQuery, addToHistory, SavedQuery } from './queryStorage';
 import { processBatchQueries, hasMultipleQueries, getQueryPreview, QueryBatch } from './batchProcessor';
 import { generateDocumentation, exportAsMarkdown, QueryDocumentation } from './documentationGenerator';
+import { analyzeDataFlow, DataFlowAnalysis, getImpactColor, getTransformationIcon } from './dataFlowAnalysis';
 
 declare global {
     interface Window {
@@ -54,6 +55,8 @@ const FlowComponent: React.FC = () => {
     const [currentQueryIndex, setCurrentQueryIndex] = useState<number>(0);
     const [documentation, setDocumentation] = useState<QueryDocumentation | null>(null);
     const [showDocumentation, setShowDocumentation] = useState<boolean>(false);
+    const [dataFlow, setDataFlow] = useState<DataFlowAnalysis | null>(null);
+    const [showDataFlow, setShowDataFlow] = useState<boolean>(false);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
@@ -110,9 +113,14 @@ const FlowComponent: React.FC = () => {
                             // Generate documentation
                             const doc = generateDocumentation(firstQuery.sql, firstQuery.ast);
                             setDocumentation(doc);
+
+                            // Analyze data flow
+                            const flow = analyzeDataFlow(firstQuery.ast, firstQuery.nodes, firstQuery.edges);
+                            setDataFlow(flow);
                         } else {
                             setOptimizationHints([]);
                             setDocumentation(null);
+                            setDataFlow(null);
                         }
                     }
                 }
@@ -133,9 +141,13 @@ const FlowComponent: React.FC = () => {
 
                     const doc = generateDocumentation(sql, ast);
                     setDocumentation(doc);
+
+                    const flow = analyzeDataFlow(ast, parsedNodes, parsedEdges);
+                    setDataFlow(flow);
                 } else {
                     setOptimizationHints([]);
                     setDocumentation(null);
+                    setDataFlow(null);
                 }
             }
 
@@ -210,9 +222,13 @@ const FlowComponent: React.FC = () => {
 
                 const doc = generateDocumentation(query.sql, query.ast);
                 setDocumentation(doc);
+
+                const flow = analyzeDataFlow(query.ast, query.nodes, query.edges);
+                setDataFlow(flow);
             } else {
                 setOptimizationHints([]);
                 setDocumentation(null);
+                setDataFlow(null);
             }
         }
     };
@@ -555,6 +571,32 @@ const FlowComponent: React.FC = () => {
                     >
                         📄 Docs
                     </button>
+                    <button
+                        onClick={() => setShowDataFlow(!showDataFlow)}
+                        disabled={!dataFlow}
+                        style={{
+                            background: '#805ad5',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: !dataFlow ? 'not-allowed' : 'pointer',
+                            opacity: !dataFlow ? 0.5 : 1,
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            if (dataFlow) {
+                                e.currentTarget.style.background = '#6b46c1';
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#805ad5';
+                        }}
+                    >
+                        🔄 Flow
+                    </button>
                 </Panel>
 
                 {selectedNode && (
@@ -868,6 +910,239 @@ const FlowComponent: React.FC = () => {
                             }}
                         >
                             Hide Documentation
+                        </button>
+                    </Panel>
+                )}
+
+                {showDataFlow && dataFlow && (
+                    <Panel position="top-right" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '320px',
+                        maxWidth: '400px',
+                        maxHeight: '500px',
+                        overflowY: 'auto',
+                        marginTop: '60px'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#805ad5' }}>
+                                🔄 Data Flow Analysis
+                            </h4>
+                            <button
+                                onClick={() => setShowDataFlow(false)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    padding: '0 4px'
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ fontSize: '12px' }}>
+                            {/* Flow Summary */}
+                            <div style={{
+                                padding: '10px',
+                                marginBottom: '10px',
+                                background: 'rgba(128, 90, 213, 0.1)',
+                                borderLeft: '3px solid #805ad5',
+                                borderRadius: '4px'
+                            }}>
+                                <div style={{ color: '#ccc', fontSize: '11px' }}>
+                                    {dataFlow.flowSummary}
+                                </div>
+                            </div>
+
+                            {/* Transformation Points */}
+                            {dataFlow.transformationPoints.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Transformations ({dataFlow.transformationPoints.length})
+                                    </div>
+                                    {dataFlow.transformationPoints.map((point, idx) => (
+                                        <div
+                                            key={point.id}
+                                            style={{
+                                                padding: '8px',
+                                                marginBottom: '6px',
+                                                background: 'rgba(0, 0, 0, 0.3)',
+                                                borderLeft: `3px solid ${getImpactColor(point.estimatedImpact)}`,
+                                                borderRadius: '4px'
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                marginBottom: '4px'
+                                            }}>
+                                                <span style={{ marginRight: '6px', fontSize: '14px' }}>
+                                                    {getTransformationIcon(point.type)}
+                                                </span>
+                                                <span style={{
+                                                    fontSize: '10px',
+                                                    color: getImpactColor(point.estimatedImpact),
+                                                    textTransform: 'uppercase',
+                                                    fontWeight: 600
+                                                }}>
+                                                    {point.type}
+                                                </span>
+                                                <span style={{
+                                                    marginLeft: 'auto',
+                                                    fontSize: '9px',
+                                                    color: '#888',
+                                                    background: 'rgba(255, 255, 255, 0.05)',
+                                                    padding: '2px 6px',
+                                                    borderRadius: '3px'
+                                                }}>
+                                                    {point.estimatedImpact} impact
+                                                </span>
+                                            </div>
+                                            <div style={{
+                                                fontSize: '10px',
+                                                color: '#bbb',
+                                                lineHeight: '1.4'
+                                            }}>
+                                                {point.description}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Data Volume Estimates */}
+                            {dataFlow.dataVolumeEstimates.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Volume Estimates
+                                    </div>
+                                    {dataFlow.dataVolumeEstimates.map((estimate, idx) => (
+                                        <div
+                                            key={idx}
+                                            style={{
+                                                fontSize: '10px',
+                                                color: '#bbb',
+                                                marginBottom: '6px',
+                                                paddingLeft: '10px',
+                                                paddingBottom: '6px',
+                                                borderBottom: idx < dataFlow.dataVolumeEstimates.length - 1 ? '1px solid #333' : 'none'
+                                            }}
+                                        >
+                                            <div style={{ color: '#805ad5', fontWeight: 600, marginBottom: '2px' }}>
+                                                {estimate.stage}
+                                            </div>
+                                            <div style={{ color: '#aaa', marginBottom: '2px' }}>
+                                                Rows: <span style={{
+                                                    color: estimate.estimatedRows === 'many' ? '#f56565' :
+                                                           estimate.estimatedRows === 'reduced' ? '#ed8936' :
+                                                           estimate.estimatedRows === 'few' ? '#48bb78' : '#38b2ac',
+                                                    fontWeight: 600
+                                                }}>
+                                                    {estimate.estimatedRows}
+                                                </span>
+                                            </div>
+                                            <div style={{ color: '#888', fontSize: '9px', fontStyle: 'italic' }}>
+                                                {estimate.reasoning}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Column Lineage */}
+                            {dataFlow.columnLineage.length > 0 && (
+                                <div style={{
+                                    padding: '10px',
+                                    marginBottom: '10px',
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    borderRadius: '4px'
+                                }}>
+                                    <div style={{ fontWeight: 600, marginBottom: '6px', color: '#aaa' }}>
+                                        Column Lineage ({dataFlow.columnLineage.length})
+                                    </div>
+                                    <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                                        {dataFlow.columnLineage.map((lineage, idx) => (
+                                            <div
+                                                key={idx}
+                                                style={{
+                                                    fontSize: '10px',
+                                                    marginBottom: '8px',
+                                                    paddingBottom: '8px',
+                                                    borderBottom: idx < dataFlow.columnLineage.length - 1 ? '1px solid #333' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ color: '#667eea', fontWeight: 600, marginBottom: '3px' }}>
+                                                    → {lineage.outputColumn}
+                                                </div>
+                                                <div style={{ color: '#888', fontSize: '9px', marginBottom: '2px' }}>
+                                                    Type: <span style={{
+                                                        color: lineage.transformationType === 'aggregation' ? '#d53f8c' :
+                                                               lineage.transformationType === 'calculation' ? '#ed8936' :
+                                                               lineage.transformationType === 'constant' ? '#888' : '#48bb78'
+                                                    }}>
+                                                        {lineage.transformationType}
+                                                    </span>
+                                                </div>
+                                                {lineage.sourceColumns.length > 0 && (
+                                                    <div style={{ color: '#aaa', fontSize: '9px', marginLeft: '10px' }}>
+                                                        From: {lineage.sourceColumns.map(sc => `${sc.table}.${sc.column}`).join(', ')}
+                                                    </div>
+                                                )}
+                                                {lineage.expression && (
+                                                    <div style={{
+                                                        color: '#888',
+                                                        fontSize: '9px',
+                                                        fontFamily: 'monospace',
+                                                        marginTop: '2px',
+                                                        marginLeft: '10px',
+                                                        fontStyle: 'italic'
+                                                    }}>
+                                                        {lineage.expression}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={() => setShowDataFlow(false)}
+                            style={{
+                                marginTop: '8px',
+                                width: '100%',
+                                padding: '6px',
+                                background: '#2d2d2d',
+                                color: '#aaa',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Hide Data Flow
                         </button>
                     </Panel>
                 )}
