@@ -1,11 +1,13 @@
 import { Parser } from 'node-sql-parser';
 import { Node, Edge } from 'reactflow';
+import { parseSchemaToGraph } from './schemaParser';
 
 const parser = new Parser();
 
 export interface ParsedSqlData {
     nodes: Node[];
     edges: Edge[];
+    isSchema?: boolean;
 }
 
 let nodeIdCounter = 0;
@@ -26,6 +28,21 @@ export function parseSqlToGraph(sqlCode: string): ParsedSqlData {
         // Handle array of statements or single statement
         const statements = Array.isArray(ast) ? ast : [ast];
 
+        // Check if this is a schema definition (CREATE TABLE statements)
+        const hasCreateTable = statements.some((stmt: any) =>
+            stmt.type?.toLowerCase() === 'create' && stmt.keyword === 'table'
+        );
+
+        if (hasCreateTable) {
+            // Use schema parser for CREATE TABLE statements
+            const schemaResult = parseSchemaToGraph(sqlCode);
+            return {
+                nodes: schemaResult.nodes,
+                edges: schemaResult.edges,
+                isSchema: true
+            };
+        }
+
         let yOffset = 0;
 
         statements.forEach((statement: any, stmtIndex: number) => {
@@ -37,7 +54,7 @@ export function parseSqlToGraph(sqlCode: string): ParsedSqlData {
             yOffset += 400;
         });
 
-        return { nodes, edges };
+        return { nodes, edges, isSchema: false };
     } catch (error) {
         console.error('SQL parsing error:', error);
 
