@@ -4,6 +4,8 @@ import { parseSchemaToGraph } from './schemaParser';
 
 const parser = new Parser();
 
+export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'Transact-SQL' | 'MariaDB' | 'SQLite';
+
 export interface ParsedSqlData {
     nodes: Node[];
     edges: Edge[];
@@ -16,14 +18,14 @@ function generateId(prefix: string = 'node'): string {
     return `${prefix}_${nodeIdCounter++}`;
 }
 
-export function parseSqlToGraph(sqlCode: string): ParsedSqlData {
+export function parseSqlToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'): ParsedSqlData {
     nodeIdCounter = 0;
     const nodes: Node[] = [];
     const edges: Edge[] = [];
 
     try {
-        // Parse SQL
-        const ast = parser.astify(sqlCode, { database: 'MySQL' });
+        // Parse SQL with selected dialect
+        const ast = parser.astify(sqlCode, { database: dialect });
 
         // Handle array of statements or single statement
         const statements = Array.isArray(ast) ? ast : [ast];
@@ -35,7 +37,7 @@ export function parseSqlToGraph(sqlCode: string): ParsedSqlData {
 
         if (hasCreateTable) {
             // Use schema parser for CREATE TABLE statements
-            const schemaResult = parseSchemaToGraph(sqlCode);
+            const schemaResult = parseSchemaToGraph(sqlCode, dialect);
             return {
                 nodes: schemaResult.nodes,
                 edges: schemaResult.edges,

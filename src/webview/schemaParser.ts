@@ -1,5 +1,6 @@
 import { Parser } from 'node-sql-parser';
 import { Node, Edge } from 'reactflow';
+import { SqlDialect } from './sqlParser';
 
 const parser = new Parser();
 
@@ -38,14 +39,14 @@ function generateId(prefix: string = 'node'): string {
     return `${prefix}_${nodeIdCounter++}`;
 }
 
-export function parseSchemaToGraph(sqlCode: string): SchemaData {
+export function parseSchemaToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'): SchemaData {
     nodeIdCounter = 0;
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const tables: SchemaTable[] = [];
 
     try {
-        const ast = parser.astify(sqlCode, { database: 'MySQL' });
+        const ast = parser.astify(sqlCode, { database: dialect });
         const statements = Array.isArray(ast) ? ast : [ast];
 
         // First pass: collect all tables

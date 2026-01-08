@@ -17,7 +17,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
-import { parseSqlToGraph } from './sqlParser';
+import { parseSqlToGraph, SqlDialect } from './sqlParser';
 
 declare global {
     interface Window {
@@ -34,6 +34,7 @@ const FlowComponent: React.FC = () => {
     const [sqlCode, setSqlCode] = useState<string>('');
     const [error, setError] = useState<string>('');
     const [exporting, setExporting] = useState<boolean>(false);
+    const [dialect, setDialect] = useState<SqlDialect>('MySQL');
     const { getNodes } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
@@ -43,20 +44,27 @@ const FlowComponent: React.FC = () => {
         setSqlCode(initialSql);
 
         if (initialSql) {
-            visualizeSql(initialSql);
+            visualizeSql(initialSql, dialect);
         }
     }, []);
 
-    const visualizeSql = (sql: string) => {
+    const visualizeSql = (sql: string, selectedDialect: SqlDialect = dialect) => {
         try {
             setError('');
-            const { nodes: parsedNodes, edges: parsedEdges } = parseSqlToGraph(sql);
+            const { nodes: parsedNodes, edges: parsedEdges } = parseSqlToGraph(sql, selectedDialect);
             setNodes(parsedNodes);
             setEdges(parsedEdges);
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             setError(errorMessage);
             console.error('Visualization error:', err);
+        }
+    };
+
+    const handleDialectChange = (newDialect: SqlDialect) => {
+        setDialect(newDialect);
+        if (sqlCode) {
+            visualizeSql(sqlCode, newDialect);
         }
     };
 
@@ -134,11 +142,40 @@ const FlowComponent: React.FC = () => {
                     padding: '12px 16px',
                     borderRadius: '8px',
                     border: '1px solid #404040',
-                    color: '#fff'
+                    color: '#fff',
+                    minWidth: '280px'
                 }}>
                     <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600 }}>
                         SQL Crack - Query Visualization
                     </h3>
+
+                    <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '12px', color: '#aaa', display: 'block', marginBottom: '4px' }}>
+                            SQL Dialect:
+                        </label>
+                        <select
+                            value={dialect}
+                            onChange={(e) => handleDialectChange(e.target.value as SqlDialect)}
+                            style={{
+                                width: '100%',
+                                padding: '6px 8px',
+                                fontSize: '12px',
+                                background: '#2d2d2d',
+                                color: '#fff',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                outline: 'none'
+                            }}
+                        >
+                            <option value="MySQL">MySQL</option>
+                            <option value="PostgreSQL">PostgreSQL</option>
+                            <option value="Transact-SQL">SQL Server (T-SQL)</option>
+                            <option value="MariaDB">MariaDB</option>
+                            <option value="SQLite">SQLite</option>
+                        </select>
+                    </div>
+
                     {error && (
                         <div style={{
                             color: '#ff6b6b',
@@ -151,7 +188,7 @@ const FlowComponent: React.FC = () => {
                             Error: {error}
                         </div>
                     )}
-                    <div style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>
+                    <div style={{ fontSize: '12px', color: '#888', marginTop: '8px' }}>
                         Drag to pan • Scroll to zoom • Click nodes to select
                     </div>
                 </Panel>
