@@ -13,7 +13,8 @@ import ReactFlow, {
     useReactFlow,
     ReactFlowProvider,
     getRectOfNodes,
-    getTransformForBounds
+    getTransformForBounds,
+    Node as FlowNode
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
@@ -35,7 +36,8 @@ const FlowComponent: React.FC = () => {
     const [error, setError] = useState<string>('');
     const [exporting, setExporting] = useState<boolean>(false);
     const [dialect, setDialect] = useState<SqlDialect>('MySQL');
-    const { getNodes } = useReactFlow();
+    const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+    const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -72,6 +74,17 @@ const FlowComponent: React.FC = () => {
         (params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)),
         [setEdges]
     );
+
+    const onNodeClick = useCallback(
+        (event: React.MouseEvent, node: FlowNode) => {
+            setSelectedNode(node);
+        },
+        []
+    );
+
+    const handleFitView = () => {
+        fitView({ padding: 0.2, duration: 300 });
+    };
 
     const downloadImage = (dataUrl: string, extension: string) => {
         const a = document.createElement('a');
@@ -134,6 +147,7 @@ const FlowComponent: React.FC = () => {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onNodeClick={onNodeClick}
                 fitView
                 attributionPosition="bottom-right"
             >
@@ -253,7 +267,93 @@ const FlowComponent: React.FC = () => {
                     >
                         {exporting ? 'Exporting...' : 'Export SVG'}
                     </button>
+                    <button
+                        onClick={handleFitView}
+                        style={{
+                            background: '#4299e1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#3182ce';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#4299e1';
+                        }}
+                    >
+                        Fit View
+                    </button>
                 </Panel>
+
+                {selectedNode && (
+                    <Panel position="bottom-left" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '300px',
+                        maxWidth: '400px'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '8px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#667eea' }}>
+                                Node Details
+                            </h4>
+                            <button
+                                onClick={() => setSelectedNode(null)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    padding: '0 4px'
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div style={{ fontSize: '12px', marginTop: '8px' }}>
+                            <div style={{ marginBottom: '6px' }}>
+                                <span style={{ color: '#888' }}>Type:</span>{' '}
+                                <span style={{ color: '#fff' }}>{selectedNode.type || 'default'}</span>
+                            </div>
+                            <div style={{ marginBottom: '6px' }}>
+                                <span style={{ color: '#888' }}>ID:</span>{' '}
+                                <span style={{ color: '#aaa', fontFamily: 'monospace', fontSize: '11px' }}>
+                                    {selectedNode.id}
+                                </span>
+                            </div>
+                            <div style={{
+                                marginTop: '10px',
+                                padding: '8px',
+                                background: 'rgba(0, 0, 0, 0.3)',
+                                borderRadius: '4px',
+                                fontFamily: 'monospace',
+                                fontSize: '11px',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                maxHeight: '150px',
+                                overflowY: 'auto'
+                            }}>
+                                {typeof selectedNode.data.label === 'string'
+                                    ? selectedNode.data.label
+                                    : JSON.stringify(selectedNode.data, null, 2)}
+                            </div>
+                        </div>
+                    </Panel>
+                )}
 
                 <Controls />
 
