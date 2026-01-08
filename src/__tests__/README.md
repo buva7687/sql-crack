@@ -4,7 +4,60 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 
 ## Test Coverage
 
-### 1. **Optimization Hints Tests** (`optimizationHints.test.ts`)
+### Core Features (Implemented Before)
+
+### 1. **SQL Parser Tests** (`sqlParser.test.ts`)
+- ✅ Parse SELECT queries (simple, with WHERE, JOIN, GROUP BY, ORDER BY, LIMIT)
+- ✅ Parse INSERT queries (simple, multiple values, with SELECT)
+- ✅ Parse UPDATE queries (with/without WHERE, multiple SET clauses)
+- ✅ Parse DELETE queries (with/without WHERE)
+- ✅ Support all SQL dialects (MySQL, PostgreSQL, SQL Server, SQLite, MariaDB)
+- ✅ Parse CTEs (Common Table Expressions)
+- ✅ Parse window functions (ROW_NUMBER, PARTITION BY)
+- ✅ Parse subqueries
+- ✅ Parse set operations (UNION, INTERSECT, EXCEPT)
+- ✅ Parse all JOIN types (INNER, LEFT, RIGHT, FULL OUTER)
+- ✅ Parse CASE statements
+- ✅ Node and edge creation
+- ✅ Node styling and positioning
+- ✅ Error handling for invalid SQL
+- ✅ Schema mode detection
+- ✅ AST structure validation
+
+### 2. **Schema Parser Tests** (`schemaParser.test.ts`)
+- ✅ Parse simple CREATE TABLE statements
+- ✅ Detect primary keys
+- ✅ Parse tables with multiple columns
+- ✅ Detect AUTO_INCREMENT/SERIAL/IDENTITY
+- ✅ Detect NOT NULL, DEFAULT, UNIQUE constraints
+- ✅ Detect foreign key constraints (inline and separate)
+- ✅ Create edges for foreign key relationships
+- ✅ Handle multiple foreign keys
+- ✅ Parse multiple CREATE TABLE statements
+- ✅ Support all SQL dialects
+- ✅ Node styling with gradients and borders
+- ✅ Handle all data types (INT, VARCHAR, TEXT, DECIMAL, TIMESTAMP, BOOLEAN)
+- ✅ Complex schemas with relationships
+- ✅ Composite primary keys
+- ✅ CHECK constraints
+- ✅ Node layout and positioning
+- ✅ AST structure for CREATE TABLE
+
+### 3. **Themes Tests** (`themes.test.ts`)
+- ✅ All 5 themes present (Dark, Light, Ocean, Forest, Sunset)
+- ✅ Theme structure validation
+- ✅ All required color properties (background, panel, node, dotColor)
+- ✅ Valid hex color formats
+- ✅ Theme uniqueness (no duplicate colors)
+- ✅ Color accessibility and contrast
+- ✅ Type safety and interface compliance
+- ✅ Color consistency (lowercase, 6-digit hex)
+- ✅ Brightness levels (dark vs light)
+- ✅ Theme export and accessibility
+
+### High-Value Features (Implemented Today)
+
+### 4. **Optimization Hints Tests** (`optimizationHints.test.ts`)
 - ✅ Detection of `SELECT *` usage
 - ✅ Detection of missing `LIMIT` clause
 - ✅ Detection of `UPDATE` without `WHERE`
@@ -16,7 +69,7 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 - ✅ Multiple issues detection
 - ✅ Well-optimized query validation
 
-### 2. **Query Storage Tests** (`queryStorage.test.ts`)
+### 5. **Query Storage Tests** (`queryStorage.test.ts`)
 - ✅ Save query with auto-generated ID and timestamps
 - ✅ Retrieve all saved queries
 - ✅ Update existing query
@@ -29,7 +82,7 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 - ✅ localStorage integration
 - ✅ Error handling for corrupted data
 
-### 3. **Batch Processing Tests** (`batchProcessor.test.ts`)
+### 6. **Batch Processing Tests** (`batchProcessor.test.ts`)
 - ✅ Split queries by semicolon
 - ✅ Remove empty queries
 - ✅ Trim whitespace
@@ -43,7 +96,7 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 - ✅ Handle mixed query types (SELECT, INSERT, UPDATE, DELETE)
 - ✅ Query preview generation
 
-### 4. **Documentation Generator Tests** (`documentationGenerator.test.ts`)
+### 7. **Documentation Generator Tests** (`documentationGenerator.test.ts`)
 - ✅ Generate documentation for SELECT queries
 - ✅ Generate documentation for INSERT queries
 - ✅ Generate documentation for UPDATE queries
@@ -61,7 +114,7 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 - ✅ Include all documentation sections
 - ✅ Error handling
 
-### 5. **Data Flow Analysis Tests** (`dataFlowAnalysis.test.ts`)
+### 8. **Data Flow Analysis Tests** (`dataFlowAnalysis.test.ts`)
 - ✅ Analyze SELECT query data flow
 - ✅ Detect JOIN transformations
 - ✅ Detect FILTER transformations
@@ -78,7 +131,7 @@ Comprehensive test suite for all features implemented in SQL Crack VS Code exten
 - ✅ Assess transformation impact levels
 - ✅ Impact colors and icons
 
-### 6. **Query Statistics Tests** (`queryStats.test.ts`)
+### 9. **Query Statistics Tests** (`queryStats.test.ts`)
 - ✅ Count total nodes
 - ✅ Count tables
 - ✅ Count joins
@@ -123,12 +176,15 @@ npm run test:coverage
 ```
 src/__tests__/
 ├── setup.ts                        # Test setup and mocks
-├── optimizationHints.test.ts       # Optimization hints tests
-├── queryStorage.test.ts            # Local storage tests
-├── batchProcessor.test.ts          # Batch processing tests
-├── documentationGenerator.test.ts  # Documentation tests
-├── dataFlowAnalysis.test.ts        # Data flow analysis tests
-├── queryStats.test.ts              # Query statistics tests
+├── sqlParser.test.ts               # Core SQL parser tests (60 tests)
+├── schemaParser.test.ts            # Schema parser tests (50 tests)
+├── themes.test.ts                  # Theme tests (32 tests)
+├── optimizationHints.test.ts       # Optimization hints tests (10 tests)
+├── queryStorage.test.ts            # Local storage tests (23 tests)
+├── batchProcessor.test.ts          # Batch processing tests (19 tests)
+├── documentationGenerator.test.ts  # Documentation tests (19 tests)
+├── dataFlowAnalysis.test.ts        # Data flow analysis tests (24 tests)
+├── queryStats.test.ts              # Query statistics tests (15 tests)
 └── README.md                       # This file
 ```
 
@@ -200,13 +256,18 @@ Tests should be run on every commit to ensure:
 
 | Feature | Tests | Status |
 |---------|-------|--------|
+| **Core Features** | | |
+| SQL Parser | 60 | ✅ Ready |
+| Schema Parser | 50 | ✅ Ready |
+| Themes | 32 | ✅ Ready |
+| **High-Value Features** | | |
 | Optimization Hints | 10 | ✅ Ready |
 | Query Storage | 23 | ✅ Ready |
 | Batch Processing | 19 | ✅ Ready |
 | Documentation Generator | 19 | ✅ Ready |
 | Data Flow Analysis | 24 | ✅ Ready |
 | Query Statistics | 15 | ✅ Ready |
-| **Total** | **110** | ✅ Ready |
+| **Total** | **252** | ✅ Ready |
 
 ## Next Steps
 
