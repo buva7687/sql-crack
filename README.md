@@ -49,29 +49,90 @@ Try SQL Crack with the included example files:
 
 ## Installation
 
-### From VSIX
-1. Download the `.vsix` file
-2. Open VS Code
-3. Go to Extensions (Ctrl+Shift+X)
-4. Click the `...` menu → "Install from VSIX..."
-5. Select the downloaded file
+### Method 1: Install from Package File (Easiest)
 
-### From Source
+**What is a VSIX file?** It's a packaged VS Code extension file (like a `.zip` file for extensions).
+
+**Step-by-step instructions:**
+
+1. **Download the extension package**
+   - Look for a file named `sql-crack-0.0.1.vsix` (or similar)
+   - Save it to your Downloads folder or desktop
+
+2. **Open Visual Studio Code**
+   - Launch the VS Code application on your computer
+
+3. **Open the Extensions panel**
+   - **Option A:** Press `Ctrl+Shift+X` on your keyboard (Windows/Linux) or `Cmd+Shift+X` (Mac)
+   - **Option B:** Click the Extensions icon in the left sidebar (it looks like 4 squares)
+
+4. **Find the install menu**
+   - Look at the top of the Extensions panel
+   - Click the **three dots** (`...`) button in the top-right corner
+   - A menu will appear
+
+5. **Install from VSIX**
+   - Click **"Install from VSIX..."** from the menu
+   - A file browser window will open
+
+6. **Select the extension file**
+   - Navigate to where you saved the `.vsix` file (Downloads or desktop)
+   - Click on the file to select it
+   - Click the **"Open"** or **"Install"** button
+
+7. **Wait for installation**
+   - You'll see a notification in the bottom-right: "Installing extension..."
+   - When done, you'll see: "Successfully installed extension"
+
+8. **Start using SQL Crack!**
+   - Open any `.sql` file
+   - Look for the **graph icon** 📊 in the top-right corner of the editor
+   - Click it to visualize your SQL!
+
+### Method 2: Install from Source (For Developers)
+
+**Note:** This method is for developers who want to modify the code or build from source.
+
 ```bash
-# Clone the repository
+# Step 1: Clone the repository
 git clone <repository-url>
 cd sql-crack
 
-# Install dependencies
+# Step 2: Install dependencies
 npm install
 
-# Build the extension
+# Step 3: Build the extension
 npm run compile
 
-# Package (optional)
+# Step 4: Package as VSIX (optional)
 npm install -g vsce
 vsce package
+# This creates a .vsix file you can install using Method 1 above
 ```
+
+Then press **F5** in VS Code to launch the Extension Development Host and test your changes.
+
+---
+
+### Troubleshooting
+
+**"I don't see the graph icon after installation"**
+- Make sure you've opened a `.sql` file (not `.txt` or other file types)
+- Try reloading VS Code: Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac), type "Reload Window", and press Enter
+
+**"Installation failed" error**
+- Make sure you're using VS Code version 1.85.0 or higher
+- Check that the `.vsix` file downloaded completely (not corrupted)
+- Try closing and reopening VS Code, then install again
+
+**"Extension not found" after installation**
+- Go to Extensions panel (`Ctrl+Shift+X`)
+- Search for "SQL Crack" in the installed extensions list
+- If you see it, the extension is installed correctly
+
+**Need help?**
+- Open an issue on GitHub with your problem
+- Include your VS Code version and operating system
 
 ## Usage 🎯
 
