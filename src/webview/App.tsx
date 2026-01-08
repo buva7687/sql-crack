@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import ReactFlow, {
     MiniMap,
     Controls,
@@ -9,9 +9,14 @@ import ReactFlow, {
     Connection,
     Edge,
     BackgroundVariant,
-    Panel
+    Panel,
+    useReactFlow,
+    ReactFlowProvider,
+    getRectOfNodes,
+    getTransformForBounds
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { toPng, toSvg } from 'html-to-image';
 import { parseSqlToGraph } from './sqlParser';
 
 declare global {
@@ -20,11 +25,17 @@ declare global {
     }
 }
 
-const App: React.FC = () => {
+const imageWidth = 1920;
+const imageHeight = 1080;
+
+const FlowComponent: React.FC = () => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
     const [sqlCode, setSqlCode] = useState<string>('');
     const [error, setError] = useState<string>('');
+    const [exporting, setExporting] = useState<boolean>(false);
+    const { getNodes } = useReactFlow();
+    const flowRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         // Get initial SQL code from window
@@ -54,14 +65,61 @@ const App: React.FC = () => {
         [setEdges]
     );
 
-    const handleReparse = () => {
-        if (sqlCode) {
-            visualizeSql(sqlCode);
+    const downloadImage = (dataUrl: string, extension: string) => {
+        const a = document.createElement('a');
+        a.setAttribute('download', `sql-visualization-${Date.now()}.${extension}`);
+        a.setAttribute('href', dataUrl);
+        a.click();
+    };
+
+    const exportToPNG = async () => {
+        if (!flowRef.current) return;
+
+        setExporting(true);
+        try {
+            const dataUrl = await toPng(flowRef.current, {
+                backgroundColor: '#1e1e1e',
+                width: imageWidth,
+                height: imageHeight,
+                style: {
+                    width: `${imageWidth}px`,
+                    height: `${imageHeight}px`,
+                }
+            });
+            downloadImage(dataUrl, 'png');
+        } catch (error) {
+            console.error('Error exporting PNG:', error);
+            setError('Failed to export PNG');
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const exportToSVG = async () => {
+        if (!flowRef.current) return;
+
+        setExporting(true);
+        try {
+            const dataUrl = await toSvg(flowRef.current, {
+                backgroundColor: '#1e1e1e',
+                width: imageWidth,
+                height: imageHeight,
+                style: {
+                    width: `${imageWidth}px`,
+                    height: `${imageHeight}px`,
+                }
+            });
+            downloadImage(dataUrl, 'svg');
+        } catch (error) {
+            console.error('Error exporting SVG:', error);
+            setError('Failed to export SVG');
+        } finally {
+            setExporting(false);
         }
     };
 
     return (
-        <div style={{ width: '100%', height: '100vh', background: '#1e1e1e' }}>
+        <div ref={flowRef} style={{ width: '100%', height: '100vh', background: '#1e1e1e' }}>
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -98,6 +156,68 @@ const App: React.FC = () => {
                     </div>
                 </Panel>
 
+                <Panel position="top-right" style={{
+                    background: 'rgba(30, 30, 30, 0.95)',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #404040',
+                    display: 'flex',
+                    gap: '8px'
+                }}>
+                    <button
+                        onClick={exportToPNG}
+                        disabled={exporting || nodes.length === 0}
+                        style={{
+                            background: '#667eea',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: exporting || nodes.length === 0 ? 'not-allowed' : 'pointer',
+                            opacity: exporting || nodes.length === 0 ? 0.5 : 1,
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            if (!exporting && nodes.length > 0) {
+                                e.currentTarget.style.background = '#5568d3';
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#667eea';
+                        }}
+                    >
+                        {exporting ? 'Exporting...' : 'Export PNG'}
+                    </button>
+                    <button
+                        onClick={exportToSVG}
+                        disabled={exporting || nodes.length === 0}
+                        style={{
+                            background: '#48bb78',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: exporting || nodes.length === 0 ? 'not-allowed' : 'pointer',
+                            opacity: exporting || nodes.length === 0 ? 0.5 : 1,
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            if (!exporting && nodes.length > 0) {
+                                e.currentTarget.style.background = '#38a169';
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#48bb78';
+                        }}
+                    >
+                        {exporting ? 'Exporting...' : 'Export SVG'}
+                    </button>
+                </Panel>
+
                 <Controls />
 
                 <MiniMap
@@ -121,6 +241,14 @@ const App: React.FC = () => {
                 />
             </ReactFlow>
         </div>
+    );
+};
+
+const App: React.FC = () => {
+    return (
+        <ReactFlowProvider>
+            <FlowComponent />
+        </ReactFlowProvider>
     );
 };
 
