@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import ReactFlow, {
     MiniMap,
     Controls,
@@ -19,6 +19,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
 import { parseSqlToGraph, SqlDialect } from './sqlParser';
+import { calculateQueryStats, getComplexityColor } from './queryStats';
 
 declare global {
     interface Window {
@@ -37,8 +38,12 @@ const FlowComponent: React.FC = () => {
     const [exporting, setExporting] = useState<boolean>(false);
     const [dialect, setDialect] = useState<SqlDialect>('MySQL');
     const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+    const [showStats, setShowStats] = useState<boolean>(true);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
+
+    // Calculate query statistics
+    const stats = useMemo(() => calculateQueryStats(nodes, edges), [nodes, edges]);
 
     useEffect(() => {
         // Get initial SQL code from window
@@ -352,6 +357,152 @@ const FlowComponent: React.FC = () => {
                                     : JSON.stringify(selectedNode.data, null, 2)}
                             </div>
                         </div>
+                    </Panel>
+                )}
+
+                {showStats && nodes.length > 0 && (
+                    <Panel position="bottom-right" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '280px'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
+                                Query Statistics
+                            </h4>
+                            <button
+                                onClick={() => setShowStats(false)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    padding: '0 4px'
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ fontSize: '12px' }}>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '6px 0',
+                                borderBottom: '1px solid #404040'
+                            }}>
+                                <span style={{ color: '#888' }}>Complexity:</span>
+                                <span style={{
+                                    fontWeight: 600,
+                                    color: getComplexityColor(stats.complexityLevel)
+                                }}>
+                                    {stats.complexityLevel} ({stats.complexityScore})
+                                </span>
+                            </div>
+
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '6px 0',
+                                borderBottom: '1px solid #404040'
+                            }}>
+                                <span style={{ color: '#888' }}>Total Nodes:</span>
+                                <span style={{ color: '#fff' }}>{stats.totalNodes}</span>
+                            </div>
+
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '6px 0',
+                                borderBottom: '1px solid #404040'
+                            }}>
+                                <span style={{ color: '#888' }}>Tables:</span>
+                                <span style={{ color: '#fff' }}>{stats.tableCount}</span>
+                            </div>
+
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '6px 0',
+                                borderBottom: '1px solid #404040'
+                            }}>
+                                <span style={{ color: '#888' }}>JOINs:</span>
+                                <span style={{ color: '#fff' }}>{stats.joinCount}</span>
+                            </div>
+
+                            {stats.cteCount > 0 && (
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 0',
+                                    borderBottom: '1px solid #404040'
+                                }}>
+                                    <span style={{ color: '#888' }}>CTEs:</span>
+                                    <span style={{ color: '#805ad5' }}>{stats.cteCount}</span>
+                                </div>
+                            )}
+
+                            {stats.windowFunctionCount > 0 && (
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 0',
+                                    borderBottom: '1px solid #404040'
+                                }}>
+                                    <span style={{ color: '#888' }}>Window Functions:</span>
+                                    <span style={{ color: '#d53f8c' }}>{stats.windowFunctionCount}</span>
+                                </div>
+                            )}
+
+                            {stats.subqueryCount > 0 && (
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 0',
+                                    borderBottom: '1px solid #404040'
+                                }}>
+                                    <span style={{ color: '#888' }}>Subqueries:</span>
+                                    <span style={{ color: '#38b2ac' }}>{stats.subqueryCount}</span>
+                                </div>
+                            )}
+
+                            {stats.setOperationCount > 0 && (
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 0'
+                                }}>
+                                    <span style={{ color: '#888' }}>Set Operations:</span>
+                                    <span style={{ color: '#f6ad55' }}>{stats.setOperationCount}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={() => setShowStats(false)}
+                            style={{
+                                marginTop: '12px',
+                                width: '100%',
+                                padding: '6px',
+                                background: '#2d2d2d',
+                                color: '#aaa',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Hide Statistics
+                        </button>
                     </Panel>
                 )}
 
