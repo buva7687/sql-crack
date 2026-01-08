@@ -21,6 +21,7 @@ import { toPng, toSvg } from 'html-to-image';
 import { parseSqlToGraph, SqlDialect } from './sqlParser';
 import { calculateQueryStats, getComplexityColor } from './queryStats';
 import { themes, Theme } from './themes';
+import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } from './optimizationHints';
 
 declare global {
     interface Window {
@@ -41,6 +42,8 @@ const FlowComponent: React.FC = () => {
     const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
     const [showStats, setShowStats] = useState<boolean>(true);
     const [themeName, setThemeName] = useState<string>('dark');
+    const [optimizationHints, setOptimizationHints] = useState<OptimizationHint[]>([]);
+    const [showHints, setShowHints] = useState<boolean>(true);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
@@ -63,13 +66,22 @@ const FlowComponent: React.FC = () => {
     const visualizeSql = (sql: string, selectedDialect: SqlDialect = dialect) => {
         try {
             setError('');
-            const { nodes: parsedNodes, edges: parsedEdges } = parseSqlToGraph(sql, selectedDialect);
+            const { nodes: parsedNodes, edges: parsedEdges, ast } = parseSqlToGraph(sql, selectedDialect);
             setNodes(parsedNodes);
             setEdges(parsedEdges);
+
+            // Analyze for optimization hints
+            if (ast) {
+                const hints = analyzeQueryForHints(sql, ast);
+                setOptimizationHints(hints);
+            } else {
+                setOptimizationHints([]);
+            }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             setError(errorMessage);
             console.error('Visualization error:', err);
+            setOptimizationHints([]);
         }
     };
 
@@ -532,6 +544,108 @@ const FlowComponent: React.FC = () => {
                             }}
                         >
                             Hide Statistics
+                        </button>
+                    </Panel>
+                )}
+
+                {showHints && optimizationHints.length > 0 && (
+                    <Panel position="top-center" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '350px',
+                        maxWidth: '500px',
+                        maxHeight: '300px',
+                        overflowY: 'auto'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
+                                ⚡ Optimization Hints ({optimizationHints.length})
+                            </h4>
+                            <button
+                                onClick={() => setShowHints(false)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    padding: '0 4px'
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ fontSize: '12px' }}>
+                            {optimizationHints.map((hint, index) => (
+                                <div
+                                    key={hint.id}
+                                    style={{
+                                        padding: '10px',
+                                        marginBottom: '8px',
+                                        background: 'rgba(0, 0, 0, 0.3)',
+                                        borderLeft: `3px solid ${getHintColor(hint.severity)}`,
+                                        borderRadius: '4px'
+                                    }}
+                                >
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        marginBottom: '6px'
+                                    }}>
+                                        <span style={{ marginRight: '6px' }}>{getHintIcon(hint.severity)}</span>
+                                        <span style={{
+                                            fontWeight: 600,
+                                            color: getHintColor(hint.severity),
+                                            fontSize: '12px'
+                                        }}>
+                                            {hint.title}
+                                        </span>
+                                        <span style={{
+                                            marginLeft: 'auto',
+                                            fontSize: '10px',
+                                            color: '#888',
+                                            background: 'rgba(255, 255, 255, 0.1)',
+                                            padding: '2px 6px',
+                                            borderRadius: '3px'
+                                        }}>
+                                            {hint.category}
+                                        </span>
+                                    </div>
+                                    <div style={{
+                                        color: '#ccc',
+                                        fontSize: '11px',
+                                        lineHeight: '1.5'
+                                    }}>
+                                        {hint.description}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={() => setShowHints(false)}
+                            style={{
+                                marginTop: '8px',
+                                width: '100%',
+                                padding: '6px',
+                                background: '#2d2d2d',
+                                color: '#aaa',
+                                border: '1px solid #404040',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Hide Hints
                         </button>
                     </Panel>
                 )}

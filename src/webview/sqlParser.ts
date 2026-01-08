@@ -10,6 +10,7 @@ export interface ParsedSqlData {
     nodes: Node[];
     edges: Edge[];
     isSchema?: boolean;
+    ast?: any;
 }
 
 let nodeIdCounter = 0;
@@ -41,7 +42,8 @@ export function parseSqlToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'):
             return {
                 nodes: schemaResult.nodes,
                 edges: schemaResult.edges,
-                isSchema: true
+                isSchema: true,
+                ast: ast
             };
         }
 
@@ -56,7 +58,7 @@ export function parseSqlToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'):
             yOffset += 400;
         });
 
-        return { nodes, edges, isSchema: false };
+        return { nodes, edges, isSchema: false, ast: ast };
     } catch (error) {
         console.error('SQL parsing error:', error);
 
