@@ -22,7 +22,18 @@ import { parseSqlToGraph, SqlDialect } from './sqlParser';
 import { calculateQueryStats, getComplexityColor } from './queryStats';
 import { themes, Theme } from './themes';
 import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } from './optimizationHints';
-import { saveQuery, getSavedQueries, deleteQuery, addToHistory, SavedQuery } from './queryStorage';
+import {
+    saveQuery,
+    getSavedQueries,
+    deleteQuery,
+    addToHistory,
+    clearHistory,
+    clearSavedQueries,
+    getPrivacySettings,
+    updatePrivacySettings,
+    SavedQuery,
+    PrivacySettings
+} from './queryStorage';
 import { processBatchQueries, hasMultipleQueries, getQueryPreview, QueryBatch } from './batchProcessor';
 import { generateDocumentation, exportAsMarkdown, QueryDocumentation } from './documentationGenerator';
 import { analyzeDataFlow, DataFlowAnalysis, getImpactColor, getTransformationIcon } from './dataFlowAnalysis';
@@ -56,15 +67,20 @@ const FlowComponent: React.FC = () => {
     const [documentation, setDocumentation] = useState<QueryDocumentation | null>(null);
     const [showDocumentation, setShowDocumentation] = useState<boolean>(false);
     const [dataFlow, setDataFlow] = useState<DataFlowAnalysis | null>(null);
+    const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(() => getPrivacySettings());
     const [showDataFlow, setShowDataFlow] = useState<boolean>(false);
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
-    // Load saved queries on mount
+    // Load saved queries on mount (only if enabled)
     useEffect(() => {
-        const queries = getSavedQueries();
-        setSavedQueries(queries);
-    }, []);
+        if (privacySettings.enableSavedQueries) {
+            const queries = getSavedQueries();
+            setSavedQueries(queries);
+        } else {
+            setSavedQueries([]);
+        }
+    }, [privacySettings.enableSavedQueries]);
 
     // Get current theme
     const currentTheme = themes[themeName];
@@ -171,6 +187,11 @@ const FlowComponent: React.FC = () => {
             return;
         }
 
+        if (!privacySettings.enableSavedQueries) {
+            setError('Saving queries is disabled by privacy settings');
+            return;
+        }
+
         const name = prompt('Enter a name for this query:');
         if (!name) return;
 
@@ -182,6 +203,36 @@ const FlowComponent: React.FC = () => {
 
         setSavedQueries([...savedQueries, saved]);
         alert(`Query "${name}" saved successfully!`);
+    };
+
+    const handleToggleHistory = () => {
+        const updated = updatePrivacySettings({ enableHistory: !privacySettings.enableHistory });
+        setPrivacySettings(updated);
+        if (!updated.enableHistory) {
+            clearHistory();
+        }
+    };
+
+    const handleToggleSavedQueries = () => {
+        const updated = updatePrivacySettings({ enableSavedQueries: !privacySettings.enableSavedQueries });
+        setPrivacySettings(updated);
+        if (!updated.enableSavedQueries) {
+            clearSavedQueries();
+            setSavedQueries([]);
+            setShowSavedQueries(false);
+        } else {
+            const queries = getSavedQueries();
+            setSavedQueries(queries);
+        }
+    };
+
+    const handleClearHistoryClick = () => {
+        clearHistory();
+    };
+
+    const handleClearSavedQueriesClick = () => {
+        clearSavedQueries();
+        setSavedQueries([]);
     };
 
     const handleLoadQuery = (query: SavedQuery) => {
@@ -371,6 +422,67 @@ const FlowComponent: React.FC = () => {
                             <option value="MariaDB">MariaDB</option>
                             <option value="SQLite">SQLite</option>
                         </select>
+                    </div>
+
+                    <div style={{ marginTop: '8px', marginBottom: '8px', borderTop: '1px solid #404040', paddingTop: '8px' }}>
+                        <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '4px', fontWeight: 600 }}>
+                            Privacy & Storage
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#ccc' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={privacySettings.enableHistory}
+                                    onChange={handleToggleHistory}
+                                    style={{ cursor: 'pointer' }}
+                                />
+                                <span>Save query history locally</span>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={privacySettings.enableSavedQueries}
+                                    onChange={handleToggleSavedQueries}
+                                    style={{ cursor: 'pointer' }}
+                                />
+                                <span>Allow saving named queries</span>
+                            </label>
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                <button
+                                    onClick={handleClearHistoryClick}
+                                    style={{
+                                        flex: 1,
+                                        background: '#2d2d2d',
+                                        color: '#aaa',
+                                        border: '1px solid #404040',
+                                        borderRadius: '4px',
+                                        padding: '4px 6px',
+                                        fontSize: '10px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Clear history
+                                </button>
+                                <button
+                                    onClick={handleClearSavedQueriesClick}
+                                    style={{
+                                        flex: 1,
+                                        background: '#2d2d2d',
+                                        color: '#aaa',
+                                        border: '1px solid #404040',
+                                        borderRadius: '4px',
+                                        padding: '4px 6px',
+                                        fontSize: '10px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Clear saved
+                                </button>
+                            </div>
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>
+                            Data is stored only in your local VS Code profile and never sent over the network.
+                        </div>
                     </div>
 
                     <div style={{ marginTop: '8px', marginBottom: '8px' }}>

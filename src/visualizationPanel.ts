@@ -71,6 +71,12 @@ export class VisualizationPanel {
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode);
     }
 
+    private _escapeForInlineScript(sqlCode: string): string {
+        // Use JSON.stringify and then escape closing </script to avoid breaking out of the script tag
+        const json = JSON.stringify(sqlCode);
+        return json.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string) {
         // Local path to main script run in the webview
         const scriptUri = webview.asWebviewUri(
@@ -104,7 +110,7 @@ export class VisualizationPanel {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">
-        window.initialSqlCode = ${JSON.stringify(sqlCode)};
+        window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
     </script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
