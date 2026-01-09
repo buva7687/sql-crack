@@ -1,3 +1,7 @@
+// Polyfill for process in webview environment
+import process from 'process/browser';
+(window as any).process = process;
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
