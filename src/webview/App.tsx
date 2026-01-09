@@ -32,7 +32,8 @@ import {
     getPrivacySettings,
     updatePrivacySettings,
     SavedQuery,
-    PrivacySettings
+    PrivacySettings,
+    getQueryHistory
 } from './queryStorage';
 import { processBatchQueries, hasMultipleQueries, getQueryPreview, QueryBatch } from './batchProcessor';
 import { generateDocumentation, exportAsMarkdown, QueryDocumentation } from './documentationGenerator';
@@ -62,6 +63,8 @@ const FlowComponent: React.FC = () => {
     const [showHints, setShowHints] = useState<boolean>(true);
     const [showSavedQueries, setShowSavedQueries] = useState<boolean>(false);
     const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
+    const [showRecentQueries, setShowRecentQueries] = useState<boolean>(false);
+    const [recentQueries, setRecentQueries] = useState<Array<{ sql: string; dialect: string; timestamp: string }>>([]);
     const [batchMode, setBatchMode] = useState<boolean>(false);
     const [batchQueries, setBatchQueries] = useState<QueryBatch[]>([]);
     const [currentQueryIndex, setCurrentQueryIndex] = useState<number>(0);
@@ -73,7 +76,7 @@ const FlowComponent: React.FC = () => {
     const { getNodes, fitView } = useReactFlow();
     const flowRef = useRef<HTMLDivElement>(null);
 
-    // Load saved queries on mount (only if enabled)
+    // Load saved queries and history on mount (only if enabled by privacy settings)
     useEffect(() => {
         if (privacySettings.enableSavedQueries) {
             const queries = getSavedQueries();
@@ -81,7 +84,14 @@ const FlowComponent: React.FC = () => {
         } else {
             setSavedQueries([]);
         }
-    }, [privacySettings.enableSavedQueries]);
+
+        if (privacySettings.enableHistory) {
+            const history = getQueryHistory();
+            setRecentQueries(history);
+        } else {
+            setRecentQueries([]);
+        }
+    }, [privacySettings.enableSavedQueries, privacySettings.enableHistory]);
 
     // Get current theme
     const currentTheme = themes[themeName];
@@ -168,9 +178,10 @@ const FlowComponent: React.FC = () => {
                 }
             }
 
-            // Add to history
-            if (sql.trim()) {
+            // Add to history (if enabled by privacy settings)
+            if (sql.trim() && privacySettings.enableHistory) {
                 addToHistory(sql, selectedDialect);
+                setRecentQueries(getQueryHistory());
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -248,6 +259,13 @@ const FlowComponent: React.FC = () => {
             deleteQuery(id);
             setSavedQueries(savedQueries.filter(q => q.id !== id));
         }
+    };
+
+    const handleLoadRecentQuery = (query: { sql: string; dialect: string; timestamp: string }) => {
+        setSqlCode(query.sql);
+        setDialect(query.dialect as SqlDialect);
+        visualizeSql(query.sql, query.dialect as SqlDialect);
+        setShowRecentQueries(false);
     };
 
     const handleBatchQueryChange = (index: number) => {
@@ -657,6 +675,28 @@ const FlowComponent: React.FC = () => {
                         }}
                     >
                         📂 Saved ({savedQueries.length})
+                    </button>
+                    <button
+                        onClick={() => setShowRecentQueries(!showRecentQueries)}
+                        style={{
+                            background: '#4299e1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 16px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#3182ce';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#4299e1';
+                        }}
+                    >
+                        🕒 Recent ({recentQueries.length})
                     </button>
                     <button
                         onClick={() => setShowDocumentation(!showDocumentation)}
@@ -1659,6 +1699,135 @@ const FlowComponent: React.FC = () => {
                                                     }}
                                                 >
                                                     Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </Panel>
+                )}
+
+                {showRecentQueries && (
+                    <Panel position="bottom-center" style={{
+                        background: 'rgba(30, 30, 30, 0.95)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #404040',
+                        color: '#fff',
+                        minWidth: '400px',
+                        maxWidth: '600px',
+                        maxHeight: '400px',
+                        overflowY: 'auto'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px'
+                        }}>
+                            <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600 }}>
+                                🕒 Recent Queries ({recentQueries.length})
+                            </h4>
+                            <button
+                                onClick={() => setShowRecentQueries(false)}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    padding: '0 4px'
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        {recentQueries.length === 0 ? (
+                            <div style={{
+                                padding: '20px',
+                                textAlign: 'center',
+                                color: '#888',
+                                fontSize: '12px'
+                            }}>
+                                No recent queries yet. Start visualizing SQL queries to build your history.
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: '12px' }}>
+                                {recentQueries.map((query, index) => (
+                                    <div
+                                        key={index}
+                                        style={{
+                                            padding: '12px',
+                                            marginBottom: '8px',
+                                            background: 'rgba(0, 0, 0, 0.3)',
+                                            borderRadius: '6px',
+                                            border: '1px solid #404040'
+                                        }}
+                                    >
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'flex-start',
+                                            marginBottom: '8px'
+                                        }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{
+                                                    fontSize: '11px',
+                                                    color: '#888',
+                                                    marginBottom: '6px'
+                                                }}>
+                                                    <span style={{
+                                                        background: 'rgba(66, 153, 225, 0.2)',
+                                                        color: '#4299e1',
+                                                        padding: '2px 6px',
+                                                        borderRadius: '3px',
+                                                        marginRight: '6px'
+                                                    }}>
+                                                        {query.dialect}
+                                                    </span>
+                                                    <span>
+                                                        {new Date(query.timestamp).toLocaleDateString()} {new Date(query.timestamp).toLocaleTimeString()}
+                                                    </span>
+                                                </div>
+                                                <div style={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '10px',
+                                                    color: '#aaa',
+                                                    maxHeight: '60px',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {query.sql.substring(0, 100)}{query.sql.length > 100 ? '...' : ''}
+                                                </div>
+                                            </div>
+                                            <div style={{
+                                                marginLeft: '12px'
+                                            }}>
+                                                <button
+                                                    onClick={() => handleLoadRecentQuery(query)}
+                                                    style={{
+                                                        background: '#48bb78',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        padding: '6px 12px',
+                                                        fontSize: '11px',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                    onMouseEnter={(e) => {
+                                                        e.currentTarget.style.background = '#38a169';
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                        e.currentTarget.style.background = '#48bb78';
+                                                    }}
+                                                >
+                                                    Load
                                                 </button>
                                             </div>
                                         </div>
