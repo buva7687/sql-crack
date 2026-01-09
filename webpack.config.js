@@ -1,9 +1,11 @@
 const path = require('path');
 
+const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--mode=production');
+
 /**@type {import('webpack').Configuration}*/
 const extensionConfig = {
   target: 'node',
-  mode: 'none',
+  mode: isProduction ? 'production' : 'none',
   entry: './src/extension.ts',
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -33,7 +35,7 @@ const extensionConfig = {
       }
     ]
   },
-  devtool: 'nosources-source-map',
+  devtool: false,
   infrastructureLogging: {
     level: "log",
   },
@@ -42,14 +44,18 @@ const extensionConfig = {
 /**@type {import('webpack').Configuration}*/
 const webviewConfig = {
   target: 'web',
-  mode: 'none',
+  mode: isProduction ? 'production' : 'none',
   entry: './src/webview/index.tsx',
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'webview.js'
   },
   resolve: {
-    extensions: ['.ts', '.tsx', '.js', '.jsx']
+    extensions: ['.ts', '.tsx', '.js', '.jsx'],
+    alias: isProduction ? {
+      'react': 'react/cjs/react.production.min.js',
+      'react-dom': 'react-dom/cjs/react-dom.production.min.js'
+    } : {}
   },
   module: {
     rules: [
@@ -72,7 +78,19 @@ const webviewConfig = {
       }
     ]
   },
-  devtool: 'nosources-source-map'
+  optimization: isProduction ? {
+    minimize: true,
+    usedExports: true,
+    sideEffects: false,
+    splitChunks: false, // Don't split chunks for VS Code extension
+    runtimeChunk: false
+  } : undefined,
+  performance: {
+    hints: isProduction ? 'warning' : false,
+    maxAssetSize: 2500000, // 2.5 MB
+    maxEntrypointSize: 2500000
+  },
+  devtool: false
 };
 
 module.exports = [extensionConfig, webviewConfig];
