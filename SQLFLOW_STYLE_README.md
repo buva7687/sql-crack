@@ -1,6 +1,6 @@
 # SQLFlow-Style Visualization Branch
 
-This branch (`claude/sqlflow-style-visualization`) contains an alternative visualization style inspired by [SQLFlow](https://sqlflow.gudusoft.com/).
+This branch (`claude/sqlflow-style-PVc4e`) contains an alternative visualization style inspired by [SQLFlow](https://sqlflow.gudusoft.com/).
 
 ## Key Differences from Original Version
 
@@ -35,7 +35,7 @@ Each table node shows:
 
 ### Current Branch (SQLFlow Style)
 ```bash
-git checkout claude/sqlflow-style-visualization
+git checkout claude/sqlflow-style-PVc4e
 npm install  # Installs dagre dependency
 npm run compile
 # Press F5 in VS Code to test
