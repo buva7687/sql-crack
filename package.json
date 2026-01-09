@@ -37,7 +37,15 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "sql-crack.visualize",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorLangId == sql"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

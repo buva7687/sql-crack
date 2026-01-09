@@ -141,7 +141,8 @@ Then press **F5** in VS Code to launch the Extension Development Host and test y
 1. Open any SQL file in VS Code
 2. Click the **graph icon** in the editor title bar, or
 3. Right-click in the editor and select **"SQL Crack: Visualize SQL Query"**, or
-4. Use the Command Palette (Ctrl+Shift+P) and search for **"SQL Crack: Visualize SQL Query"**
+4. Use the Command Palette (Ctrl+Shift+P) and search for **"SQL Crack: Visualize SQL Query"**, or
+5. Use the keyboard shortcut: **`Ctrl+Shift+V`** (Windows/Linux) or **`Cmd+Shift+V`** (Mac)
 
 ### Visualizing Queries
 
