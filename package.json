@@ -82,6 +82,8 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@types/dagre": "^0.7.53",
+    "dagre": "^0.8.5",
     "html-to-image": "^1.11.11",
     "node-sql-parser": "^5.3.1",
     "react": "^18.2.0",

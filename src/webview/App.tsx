@@ -18,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
-import { parseSqlToGraph, SqlDialect } from './sqlParser';
+import { parseSqlToGraph, SqlDialect } from './sqlParserSQLFlow';
 import { calculateQueryStats, getComplexityColor } from './queryStats';
 import { themes, Theme } from './themes';
 import { analyzeQueryForHints, OptimizationHint, getHintColor, getHintIcon } from './optimizationHints';
