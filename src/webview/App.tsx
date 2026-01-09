@@ -812,6 +812,40 @@ const FlowComponent: React.FC = () => {
                                     ? selectedNode.data.label
                                     : JSON.stringify(selectedNode.data, null, 2)}
                             </div>
+                            <button
+                                onClick={() => {
+                                    const textToCopy = typeof selectedNode.data.label === 'string'
+                                        ? selectedNode.data.label
+                                        : JSON.stringify(selectedNode.data, null, 2);
+                                    navigator.clipboard.writeText(textToCopy).then(() => {
+                                        alert('Copied to clipboard!');
+                                    }).catch(err => {
+                                        console.error('Failed to copy:', err);
+                                        alert('Failed to copy to clipboard');
+                                    });
+                                }}
+                                style={{
+                                    marginTop: '10px',
+                                    background: '#667eea',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    padding: '6px 12px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#5a67d8';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#667eea';
+                                }}
+                            >
+                                📋 Copy to Clipboard
+                            </button>
                         </div>
                     </Panel>
                 )}
