@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 
 const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--mode=production');
 
@@ -55,7 +56,12 @@ const webviewConfig = {
     alias: isProduction ? {
       'react': 'react/cjs/react.production.min.js',
       'react-dom': 'react-dom/cjs/react-dom.production.min.js'
-    } : {}
+    } : {},
+    fallback: {
+      "process": require.resolve("process/browser"),
+      "path": false,
+      "fs": false
+    }
   },
   module: {
     rules: [
@@ -90,6 +96,14 @@ const webviewConfig = {
     maxAssetSize: 2500000, // 2.5 MB
     maxEntrypointSize: 2500000
   },
+  plugins: [
+    new webpack.ProvidePlugin({
+      process: 'process/browser',
+    }),
+    new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify(isProduction ? 'production' : 'development')
+    })
+  ],
   devtool: false
 };
 
