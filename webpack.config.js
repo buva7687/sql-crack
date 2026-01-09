@@ -25,10 +25,8 @@ const extensionConfig = {
           {
             loader: 'ts-loader',
             options: {
-              onlyCompileBundledFiles: true,
-              compilerOptions: {
-                noEmit: false
-              }
+              transpileOnly: true,
+              onlyCompileBundledFiles: true
             }
           }
         ]
@@ -62,10 +60,8 @@ const webviewConfig = {
           {
             loader: 'ts-loader',
             options: {
-              onlyCompileBundledFiles: true,
-              compilerOptions: {
-                noEmit: false
-              }
+              transpileOnly: true,
+              onlyCompileBundledFiles: true
             }
           }
         ]
