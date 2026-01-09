@@ -86,6 +86,10 @@ export class VisualizationPanel {
         // Use a nonce to only allow specific scripts to be run
         const nonce = getNonce();
 
+        // Get VS Code theme kind
+        const themeKind = vscode.window.activeColorTheme.kind;
+        const vscodeTheme = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,6 +115,7 @@ export class VisualizationPanel {
     <div id="root"></div>
     <script nonce="${nonce}">
         window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
+        window.vscodeTheme = ${JSON.stringify(vscodeTheme)};
     </script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

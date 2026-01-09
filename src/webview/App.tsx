@@ -41,6 +41,7 @@ import { analyzeDataFlow, DataFlowAnalysis, getImpactColor, getTransformationIco
 declare global {
     interface Window {
         initialSqlCode: string;
+        vscodeTheme?: string;
     }
 }
 
@@ -56,7 +57,7 @@ const FlowComponent: React.FC = () => {
     const [dialect, setDialect] = useState<SqlDialect>('MySQL');
     const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
     const [showStats, setShowStats] = useState<boolean>(true);
-    const [themeName, setThemeName] = useState<string>('dark');
+    const [themeName, setThemeName] = useState<string>(window.vscodeTheme || 'dark');
     const [optimizationHints, setOptimizationHints] = useState<OptimizationHint[]>([]);
     const [showHints, setShowHints] = useState<boolean>(true);
     const [showSavedQueries, setShowSavedQueries] = useState<boolean>(false);
