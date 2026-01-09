@@ -1,3 +1,4 @@
+import React from 'react';
 import { Parser } from 'node-sql-parser';
 import { Node, Edge } from 'reactflow';
 import dagre from 'dagre';
