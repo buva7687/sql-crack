@@ -20,10 +20,16 @@ const extensionConfig = {
     rules: [
       {
         test: /\.ts$/,
-        exclude: [/node_modules/, /__tests__/],
+        exclude: [/node_modules/, /__tests__/, /\.test\.ts$/],
         use: [
           {
-            loader: 'ts-loader'
+            loader: 'ts-loader',
+            options: {
+              onlyCompileBundledFiles: true,
+              compilerOptions: {
+                noEmit: false
+              }
+            }
           }
         ]
       }
@@ -51,10 +57,16 @@ const webviewConfig = {
     rules: [
       {
         test: /\.tsx?$/,
-        exclude: [/node_modules/, /__tests__/],
+        exclude: [/node_modules/, /__tests__/, /\.test\.tsx?$/],
         use: [
           {
-            loader: 'ts-loader'
+            loader: 'ts-loader',
+            options: {
+              onlyCompileBundledFiles: true,
+              compilerOptions: {
+                noEmit: false
+              }
+            }
           }
         ]
       },
