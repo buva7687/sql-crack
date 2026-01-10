@@ -331,7 +331,13 @@ export function parseSqlToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'):
             ));
         }
 
+        console.log('Parsed SQL - Nodes before layout:', nodes.length, nodes.map(n => n.data.nodeTitle));
+        console.log('Parsed SQL - Edges before layout:', edges.length, edges.map(e => `${e.source} -> ${e.target}`));
+
         const layouted = getLayoutedElements(nodes, edges);
+
+        console.log('After layout - Nodes:', layouted.nodes.length, layouted.nodes.map(n => ({ id: n.id, pos: n.position })));
+
         return { ...layouted, ast };
 
     } catch (error) {
