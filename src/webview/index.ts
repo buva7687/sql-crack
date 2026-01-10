@@ -2,8 +2,20 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseSql, SqlDialect } from './sqlParser';
-import { initRenderer, render, zoomIn, zoomOut, resetView, exportToPng } from './renderer';
+import { parseSqlBatch, ParseResult, SqlDialect, BatchParseResult } from './sqlParser';
+import {
+    initRenderer,
+    render,
+    zoomIn,
+    zoomOut,
+    resetView,
+    exportToPng,
+    exportToSvg,
+    copyToClipboard,
+    setSearchBox,
+    nextSearchResult,
+    prevSearchResult
+} from './renderer';
 
 declare global {
     interface Window {
@@ -14,6 +26,8 @@ declare global {
 
 // Current state
 let currentDialect: SqlDialect = 'MySQL';
+let batchResult: BatchParseResult | null = null;
+let currentQueryIndex = 0;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -39,6 +53,9 @@ function init(): void {
     // Create toolbar
     createToolbar(container);
 
+    // Create batch tabs
+    createBatchTabs(container);
+
     // Parse and render initial SQL
     const sql = window.initialSqlCode || '';
     if (sql) {
@@ -57,7 +74,7 @@ function createToolbar(container: HTMLElement): void {
         z-index: 100;
     `;
 
-    // Title
+    // Title and dialect selector
     const title = document.createElement('div');
     title.style.cssText = `
         background: rgba(15, 23, 42, 0.95);
@@ -91,6 +108,73 @@ function createToolbar(container: HTMLElement): void {
         </select>
     `;
     toolbar.appendChild(title);
+
+    // Search box
+    const searchContainer = document.createElement('div');
+    searchContainer.style.cssText = `
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 4px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    `;
+
+    const searchIcon = document.createElement('span');
+    searchIcon.textContent = '🔍';
+    searchIcon.style.fontSize = '12px';
+    searchContainer.appendChild(searchIcon);
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search nodes... (Ctrl+F)';
+    searchInput.style.cssText = `
+        background: transparent;
+        border: none;
+        color: #f1f5f9;
+        font-size: 12px;
+        width: 140px;
+        outline: none;
+    `;
+    searchInput.id = 'search-input';
+    searchContainer.appendChild(searchInput);
+
+    // Search navigation buttons
+    const searchNav = document.createElement('div');
+    searchNav.style.cssText = `
+        display: flex;
+        gap: 4px;
+    `;
+
+    const prevBtn = document.createElement('button');
+    prevBtn.innerHTML = '↑';
+    prevBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        padding: 2px 6px;
+        font-size: 12px;
+    `;
+    prevBtn.addEventListener('click', prevSearchResult);
+    searchNav.appendChild(prevBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.innerHTML = '↓';
+    nextBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        padding: 2px 6px;
+        font-size: 12px;
+    `;
+    nextBtn.addEventListener('click', nextSearchResult);
+    searchNav.appendChild(nextBtn);
+
+    searchContainer.appendChild(searchNav);
+    toolbar.appendChild(searchContainer);
 
     container.appendChild(toolbar);
 
@@ -151,24 +235,48 @@ function createToolbar(container: HTMLElement): void {
 
     actions.appendChild(zoomGroup);
 
-    // Export button
-    const exportBtn = document.createElement('button');
-    exportBtn.innerHTML = '↓ PNG';
-    exportBtn.style.cssText = `
-        background: rgba(99, 102, 241, 0.9);
-        border: none;
-        color: white;
-        padding: 8px 16px;
+    // Export buttons
+    const exportGroup = document.createElement('div');
+    exportGroup.style.cssText = `
+        display: flex;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 600;
-        transition: background 0.2s;
+        overflow: hidden;
     `;
-    exportBtn.addEventListener('click', exportToPng);
-    exportBtn.addEventListener('mouseenter', () => exportBtn.style.background = 'rgba(79, 70, 229, 1)');
-    exportBtn.addEventListener('mouseleave', () => exportBtn.style.background = 'rgba(99, 102, 241, 0.9)');
-    actions.appendChild(exportBtn);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.innerHTML = '📋';
+    copyBtn.title = 'Copy to clipboard';
+    copyBtn.style.cssText = btnStyle;
+    copyBtn.addEventListener('click', () => {
+        copyToClipboard();
+        copyBtn.innerHTML = '✓';
+        setTimeout(() => copyBtn.innerHTML = '📋', 1500);
+    });
+    copyBtn.addEventListener('mouseenter', () => copyBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    copyBtn.addEventListener('mouseleave', () => copyBtn.style.background = 'transparent');
+    exportGroup.appendChild(copyBtn);
+
+    const pngBtn = document.createElement('button');
+    pngBtn.innerHTML = 'PNG';
+    pngBtn.title = 'Export as PNG';
+    pngBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 600; border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    pngBtn.addEventListener('click', exportToPng);
+    pngBtn.addEventListener('mouseenter', () => pngBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    pngBtn.addEventListener('mouseleave', () => pngBtn.style.background = 'transparent');
+    exportGroup.appendChild(pngBtn);
+
+    const svgBtn = document.createElement('button');
+    svgBtn.innerHTML = 'SVG';
+    svgBtn.title = 'Export as SVG';
+    svgBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 600; border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    svgBtn.addEventListener('click', exportToSvg);
+    svgBtn.addEventListener('mouseenter', () => svgBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    svgBtn.addEventListener('mouseleave', () => svgBtn.style.background = 'transparent');
+    exportGroup.appendChild(svgBtn);
+
+    actions.appendChild(exportGroup);
 
     container.appendChild(actions);
 
@@ -181,9 +289,162 @@ function createToolbar(container: HTMLElement): void {
             visualize(sql);
         }
     });
+
+    // Setup search box
+    setSearchBox(searchInput);
+}
+
+function createBatchTabs(container: HTMLElement): void {
+    const tabsContainer = document.createElement('div');
+    tabsContainer.id = 'batch-tabs';
+    tabsContainer.style.cssText = `
+        position: absolute;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 4px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 6px 12px;
+        z-index: 100;
+    `;
+    container.appendChild(tabsContainer);
+}
+
+function updateBatchTabs(): void {
+    const tabsContainer = document.getElementById('batch-tabs');
+    if (!tabsContainer || !batchResult) {return;}
+
+    const queryCount = batchResult.queries.length;
+
+    if (queryCount <= 1) {
+        tabsContainer.style.display = 'none';
+        return;
+    }
+
+    tabsContainer.style.display = 'flex';
+    tabsContainer.innerHTML = '';
+
+    // Previous button
+    const prevBtn = document.createElement('button');
+    prevBtn.innerHTML = '◀';
+    prevBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        color: ${currentQueryIndex > 0 ? '#f1f5f9' : '#475569'};
+        cursor: ${currentQueryIndex > 0 ? 'pointer' : 'default'};
+        padding: 4px 8px;
+        font-size: 12px;
+    `;
+    prevBtn.disabled = currentQueryIndex === 0;
+    prevBtn.addEventListener('click', () => {
+        if (currentQueryIndex > 0) {
+            currentQueryIndex--;
+            renderCurrentQuery();
+            updateBatchTabs();
+        }
+    });
+    tabsContainer.appendChild(prevBtn);
+
+    // Query tabs (show up to 7)
+    const maxTabs = 7;
+    const startIdx = Math.max(0, Math.min(currentQueryIndex - Math.floor(maxTabs / 2), queryCount - maxTabs));
+    const endIdx = Math.min(startIdx + maxTabs, queryCount);
+
+    for (let i = startIdx; i < endIdx; i++) {
+        const tab = document.createElement('button');
+        const query = batchResult.queries[i];
+        const isActive = i === currentQueryIndex;
+        const hasError = !!query.error;
+
+        tab.innerHTML = `Q${i + 1}`;
+        tab.title = truncateSql(query.sql, 50);
+        tab.style.cssText = `
+            background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
+            border: 1px solid ${isActive ? '#6366f1' : hasError ? '#ef4444' : 'transparent'};
+            border-radius: 4px;
+            color: ${hasError ? '#f87171' : isActive ? '#a5b4fc' : '#94a3b8'};
+            cursor: pointer;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: ${isActive ? '600' : '400'};
+            transition: all 0.2s;
+        `;
+
+        tab.addEventListener('click', () => {
+            currentQueryIndex = i;
+            renderCurrentQuery();
+            updateBatchTabs();
+        });
+
+        tab.addEventListener('mouseenter', () => {
+            if (!isActive) {
+                tab.style.background = 'rgba(148, 163, 184, 0.1)';
+            }
+        });
+
+        tab.addEventListener('mouseleave', () => {
+            if (!isActive) {
+                tab.style.background = 'transparent';
+            }
+        });
+
+        tabsContainer.appendChild(tab);
+    }
+
+    // Next button
+    const nextBtn = document.createElement('button');
+    nextBtn.innerHTML = '▶';
+    nextBtn.style.cssText = `
+        background: transparent;
+        border: none;
+        color: ${currentQueryIndex < queryCount - 1 ? '#f1f5f9' : '#475569'};
+        cursor: ${currentQueryIndex < queryCount - 1 ? 'pointer' : 'default'};
+        padding: 4px 8px;
+        font-size: 12px;
+    `;
+    nextBtn.disabled = currentQueryIndex >= queryCount - 1;
+    nextBtn.addEventListener('click', () => {
+        if (currentQueryIndex < queryCount - 1) {
+            currentQueryIndex++;
+            renderCurrentQuery();
+            updateBatchTabs();
+        }
+    });
+    tabsContainer.appendChild(nextBtn);
+
+    // Query counter
+    const counter = document.createElement('span');
+    counter.style.cssText = `
+        color: #64748b;
+        font-size: 11px;
+        margin-left: 8px;
+        padding-left: 8px;
+        border-left: 1px solid rgba(148, 163, 184, 0.2);
+    `;
+    counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
+    tabsContainer.appendChild(counter);
 }
 
 function visualize(sql: string): void {
-    const result = parseSql(sql, currentDialect);
-    render(result);
+    batchResult = parseSqlBatch(sql, currentDialect);
+    currentQueryIndex = 0;
+    updateBatchTabs();
+    renderCurrentQuery();
+}
+
+function renderCurrentQuery(): void {
+    if (!batchResult || batchResult.queries.length === 0) {return;}
+
+    const query = batchResult.queries[currentQueryIndex];
+    render(query);
+}
+
+function truncateSql(sql: string, maxLen: number): string {
+    const normalized = sql.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLen) {return normalized;}
+    return normalized.substring(0, maxLen - 3) + '...';
 }

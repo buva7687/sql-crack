@@ -5,7 +5,7 @@ export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'Transact-SQL' | 'MariaDB' | '
 
 export interface FlowNode {
     id: string;
-    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery';
+    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window';
     label: string;
     description?: string;
     details?: string[];
@@ -22,10 +22,37 @@ export interface FlowEdge {
     label?: string;
 }
 
+export interface QueryStats {
+    tables: number;
+    joins: number;
+    subqueries: number;
+    ctes: number;
+    aggregations: number;
+    windowFunctions: number;
+    unions: number;
+    conditions: number;
+    complexity: 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
+    complexityScore: number;
+}
+
+export interface OptimizationHint {
+    type: 'warning' | 'info' | 'error';
+    message: string;
+    suggestion?: string;
+}
+
 export interface ParseResult {
     nodes: FlowNode[];
     edges: FlowEdge[];
+    stats: QueryStats;
+    hints: OptimizationHint[];
+    sql: string;
     error?: string;
+}
+
+export interface BatchParseResult {
+    queries: ParseResult[];
+    totalStats: QueryStats;
 }
 
 const NODE_COLORS: Record<FlowNode['type'], string> = {
@@ -40,25 +67,175 @@ const NODE_COLORS: Record<FlowNode['type'], string> = {
     cte: '#a855f7',        // purple
     union: '#f97316',      // orange
     subquery: '#14b8a6',   // teal
+    window: '#d946ef',     // fuchsia
 };
 
 export function getNodeColor(type: FlowNode['type']): string {
     return NODE_COLORS[type] || '#6366f1';
 }
 
+// Stats tracking during parsing
+let stats: QueryStats;
+let hints: OptimizationHint[];
 let nodeCounter = 0;
+let hasSelectStar = false;
+let hasNoLimit = false;
+let statementType = '';
+
+function resetStats(): void {
+    stats = {
+        tables: 0,
+        joins: 0,
+        subqueries: 0,
+        ctes: 0,
+        aggregations: 0,
+        windowFunctions: 0,
+        unions: 0,
+        conditions: 0,
+        complexity: 'Simple',
+        complexityScore: 0
+    };
+    hints = [];
+    hasSelectStar = false;
+    hasNoLimit = true;
+    statementType = '';
+}
+
+function calculateComplexity(): void {
+    const score =
+        stats.tables * 1 +
+        stats.joins * 3 +
+        stats.subqueries * 5 +
+        stats.ctes * 4 +
+        stats.aggregations * 2 +
+        stats.windowFunctions * 4 +
+        stats.unions * 3 +
+        stats.conditions * 0.5;
+
+    stats.complexityScore = Math.round(score);
+
+    if (score < 5) {
+        stats.complexity = 'Simple';
+    } else if (score < 15) {
+        stats.complexity = 'Moderate';
+    } else if (score < 30) {
+        stats.complexity = 'Complex';
+    } else {
+        stats.complexity = 'Very Complex';
+    }
+}
 
 function genId(prefix: string): string {
     return `${prefix}_${nodeCounter++}`;
 }
 
+// Split SQL into individual statements
+export function splitSqlStatements(sql: string): string[] {
+    const statements: string[] = [];
+    let current = '';
+    let inString = false;
+    let stringChar = '';
+    let depth = 0;
+
+    for (let i = 0; i < sql.length; i++) {
+        const char = sql[i];
+        const prevChar = i > 0 ? sql[i - 1] : '';
+
+        // Handle string literals
+        if ((char === "'" || char === '"') && prevChar !== '\\') {
+            if (!inString) {
+                inString = true;
+                stringChar = char;
+            } else if (char === stringChar) {
+                inString = false;
+            }
+        }
+
+        // Handle parentheses depth
+        if (!inString) {
+            if (char === '(') {depth++;}
+            if (char === ')') {depth--;}
+        }
+
+        // Split on semicolon at depth 0
+        if (char === ';' && !inString && depth === 0) {
+            const trimmed = current.trim();
+            if (trimmed) {
+                statements.push(trimmed);
+            }
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    // Add last statement
+    const trimmed = current.trim();
+    if (trimmed) {
+        statements.push(trimmed);
+    }
+
+    return statements;
+}
+
+// Parse multiple SQL statements
+export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): BatchParseResult {
+    const statements = splitSqlStatements(sql);
+    const queries: ParseResult[] = [];
+
+    for (const stmt of statements) {
+        queries.push(parseSql(stmt, dialect));
+    }
+
+    // Calculate total stats
+    const totalStats: QueryStats = {
+        tables: 0,
+        joins: 0,
+        subqueries: 0,
+        ctes: 0,
+        aggregations: 0,
+        windowFunctions: 0,
+        unions: 0,
+        conditions: 0,
+        complexity: 'Simple',
+        complexityScore: 0
+    };
+
+    for (const q of queries) {
+        totalStats.tables += q.stats.tables;
+        totalStats.joins += q.stats.joins;
+        totalStats.subqueries += q.stats.subqueries;
+        totalStats.ctes += q.stats.ctes;
+        totalStats.aggregations += q.stats.aggregations;
+        totalStats.windowFunctions += q.stats.windowFunctions;
+        totalStats.unions += q.stats.unions;
+        totalStats.conditions += q.stats.conditions;
+        totalStats.complexityScore += q.stats.complexityScore;
+    }
+
+    // Determine overall complexity
+    const avgScore = queries.length > 0 ? totalStats.complexityScore / queries.length : 0;
+    if (avgScore < 5) {
+        totalStats.complexity = 'Simple';
+    } else if (avgScore < 15) {
+        totalStats.complexity = 'Moderate';
+    } else if (avgScore < 30) {
+        totalStats.complexity = 'Complex';
+    } else {
+        totalStats.complexity = 'Very Complex';
+    }
+
+    return { queries, totalStats };
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     nodeCounter = 0;
+    resetStats();
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
 
     if (!sql || !sql.trim()) {
-        return { nodes, edges, error: 'No SQL provided' };
+        return { nodes, edges, stats, hints, sql, error: 'No SQL provided' };
     }
 
     const parser = new Parser();
@@ -71,22 +248,88 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             processStatement(stmt, nodes, edges);
         }
 
+        // Calculate complexity
+        calculateComplexity();
+
+        // Generate optimization hints
+        generateHints(statements[0]);
+
         // Use dagre for layout
         layoutGraph(nodes, edges);
 
-        return { nodes, edges };
+        return { nodes, edges, stats, hints, sql };
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Parse error';
-        return { nodes: [], edges: [], error: message };
+        return { nodes: [], edges: [], stats, hints, sql, error: message };
+    }
+}
+
+function generateHints(stmt: any): void {
+    if (!stmt) {return;}
+
+    const type = stmt.type?.toLowerCase() || '';
+
+    // SELECT * warning
+    if (hasSelectStar) {
+        hints.push({
+            type: 'warning',
+            message: 'SELECT * detected',
+            suggestion: 'Specify only needed columns to reduce data transfer and improve performance'
+        });
+    }
+
+    // Missing LIMIT on SELECT
+    if (type === 'select' && hasNoLimit && stats.tables > 0) {
+        hints.push({
+            type: 'info',
+            message: 'No LIMIT clause',
+            suggestion: 'Consider adding LIMIT to prevent fetching large result sets'
+        });
+    }
+
+    // Missing WHERE on UPDATE/DELETE
+    if ((type === 'update' || type === 'delete') && !stmt.where) {
+        hints.push({
+            type: 'error',
+            message: `${type.toUpperCase()} without WHERE clause`,
+            suggestion: 'This will affect ALL rows in the table. Add a WHERE clause to limit scope'
+        });
+    }
+
+    // Too many JOINs
+    if (stats.joins > 5) {
+        hints.push({
+            type: 'warning',
+            message: `High number of JOINs (${stats.joins})`,
+            suggestion: 'Consider breaking into smaller queries or using CTEs for clarity'
+        });
+    }
+
+    // Deeply nested subqueries
+    if (stats.subqueries > 3) {
+        hints.push({
+            type: 'warning',
+            message: `Multiple subqueries detected (${stats.subqueries})`,
+            suggestion: 'Consider using CTEs (WITH clause) for better readability'
+        });
+    }
+
+    // Cartesian product (no join condition)
+    if (stats.tables > 1 && stats.joins === 0 && stats.conditions === 0) {
+        hints.push({
+            type: 'error',
+            message: 'Possible Cartesian product',
+            suggestion: 'Multiple tables without JOIN conditions will produce all row combinations'
+        });
     }
 }
 
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
     if (!stmt || !stmt.type) {return null;}
 
-    const stmtType = stmt.type.toLowerCase();
+    statementType = stmt.type.toLowerCase();
 
-    if (stmtType === 'select') {
+    if (statementType === 'select') {
         return processSelect(stmt, nodes, edges);
     }
 
@@ -100,6 +343,28 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
         x: 0, y: 0, width: 160, height: 60
     });
 
+    // Process table for UPDATE/DELETE/INSERT
+    if (stmt.table) {
+        const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        for (const t of tables) {
+            stats.tables++;
+            const tableId = genId('table');
+            const tableName = t.table || t.name || t;
+            nodes.push({
+                id: tableId,
+                type: 'table',
+                label: String(tableName),
+                description: 'Target table',
+                x: 0, y: 0, width: 140, height: 60
+            });
+            edges.push({
+                id: genId('e'),
+                source: tableId,
+                target: rootId
+            });
+        }
+    }
+
     return rootId;
 }
 
@@ -109,6 +374,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
     // Process CTEs first
     if (stmt.with && Array.isArray(stmt.with)) {
         for (const cte of stmt.with) {
+            stats.ctes++;
             const cteId = genId('cte');
             const cteName = cte.name?.value || cte.name || 'CTE';
             nodes.push({
@@ -137,6 +403,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
             if (fromItem.join) {
+                stats.joins++;
                 const joinId = genId('join');
                 const joinType = fromItem.join || 'JOIN';
                 const joinTable = getTableName(fromItem);
@@ -179,6 +446,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
     if (stmt.where) {
         const whereId = genId('filter');
         const conditions = extractConditions(stmt.where);
+        stats.conditions += conditions.length;
         nodes.push({
             id: whereId,
             type: 'filter',
@@ -200,6 +468,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
 
     // Process GROUP BY
     if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+        stats.aggregations++;
         const groupId = genId('agg');
         const groupCols = stmt.groupby.map((g: any) => g.column || g.expr?.column || '?').join(', ');
         nodes.push({
@@ -241,6 +510,30 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
             });
         }
         previousId = havingId;
+    }
+
+    // Check for window functions in columns
+    const windowFuncs = extractWindowFunctions(stmt.columns);
+    if (windowFuncs.length > 0) {
+        stats.windowFunctions += windowFuncs.length;
+        const windowId = genId('window');
+        nodes.push({
+            id: windowId,
+            type: 'window',
+            label: 'WINDOW',
+            description: 'Window functions',
+            details: windowFuncs.slice(0, 3),
+            x: 0, y: 0, width: 150, height: 60
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: windowId
+            });
+        }
+        previousId = windowId;
     }
 
     // Process SELECT columns
@@ -291,6 +584,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
 
     // Process LIMIT
     if (stmt.limit) {
+        hasNoLimit = false;
         const limitId = genId('limit');
         const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
         nodes.push({
@@ -328,6 +622,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
 
     // Handle UNION/INTERSECT/EXCEPT
     if (stmt._next) {
+        stats.unions++;
         const nextResultId = processStatement(stmt._next, nodes, edges);
         if (nextResultId) {
             const unionId = genId('union');
@@ -354,6 +649,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
 function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
+        stats.subqueries++;
         const subqueryId = genId('subquery');
         const alias = fromItem.as || 'subquery';
         nodes.push({
@@ -370,6 +666,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
     const tableName = getTableName(fromItem);
     if (!tableName || fromItem.join) {return null;} // Skip join tables, handled separately
 
+    stats.tables++;
     const tableId = genId('table');
     nodes.push({
         id: tableId,
@@ -389,16 +686,40 @@ function getTableName(item: any): string {
 }
 
 function extractColumns(columns: any): string[] {
-    if (!columns || columns === '*') {return ['*'];}
+    if (!columns || columns === '*') {
+        hasSelectStar = true;
+        return ['*'];
+    }
     if (!Array.isArray(columns)) {return ['*'];}
 
     return columns.map((col: any) => {
-        if (col === '*' || col.expr?.column === '*') {return '*';}
+        if (col === '*' || col.expr?.column === '*') {
+            hasSelectStar = true;
+            return '*';
+        }
         if (col.as) {return col.as;}
         if (col.expr?.column) {return col.expr.column;}
         if (col.expr?.name) {return `${col.expr.name}()`;}
         return 'expr';
     }).slice(0, 10); // Limit to first 10
+}
+
+function extractWindowFunctions(columns: any): string[] {
+    if (!columns || !Array.isArray(columns)) {return [];}
+
+    const windowFuncs: string[] = [];
+    for (const col of columns) {
+        if (col.expr?.over) {
+            const funcName = col.expr.name || 'WINDOW';
+            const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column || p.expr?.column).join(', ');
+            let desc = `${funcName}()`;
+            if (partitionBy) {
+                desc += ` OVER(PARTITION BY ${partitionBy})`;
+            }
+            windowFuncs.push(desc);
+        }
+    }
+    return windowFuncs;
 }
 
 function extractConditions(where: any): string[] {

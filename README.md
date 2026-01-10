@@ -7,11 +7,47 @@ SQL Crack is a lightweight Visual Studio Code extension that transforms SQL quer
 ## Features
 
 - **Execution Flow Visualization** - See how your SQL query executes step by step
-- **Interactive Nodes** - Click any node to view detailed information
-- **Pan & Zoom** - Navigate large queries with mouse drag and scroll
+- **Multiple Query Support** - Visualize multiple SQL statements with tab navigation
+- **Interactive Nodes** - Click nodes to view details, double-click to zoom
+- **Node Search** - Search nodes by name (Ctrl+F / Cmd+F)
+- **Query Statistics** - Complexity score, table/join/filter counts
+- **Optimization Hints** - Automatic detection of common SQL anti-patterns
+- **Pan & Zoom** - Navigate with mouse drag and scroll wheel
 - **Multi-Dialect Support** - MySQL, PostgreSQL, SQL Server, MariaDB, SQLite
-- **PNG Export** - Download visualizations as high-resolution images
-- **Lightweight** - Pure SVG rendering, no heavy dependencies
+- **Export Options** - PNG, SVG, or copy to clipboard
+
+## New Features
+
+### Batch Processing
+- Visualize multiple SQL statements in one file
+- Tab navigation between queries (Q1, Q2, Q3...)
+- Error queries highlighted in red
+- Hover over tabs to see SQL preview
+
+### Query Statistics Panel
+- **Complexity Score** - Simple, Moderate, Complex, Very Complex
+- **Metrics** - Tables, Joins, Filters, CTEs, Subqueries, Window Functions
+- Color-coded badges for quick assessment
+
+### Optimization Hints
+Automatic detection of:
+- `SELECT *` usage (performance warning)
+- Missing `LIMIT` clause (info)
+- `DELETE`/`UPDATE` without `WHERE` (error)
+- Too many JOINs (warning)
+- Multiple subqueries (warning)
+- Cartesian products (error)
+
+### Enhanced Interactivity
+- **Search nodes** - Ctrl+F to search, Enter for next result
+- **Edge highlighting** - Hover/click nodes to highlight connected edges
+- **Zoom to node** - Double-click any node to zoom in
+- **Keyboard shortcuts** - Escape to clear selection
+
+### Export Enhancements
+- **PNG** - High-DPI export with background
+- **SVG** - Vector format for scalable diagrams
+- **Clipboard** - Copy diagram directly to clipboard
 
 ## Supported SQL Features
 
@@ -26,7 +62,8 @@ SQL Crack is a lightweight Visual Studio Code extension that transforms SQL quer
 | CTEs (WITH clause) | Full |
 | Subqueries | Full |
 | UNION / INTERSECT / EXCEPT | Full |
-| Window functions | Partial |
+| Window functions | Full |
+| INSERT / UPDATE / DELETE | Basic |
 
 ## Installation
 
@@ -50,26 +87,15 @@ npm run package
 ### Development
 
 ```bash
-# Install dependencies
-npm install
-
-# Compile (development)
-npm run compile
-
-# Watch mode
-npm run watch
-
-# Production build
-npm run package
-
-# Type check
-npm run typecheck
-
-# Lint
-npm run lint
+npm install        # Install dependencies
+npm run compile    # Development build
+npm run watch      # Watch mode
+npm run package    # Production build
+npm run typecheck  # Type check
+npm run lint       # Lint
 ```
 
-Press **F5** in VS Code to launch the Extension Development Host for testing.
+Press **F5** in VS Code to launch the Extension Development Host.
 
 ## Usage
 
@@ -78,42 +104,25 @@ Press **F5** in VS Code to launch the Extension Development Host for testing.
    - Click the **graph icon** in the editor title bar
    - Right-click and select **"SQL Crack: Visualize SQL Query"**
    - Press **`Cmd+Shift+V`** (Mac) or **`Ctrl+Shift+V`** (Windows/Linux)
-   - Use Command Palette: **"SQL Crack: Visualize SQL Query"**
+   - Command Palette: **"SQL Crack: Visualize SQL Query"**
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd/Ctrl + F` | Focus search box |
+| `Enter` | Next search result |
+| `Escape` | Clear selection / search |
+| Mouse wheel | Zoom in/out |
+| Mouse drag | Pan canvas |
+| Double-click | Zoom to node |
 
 ### Tips
 
 - **Select specific SQL** to visualize just that portion
-- **Change dialect** using the dropdown in the visualization panel
+- **Change dialect** using the dropdown in the toolbar
 - **Click nodes** to see operation details in the side panel
-- **Export to PNG** using the button in the top-right corner
-
-## Example
-
-```sql
-SELECT
-    u.id,
-    u.name,
-    COUNT(o.id) as order_count,
-    SUM(o.total) as total_spent
-FROM users u
-LEFT JOIN orders o ON u.id = o.user_id
-WHERE u.status = 'active'
-GROUP BY u.id, u.name
-HAVING COUNT(o.id) > 0
-ORDER BY total_spent DESC
-LIMIT 100;
-```
-
-This query generates a flow diagram showing:
-- **users** (source table)
-- **LEFT JOIN** with orders
-- **WHERE** filter on status
-- **GROUP BY** aggregation
-- **HAVING** filter on groups
-- **SELECT** column projection
-- **ORDER BY** sorting
-- **LIMIT** row limiting
-- **Result** output
+- **Hover tabs** to preview SQL for each query
 
 ## Node Types & Colors
 
@@ -123,6 +132,7 @@ This query generates a flow diagram showing:
 | Filter | Purple | WHERE/HAVING conditions |
 | Join | Pink | JOIN operations |
 | Aggregate | Amber | GROUP BY operations |
+| Window | Fuchsia | Window functions |
 | Select | Indigo | Column projection |
 | Sort | Green | ORDER BY operations |
 | Limit | Cyan | LIMIT clause |
@@ -141,8 +151,8 @@ sql-crack/
 │   ├── types.d.ts            # Type declarations
 │   └── webview/
 │       ├── index.ts          # Webview entry point
-│       ├── sqlParser.ts      # SQL parsing & layout
-│       └── renderer.ts       # SVG rendering engine
+│       ├── sqlParser.ts      # SQL parsing, stats & hints
+│       └── renderer.ts       # SVG rendering & UI
 ├── dist/                     # Compiled output
 ├── package.json
 ├── tsconfig.json
@@ -155,7 +165,7 @@ sql-crack/
 - **TypeScript** - Type-safe development
 - **node-sql-parser** - SQL parsing (multi-dialect)
 - **dagre** - Graph layout algorithm
-- **Pure SVG** - Lightweight rendering (no React/ReactFlow)
+- **Pure SVG** - Lightweight rendering
 - **Webpack** - Bundling
 
 ### Bundle Size
@@ -163,9 +173,7 @@ sql-crack/
 | File | Size |
 |------|------|
 | extension.js | 3.4 KB |
-| webview.js | 2.6 MB |
-
-The webview bundle is primarily `node-sql-parser` (2.38 MB) which provides comprehensive SQL parsing across multiple dialects.
+| webview.js | 2.5 MB |
 
 ## Privacy
 
