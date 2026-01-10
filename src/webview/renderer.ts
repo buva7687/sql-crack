@@ -279,6 +279,54 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('data-label', node.label.toLowerCase());
     group.style.cursor = 'pointer';
 
+    // Check if this is a container node (CTE or Subquery with children)
+    const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
+    const isWindowNode = node.type === 'window' && node.windowDetails;
+
+    if (isContainer) {
+        renderContainerNode(node, group);
+    } else if (isWindowNode) {
+        renderWindowNode(node, group);
+    } else {
+        renderStandardNode(node, group);
+    }
+
+    // Hover effect
+    const rect = group.querySelector('.node-rect') as SVGRectElement;
+    if (rect) {
+        group.addEventListener('mouseenter', () => {
+            rect.setAttribute('fill', lightenColor(getNodeColor(node.type), 20));
+            highlightConnectedEdges(node.id, true);
+        });
+
+        group.addEventListener('mouseleave', () => {
+            rect.setAttribute('fill', getNodeColor(node.type));
+            if (state.selectedNodeId !== node.id) {
+                highlightConnectedEdges(node.id, false);
+            }
+        });
+    }
+
+    // Click to select (or toggle expand for subqueries)
+    group.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (node.type === 'subquery' && node.children && node.children.length > 0) {
+            toggleNodeExpansion(node);
+        } else {
+            selectNode(node.id);
+        }
+    });
+
+    // Double click to zoom to node
+    group.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        zoomToNode(node);
+    });
+
+    parent.appendChild(group);
+}
+
+function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
@@ -323,33 +371,284 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         desc.textContent = truncate(node.description, 20);
         group.appendChild(desc);
     }
+}
 
-    // Hover effect
-    group.addEventListener('mouseenter', () => {
-        rect.setAttribute('fill', lightenColor(getNodeColor(node.type), 20));
-        highlightConnectedEdges(node.id, true);
-    });
+function renderContainerNode(node: FlowNode, group: SVGGElement): void {
+    const isExpanded = node.expanded !== false;
+    const padding = 8;
+    const headerHeight = 36;
 
-    group.addEventListener('mouseleave', () => {
-        rect.setAttribute('fill', getNodeColor(node.type));
-        if (state.selectedNodeId !== node.id) {
-            highlightConnectedEdges(node.id, false);
+    // Container background with gradient
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(isExpanded ? node.height : 50));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header bar
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    // Clip the bottom corners of header
+    const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    headerClip.setAttribute('x', String(node.x));
+    headerClip.setAttribute('y', String(node.y + headerHeight - 10));
+    headerClip.setAttribute('width', String(node.width));
+    headerClip.setAttribute('height', '10');
+    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(headerClip);
+
+    // Icon
+    const icon = getNodeIcon(node.type);
+    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('x', String(node.x + 12));
+    iconText.setAttribute('y', String(node.y + 24));
+    iconText.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    iconText.setAttribute('font-size', '14');
+    iconText.textContent = icon;
+    group.appendChild(iconText);
+
+    // Label
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + 32));
+    label.setAttribute('y', String(node.y + 24));
+    label.setAttribute('fill', 'white');
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    label.textContent = truncate(node.label, 18);
+    group.appendChild(label);
+
+    // Expand/collapse indicator for subqueries
+    if (node.type === 'subquery') {
+        const expandIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        expandIcon.setAttribute('x', String(node.x + node.width - 20));
+        expandIcon.setAttribute('y', String(node.y + 24));
+        expandIcon.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        expandIcon.setAttribute('font-size', '12');
+        expandIcon.textContent = isExpanded ? '▼' : '▶';
+        group.appendChild(expandIcon);
+    }
+
+    // Render children if expanded
+    if (isExpanded && node.children && node.children.length > 0) {
+        const childrenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        childrenGroup.setAttribute('class', 'children-group');
+
+        // Inner content area
+        const innerBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        innerBg.setAttribute('x', String(node.x + padding));
+        innerBg.setAttribute('y', String(node.y + headerHeight + 4));
+        innerBg.setAttribute('width', String(node.width - padding * 2));
+        innerBg.setAttribute('height', String(node.height - headerHeight - padding - 4));
+        innerBg.setAttribute('rx', '6');
+        innerBg.setAttribute('fill', 'rgba(0,0,0,0.15)');
+        childrenGroup.appendChild(innerBg);
+
+        // Render child nodes as mini pills
+        let yOffset = node.y + headerHeight + 12;
+        for (const child of node.children) {
+            const childPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            childPill.setAttribute('x', String(node.x + padding + 6));
+            childPill.setAttribute('y', String(yOffset));
+            childPill.setAttribute('width', String(node.width - padding * 2 - 12));
+            childPill.setAttribute('height', '24');
+            childPill.setAttribute('rx', '4');
+            childPill.setAttribute('fill', getNodeColor(child.type));
+            childPill.setAttribute('opacity', '0.9');
+            childrenGroup.appendChild(childPill);
+
+            // Child icon
+            const childIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            childIcon.setAttribute('x', String(node.x + padding + 12));
+            childIcon.setAttribute('y', String(yOffset + 16));
+            childIcon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+            childIcon.setAttribute('font-size', '10');
+            childIcon.textContent = getNodeIcon(child.type);
+            childrenGroup.appendChild(childIcon);
+
+            // Child label
+            const childLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            childLabel.setAttribute('x', String(node.x + padding + 26));
+            childLabel.setAttribute('y', String(yOffset + 16));
+            childLabel.setAttribute('fill', 'white');
+            childLabel.setAttribute('font-size', '10');
+            childLabel.setAttribute('font-weight', '500');
+            childLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+            childLabel.textContent = truncate(child.label, 16);
+            childrenGroup.appendChild(childLabel);
+
+            yOffset += 30;
         }
-    });
 
-    // Click to select
-    group.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectNode(node.id);
-    });
+        group.appendChild(childrenGroup);
+    }
+}
 
-    // Double click to zoom to node
-    group.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        zoomToNode(node);
-    });
+function renderWindowNode(node: FlowNode, group: SVGGElement): void {
+    const windowDetails = node.windowDetails!;
+    const padding = 10;
+    const headerHeight = 32;
+    const funcHeight = 24;
 
-    parent.appendChild(group);
+    // Main container
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    headerClip.setAttribute('x', String(node.x));
+    headerClip.setAttribute('y', String(node.y + headerHeight - 10));
+    headerClip.setAttribute('width', String(node.width));
+    headerClip.setAttribute('height', '10');
+    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(headerClip);
+
+    // Icon and title
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + 10));
+    icon.setAttribute('y', String(node.y + 22));
+    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('font-size', '12');
+    icon.textContent = '▦';
+    group.appendChild(icon);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', String(node.x + 28));
+    title.setAttribute('y', String(node.y + 22));
+    title.setAttribute('fill', 'white');
+    title.setAttribute('font-size', '12');
+    title.setAttribute('font-weight', '600');
+    title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    title.textContent = `WINDOW (${windowDetails.functions.length})`;
+    group.appendChild(title);
+
+    // Render each window function
+    let yOffset = node.y + headerHeight + 8;
+    for (const func of windowDetails.functions.slice(0, 4)) { // Max 4 visible
+        // Function pill
+        const funcPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        funcPill.setAttribute('x', String(node.x + padding));
+        funcPill.setAttribute('y', String(yOffset));
+        funcPill.setAttribute('width', String(node.width - padding * 2));
+        funcPill.setAttribute('height', String(funcHeight));
+        funcPill.setAttribute('rx', '4');
+        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        group.appendChild(funcPill);
+
+        // Function name
+        const funcName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        funcName.setAttribute('x', String(node.x + padding + 6));
+        funcName.setAttribute('y', String(yOffset + 15));
+        funcName.setAttribute('fill', '#fbbf24');
+        funcName.setAttribute('font-size', '10');
+        funcName.setAttribute('font-weight', '600');
+        funcName.setAttribute('font-family', 'monospace');
+        funcName.textContent = func.name;
+        group.appendChild(funcName);
+
+        // Partition/Order info as badges
+        let badgeX = node.x + padding + 6 + func.name.length * 6.5 + 8;
+
+        if (func.partitionBy && func.partitionBy.length > 0) {
+            const partBadge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            partBadge.setAttribute('x', String(badgeX));
+            partBadge.setAttribute('y', String(yOffset + 4));
+            partBadge.setAttribute('width', '16');
+            partBadge.setAttribute('height', '14');
+            partBadge.setAttribute('rx', '3');
+            partBadge.setAttribute('fill', '#6366f1');
+            group.appendChild(partBadge);
+
+            const partText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            partText.setAttribute('x', String(badgeX + 4));
+            partText.setAttribute('y', String(yOffset + 14));
+            partText.setAttribute('fill', 'white');
+            partText.setAttribute('font-size', '8');
+            partText.setAttribute('font-weight', '600');
+            partText.textContent = 'P';
+            group.appendChild(partText);
+
+            badgeX += 20;
+        }
+
+        if (func.orderBy && func.orderBy.length > 0) {
+            const orderBadge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            orderBadge.setAttribute('x', String(badgeX));
+            orderBadge.setAttribute('y', String(yOffset + 4));
+            orderBadge.setAttribute('width', '16');
+            orderBadge.setAttribute('height', '14');
+            orderBadge.setAttribute('rx', '3');
+            orderBadge.setAttribute('fill', '#10b981');
+            group.appendChild(orderBadge);
+
+            const orderText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            orderText.setAttribute('x', String(badgeX + 4));
+            orderText.setAttribute('y', String(yOffset + 14));
+            orderText.setAttribute('fill', 'white');
+            orderText.setAttribute('font-size', '8');
+            orderText.setAttribute('font-weight', '600');
+            orderText.textContent = 'O';
+            group.appendChild(orderText);
+        }
+
+        yOffset += funcHeight + 4;
+    }
+
+    // Show "more" indicator if there are more functions
+    if (windowDetails.functions.length > 4) {
+        const moreText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        moreText.setAttribute('x', String(node.x + node.width / 2));
+        moreText.setAttribute('y', String(node.y + node.height - 8));
+        moreText.setAttribute('text-anchor', 'middle');
+        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('font-size', '9');
+        moreText.textContent = `+${windowDetails.functions.length - 4} more`;
+        group.appendChild(moreText);
+    }
+}
+
+function toggleNodeExpansion(node: FlowNode): void {
+    node.expanded = !node.expanded;
+
+    // Recalculate height
+    if (node.expanded && node.children) {
+        node.height = 70 + node.children.length * 30;
+    } else {
+        node.height = 50;
+    }
+
+    // Re-render (this is a simple approach; a more efficient one would update in place)
+    const currentResult = { nodes: currentNodes, edges: currentEdges, stats: currentStats!, hints: currentHints, sql: '' };
+    render(currentResult as ParseResult);
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
@@ -460,6 +759,76 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (!node) {return;}
 
     detailsPanel.style.transform = 'translateX(0)';
+
+    // Build details section based on node type
+    let detailsSection = '';
+
+    // Window function details
+    if (node.windowDetails && node.windowDetails.functions.length > 0) {
+        detailsSection = `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Window Functions</div>
+                ${node.windowDetails.functions.map(func => `
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                        <div style="color: #fbbf24; font-weight: 600; font-size: 13px; font-family: monospace; margin-bottom: 6px;">
+                            ${escapeHtml(func.name)}()
+                        </div>
+                        ${func.partitionBy && func.partitionBy.length > 0 ? `
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <span style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">PARTITION BY</span>
+                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                            </div>
+                        ` : ''}
+                        ${func.orderBy && func.orderBy.length > 0 ? `
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">ORDER BY</span>
+                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                            </div>
+                        ` : ''}
+                        ${func.frame ? `
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">FRAME</span>
+                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    // Children details for CTEs and subqueries
+    else if (node.children && node.children.length > 0) {
+        detailsSection = `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Internal Structure</div>
+                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px;">
+                    ${node.children.map(child => `
+                        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                            <span style="background: ${getNodeColor(child.type)}; padding: 3px 8px; border-radius: 4px; color: white; font-size: 10px; font-weight: 500;">
+                                ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    // Standard details
+    else if (node.details && node.details.length > 0) {
+        detailsSection = `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Details</div>
+                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 12px;">
+                    ${node.details.map(d => `
+                        <div style="color: #cbd5e1; font-size: 12px; padding: 4px 0; font-family: monospace;">
+                            ${escapeHtml(d)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
     detailsPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h3 style="margin: 0; color: #f1f5f9; font-size: 14px;">Node Details</h3>
@@ -473,18 +842,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                 ${node.description || ''}
             </div>
         </div>
-        ${node.details && node.details.length > 0 ? `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Details</div>
-                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 12px;">
-                    ${node.details.map(d => `
-                        <div style="color: #cbd5e1; font-size: 12px; padding: 4px 0; font-family: monospace;">
-                            ${escapeHtml(d)}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        ` : ''}
+        ${detailsSection}
         <div style="color: #64748b; font-size: 11px; margin-top: 20px;">
             Type: ${node.type}<br>
             ID: ${node.id}

@@ -13,6 +13,19 @@ export interface FlowNode {
     y: number;
     width: number;
     height: number;
+    // For nested visualizations (CTEs, subqueries)
+    children?: FlowNode[];
+    childEdges?: FlowEdge[];
+    expanded?: boolean;
+    // For window functions - detailed breakdown
+    windowDetails?: {
+        functions: Array<{
+            name: string;
+            partitionBy?: string[];
+            orderBy?: string[];
+            frame?: string;
+        }>;
+    };
 }
 
 export interface FlowEdge {
@@ -371,18 +384,35 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
 function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string {
     const nodeIds: string[] = [];
 
-    // Process CTEs first
+    // Process CTEs first - with nested sub-graph
     if (stmt.with && Array.isArray(stmt.with)) {
         for (const cte of stmt.with) {
             stats.ctes++;
             const cteId = genId('cte');
             const cteName = cte.name?.value || cte.name || 'CTE';
+
+            // Parse CTE's internal structure
+            const cteChildren: FlowNode[] = [];
+            const cteChildEdges: FlowEdge[] = [];
+
+            if (cte.stmt) {
+                // Recursively parse the CTE's SELECT statement
+                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges);
+            }
+
+            // Calculate container size based on children
+            const containerWidth = Math.max(200, cteChildren.length > 0 ? 220 : 160);
+            const containerHeight = cteChildren.length > 0 ? 80 + cteChildren.length * 35 : 60;
+
             nodes.push({
                 id: cteId,
                 type: 'cte',
                 label: `WITH ${cteName}`,
                 description: 'Common Table Expression',
-                x: 0, y: 0, width: 160, height: 60
+                children: cteChildren.length > 0 ? cteChildren : undefined,
+                childEdges: cteChildEdges.length > 0 ? cteChildEdges : undefined,
+                expanded: true,
+                x: 0, y: 0, width: containerWidth, height: containerHeight
             });
             nodeIds.push(cteId);
         }
@@ -559,18 +589,24 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
         previousId = havingId;
     }
 
-    // Check for window functions in columns
-    const windowFuncs = extractWindowFunctions(stmt.columns);
-    if (windowFuncs.length > 0) {
-        stats.windowFunctions += windowFuncs.length;
+    // Check for window functions in columns - with detailed breakdown
+    const windowFuncDetails = extractWindowFunctionDetails(stmt.columns);
+    if (windowFuncDetails.length > 0) {
+        stats.windowFunctions += windowFuncDetails.length;
         const windowId = genId('window');
+
+        // Calculate height based on number of functions
+        const baseHeight = 50;
+        const perFuncHeight = 28;
+        const windowHeight = baseHeight + windowFuncDetails.length * perFuncHeight;
+
         nodes.push({
             id: windowId,
             type: 'window',
             label: 'WINDOW',
-            description: 'Window functions',
-            details: windowFuncs.slice(0, 3),
-            x: 0, y: 0, width: 150, height: 60
+            description: `${windowFuncDetails.length} window function${windowFuncDetails.length > 1 ? 's' : ''}`,
+            windowDetails: { functions: windowFuncDetails },
+            x: 0, y: 0, width: 220, height: Math.min(windowHeight, 180)
         });
 
         if (previousId) {
@@ -718,12 +754,25 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
         stats.subqueries++;
         const subqueryId = genId('subquery');
         const alias = fromItem.as || 'subquery';
+
+        // Parse subquery's internal structure
+        const subChildren: FlowNode[] = [];
+        const subChildEdges: FlowEdge[] = [];
+        parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges);
+
+        // Calculate container size
+        const containerWidth = Math.max(160, subChildren.length > 0 ? 200 : 140);
+        const containerHeight = subChildren.length > 0 ? 70 + subChildren.length * 30 : 60;
+
         nodes.push({
             id: subqueryId,
             type: 'subquery',
             label: `(${alias})`,
-            description: 'Subquery',
-            x: 0, y: 0, width: 140, height: 60
+            description: 'Subquery - click to expand',
+            children: subChildren.length > 0 ? subChildren : undefined,
+            childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
+            expanded: false, // Start collapsed
+            x: 0, y: 0, width: containerWidth, height: containerHeight
         });
         return subqueryId;
     }
@@ -786,6 +835,153 @@ function extractWindowFunctions(columns: any): string[] {
         }
     }
     return windowFuncs;
+}
+
+// Extract detailed window function information
+function extractWindowFunctionDetails(columns: any): Array<{
+    name: string;
+    partitionBy?: string[];
+    orderBy?: string[];
+    frame?: string;
+}> {
+    if (!columns || !Array.isArray(columns)) {return [];}
+
+    const details: Array<{
+        name: string;
+        partitionBy?: string[];
+        orderBy?: string[];
+        frame?: string;
+    }> = [];
+
+    for (const col of columns) {
+        if (col.expr?.over) {
+            const funcName = col.expr.name || col.expr.type || 'WINDOW';
+
+            // Extract PARTITION BY columns
+            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
+                p.column || p.expr?.column || p.value || '?'
+            ).filter(Boolean);
+
+            // Extract ORDER BY columns
+            const orderBy = col.expr.over?.orderby?.map((o: any) => {
+                const colName = o.expr?.column || o.column || '?';
+                const dir = o.type || '';
+                return dir ? `${colName} ${dir}` : colName;
+            }).filter(Boolean);
+
+            // Extract frame clause if present
+            let frame: string | undefined;
+            if (col.expr.over?.frame) {
+                const f = col.expr.over.frame;
+                frame = `${f.type || 'ROWS'} ${f.start || ''} ${f.end ? 'TO ' + f.end : ''}`.trim();
+            }
+
+            details.push({
+                name: funcName.toUpperCase(),
+                partitionBy: partitionBy?.length > 0 ? partitionBy : undefined,
+                orderBy: orderBy?.length > 0 ? orderBy : undefined,
+                frame
+            });
+        }
+    }
+
+    return details;
+}
+
+// Parse CTE or Subquery internal structure for nested visualization
+function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): void {
+    if (!stmt) {return;}
+
+    let previousId: string | null = null;
+
+    // Extract tables from FROM clause
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            if (!fromItem.join) {
+                const tableName = getTableName(fromItem);
+                if (tableName && tableName !== 'table') {
+                    const tableId = genId('child_table');
+                    nodes.push({
+                        id: tableId,
+                        type: 'table',
+                        label: tableName,
+                        description: 'Table',
+                        x: 0, y: 0, width: 100, height: 32
+                    });
+                    if (previousId) {
+                        edges.push({ id: genId('ce'), source: previousId, target: tableId });
+                    }
+                    previousId = tableId;
+                }
+            }
+        }
+
+        // Add joins
+        for (const fromItem of stmt.from) {
+            if (fromItem.join) {
+                const joinId = genId('child_join');
+                const joinTable = getTableName(fromItem);
+                nodes.push({
+                    id: joinId,
+                    type: 'join',
+                    label: `${fromItem.join} ${joinTable}`,
+                    description: 'Join',
+                    x: 0, y: 0, width: 120, height: 32
+                });
+                if (previousId) {
+                    edges.push({ id: genId('ce'), source: previousId, target: joinId });
+                }
+                previousId = joinId;
+            }
+        }
+    }
+
+    // Add WHERE if present
+    if (stmt.where) {
+        const whereId = genId('child_where');
+        nodes.push({
+            id: whereId,
+            type: 'filter',
+            label: 'WHERE',
+            description: 'Filter',
+            x: 0, y: 0, width: 80, height: 32
+        });
+        if (previousId) {
+            edges.push({ id: genId('ce'), source: previousId, target: whereId });
+        }
+        previousId = whereId;
+    }
+
+    // Add GROUP BY if present
+    if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+        const groupId = genId('child_group');
+        nodes.push({
+            id: groupId,
+            type: 'aggregate',
+            label: 'GROUP BY',
+            description: 'Aggregate',
+            x: 0, y: 0, width: 90, height: 32
+        });
+        if (previousId) {
+            edges.push({ id: genId('ce'), source: previousId, target: groupId });
+        }
+        previousId = groupId;
+    }
+
+    // Add ORDER BY if present
+    if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
+        const sortId = genId('child_sort');
+        nodes.push({
+            id: sortId,
+            type: 'sort',
+            label: 'ORDER BY',
+            description: 'Sort',
+            x: 0, y: 0, width: 90, height: 32
+        });
+        if (previousId) {
+            edges.push({ id: genId('ce'), source: previousId, target: sortId });
+        }
+    }
 }
 
 function extractConditions(where: any): string[] {
