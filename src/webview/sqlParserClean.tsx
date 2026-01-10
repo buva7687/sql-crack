@@ -60,7 +60,13 @@ function getLayoutedElements(nodes: Node[], edges: Edge[]) {
     return { nodes, edges };
 }
 
-function createNode(id: string, label: string, description: string, color: string): Node {
+interface NodeMetadata {
+    type: string;
+    details: string[];
+    sqlFragment?: string;
+}
+
+function createNode(id: string, label: string, description: string, color: string, metadata?: NodeMetadata): Node {
     return {
         id,
         type: 'default',
@@ -83,7 +89,10 @@ function createNode(id: string, label: string, description: string, color: strin
                         {description}
                     </div>
                 </div>
-            )
+            ),
+            nodeTitle: label,
+            nodeDescription: description,
+            metadata: metadata || { type: label, details: [description] }
         },
         position: { x: 0, y: 0 },
         style: {
@@ -95,6 +104,7 @@ function createNode(id: string, label: string, description: string, color: strin
             width: 280,
             minHeight: 80,
             boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            transition: 'all 0.2s',
         }
     };
 }
