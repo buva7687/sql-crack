@@ -307,14 +307,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
     }
 
-    // Click to select (or toggle expand for subqueries)
+    // Click to select
     group.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (node.type === 'subquery' && node.children && node.children.length > 0) {
-            toggleNodeExpansion(node);
-        } else {
-            selectNode(node.id);
-        }
+        selectNode(node.id);
     });
 
     // Double click to zoom to node
@@ -375,15 +371,124 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
 
 function renderContainerNode(node: FlowNode, group: SVGGElement): void {
     const isExpanded = node.expanded !== false;
+    const hasChildren = node.children && node.children.length > 0;
+
+    if (node.type === 'subquery') {
+        renderSubqueryNode(node, group, isExpanded, hasChildren);
+    } else {
+        renderCteNode(node, group, isExpanded, hasChildren);
+    }
+}
+
+function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
+    const padding = 6;
+    const headerHeight = 28;
+
+    // Outer container with dashed border effect
+    const outerRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    outerRect.setAttribute('x', String(node.x));
+    outerRect.setAttribute('y', String(node.y));
+    outerRect.setAttribute('width', String(node.width));
+    outerRect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 55));
+    outerRect.setAttribute('rx', '8');
+    outerRect.setAttribute('fill', '#1e293b');
+    outerRect.setAttribute('stroke', getNodeColor(node.type));
+    outerRect.setAttribute('stroke-width', '2');
+    outerRect.setAttribute('stroke-dasharray', '6,3');
+    outerRect.setAttribute('filter', 'url(#shadow)');
+    outerRect.setAttribute('class', 'node-rect');
+    group.appendChild(outerRect);
+
+    // Header with solid background
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x + 2));
+    header.setAttribute('y', String(node.y + 2));
+    header.setAttribute('width', String(node.width - 4));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '6');
+    header.setAttribute('fill', getNodeColor(node.type));
+    group.appendChild(header);
+
+    // Subquery icon and label
+    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('x', String(node.x + 10));
+    iconText.setAttribute('y', String(node.y + 20));
+    iconText.setAttribute('fill', 'white');
+    iconText.setAttribute('font-size', '11');
+    iconText.textContent = '⊂';
+    group.appendChild(iconText);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + 24));
+    label.setAttribute('y', String(node.y + 20));
+    label.setAttribute('fill', 'white');
+    label.setAttribute('font-size', '11');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('font-family', 'monospace');
+    label.textContent = truncate(node.label, 20);
+    group.appendChild(label);
+
+    // Render children (internal operations)
+    if (isExpanded && hasChildren && node.children) {
+        let yOffset = node.y + headerHeight + 8;
+
+        for (const child of node.children) {
+            // Small operation badge
+            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            badge.setAttribute('x', String(node.x + padding + 4));
+            badge.setAttribute('y', String(yOffset));
+            badge.setAttribute('width', String(node.width - padding * 2 - 8));
+            badge.setAttribute('height', '20');
+            badge.setAttribute('rx', '4');
+            badge.setAttribute('fill', getNodeColor(child.type));
+            badge.setAttribute('opacity', '0.85');
+            group.appendChild(badge);
+
+            // Operation icon
+            const opIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            opIcon.setAttribute('x', String(node.x + padding + 10));
+            opIcon.setAttribute('y', String(yOffset + 14));
+            opIcon.setAttribute('fill', 'white');
+            opIcon.setAttribute('font-size', '9');
+            opIcon.textContent = getNodeIcon(child.type);
+            group.appendChild(opIcon);
+
+            // Operation label
+            const opLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            opLabel.setAttribute('x', String(node.x + padding + 24));
+            opLabel.setAttribute('y', String(yOffset + 14));
+            opLabel.setAttribute('fill', 'white');
+            opLabel.setAttribute('font-size', '9');
+            opLabel.setAttribute('font-weight', '500');
+            opLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+            opLabel.textContent = truncate(child.label, 18);
+            group.appendChild(opLabel);
+
+            yOffset += 24;
+        }
+    } else if (!hasChildren) {
+        // Show "Derived Table" text when no internal details
+        const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        descText.setAttribute('x', String(node.x + node.width / 2));
+        descText.setAttribute('y', String(node.y + 44));
+        descText.setAttribute('text-anchor', 'middle');
+        descText.setAttribute('fill', '#64748b');
+        descText.setAttribute('font-size', '10');
+        descText.textContent = 'Derived Table';
+        group.appendChild(descText);
+    }
+}
+
+function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
     const padding = 8;
     const headerHeight = 36;
 
-    // Container background with gradient
+    // Container background
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
-    rect.setAttribute('height', String(isExpanded ? node.height : 50));
+    rect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 50));
     rect.setAttribute('rx', '10');
     rect.setAttribute('fill', getNodeColor(node.type));
     rect.setAttribute('filter', 'url(#shadow)');
@@ -400,7 +505,6 @@ function renderContainerNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('fill', 'rgba(0,0,0,0.2)');
     group.appendChild(header);
 
-    // Clip the bottom corners of header
     const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     headerClip.setAttribute('x', String(node.x));
     headerClip.setAttribute('y', String(node.y + headerHeight - 10));
@@ -430,19 +534,8 @@ function renderContainerNode(node: FlowNode, group: SVGGElement): void {
     label.textContent = truncate(node.label, 18);
     group.appendChild(label);
 
-    // Expand/collapse indicator for subqueries
-    if (node.type === 'subquery') {
-        const expandIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        expandIcon.setAttribute('x', String(node.x + node.width - 20));
-        expandIcon.setAttribute('y', String(node.y + 24));
-        expandIcon.setAttribute('fill', 'rgba(255,255,255,0.7)');
-        expandIcon.setAttribute('font-size', '12');
-        expandIcon.textContent = isExpanded ? '▼' : '▶';
-        group.appendChild(expandIcon);
-    }
-
     // Render children if expanded
-    if (isExpanded && node.children && node.children.length > 0) {
+    if (isExpanded && hasChildren && node.children) {
         const childrenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         childrenGroup.setAttribute('class', 'children-group');
 

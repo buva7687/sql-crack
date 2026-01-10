@@ -760,18 +760,20 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
         const subChildEdges: FlowEdge[] = [];
         parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges);
 
-        // Calculate container size
-        const containerWidth = Math.max(160, subChildren.length > 0 ? 200 : 140);
-        const containerHeight = subChildren.length > 0 ? 70 + subChildren.length * 30 : 60;
+        // Subqueries as data sources should always be expanded
+        // Calculate container size based on children
+        const hasChildren = subChildren.length > 0;
+        const containerWidth = hasChildren ? 220 : 160;
+        const containerHeight = hasChildren ? 55 + subChildren.length * 28 : 60;
 
         nodes.push({
             id: subqueryId,
             type: 'subquery',
-            label: `(${alias})`,
-            description: 'Subquery - click to expand',
-            children: subChildren.length > 0 ? subChildren : undefined,
+            label: alias,
+            description: hasChildren ? `Derived table with ${subChildren.length} operations` : 'Derived table',
+            children: hasChildren ? subChildren : undefined,
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
-            expanded: false, // Start collapsed
+            expanded: true, // Always expanded for data source subqueries
             x: 0, y: 0, width: containerWidth, height: containerHeight
         });
         return subqueryId;
@@ -855,7 +857,15 @@ function extractWindowFunctionDetails(columns: any): Array<{
 
     for (const col of columns) {
         if (col.expr?.over) {
-            const funcName = col.expr.name || col.expr.type || 'WINDOW';
+            // Safely extract function name - could be string or object
+            let funcName = 'WINDOW';
+            if (typeof col.expr.name === 'string') {
+                funcName = col.expr.name;
+            } else if (col.expr.name?.name) {
+                funcName = col.expr.name.name;
+            } else if (typeof col.expr.type === 'string') {
+                funcName = col.expr.type;
+            }
 
             // Extract PARTITION BY columns
             const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
@@ -877,7 +887,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
             }
 
             details.push({
-                name: funcName.toUpperCase(),
+                name: String(funcName).toUpperCase(),
                 partitionBy: partitionBy?.length > 0 ? partitionBy : undefined,
                 orderBy: orderBy?.length > 0 ? orderBy : undefined,
                 frame
