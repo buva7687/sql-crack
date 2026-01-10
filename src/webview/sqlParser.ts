@@ -827,7 +827,17 @@ function extractWindowFunctions(columns: any): string[] {
     const windowFuncs: string[] = [];
     for (const col of columns) {
         if (col.expr?.over) {
-            const funcName = col.expr.name || 'WINDOW';
+            // Safely extract function name
+            let funcName = 'WINDOW';
+            const expr = col.expr;
+            if (typeof expr.name === 'string') {
+                funcName = expr.name;
+            } else if (expr.name?.name && typeof expr.name.name === 'string') {
+                funcName = expr.name.name;
+            } else if (expr.name?.value && typeof expr.name.value === 'string') {
+                funcName = expr.name.value;
+            }
+
             const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column || p.expr?.column).join(', ');
             let desc = `${funcName}()`;
             if (partitionBy) {
@@ -857,14 +867,30 @@ function extractWindowFunctionDetails(columns: any): Array<{
 
     for (const col of columns) {
         if (col.expr?.over) {
-            // Safely extract function name - could be string or object
+            // Safely extract function name - could be in various formats
             let funcName = 'WINDOW';
-            if (typeof col.expr.name === 'string') {
-                funcName = col.expr.name;
-            } else if (col.expr.name?.name) {
-                funcName = col.expr.name.name;
-            } else if (typeof col.expr.type === 'string') {
-                funcName = col.expr.type;
+            const expr = col.expr;
+
+            // Try multiple paths to find the function name
+            if (typeof expr.name === 'string') {
+                funcName = expr.name;
+            } else if (expr.name?.name && typeof expr.name.name === 'string') {
+                funcName = expr.name.name;
+            } else if (expr.name?.value && typeof expr.name.value === 'string') {
+                funcName = expr.name.value;
+            } else if (typeof expr.type === 'string' && expr.type !== 'aggr_func' && expr.type !== 'function') {
+                funcName = expr.type;
+            } else if (expr.args?.expr?.name && typeof expr.args.expr.name === 'string') {
+                funcName = expr.args.expr.name;
+            }
+
+            // Final fallback - try to stringify and extract
+            if (funcName === 'WINDOW' && expr.name) {
+                const nameStr = JSON.stringify(expr.name);
+                const match = nameStr.match(/"name"\s*:\s*"([^"]+)"/);
+                if (match) {
+                    funcName = match[1];
+                }
             }
 
             // Extract PARTITION BY columns
