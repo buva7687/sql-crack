@@ -1,590 +1,469 @@
 import { Parser } from 'node-sql-parser';
-import { Node, Edge } from 'reactflow';
-import { parseSchemaToGraph } from './schemaParser';
-
-const parser = new Parser();
+import dagre from 'dagre';
 
 export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'Transact-SQL' | 'MariaDB' | 'SQLite';
 
-export interface ParsedSqlData {
-    nodes: Node[];
-    edges: Edge[];
-    isSchema?: boolean;
-    ast?: any;
+export interface FlowNode {
+    id: string;
+    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery';
+    label: string;
+    description?: string;
+    details?: string[];
+    x: number;
+    y: number;
+    width: number;
+    height: number;
 }
 
-let nodeIdCounter = 0;
-
-function generateId(prefix: string = 'node'): string {
-    return `${prefix}_${nodeIdCounter++}`;
+export interface FlowEdge {
+    id: string;
+    source: string;
+    target: string;
+    label?: string;
 }
 
-export function parseSqlToGraph(sqlCode: string, dialect: SqlDialect = 'MySQL'): ParsedSqlData {
-    nodeIdCounter = 0;
-    const nodes: Node[] = [];
-    const edges: Edge[] = [];
+export interface ParseResult {
+    nodes: FlowNode[];
+    edges: FlowEdge[];
+    error?: string;
+}
+
+const NODE_COLORS: Record<FlowNode['type'], string> = {
+    table: '#3b82f6',      // blue
+    filter: '#8b5cf6',     // purple
+    join: '#ec4899',       // pink
+    aggregate: '#f59e0b',  // amber
+    sort: '#10b981',       // green
+    limit: '#06b6d4',      // cyan
+    select: '#6366f1',     // indigo
+    result: '#22c55e',     // green
+    cte: '#a855f7',        // purple
+    union: '#f97316',      // orange
+    subquery: '#14b8a6',   // teal
+};
+
+export function getNodeColor(type: FlowNode['type']): string {
+    return NODE_COLORS[type] || '#6366f1';
+}
+
+let nodeCounter = 0;
+
+function genId(prefix: string): string {
+    return `${prefix}_${nodeCounter++}`;
+}
+
+export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
+    nodeCounter = 0;
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+
+    if (!sql || !sql.trim()) {
+        return { nodes, edges, error: 'No SQL provided' };
+    }
+
+    const parser = new Parser();
 
     try {
-        // Parse SQL with selected dialect
-        const ast = parser.astify(sqlCode, { database: dialect });
-
-        // Handle array of statements or single statement
+        const ast = parser.astify(sql, { database: dialect });
         const statements = Array.isArray(ast) ? ast : [ast];
 
-        // Check if this is a schema definition (CREATE TABLE statements)
-        const hasCreateTable = statements.some((stmt: any) =>
-            stmt.type?.toLowerCase() === 'create' && stmt.keyword === 'table'
-        );
-
-        if (hasCreateTable) {
-            // Use schema parser for CREATE TABLE statements
-            const schemaResult = parseSchemaToGraph(sqlCode, dialect);
-            return {
-                nodes: schemaResult.nodes,
-                edges: schemaResult.edges,
-                isSchema: true,
-                ast: ast
-            };
+        for (const stmt of statements) {
+            processStatement(stmt, nodes, edges);
         }
 
-        let yOffset = 0;
+        // Use dagre for layout
+        layoutGraph(nodes, edges);
 
-        statements.forEach((statement: any, stmtIndex: number) => {
-            const result = processStatement(statement, stmtIndex, yOffset);
-            nodes.push(...result.nodes);
-            edges.push(...result.edges);
-
-            // Offset for next statement
-            yOffset += 400;
-        });
-
-        return { nodes, edges, isSchema: false, ast: ast };
-    } catch (error) {
-        console.error('SQL parsing error:', error);
-
-        // Return error node
-        return {
-            nodes: [{
-                id: 'error',
-                type: 'default',
-                data: {
-                    label: `Parse Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-                },
-                position: { x: 250, y: 50 },
-                style: {
-                    background: '#ff6b6b',
-                    color: 'white',
-                    border: '2px solid #ff0000',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 200
-                }
-            }],
-            edges: []
-        };
+        return { nodes, edges };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Parse error';
+        return { nodes: [], edges: [], error: message };
     }
 }
 
-function processStatement(statement: any, stmtIndex: number, baseYOffset: number): ParsedSqlData {
-    const nodes: Node[] = [];
-    const edges: Edge[] = [];
+function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
+    if (!stmt || !stmt.type) {return null;}
 
-    if (!statement || !statement.type) {
-        return { nodes, edges };
+    const stmtType = stmt.type.toLowerCase();
+
+    if (stmtType === 'select') {
+        return processSelect(stmt, nodes, edges);
     }
 
-    const statementType = statement.type.toLowerCase();
-
-    // Create root node for the statement
-    const rootId = generateId('stmt');
+    // For non-SELECT, create a simple representation
+    const rootId = genId('stmt');
     nodes.push({
         id: rootId,
-        type: 'input',
-        data: { label: `${statement.type} Query` },
-        position: { x: 250, y: baseYOffset + 50 },
-        style: {
-            background: '#667eea',
-            color: 'white',
-            border: '2px solid #764ba2',
-            borderRadius: 8,
-            padding: 10,
-            fontSize: 14,
-            fontWeight: 'bold'
-        }
+        type: 'result',
+        label: stmt.type.toUpperCase(),
+        description: `${stmt.type} statement`,
+        x: 0, y: 0, width: 160, height: 60
     });
 
-    let xOffset = 0;
-    const yStep = 120;
-
-    // Process CTEs (WITH clause)
-    if (statement.with && statement.with.length > 0) {
-        statement.with.forEach((cte: any, idx: number) => {
-            const cteId = generateId('cte');
-            const cteName = cte.name || `CTE_${idx + 1}`;
-
-            nodes.push({
-                id: cteId,
-                data: { label: `WITH\n${cteName}` },
-                position: { x: idx * 200, y: baseYOffset },
-                style: {
-                    background: '#805ad5',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 120,
-                    whiteSpace: 'pre-wrap',
-                    border: '2px dashed #6b46c1'
-                }
-            });
-
-            edges.push({
-                id: `${cteId}-${rootId}`,
-                source: cteId,
-                target: rootId,
-                label: 'CTE',
-                animated: true,
-                style: { strokeDasharray: '5 5', stroke: '#805ad5' }
-            });
-        });
-    }
-
-    // Check for UNION/INTERSECT/EXCEPT operations
-    if (statement._next) {
-        const setOpType = statement.set_op || 'UNION';
-        const setOpId = generateId('setop');
-
-        nodes.push({
-            id: setOpId,
-            data: { label: setOpType },
-            position: { x: 500, y: baseYOffset + 50 + yStep },
-            style: {
-                background: '#f6ad55',
-                color: 'white',
-                borderRadius: 8,
-                padding: 10,
-                minWidth: 100,
-                fontWeight: 'bold',
-                border: '2px solid #dd6b20'
-            }
-        });
-
-        edges.push({
-            id: `${rootId}-${setOpId}`,
-            source: rootId,
-            target: setOpId,
-            label: 'combines with',
-            animated: true
-        });
-
-        // Process the next query in the set operation
-        const nextResult = processStatement(statement._next, stmtIndex + 1, baseYOffset + 300);
-        nodes.push(...nextResult.nodes);
-        edges.push(...nextResult.edges);
-
-        if (nextResult.nodes.length > 0) {
-            edges.push({
-                id: `${setOpId}-${nextResult.nodes[0].id}`,
-                source: setOpId,
-                target: nextResult.nodes[0].id,
-                animated: true
-            });
-        }
-    }
-
-    if (statementType === 'select') {
-        // Process SELECT columns
-        if (statement.columns && statement.columns.length > 0) {
-            const selectId = generateId('select');
-            const windowFunctions: string[] = [];
-            const regularColumns: string[] = [];
-
-            statement.columns.forEach((col: any) => {
-                if (col.expr && col.expr.column === '*') {
-                    regularColumns.push('*');
-                } else if (col.expr && col.expr.type === 'aggr_func' && col.expr.over) {
-                    // Window function detected
-                    const funcName = col.expr.name || 'WINDOW_FUNC';
-                    const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column).join(', ') || '';
-                    const orderBy = col.expr.over?.orderby?.map((o: any) => o.expr.column).join(', ') || '';
-                    windowFunctions.push(`${funcName}() OVER${partitionBy ? ` (PARTITION BY ${partitionBy})` : ''}`);
-                } else {
-                    regularColumns.push(col.as || col.expr?.column || 'expression');
-                }
-            });
-
-            const columnsLabel = regularColumns.join(', ');
-
-            nodes.push({
-                id: selectId,
-                data: { label: `SELECT\n${columnsLabel}` },
-                position: { x: xOffset, y: baseYOffset + 50 + yStep },
-                style: {
-                    background: '#48bb78',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 150,
-                    whiteSpace: 'pre-wrap'
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${selectId}`,
-                source: rootId,
-                target: selectId,
-                animated: true
-            });
-
-            // Add window function nodes if present
-            if (windowFunctions.length > 0) {
-                const windowId = generateId('window');
-                nodes.push({
-                    id: windowId,
-                    data: { label: `WINDOW\n${windowFunctions.join('\\n')}` },
-                    position: { x: xOffset, y: baseYOffset + 50 + yStep * 2 },
-                    style: {
-                        background: '#d53f8c',
-                        color: 'white',
-                        borderRadius: 8,
-                        padding: 10,
-                        minWidth: 180,
-                        whiteSpace: 'pre-wrap',
-                        border: '2px solid #b83280'
-                    }
-                });
-
-                edges.push({
-                    id: `${selectId}-${windowId}`,
-                    source: selectId,
-                    target: windowId,
-                    label: 'uses',
-                    animated: true
-                });
-            }
-
-            xOffset += 200;
-        }
-
-        // Process FROM tables
-        if (statement.from && statement.from.length > 0) {
-            statement.from.forEach((fromItem: any, idx: number) => {
-                const fromId = generateId('from');
-
-                // Check if this is a subquery
-                if (fromItem.expr && fromItem.expr.type === 'select') {
-                    // This is a subquery
-                    const subqueryName = fromItem.as || 'subquery';
-
-                    nodes.push({
-                        id: fromId,
-                        data: { label: `FROM\n(${subqueryName})` },
-                        position: { x: xOffset, y: baseYOffset + 50 + yStep },
-                        style: {
-                            background: '#38b2ac',
-                            color: 'white',
-                            borderRadius: 8,
-                            padding: 10,
-                            minWidth: 120,
-                            whiteSpace: 'pre-wrap',
-                            border: '2px dashed #319795'
-                        }
-                    });
-
-                    edges.push({
-                        id: `${rootId}-${fromId}`,
-                        source: rootId,
-                        target: fromId,
-                        label: 'subquery',
-                        animated: true,
-                        style: { strokeDasharray: '5 5' }
-                    });
-                } else {
-                    // Regular table
-                    const tableName = fromItem.as || fromItem.table || 'table';
-
-                    nodes.push({
-                        id: fromId,
-                        data: { label: `FROM\n${tableName}` },
-                        position: { x: xOffset, y: baseYOffset + 50 + yStep },
-                        style: {
-                            background: '#4299e1',
-                            color: 'white',
-                            borderRadius: 8,
-                            padding: 10,
-                            minWidth: 120,
-                            whiteSpace: 'pre-wrap'
-                        }
-                    });
-
-                    edges.push({
-                        id: `${rootId}-${fromId}`,
-                        source: rootId,
-                        target: fromId,
-                        animated: true
-                    });
-                }
-
-                // Process JOINs
-                if (fromItem.join) {
-                    const joinId = generateId('join');
-                    const joinTable = fromItem.join.as || fromItem.join.table || 'joined_table';
-                    const joinType = fromItem.join.join || 'JOIN';
-
-                    nodes.push({
-                        id: joinId,
-                        data: { label: `${joinType}\n${joinTable}` },
-                        position: { x: xOffset + 150, y: baseYOffset + 50 + yStep * 2 },
-                        style: {
-                            background: '#ed8936',
-                            color: 'white',
-                            borderRadius: 8,
-                            padding: 10,
-                            minWidth: 120,
-                            whiteSpace: 'pre-wrap'
-                        }
-                    });
-
-                    edges.push({
-                        id: `${fromId}-${joinId}`,
-                        source: fromId,
-                        target: joinId,
-                        label: 'joins with',
-                        animated: true
-                    });
-                }
-
-                xOffset += 250;
-            });
-        }
-
-        // Process WHERE clause
-        if (statement.where) {
-            const whereId = generateId('where');
-            const whereLabel = formatWhereClause(statement.where);
-
-            nodes.push({
-                id: whereId,
-                data: { label: `WHERE\n${whereLabel}` },
-                position: { x: 100, y: baseYOffset + 50 + yStep * 2 },
-                style: {
-                    background: '#9f7aea',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 150,
-                    whiteSpace: 'pre-wrap'
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${whereId}`,
-                source: rootId,
-                target: whereId,
-                label: 'filter',
-                animated: true
-            });
-        }
-
-        // Process GROUP BY
-        if (statement.groupby && statement.groupby.length > 0) {
-            const groupId = generateId('group');
-            const groupCols = statement.groupby.map((g: any) => g.column).join(', ');
-
-            nodes.push({
-                id: groupId,
-                data: { label: `GROUP BY\n${groupCols}` },
-                position: { x: 300, y: baseYOffset + 50 + yStep * 2 },
-                style: {
-                    background: '#ed64a6',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 120,
-                    whiteSpace: 'pre-wrap'
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${groupId}`,
-                source: rootId,
-                target: groupId,
-                animated: true
-            });
-        }
-
-        // Process ORDER BY
-        if (statement.orderby && statement.orderby.length > 0) {
-            const orderId = generateId('order');
-            const orderCols = statement.orderby.map((o: any) =>
-                `${o.expr.column} ${o.type || 'ASC'}`
-            ).join(', ');
-
-            nodes.push({
-                id: orderId,
-                data: { label: `ORDER BY\n${orderCols}` },
-                position: { x: 500, y: baseYOffset + 50 + yStep * 2 },
-                style: {
-                    background: '#38b2ac',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 120,
-                    whiteSpace: 'pre-wrap'
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${orderId}`,
-                source: rootId,
-                target: orderId,
-                animated: true
-            });
-        }
-
-        // Process LIMIT
-        if (statement.limit) {
-            const limitId = generateId('limit');
-            const limitValue = statement.limit.value?.[0]?.value || statement.limit;
-
-            nodes.push({
-                id: limitId,
-                data: { label: `LIMIT\n${limitValue}` },
-                position: { x: 650, y: baseYOffset + 50 + yStep * 2 },
-                style: {
-                    background: '#f6ad55',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10,
-                    minWidth: 100,
-                    whiteSpace: 'pre-wrap'
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${limitId}`,
-                source: rootId,
-                target: limitId,
-                animated: true
-            });
-        }
-    } else if (statementType === 'insert') {
-        // Process INSERT
-        const tableId = generateId('table');
-        nodes.push({
-            id: tableId,
-            data: { label: `INTO TABLE\n${statement.table?.[0]?.table || 'unknown'}` },
-            position: { x: 100, y: baseYOffset + 50 + yStep },
-            style: {
-                background: '#4299e1',
-                color: 'white',
-                borderRadius: 8,
-                padding: 10
-            }
-        });
-
-        edges.push({
-            id: `${rootId}-${tableId}`,
-            source: rootId,
-            target: tableId,
-            animated: true
-        });
-    } else if (statementType === 'update') {
-        // Process UPDATE
-        const tableId = generateId('table');
-        nodes.push({
-            id: tableId,
-            data: { label: `TABLE\n${statement.table?.[0]?.table || 'unknown'}` },
-            position: { x: 100, y: baseYOffset + 50 + yStep },
-            style: {
-                background: '#4299e1',
-                color: 'white',
-                borderRadius: 8,
-                padding: 10
-            }
-        });
-
-        edges.push({
-            id: `${rootId}-${tableId}`,
-            source: rootId,
-            target: tableId,
-            animated: true
-        });
-
-        if (statement.where) {
-            const whereId = generateId('where');
-            nodes.push({
-                id: whereId,
-                data: { label: `WHERE\n${formatWhereClause(statement.where)}` },
-                position: { x: 300, y: baseYOffset + 50 + yStep },
-                style: {
-                    background: '#9f7aea',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${whereId}`,
-                source: rootId,
-                target: whereId,
-                animated: true
-            });
-        }
-    } else if (statementType === 'delete') {
-        // Process DELETE
-        const tableId = generateId('table');
-        nodes.push({
-            id: tableId,
-            data: { label: `FROM TABLE\n${statement.table?.[0]?.table || 'unknown'}` },
-            position: { x: 100, y: baseYOffset + 50 + yStep },
-            style: {
-                background: '#4299e1',
-                color: 'white',
-                borderRadius: 8,
-                padding: 10
-            }
-        });
-
-        edges.push({
-            id: `${rootId}-${tableId}`,
-            source: rootId,
-            target: tableId,
-            animated: true
-        });
-
-        if (statement.where) {
-            const whereId = generateId('where');
-            nodes.push({
-                id: whereId,
-                data: { label: `WHERE\n${formatWhereClause(statement.where)}` },
-                position: { x: 300, y: baseYOffset + 50 + yStep },
-                style: {
-                    background: '#9f7aea',
-                    color: 'white',
-                    borderRadius: 8,
-                    padding: 10
-                }
-            });
-
-            edges.push({
-                id: `${rootId}-${whereId}`,
-                source: rootId,
-                target: whereId,
-                animated: true
-            });
-        }
-    }
-
-    return { nodes, edges };
+    return rootId;
 }
 
-function formatWhereClause(where: any): string {
-    if (!where) return '';
+function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string {
+    const nodeIds: string[] = [];
 
-    if (where.type === 'binary_expr') {
-        return `${where.left?.column || '?'} ${where.operator} ${where.right?.value || '?'}`;
+    // Process CTEs first
+    if (stmt.with && Array.isArray(stmt.with)) {
+        for (const cte of stmt.with) {
+            const cteId = genId('cte');
+            const cteName = cte.name?.value || cte.name || 'CTE';
+            nodes.push({
+                id: cteId,
+                type: 'cte',
+                label: `WITH ${cteName}`,
+                description: 'Common Table Expression',
+                x: 0, y: 0, width: 160, height: 60
+            });
+            nodeIds.push(cteId);
+        }
+    }
+
+    // Process FROM tables (data sources)
+    const tableIds: string[] = [];
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            const tableId = processFromItem(fromItem, nodes, edges);
+            if (tableId) {tableIds.push(tableId);}
+        }
+    }
+
+    // Process JOINs - find the last table to connect to
+    let lastTableId = tableIds[tableIds.length - 1];
+
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem.join) {
+                const joinId = genId('join');
+                const joinType = fromItem.join || 'JOIN';
+                const joinTable = getTableName(fromItem);
+
+                nodes.push({
+                    id: joinId,
+                    type: 'join',
+                    label: joinType.toUpperCase(),
+                    description: `Join with ${joinTable}`,
+                    details: fromItem.on ? [formatCondition(fromItem.on)] : undefined,
+                    x: 0, y: 0, width: 140, height: 60
+                });
+
+                // Connect previous table to join
+                if (lastTableId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: lastTableId,
+                        target: joinId
+                    });
+                }
+                lastTableId = joinId;
+            }
+        }
+    }
+
+    // Connect CTEs to first table
+    for (const cteId of nodeIds) {
+        if (tableIds[0]) {
+            edges.push({
+                id: genId('e'),
+                source: cteId,
+                target: tableIds[0]
+            });
+        }
+    }
+
+    // Process WHERE
+    let previousId = lastTableId || tableIds[0];
+    if (stmt.where) {
+        const whereId = genId('filter');
+        const conditions = extractConditions(stmt.where);
+        nodes.push({
+            id: whereId,
+            type: 'filter',
+            label: 'WHERE',
+            description: 'Filter rows',
+            details: conditions,
+            x: 0, y: 0, width: 140, height: 60
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: whereId
+            });
+        }
+        previousId = whereId;
+    }
+
+    // Process GROUP BY
+    if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+        const groupId = genId('agg');
+        const groupCols = stmt.groupby.map((g: any) => g.column || g.expr?.column || '?').join(', ');
+        nodes.push({
+            id: groupId,
+            type: 'aggregate',
+            label: 'GROUP BY',
+            description: 'Aggregate rows',
+            details: [`Columns: ${groupCols}`],
+            x: 0, y: 0, width: 140, height: 60
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: groupId
+            });
+        }
+        previousId = groupId;
+    }
+
+    // Process HAVING
+    if (stmt.having) {
+        const havingId = genId('filter');
+        nodes.push({
+            id: havingId,
+            type: 'filter',
+            label: 'HAVING',
+            description: 'Filter groups',
+            details: [formatCondition(stmt.having)],
+            x: 0, y: 0, width: 140, height: 60
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: havingId
+            });
+        }
+        previousId = havingId;
+    }
+
+    // Process SELECT columns
+    const selectId = genId('select');
+    const columns = extractColumns(stmt.columns);
+    nodes.push({
+        id: selectId,
+        type: 'select',
+        label: 'SELECT',
+        description: 'Project columns',
+        details: columns.length <= 5 ? columns : [`${columns.length} columns`],
+        x: 0, y: 0, width: 140, height: 60
+    });
+
+    if (previousId) {
+        edges.push({
+            id: genId('e'),
+            source: previousId,
+            target: selectId
+        });
+    }
+    previousId = selectId;
+
+    // Process ORDER BY
+    if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
+        const sortId = genId('sort');
+        const sortCols = stmt.orderby.map((o: any) => {
+            const col = o.expr?.column || o.expr?.value || '?';
+            const dir = o.type || 'ASC';
+            return `${col} ${dir}`;
+        }).join(', ');
+        nodes.push({
+            id: sortId,
+            type: 'sort',
+            label: 'ORDER BY',
+            description: 'Sort results',
+            details: [sortCols],
+            x: 0, y: 0, width: 140, height: 60
+        });
+
+        edges.push({
+            id: genId('e'),
+            source: previousId,
+            target: sortId
+        });
+        previousId = sortId;
+    }
+
+    // Process LIMIT
+    if (stmt.limit) {
+        const limitId = genId('limit');
+        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        nodes.push({
+            id: limitId,
+            type: 'limit',
+            label: 'LIMIT',
+            description: 'Limit rows',
+            details: [`${limitVal} rows`],
+            x: 0, y: 0, width: 120, height: 60
+        });
+
+        edges.push({
+            id: genId('e'),
+            source: previousId,
+            target: limitId
+        });
+        previousId = limitId;
+    }
+
+    // Add result node
+    const resultId = genId('result');
+    nodes.push({
+        id: resultId,
+        type: 'result',
+        label: 'Result',
+        description: 'Query output',
+        x: 0, y: 0, width: 120, height: 60
+    });
+
+    edges.push({
+        id: genId('e'),
+        source: previousId,
+        target: resultId
+    });
+
+    // Handle UNION/INTERSECT/EXCEPT
+    if (stmt._next) {
+        const nextResultId = processStatement(stmt._next, nodes, edges);
+        if (nextResultId) {
+            const unionId = genId('union');
+            const setOp = stmt.set_op || 'UNION';
+            nodes.push({
+                id: unionId,
+                type: 'union',
+                label: setOp.toUpperCase(),
+                description: `${setOp} operation`,
+                x: 0, y: 0, width: 120, height: 60
+            });
+
+            edges.push({
+                id: genId('e'),
+                source: resultId,
+                target: unionId
+            });
+        }
+    }
+
+    return resultId;
+}
+
+function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
+    // Check for subquery
+    if (fromItem.expr && fromItem.expr.ast) {
+        const subqueryId = genId('subquery');
+        const alias = fromItem.as || 'subquery';
+        nodes.push({
+            id: subqueryId,
+            type: 'subquery',
+            label: `(${alias})`,
+            description: 'Subquery',
+            x: 0, y: 0, width: 140, height: 60
+        });
+        return subqueryId;
+    }
+
+    // Regular table
+    const tableName = getTableName(fromItem);
+    if (!tableName || fromItem.join) {return null;} // Skip join tables, handled separately
+
+    const tableId = genId('table');
+    nodes.push({
+        id: tableId,
+        type: 'table',
+        label: tableName,
+        description: 'Source table',
+        details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
+        x: 0, y: 0, width: 140, height: 60
+    });
+
+    return tableId;
+}
+
+function getTableName(item: any): string {
+    if (typeof item === 'string') {return item;}
+    return item.table || item.as || item.name || 'table';
+}
+
+function extractColumns(columns: any): string[] {
+    if (!columns || columns === '*') {return ['*'];}
+    if (!Array.isArray(columns)) {return ['*'];}
+
+    return columns.map((col: any) => {
+        if (col === '*' || col.expr?.column === '*') {return '*';}
+        if (col.as) {return col.as;}
+        if (col.expr?.column) {return col.expr.column;}
+        if (col.expr?.name) {return `${col.expr.name}()`;}
+        return 'expr';
+    }).slice(0, 10); // Limit to first 10
+}
+
+function extractConditions(where: any): string[] {
+    const conditions: string[] = [];
+    formatConditionRecursive(where, conditions);
+    return conditions.slice(0, 5); // Limit to first 5
+}
+
+function formatConditionRecursive(expr: any, conditions: string[], depth = 0): void {
+    if (!expr || depth > 3) {return;}
+
+    if (expr.type === 'binary_expr') {
+        if (expr.operator === 'AND' || expr.operator === 'OR') {
+            formatConditionRecursive(expr.left, conditions, depth + 1);
+            formatConditionRecursive(expr.right, conditions, depth + 1);
+        } else {
+            conditions.push(formatCondition(expr));
+        }
+    }
+}
+
+function formatCondition(expr: any): string {
+    if (!expr) {return '?';}
+
+    if (expr.type === 'binary_expr') {
+        const left = expr.left?.column || expr.left?.value || '?';
+        const right = expr.right?.column || expr.right?.value || '?';
+        return `${left} ${expr.operator} ${right}`;
     }
 
     return 'condition';
+}
+
+function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
+    if (nodes.length === 0) {return;}
+
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+        rankdir: 'TB',
+        nodesep: 60,
+        ranksep: 80,
+        marginx: 40,
+        marginy: 40
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Add nodes
+    for (const node of nodes) {
+        g.setNode(node.id, { width: node.width, height: node.height });
+    }
+
+    // Add edges
+    for (const edge of edges) {
+        g.setEdge(edge.source, edge.target);
+    }
+
+    // Run layout
+    dagre.layout(g);
+
+    // Apply positions
+    for (const node of nodes) {
+        const layoutNode = g.node(node.id);
+        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
+            node.x = layoutNode.x - node.width / 2;
+            node.y = layoutNode.y - node.height / 2;
+        }
+    }
 }
