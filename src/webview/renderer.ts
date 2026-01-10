@@ -1,4 +1,5 @@
-import { FlowNode, FlowEdge, getNodeColor, ParseResult, QueryStats, OptimizationHint } from './sqlParser';
+import { FlowNode, FlowEdge, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
+import { formatSql, highlightSql } from './sqlFormatter';
 
 interface ViewState {
     scale: number;
@@ -11,6 +12,9 @@ interface ViewState {
     searchTerm: string;
     searchResults: string[];
     currentSearchIndex: number;
+    focusModeEnabled: boolean;
+    legendVisible: boolean;
+    highlightedColumnSources: string[]; // Node IDs to highlight for column flow
 }
 
 const state: ViewState = {
@@ -23,7 +27,10 @@ const state: ViewState = {
     dragStartY: 0,
     searchTerm: '',
     searchResults: [],
-    currentSearchIndex: -1
+    currentSearchIndex: -1,
+    focusModeEnabled: false,
+    legendVisible: false,
+    highlightedColumnSources: []
 };
 
 let svg: SVGSVGElement | null = null;
@@ -31,11 +38,15 @@ let mainGroup: SVGGElement | null = null;
 let detailsPanel: HTMLDivElement | null = null;
 let statsPanel: HTMLDivElement | null = null;
 let hintsPanel: HTMLDivElement | null = null;
+let legendPanel: HTMLDivElement | null = null;
+let sqlPreviewPanel: HTMLDivElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
+let currentSql: string = '';
+let currentColumnLineage: ColumnLineage[] = [];
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -135,12 +146,55 @@ export function initRenderer(container: HTMLElement): void {
     `;
     container.appendChild(hintsPanel);
 
+    // Create legend panel (color legend)
+    legendPanel = document.createElement('div');
+    legendPanel.className = 'legend-panel';
+    legendPanel.style.cssText = `
+        position: absolute;
+        left: 16px;
+        top: 60px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 12px 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 11px;
+        color: #94a3b8;
+        z-index: 100;
+        display: none;
+        max-width: 200px;
+    `;
+    updateLegendPanel();
+    container.appendChild(legendPanel);
+
+    // Create SQL preview panel
+    sqlPreviewPanel = document.createElement('div');
+    sqlPreviewPanel.className = 'sql-preview-panel';
+    sqlPreviewPanel.style.cssText = `
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: 200px;
+        background: rgba(15, 23, 42, 0.98);
+        border-top: 1px solid rgba(148, 163, 184, 0.2);
+        padding: 12px 16px;
+        box-sizing: border-box;
+        font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+        font-size: 12px;
+        color: #e2e8f0;
+        z-index: 150;
+        display: none;
+        overflow-y: auto;
+    `;
+    container.appendChild(sqlPreviewPanel);
+
     // Setup event listeners
     setupEventListeners();
 }
 
 function setupEventListeners(): void {
-    if (!svg) {return;}
+    if (!svg) { return; }
 
     // Pan
     svg.addEventListener('mousedown', (e) => {
@@ -224,12 +278,17 @@ function updateTransform(): void {
 }
 
 export function render(result: ParseResult): void {
-    if (!mainGroup) {return;}
+    if (!mainGroup) { return; }
 
     currentNodes = result.nodes;
     currentEdges = result.edges;
     currentStats = result.stats;
     currentHints = result.hints;
+    currentSql = result.sql;
+    currentColumnLineage = result.columnLineage || [];
+
+    // Reset highlight state
+    state.highlightedColumnSources = [];
 
     // Clear previous content
     mainGroup.innerHTML = '';
@@ -748,7 +807,7 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     const sourceNode = currentNodes.find(n => n.id === edge.source);
     const targetNode = currentNodes.find(n => n.id === edge.target);
 
-    if (!sourceNode || !targetNode) {return;}
+    if (!sourceNode || !targetNode) { return; }
 
     // Calculate connection points (center bottom to center top)
     const x1 = sourceNode.x + sourceNode.width / 2;
@@ -791,7 +850,7 @@ function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
 }
 
 function renderError(message: string): void {
-    if (!mainGroup) {return;}
+    if (!mainGroup) { return; }
 
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', '50%');
@@ -841,7 +900,7 @@ function selectNode(nodeId: string | null): void {
 }
 
 function updateDetailsPanel(nodeId: string | null): void {
-    if (!detailsPanel) {return;}
+    if (!detailsPanel) { return; }
 
     if (!nodeId) {
         detailsPanel.style.transform = 'translateX(100%)';
@@ -849,7 +908,7 @@ function updateDetailsPanel(nodeId: string | null): void {
     }
 
     const node = currentNodes.find(n => n.id === nodeId);
-    if (!node) {return;}
+    if (!node) { return; }
 
     detailsPanel.style.transform = 'translateX(0)';
 
@@ -949,7 +1008,7 @@ function updateDetailsPanel(nodeId: string | null): void {
 }
 
 function updateStatsPanel(): void {
-    if (!statsPanel || !currentStats) {return;}
+    if (!statsPanel || !currentStats) { return; }
 
     const complexityColors: Record<string, string> = {
         'Simple': '#22c55e',
@@ -999,7 +1058,7 @@ function updateStatsPanel(): void {
 }
 
 function updateHintsPanel(): void {
-    if (!hintsPanel) {return;}
+    if (!hintsPanel) { return; }
 
     if (!currentHints || currentHints.length === 0) {
         hintsPanel.style.display = 'none';
@@ -1026,8 +1085,8 @@ function updateHintsPanel(): void {
             ">${currentHints.length}</span>
         </div>
         ${currentHints.map(hint => {
-            const style = hintColors[hint.type] || hintColors.info;
-            return `
+        const style = hintColors[hint.type] || hintColors.info;
+        return `
                 <div style="
                     background: ${style.bg};
                     border-left: 3px solid ${style.border};
@@ -1045,12 +1104,12 @@ function updateHintsPanel(): void {
                     ` : ''}
                 </div>
             `;
-        }).join('')}
+    }).join('')}
     `;
 }
 
 function fitView(): void {
-    if (!svg || currentNodes.length === 0) {return;}
+    if (!svg || currentNodes.length === 0) { return; }
 
     const rect = svg.getBoundingClientRect();
     const padding = 80;
@@ -1084,7 +1143,7 @@ function fitView(): void {
 }
 
 function zoomToNode(node: FlowNode): void {
-    if (!svg) {return;}
+    if (!svg) { return; }
 
     const rect = svg.getBoundingClientRect();
     const targetScale = 1.5;
@@ -1138,7 +1197,7 @@ function performSearch(term: string): void {
         }
     });
 
-    if (!term) {return;}
+    if (!term) { return; }
 
     // Find matching nodes
     allNodes?.forEach(g => {
@@ -1162,7 +1221,7 @@ function performSearch(term: string): void {
 }
 
 function navigateSearch(delta: number): void {
-    if (state.searchResults.length === 0) {return;}
+    if (state.searchResults.length === 0) { return; }
 
     if (delta === 0) {
         state.currentSearchIndex = 0;
@@ -1211,7 +1270,7 @@ export function prevSearchResult(): void {
 
 // Export functions
 export function exportToPng(): void {
-    if (!svg) {return;}
+    if (!svg) { return; }
 
     const svgClone = svg.cloneNode(true) as SVGSVGElement;
 
@@ -1244,7 +1303,7 @@ export function exportToPng(): void {
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    if (!ctx) {return;}
+    if (!ctx) { return; }
 
     const scale = 2; // High DPI
     canvas.width = width * scale;
@@ -1263,7 +1322,7 @@ export function exportToPng(): void {
 }
 
 export function exportToSvg(): void {
-    if (!svg) {return;}
+    if (!svg) { return; }
 
     const svgClone = svg.cloneNode(true) as SVGSVGElement;
 
@@ -1306,7 +1365,7 @@ export function exportToSvg(): void {
 }
 
 export function copyToClipboard(): void {
-    if (!svg) {return;}
+    if (!svg) { return; }
 
     const svgClone = svg.cloneNode(true) as SVGSVGElement;
     const bounds = calculateBounds();
@@ -1334,7 +1393,7 @@ export function copyToClipboard(): void {
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    if (!ctx) {return;}
+    if (!ctx) { return; }
 
     const scale = 2;
     canvas.width = width * scale;
@@ -1393,7 +1452,7 @@ function getNodeIcon(type: FlowNode['type']): string {
 }
 
 function truncate(str: string, maxLen: number): string {
-    if (str.length <= maxLen) {return str;}
+    if (str.length <= maxLen) { return str; }
     return str.substring(0, maxLen - 1) + '…';
 }
 
@@ -1410,4 +1469,357 @@ function escapeHtml(str: string): string {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// ============================================================
+// FEATURE: Color Legend
+// ============================================================
+
+const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
+    table: { color: '#3b82f6', icon: '⊞', description: 'Source table' },
+    filter: { color: '#8b5cf6', icon: '⧩', description: 'WHERE/HAVING filter' },
+    join: { color: '#ec4899', icon: '⋈', description: 'JOIN operation' },
+    aggregate: { color: '#f59e0b', icon: 'Σ', description: 'GROUP BY aggregation' },
+    sort: { color: '#10b981', icon: '↕', description: 'ORDER BY sorting' },
+    limit: { color: '#06b6d4', icon: '⊟', description: 'LIMIT clause' },
+    select: { color: '#6366f1', icon: '▤', description: 'Column projection' },
+    result: { color: '#22c55e', icon: '◉', description: 'Query output' },
+    cte: { color: '#a855f7', icon: '↻', description: 'Common Table Expression' },
+    union: { color: '#f97316', icon: '∪', description: 'Set operation' },
+    subquery: { color: '#14b8a6', icon: '⊂', description: 'Subquery/Derived table' },
+    window: { color: '#d946ef', icon: '▦', description: 'Window function' }
+};
+
+function updateLegendPanel(): void {
+    if (!legendPanel) return;
+
+    legendPanel.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">Node Types</span>
+            <button id="close-legend" style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 14px;">&times;</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            ${Object.entries(NODE_TYPE_INFO).map(([type, info]) => `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="
+                        background: ${info.color};
+                        width: 24px;
+                        height: 18px;
+                        border-radius: 4px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 10px;
+                        color: white;
+                    ">${info.icon}</span>
+                    <div style="flex: 1;">
+                        <div style="color: #e2e8f0; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                        <div style="color: #64748b; font-size: 9px;">${info.description}</div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    legendPanel.querySelector('#close-legend')?.addEventListener('click', () => {
+        toggleLegend(false);
+    });
+}
+
+export function toggleLegend(show?: boolean): void {
+    if (!legendPanel) return;
+    state.legendVisible = show ?? !state.legendVisible;
+    legendPanel.style.display = state.legendVisible ? 'block' : 'none';
+}
+
+// ============================================================
+// FEATURE: Focus Mode
+// ============================================================
+
+export function toggleFocusMode(enable?: boolean): void {
+    state.focusModeEnabled = enable ?? !state.focusModeEnabled;
+
+    if (state.focusModeEnabled && state.selectedNodeId) {
+        applyFocusMode(state.selectedNodeId);
+    } else {
+        clearFocusMode();
+    }
+}
+
+function applyFocusMode(nodeId: string): void {
+    if (!state.focusModeEnabled || !mainGroup) return;
+
+    const connectedIds = getConnectedNodes(nodeId);
+    connectedIds.add(nodeId);
+
+    // Dim unconnected nodes
+    const allNodes = mainGroup.querySelectorAll('.node');
+    allNodes.forEach(nodeEl => {
+        const id = nodeEl.getAttribute('data-id');
+        if (id && !connectedIds.has(id)) {
+            (nodeEl as SVGGElement).style.opacity = '0.25';
+        } else {
+            (nodeEl as SVGGElement).style.opacity = '1';
+        }
+    });
+
+    // Dim unconnected edges
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        const source = edgeEl.getAttribute('data-source');
+        const target = edgeEl.getAttribute('data-target');
+        if (source && target && connectedIds.has(source) && connectedIds.has(target)) {
+            (edgeEl as SVGPathElement).style.opacity = '1';
+        } else {
+            (edgeEl as SVGPathElement).style.opacity = '0.15';
+        }
+    });
+}
+
+function clearFocusMode(): void {
+    if (!mainGroup) return;
+
+    const allNodes = mainGroup.querySelectorAll('.node');
+    allNodes.forEach(nodeEl => {
+        (nodeEl as SVGGElement).style.opacity = '1';
+    });
+
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        (edgeEl as SVGPathElement).style.opacity = '1';
+    });
+}
+
+function getConnectedNodes(nodeId: string): Set<string> {
+    const connected = new Set<string>();
+
+    // Find upstream nodes (sources that flow into this node)
+    function findUpstream(id: string) {
+        for (const edge of currentEdges) {
+            if (edge.target === id && !connected.has(edge.source)) {
+                connected.add(edge.source);
+                findUpstream(edge.source);
+            }
+        }
+    }
+
+    // Find downstream nodes (nodes this flows into)
+    function findDownstream(id: string) {
+        for (const edge of currentEdges) {
+            if (edge.source === id && !connected.has(edge.target)) {
+                connected.add(edge.target);
+                findDownstream(edge.target);
+            }
+        }
+    }
+
+    findUpstream(nodeId);
+    findDownstream(nodeId);
+
+    return connected;
+}
+
+// ============================================================
+// FEATURE: Column Flow Highlighting
+// ============================================================
+
+export function highlightColumnSources(columnName: string): void {
+    if (!mainGroup) return;
+
+    // Find lineage for this column
+    const lineage = currentColumnLineage.find(l =>
+        l.outputColumn.toLowerCase() === columnName.toLowerCase()
+    );
+
+    // Clear previous highlights
+    clearColumnHighlights();
+
+    if (!lineage || lineage.sources.length === 0) return;
+
+    // Store highlighted node IDs
+    state.highlightedColumnSources = lineage.sources.map(s => s.nodeId).filter(Boolean);
+
+    // Highlight source nodes with special glow
+    for (const source of lineage.sources) {
+        if (!source.nodeId) continue;
+
+        const nodeEl = mainGroup.querySelector(`.node[data-id="${source.nodeId}"]`);
+        if (nodeEl) {
+            const rect = nodeEl.querySelector('.node-rect');
+            if (rect) {
+                rect.setAttribute('stroke', '#22d3ee');
+                rect.setAttribute('stroke-width', '3');
+                rect.setAttribute('stroke-dasharray', '5,3');
+            }
+            nodeEl.classList.add('column-source-highlight');
+        }
+    }
+
+    // Highlight path from sources to SELECT node
+    highlightPathToSelect();
+}
+
+function highlightPathToSelect(): void {
+    if (!mainGroup || state.highlightedColumnSources.length === 0) return;
+
+    // Find SELECT node
+    const selectNode = currentNodes.find(n => n.type === 'select');
+    if (!selectNode) return;
+
+    // Highlight edges between sources and select
+    const pathNodeIds = new Set<string>(state.highlightedColumnSources);
+
+    // Find all nodes on paths from sources to select
+    for (const sourceId of state.highlightedColumnSources) {
+        findPath(sourceId, selectNode.id, pathNodeIds);
+    }
+
+    // Highlight edges on the path
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        const source = edgeEl.getAttribute('data-source');
+        const target = edgeEl.getAttribute('data-target');
+        if (source && target && pathNodeIds.has(source) && pathNodeIds.has(target)) {
+            edgeEl.setAttribute('stroke', '#22d3ee');
+            edgeEl.setAttribute('stroke-width', '3');
+            edgeEl.setAttribute('stroke-dasharray', '5,3');
+        }
+    });
+}
+
+function findPath(fromId: string, toId: string, visited: Set<string>): boolean {
+    if (fromId === toId) return true;
+
+    for (const edge of currentEdges) {
+        if (edge.source === fromId && !visited.has(edge.target)) {
+            visited.add(edge.target);
+            if (findPath(edge.target, toId, visited)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function clearColumnHighlights(): void {
+    if (!mainGroup) return;
+
+    state.highlightedColumnSources = [];
+
+    // Clear node highlights
+    const highlightedNodes = mainGroup.querySelectorAll('.column-source-highlight');
+    highlightedNodes.forEach(nodeEl => {
+        nodeEl.classList.remove('column-source-highlight');
+        const rect = nodeEl.querySelector('.node-rect');
+        if (rect) {
+            rect.removeAttribute('stroke-dasharray');
+            if (state.selectedNodeId !== nodeEl.getAttribute('data-id')) {
+                rect.removeAttribute('stroke');
+                rect.removeAttribute('stroke-width');
+            }
+        }
+    });
+
+    // Restore edges
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        edgeEl.setAttribute('stroke', '#64748b');
+        edgeEl.setAttribute('stroke-width', '2');
+        edgeEl.removeAttribute('stroke-dasharray');
+        edgeEl.setAttribute('marker-end', 'url(#arrowhead)');
+    });
+}
+
+// ============================================================
+// FEATURE: SQL Preview Panel
+// ============================================================
+
+export function toggleSqlPreview(show?: boolean): void {
+    if (!sqlPreviewPanel) return;
+    const shouldShow = show ?? (sqlPreviewPanel.style.display === 'none');
+    sqlPreviewPanel.style.display = shouldShow ? 'block' : 'none';
+
+    if (shouldShow) {
+        updateSqlPreview();
+    }
+}
+
+function updateSqlPreview(): void {
+    if (!sqlPreviewPanel || !currentSql) return;
+
+    const formattedSql = formatSql(currentSql);
+    const highlightedSql = highlightSql(formattedSql);
+
+    sqlPreviewPanel.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">SQL Query</span>
+            <div style="display: flex; gap: 8px;">
+                <button id="copy-sql" style="
+                    background: rgba(99, 102, 241, 0.2);
+                    border: 1px solid rgba(99, 102, 241, 0.3);
+                    border-radius: 4px;
+                    color: #a5b4fc;
+                    padding: 4px 10px;
+                    font-size: 10px;
+                    cursor: pointer;
+                ">Copy</button>
+                <button id="close-sql-preview" style="
+                    background: none;
+                    border: none;
+                    color: #64748b;
+                    cursor: pointer;
+                    font-size: 16px;
+                ">&times;</button>
+            </div>
+        </div>
+        <pre style="
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.5;
+            max-height: 150px;
+            overflow-y: auto;
+        ">${highlightedSql}</pre>
+    `;
+
+    sqlPreviewPanel.querySelector('#copy-sql')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(formattedSql).then(() => {
+            const btn = sqlPreviewPanel?.querySelector('#copy-sql');
+            if (btn) {
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+            }
+        });
+    });
+
+    sqlPreviewPanel.querySelector('#close-sql-preview')?.addEventListener('click', () => {
+        toggleSqlPreview(false);
+    });
+}
+
+// ============================================================
+// FEATURE: Collapsible CTEs/Subqueries
+// ============================================================
+
+export function toggleNodeCollapse(nodeId: string): void {
+    const node = currentNodes.find(n => n.id === nodeId);
+    if (!node || !node.collapsible) return;
+
+    node.expanded = !node.expanded;
+
+    // Re-render to show collapsed/expanded state
+    // This triggers a full re-render which handles the layout Change
+    const result: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage
+    };
+    render(result);
+}
+
+export function getFormattedSql(): string {
+    return formatSql(currentSql);
 }

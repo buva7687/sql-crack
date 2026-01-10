@@ -17,6 +17,7 @@ export interface FlowNode {
     children?: FlowNode[];
     childEdges?: FlowEdge[];
     expanded?: boolean;
+    collapsible?: boolean; // Can this node be collapsed?
     // For window functions - detailed breakdown
     windowDetails?: {
         functions: Array<{
@@ -26,6 +27,8 @@ export interface FlowNode {
             frame?: string;
         }>;
     };
+    // For SELECT nodes - column details with source tracking
+    columns?: ColumnInfo[];
 }
 
 export interface FlowEdge {
@@ -54,12 +57,32 @@ export interface OptimizationHint {
     suggestion?: string;
 }
 
+// Column lineage tracking
+export interface ColumnInfo {
+    name: string;           // Column name or alias
+    expression: string;     // Full expression
+    sourceTable?: string;   // Source table name if direct column
+    sourceColumn?: string;  // Source column name if direct column  
+    isAggregate?: boolean;  // Is this an aggregate function?
+    isWindowFunc?: boolean; // Is this a window function?
+}
+
+export interface ColumnLineage {
+    outputColumn: string;
+    sources: Array<{
+        table: string;
+        column: string;
+        nodeId: string;
+    }>;
+}
+
 export interface ParseResult {
     nodes: FlowNode[];
     edges: FlowEdge[];
     stats: QueryStats;
     hints: OptimizationHint[];
     sql: string;
+    columnLineage: ColumnLineage[];
     error?: string;
 }
 
@@ -166,8 +189,8 @@ export function splitSqlStatements(sql: string): string[] {
 
         // Handle parentheses depth
         if (!inString) {
-            if (char === '(') {depth++;}
-            if (char === ')') {depth--;}
+            if (char === '(') { depth++; }
+            if (char === ')') { depth--; }
         }
 
         // Split on semicolon at depth 0
@@ -248,7 +271,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const edges: FlowEdge[] = [];
 
     if (!sql || !sql.trim()) {
-        return { nodes, edges, stats, hints, sql, error: 'No SQL provided' };
+        return { nodes, edges, stats, hints, sql, columnLineage: [], error: 'No SQL provided' };
     }
 
     const parser = new Parser();
@@ -270,15 +293,18 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Use dagre for layout
         layoutGraph(nodes, edges);
 
-        return { nodes, edges, stats, hints, sql };
+        // Extract column lineage
+        const columnLineage = extractColumnLineage(statements[0], nodes);
+
+        return { nodes, edges, stats, hints, sql, columnLineage };
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Parse error';
-        return { nodes: [], edges: [], stats, hints, sql, error: message };
+        return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], error: message };
     }
 }
 
 function generateHints(stmt: any): void {
-    if (!stmt) {return;}
+    if (!stmt) { return; }
 
     const type = stmt.type?.toLowerCase() || '';
 
@@ -338,7 +364,7 @@ function generateHints(stmt: any): void {
 }
 
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
-    if (!stmt || !stmt.type) {return null;}
+    if (!stmt || !stmt.type) { return null; }
 
     statementType = stmt.type.toLowerCase();
 
@@ -781,7 +807,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
 
     // Regular table
     const tableName = getTableName(fromItem);
-    if (!tableName || fromItem.join) {return null;} // Skip join tables, handled separately
+    if (!tableName || fromItem.join) { return null; } // Skip join tables, handled separately
 
     stats.tables++;
     const tableId = genId('table');
@@ -798,7 +824,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
 }
 
 function getTableName(item: any): string {
-    if (typeof item === 'string') {return item;}
+    if (typeof item === 'string') { return item; }
     return item.table || item.as || item.name || 'table';
 }
 
@@ -807,22 +833,22 @@ function extractColumns(columns: any): string[] {
         hasSelectStar = true;
         return ['*'];
     }
-    if (!Array.isArray(columns)) {return ['*'];}
+    if (!Array.isArray(columns)) { return ['*']; }
 
     return columns.map((col: any) => {
         if (col === '*' || col.expr?.column === '*') {
             hasSelectStar = true;
             return '*';
         }
-        if (col.as) {return col.as;}
-        if (col.expr?.column) {return col.expr.column;}
-        if (col.expr?.name) {return `${col.expr.name}()`;}
+        if (col.as) { return col.as; }
+        if (col.expr?.column) { return col.expr.column; }
+        if (col.expr?.name) { return `${col.expr.name}()`; }
         return 'expr';
     }).slice(0, 10); // Limit to first 10
 }
 
 function extractWindowFunctions(columns: any): string[] {
-    if (!columns || !Array.isArray(columns)) {return [];}
+    if (!columns || !Array.isArray(columns)) { return []; }
 
     const windowFuncs: string[] = [];
     for (const col of columns) {
@@ -856,7 +882,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
     orderBy?: string[];
     frame?: string;
 }> {
-    if (!columns || !Array.isArray(columns)) {return [];}
+    if (!columns || !Array.isArray(columns)) { return []; }
 
     const details: Array<{
         name: string;
@@ -926,7 +952,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
 
 // Parse CTE or Subquery internal structure for nested visualization
 function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): void {
-    if (!stmt) {return;}
+    if (!stmt) { return; }
 
     let previousId: string | null = null;
 
@@ -1027,7 +1053,7 @@ function extractConditions(where: any): string[] {
 }
 
 function formatConditionRecursive(expr: any, conditions: string[], depth = 0): void {
-    if (!expr || depth > 3) {return;}
+    if (!expr || depth > 3) { return; }
 
     if (expr.type === 'binary_expr') {
         if (expr.operator === 'AND' || expr.operator === 'OR') {
@@ -1040,7 +1066,7 @@ function formatConditionRecursive(expr: any, conditions: string[], depth = 0): v
 }
 
 function formatCondition(expr: any): string {
-    if (!expr) {return '?';}
+    if (!expr) { return '?'; }
 
     if (expr.type === 'binary_expr') {
         const left = expr.left?.column || expr.left?.value || '?';
@@ -1053,7 +1079,7 @@ function formatCondition(expr: any): string {
 
 function extractTablesFromStatement(stmt: any): string[] {
     const tables: string[] = [];
-    if (!stmt || !stmt.from) {return tables;}
+    if (!stmt || !stmt.from) { return tables; }
 
     const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
     for (const item of fromItems) {
@@ -1066,7 +1092,7 @@ function extractTablesFromStatement(stmt: any): string[] {
 }
 
 function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
-    if (nodes.length === 0) {return;}
+    if (nodes.length === 0) { return; }
 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
@@ -1097,6 +1123,126 @@ function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
         if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
             node.x = layoutNode.x - node.width / 2;
             node.y = layoutNode.y - node.height / 2;
+        }
+    }
+}
+
+// Extract column lineage from SELECT statement
+function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
+    const lineage: ColumnLineage[] = [];
+
+    if (!stmt || stmt.type?.toLowerCase() !== 'select' || !stmt.columns) {
+        return lineage;
+    }
+
+    // Build table alias map
+    const tableAliasMap = new Map<string, string>();
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            const tableName = fromItem.table || fromItem.name || '';
+            const alias = fromItem.as || tableName;
+            if (tableName) {
+                tableAliasMap.set(alias.toLowerCase(), tableName);
+            }
+        }
+    }
+
+    // Find table nodes for mapping
+    const tableNodes = nodes.filter(n => n.type === 'table');
+
+    // Process each column
+    const columns = Array.isArray(stmt.columns) ? stmt.columns : [];
+    for (const col of columns) {
+        if (col === '*') {
+            lineage.push({
+                outputColumn: '*',
+                sources: tableNodes.map(n => ({
+                    table: n.label,
+                    column: '*',
+                    nodeId: n.id
+                }))
+            });
+            continue;
+        }
+
+        const colName = col.as || col.expr?.column || col.expr?.name || 'expr';
+        const sources: ColumnLineage['sources'] = [];
+
+        // Try to extract source table and column
+        if (col.expr) {
+            extractSourcesFromExpr(col.expr, sources, tableAliasMap, tableNodes);
+        }
+
+        lineage.push({
+            outputColumn: String(colName),
+            sources
+        });
+    }
+
+    return lineage;
+}
+
+// Recursively extract source columns from expression
+function extractSourcesFromExpr(
+    expr: any,
+    sources: ColumnLineage['sources'],
+    tableAliasMap: Map<string, string>,
+    tableNodes: FlowNode[]
+): void {
+    if (!expr) return;
+
+    // Direct column reference
+    if (expr.type === 'column_ref' || expr.column) {
+        const column = expr.column || expr.name;
+        const tableAlias = expr.table || '';
+
+        let tableName = tableAlias;
+        if (tableAlias && tableAliasMap.has(tableAlias.toLowerCase())) {
+            tableName = tableAliasMap.get(tableAlias.toLowerCase()) || tableAlias;
+        }
+
+        // Find matching table node
+        const tableNode = tableNodes.find(n =>
+            n.label.toLowerCase() === tableName.toLowerCase() ||
+            n.label.toLowerCase() === tableAlias.toLowerCase()
+        );
+
+        if (tableName || tableNodes.length === 1) {
+            sources.push({
+                table: tableName || (tableNodes[0]?.label || 'unknown'),
+                column: String(column),
+                nodeId: tableNode?.id || tableNodes[0]?.id || ''
+            });
+        }
+        return;
+    }
+
+    // Binary expression (e.g., a + b)
+    if (expr.type === 'binary_expr') {
+        extractSourcesFromExpr(expr.left, sources, tableAliasMap, tableNodes);
+        extractSourcesFromExpr(expr.right, sources, tableAliasMap, tableNodes);
+        return;
+    }
+
+    // Function call (including aggregates)
+    if (expr.args) {
+        const args = expr.args.value || expr.args;
+        if (Array.isArray(args)) {
+            for (const arg of args) {
+                extractSourcesFromExpr(arg, sources, tableAliasMap, tableNodes);
+            }
+        } else if (typeof args === 'object') {
+            extractSourcesFromExpr(args, sources, tableAliasMap, tableNodes);
+        }
+    }
+
+    // CASE expression
+    if (expr.type === 'case') {
+        if (expr.args) {
+            for (const caseArg of expr.args) {
+                extractSourcesFromExpr(caseArg.cond, sources, tableAliasMap, tableNodes);
+                extractSourcesFromExpr(caseArg.result, sources, tableAliasMap, tableNodes);
+            }
         }
     }
 }

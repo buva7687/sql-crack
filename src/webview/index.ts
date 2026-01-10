@@ -14,7 +14,11 @@ import {
     copyToClipboard,
     setSearchBox,
     nextSearchResult,
-    prevSearchResult
+    prevSearchResult,
+    toggleLegend,
+    toggleFocusMode,
+    toggleSqlPreview,
+    highlightColumnSources
 } from './renderer';
 
 declare global {
@@ -36,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function init(): void {
     const container = document.getElementById('root');
-    if (!container) {return;}
+    if (!container) { return; }
 
     // Setup container styles
     container.style.cssText = `
@@ -278,6 +282,59 @@ function createToolbar(container: HTMLElement): void {
 
     actions.appendChild(exportGroup);
 
+    // Feature buttons (new features)
+    const featureGroup = document.createElement('div');
+    featureGroup.style.cssText = `
+        display: flex;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        overflow: hidden;
+    `;
+
+    // Legend button
+    const legendBtn = document.createElement('button');
+    legendBtn.innerHTML = '🎨';
+    legendBtn.title = 'Show color legend';
+    legendBtn.style.cssText = btnStyle;
+    legendBtn.addEventListener('click', () => {
+        toggleLegend();
+    });
+    legendBtn.addEventListener('mouseenter', () => legendBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    legendBtn.addEventListener('mouseleave', () => legendBtn.style.background = 'transparent');
+    featureGroup.appendChild(legendBtn);
+
+    // Focus Mode button
+    let focusModeActive = false;
+    const focusBtn = document.createElement('button');
+    focusBtn.innerHTML = '👁';
+    focusBtn.title = 'Focus mode - highlight connected nodes';
+    focusBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    focusBtn.addEventListener('click', () => {
+        focusModeActive = !focusModeActive;
+        toggleFocusMode(focusModeActive);
+        focusBtn.style.background = focusModeActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    });
+    focusBtn.addEventListener('mouseenter', () => {
+        if (!focusModeActive) focusBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    focusBtn.addEventListener('mouseleave', () => {
+        if (!focusModeActive) focusBtn.style.background = 'transparent';
+    });
+    featureGroup.appendChild(focusBtn);
+
+    // SQL Preview button
+    const sqlBtn = document.createElement('button');
+    sqlBtn.innerHTML = '{ }';
+    sqlBtn.title = 'Show formatted SQL';
+    sqlBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 700; border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    sqlBtn.addEventListener('click', () => toggleSqlPreview());
+    sqlBtn.addEventListener('mouseenter', () => sqlBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    sqlBtn.addEventListener('mouseleave', () => sqlBtn.style.background = 'transparent');
+    featureGroup.appendChild(sqlBtn);
+
+    actions.appendChild(featureGroup);
+
     container.appendChild(actions);
 
     // Dialect change handler
@@ -316,7 +373,7 @@ function createBatchTabs(container: HTMLElement): void {
 
 function updateBatchTabs(): void {
     const tabsContainer = document.getElementById('batch-tabs');
-    if (!tabsContainer || !batchResult) {return;}
+    if (!tabsContainer || !batchResult) { return; }
 
     const queryCount = batchResult.queries.length;
 
@@ -464,7 +521,7 @@ function visualize(sql: string): void {
 }
 
 function renderCurrentQuery(): void {
-    if (!batchResult || batchResult.queries.length === 0) {return;}
+    if (!batchResult || batchResult.queries.length === 0) { return; }
 
     const query = batchResult.queries[currentQueryIndex];
     render(query);
@@ -472,6 +529,6 @@ function renderCurrentQuery(): void {
 
 function truncateSql(sql: string, maxLen: number): string {
     const normalized = sql.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= maxLen) {return normalized;}
+    if (normalized.length <= maxLen) { return normalized; }
     return normalized.substring(0, maxLen - 3) + '...';
 }
