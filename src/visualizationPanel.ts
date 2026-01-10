@@ -10,22 +10,18 @@ export class VisualizationPanel {
     private _disposables: vscode.Disposable[] = [];
 
     public static createOrShow(extensionUri: vscode.Uri, sqlCode: string) {
-        const column = vscode.window.activeTextEditor
-            ? vscode.window.activeTextEditor.viewColumn
-            : undefined;
-
-        // If we already have a panel, show it
+        // If we already have a panel, update it
         if (VisualizationPanel.currentPanel) {
-            VisualizationPanel.currentPanel._panel.reveal(column);
+            VisualizationPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
             VisualizationPanel.currentPanel._update(sqlCode);
             return;
         }
 
-        // Otherwise, create a new panel
+        // Otherwise, create a new panel beside the current editor (like markdown preview)
         const panel = vscode.window.createWebviewPanel(
             VisualizationPanel.viewType,
-            'SQL Visualization',
-            column || vscode.ViewColumn.Two,
+            'SQL Flow',
+            vscode.ViewColumn.Beside,
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,

@@ -388,44 +388,91 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
         }
     }
 
-    // Process FROM tables (data sources)
+    // Process FROM tables (data sources) - first pass: create all table nodes
     const tableIds: string[] = [];
+    const joinTableMap: Map<string, string> = new Map(); // Maps table name to its node id
+
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const tableId = processFromItem(fromItem, nodes, edges);
-            if (tableId) {tableIds.push(tableId);}
+            // Create table node for non-join tables
+            if (!fromItem.join) {
+                const tableId = processFromItem(fromItem, nodes, edges);
+                if (tableId) {
+                    tableIds.push(tableId);
+                    const tableName = getTableName(fromItem);
+                    joinTableMap.set(tableName, tableId);
+                }
+            } else {
+                // Create table node for join tables too
+                stats.tables++;
+                const tableName = getTableName(fromItem);
+                const tableId = genId('table');
+                nodes.push({
+                    id: tableId,
+                    type: 'table',
+                    label: tableName,
+                    description: 'Joined table',
+                    details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
+                    x: 0, y: 0, width: 140, height: 60
+                });
+                tableIds.push(tableId);
+                joinTableMap.set(tableName, tableId);
+            }
         }
     }
 
-    // Process JOINs - find the last table to connect to
-    let lastTableId = tableIds[tableIds.length - 1];
+    // Process JOINs - create join nodes and connect tables properly
+    let lastOutputId = tableIds[0]; // Start with first table as base
 
     if (stmt.from && Array.isArray(stmt.from)) {
-        for (const fromItem of stmt.from) {
+        let leftTableId = tableIds[0];
+
+        for (let i = 0; i < stmt.from.length; i++) {
+            const fromItem = stmt.from[i];
             if (fromItem.join) {
                 stats.joins++;
                 const joinId = genId('join');
                 const joinType = fromItem.join || 'JOIN';
                 const joinTable = getTableName(fromItem);
+                const rightTableId = joinTableMap.get(joinTable);
+
+                // Extract join condition details
+                const joinDetails: string[] = [];
+                if (fromItem.on) {
+                    joinDetails.push(formatCondition(fromItem.on));
+                }
+                joinDetails.push(`${joinTable}`);
 
                 nodes.push({
                     id: joinId,
                     type: 'join',
                     label: joinType.toUpperCase(),
                     description: `Join with ${joinTable}`,
-                    details: fromItem.on ? [formatCondition(fromItem.on)] : undefined,
+                    details: joinDetails,
                     x: 0, y: 0, width: 140, height: 60
                 });
 
-                // Connect previous table to join
-                if (lastTableId) {
+                // Connect left side to join (previous join result or first table)
+                if (leftTableId) {
                     edges.push({
                         id: genId('e'),
-                        source: lastTableId,
+                        source: leftTableId,
                         target: joinId
                     });
                 }
-                lastTableId = joinId;
+
+                // Connect right side (join table) to join
+                if (rightTableId && rightTableId !== leftTableId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: rightTableId,
+                        target: joinId
+                    });
+                }
+
+                // The join output becomes the left side for next join
+                leftTableId = joinId;
+                lastOutputId = joinId;
             }
         }
     }
@@ -441,8 +488,8 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
         }
     }
 
-    // Process WHERE
-    let previousId = lastTableId || tableIds[0];
+    // Process WHERE - connect from the last join output or first table
+    let previousId = lastOutputId || tableIds[0];
     if (stmt.where) {
         const whereId = genId('filter');
         const conditions = extractConditions(stmt.where);
@@ -627,17 +674,36 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
         if (nextResultId) {
             const unionId = genId('union');
             const setOp = stmt.set_op || 'UNION';
+
+            // Collect tables from both sides for details
+            const leftTables = extractTablesFromStatement(stmt);
+            const rightTables = extractTablesFromStatement(stmt._next);
+            const unionDetails: string[] = [];
+            if (leftTables.length > 0) {
+                unionDetails.push(`Left: ${leftTables.join(', ')}`);
+            }
+            if (rightTables.length > 0) {
+                unionDetails.push(`Right: ${rightTables.join(', ')}`);
+            }
+
             nodes.push({
                 id: unionId,
                 type: 'union',
                 label: setOp.toUpperCase(),
                 description: `${setOp} operation`,
-                x: 0, y: 0, width: 120, height: 60
+                details: unionDetails.length > 0 ? unionDetails : undefined,
+                x: 0, y: 0, width: 140, height: 60
             });
 
+            // Connect both results to the union
             edges.push({
                 id: genId('e'),
                 source: resultId,
+                target: unionId
+            });
+            edges.push({
+                id: genId('e'),
+                source: nextResultId,
                 target: unionId
             });
         }
@@ -751,6 +817,20 @@ function formatCondition(expr: any): string {
     }
 
     return 'condition';
+}
+
+function extractTablesFromStatement(stmt: any): string[] {
+    const tables: string[] = [];
+    if (!stmt || !stmt.from) {return tables;}
+
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
+    for (const item of fromItems) {
+        const name = getTableName(item);
+        if (name && name !== 'table') {
+            tables.push(name);
+        }
+    }
+    return tables;
 }
 
 function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {

@@ -328,17 +328,35 @@ function updateBatchTabs(): void {
     tabsContainer.style.display = 'flex';
     tabsContainer.innerHTML = '';
 
-    // Previous button
-    const prevBtn = document.createElement('button');
-    prevBtn.innerHTML = '◀';
-    prevBtn.style.cssText = `
+    const navBtnStyle = (enabled: boolean) => `
         background: transparent;
         border: none;
-        color: ${currentQueryIndex > 0 ? '#f1f5f9' : '#475569'};
-        cursor: ${currentQueryIndex > 0 ? 'pointer' : 'default'};
+        color: ${enabled ? '#f1f5f9' : '#475569'};
+        cursor: ${enabled ? 'pointer' : 'default'};
         padding: 4px 8px;
         font-size: 12px;
     `;
+
+    // First button
+    const firstBtn = document.createElement('button');
+    firstBtn.innerHTML = '⏮';
+    firstBtn.title = 'First query';
+    firstBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
+    firstBtn.disabled = currentQueryIndex === 0;
+    firstBtn.addEventListener('click', () => {
+        if (currentQueryIndex > 0) {
+            currentQueryIndex = 0;
+            renderCurrentQuery();
+            updateBatchTabs();
+        }
+    });
+    tabsContainer.appendChild(firstBtn);
+
+    // Previous button
+    const prevBtn = document.createElement('button');
+    prevBtn.innerHTML = '◀';
+    prevBtn.title = 'Previous query';
+    prevBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
     prevBtn.disabled = currentQueryIndex === 0;
     prevBtn.addEventListener('click', () => {
         if (currentQueryIndex > 0) {
@@ -361,7 +379,7 @@ function updateBatchTabs(): void {
         const hasError = !!query.error;
 
         tab.innerHTML = `Q${i + 1}`;
-        tab.title = truncateSql(query.sql, 50);
+        tab.title = truncateSql(query.sql, 100);
         tab.style.cssText = `
             background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
             border: 1px solid ${isActive ? '#6366f1' : hasError ? '#ef4444' : 'transparent'};
@@ -398,14 +416,8 @@ function updateBatchTabs(): void {
     // Next button
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '▶';
-    nextBtn.style.cssText = `
-        background: transparent;
-        border: none;
-        color: ${currentQueryIndex < queryCount - 1 ? '#f1f5f9' : '#475569'};
-        cursor: ${currentQueryIndex < queryCount - 1 ? 'pointer' : 'default'};
-        padding: 4px 8px;
-        font-size: 12px;
-    `;
+    nextBtn.title = 'Next query';
+    nextBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
     nextBtn.disabled = currentQueryIndex >= queryCount - 1;
     nextBtn.addEventListener('click', () => {
         if (currentQueryIndex < queryCount - 1) {
@@ -415,6 +427,21 @@ function updateBatchTabs(): void {
         }
     });
     tabsContainer.appendChild(nextBtn);
+
+    // Last button
+    const lastBtn = document.createElement('button');
+    lastBtn.innerHTML = '⏭';
+    lastBtn.title = 'Last query';
+    lastBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
+    lastBtn.disabled = currentQueryIndex >= queryCount - 1;
+    lastBtn.addEventListener('click', () => {
+        if (currentQueryIndex < queryCount - 1) {
+            currentQueryIndex = queryCount - 1;
+            renderCurrentQuery();
+            updateBatchTabs();
+        }
+    });
+    tabsContainer.appendChild(lastBtn);
 
     // Query counter
     const counter = document.createElement('span');
