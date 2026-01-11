@@ -4,3 +4,27 @@ dist
 *.vsix
 .vscode-test/
 .DS_Store
+
+# Python virtual environments
+sql/
+sql_crack_venv/
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+Thumbs.db
