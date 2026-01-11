@@ -15,6 +15,8 @@ interface ViewState {
     focusModeEnabled: boolean;
     legendVisible: boolean;
     highlightedColumnSources: string[]; // Node IDs to highlight for column flow
+    isFullscreen: boolean;
+    isDarkTheme: boolean;
 }
 
 const state: ViewState = {
@@ -30,7 +32,9 @@ const state: ViewState = {
     currentSearchIndex: -1,
     focusModeEnabled: false,
     legendVisible: false,
-    highlightedColumnSources: []
+    highlightedColumnSources: [],
+    isFullscreen: false,
+    isDarkTheme: true
 };
 
 let svg: SVGSVGElement | null = null;
@@ -40,6 +44,8 @@ let statsPanel: HTMLDivElement | null = null;
 let hintsPanel: HTMLDivElement | null = null;
 let legendPanel: HTMLDivElement | null = null;
 let sqlPreviewPanel: HTMLDivElement | null = null;
+let tooltipElement: HTMLDivElement | null = null;
+let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
@@ -189,6 +195,69 @@ export function initRenderer(container: HTMLElement): void {
     `;
     container.appendChild(sqlPreviewPanel);
 
+    // Create minimap for large queries
+    const minimapContainer = document.createElement('div');
+    minimapContainer.id = 'minimap-container';
+    minimapContainer.style.cssText = `
+        position: absolute;
+        right: 16px;
+        top: 60px;
+        width: 150px;
+        height: 100px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        overflow: hidden;
+        z-index: 100;
+        display: none;
+    `;
+
+    const minimapSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    minimapSvg.id = 'minimap-svg';
+    minimapSvg.setAttribute('width', '100%');
+    minimapSvg.setAttribute('height', '100%');
+    minimapSvg.style.background = 'transparent';
+    minimapContainer.appendChild(minimapSvg);
+
+    // Viewport indicator
+    const viewportRect = document.createElement('div');
+    viewportRect.id = 'minimap-viewport';
+    viewportRect.style.cssText = `
+        position: absolute;
+        border: 2px solid rgba(99, 102, 241, 0.7);
+        background: rgba(99, 102, 241, 0.1);
+        pointer-events: none;
+    `;
+    minimapContainer.appendChild(viewportRect);
+    container.appendChild(minimapContainer);
+
+    // Create tooltip element
+    tooltipElement = document.createElement('div');
+    tooltipElement.id = 'node-tooltip';
+    tooltipElement.style.cssText = `
+        position: fixed;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+        color: #e2e8f0;
+        z-index: 1000;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        max-width: 300px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+    container.appendChild(tooltipElement);
+
+    // Store container reference
+    containerElement = container;
+
+    // Apply initial theme
+    applyTheme(state.isDarkTheme);
+
     // Setup event listeners
     setupEventListeners();
 }
@@ -251,22 +320,78 @@ function setupEventListeners(): void {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        // Don't trigger shortcuts when typing in input fields
+        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
+                               document.activeElement?.tagName === 'TEXTAREA';
+
         // Ctrl/Cmd + F for search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
             searchBox?.focus();
+            return;
         }
-        // Escape to close panels
+
+        // Escape to close panels and exit fullscreen
         if (e.key === 'Escape') {
+            if (state.isFullscreen) {
+                toggleFullscreen(false);
+            }
             selectNode(null);
             if (searchBox) {
                 searchBox.value = '';
                 clearSearch();
             }
+            return;
         }
+
         // Enter to go to next search result
         if (e.key === 'Enter' && document.activeElement === searchBox) {
             navigateSearch(1);
+            return;
+        }
+
+        // Skip other shortcuts if input is focused
+        if (isInputFocused) return;
+
+        // + or = to zoom in
+        if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            zoomIn();
+        }
+        // - to zoom out
+        if (e.key === '-') {
+            e.preventDefault();
+            zoomOut();
+        }
+        // R to reset view
+        if (e.key === 'r' || e.key === 'R') {
+            e.preventDefault();
+            resetView();
+        }
+        // F to toggle fullscreen
+        if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            toggleFullscreen();
+        }
+        // T to toggle theme
+        if (e.key === 't' || e.key === 'T') {
+            e.preventDefault();
+            toggleTheme();
+        }
+        // L to toggle legend
+        if (e.key === 'l' || e.key === 'L') {
+            e.preventDefault();
+            toggleLegend();
+        }
+        // S to show SQL preview
+        if (e.key === 's' || e.key === 'S') {
+            e.preventDefault();
+            toggleSqlPreview();
+        }
+        // / to focus search (like vim)
+        if (e.key === '/') {
+            e.preventDefault();
+            searchBox?.focus();
         }
     });
 }
@@ -274,6 +399,14 @@ function setupEventListeners(): void {
 function updateTransform(): void {
     if (mainGroup) {
         mainGroup.setAttribute('transform', `translate(${state.offsetX}, ${state.offsetY}) scale(${state.scale})`);
+        // Update minimap viewport when panning/zooming
+        const viewport = document.getElementById('minimap-viewport');
+        if (viewport) {
+            requestAnimationFrame(() => {
+                const event = new CustomEvent('transform-update');
+                document.dispatchEvent(event);
+            });
+        }
     }
 }
 
@@ -329,6 +462,9 @@ export function render(result: ParseResult): void {
 
     // Fit view
     fitView();
+
+    // Update minimap for complex queries
+    updateMinimap();
 }
 
 function renderNode(node: FlowNode, parent: SVGGElement): void {
@@ -350,12 +486,17 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         renderStandardNode(node, group);
     }
 
-    // Hover effect
+    // Hover effect with tooltip
     const rect = group.querySelector('.node-rect') as SVGRectElement;
     if (rect) {
-        group.addEventListener('mouseenter', () => {
+        group.addEventListener('mouseenter', (e) => {
             rect.setAttribute('fill', lightenColor(getNodeColor(node.type), 20));
             highlightConnectedEdges(node.id, true);
+            showTooltip(node, e as MouseEvent);
+        });
+
+        group.addEventListener('mousemove', (e) => {
+            updateTooltipPosition(e as MouseEvent);
         });
 
         group.addEventListener('mouseleave', () => {
@@ -363,6 +504,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             if (state.selectedNodeId !== node.id) {
                 highlightConnectedEdges(node.id, false);
             }
+            hideTooltip();
         });
     }
 
@@ -370,6 +512,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.addEventListener('click', (e) => {
         e.stopPropagation();
         selectNode(node.id);
+        hideTooltip();
     });
 
     // Double click to zoom to node
@@ -377,6 +520,11 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         e.stopPropagation();
         zoomToNode(node);
     });
+
+    // Add collapse button for CTEs and subqueries with children
+    if ((node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+        addCollapseButton(node, group);
+    }
 
     parent.appendChild(group);
 }
@@ -1822,4 +1970,382 @@ export function toggleNodeCollapse(nodeId: string): void {
 
 export function getFormattedSql(): string {
     return formatSql(currentSql);
+}
+
+// ============================================================
+// FEATURE: Minimap for Complex Queries
+// ============================================================
+
+export function updateMinimap(): void {
+    const minimapContainer = document.getElementById('minimap-container');
+    const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
+
+    if (!minimapContainer || !minimapSvg || currentNodes.length < 8) {
+        // Only show minimap for complex queries (8+ nodes)
+        if (minimapContainer) minimapContainer.style.display = 'none';
+        return;
+    }
+
+    minimapContainer.style.display = 'block';
+
+    // Calculate bounds
+    const bounds = calculateBounds();
+    const padding = 10;
+    const mapWidth = 150;
+    const mapHeight = 100;
+
+    // Calculate scale to fit all nodes
+    const scaleX = (mapWidth - padding * 2) / bounds.width;
+    const scaleY = (mapHeight - padding * 2) / bounds.height;
+    const mapScale = Math.min(scaleX, scaleY, 0.15);
+
+    // Render mini nodes
+    minimapSvg.innerHTML = '';
+
+    for (const node of currentNodes) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String((node.x - bounds.minX) * mapScale + padding));
+        rect.setAttribute('y', String((node.y - bounds.minY) * mapScale + padding));
+        rect.setAttribute('width', String(Math.max(4, node.width * mapScale)));
+        rect.setAttribute('height', String(Math.max(3, node.height * mapScale)));
+        rect.setAttribute('fill', getNodeColor(node.type));
+        rect.setAttribute('rx', '1');
+        minimapSvg.appendChild(rect);
+    }
+
+    // Update viewport indicator
+    updateMinimapViewport();
+}
+
+function updateMinimapViewport(): void {
+    const viewport = document.getElementById('minimap-viewport');
+    const minimapContainer = document.getElementById('minimap-container');
+
+    if (!viewport || !minimapContainer || !svg || currentNodes.length < 8) return;
+
+    const bounds = calculateBounds();
+    const svgRect = svg.getBoundingClientRect();
+    const mapWidth = 150;
+    const mapHeight = 100;
+    const padding = 10;
+
+    const scaleX = (mapWidth - padding * 2) / bounds.width;
+    const scaleY = (mapHeight - padding * 2) / bounds.height;
+    const mapScale = Math.min(scaleX, scaleY, 0.15);
+
+    // Calculate visible area in graph coordinates
+    const visibleLeft = -state.offsetX / state.scale;
+    const visibleTop = -state.offsetY / state.scale;
+    const visibleWidth = svgRect.width / state.scale;
+    const visibleHeight = svgRect.height / state.scale;
+
+    // Transform to minimap coordinates
+    const vpLeft = (visibleLeft - bounds.minX) * mapScale + padding;
+    const vpTop = (visibleTop - bounds.minY) * mapScale + padding;
+    const vpWidth = visibleWidth * mapScale;
+    const vpHeight = visibleHeight * mapScale;
+
+    viewport.style.left = `${Math.max(0, vpLeft)}px`;
+    viewport.style.top = `${Math.max(0, vpTop)}px`;
+    viewport.style.width = `${Math.min(mapWidth, vpWidth)}px`;
+    viewport.style.height = `${Math.min(mapHeight, vpHeight)}px`;
+}
+
+// ============================================================
+// FEATURE: Query Complexity Info Badge
+// ============================================================
+
+export function getQueryComplexityInfo(): { nodeCount: number; tableCount: number; depth: number; isComplex: boolean } {
+    const tableCount = currentNodes.filter(n => n.type === 'table').length;
+    const depth = calculateQueryDepth();
+
+    return {
+        nodeCount: currentNodes.length,
+        tableCount,
+        depth,
+        isComplex: currentNodes.length >= 8 || tableCount >= 5 || depth >= 3
+    };
+}
+
+function calculateQueryDepth(): number {
+    // Calculate max depth (longest path from any table to result)
+    const resultNode = currentNodes.find(n => n.type === 'result');
+    if (!resultNode) return 0;
+
+    const visited = new Set<string>();
+    let maxDepth = 0;
+
+    function dfs(nodeId: string, depth: number) {
+        if (visited.has(nodeId)) return;
+        visited.add(nodeId);
+        maxDepth = Math.max(maxDepth, depth);
+
+        for (const edge of currentEdges) {
+            if (edge.target === nodeId) {
+                dfs(edge.source, depth + 1);
+            }
+        }
+    }
+
+    dfs(resultNode.id, 0);
+    return maxDepth;
+}
+
+// ============================================================
+// FEATURE: Fullscreen Mode
+// ============================================================
+
+export function toggleFullscreen(enable?: boolean): void {
+    state.isFullscreen = enable ?? !state.isFullscreen;
+
+    if (!containerElement) return;
+
+    if (state.isFullscreen) {
+        // Save original styles
+        containerElement.dataset.originalStyles = containerElement.style.cssText;
+
+        // Go fullscreen
+        containerElement.style.cssText = `
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background: ${state.isDarkTheme ? '#0f172a' : '#f8fafc'};
+        `;
+
+        // Try to use browser fullscreen API
+        if (containerElement.requestFullscreen) {
+            containerElement.requestFullscreen().catch(() => {
+                // Fallscreen API failed, but CSS fullscreen still works
+            });
+        }
+    } else {
+        // Restore original styles
+        containerElement.style.cssText = containerElement.dataset.originalStyles || '';
+
+        // Exit browser fullscreen
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    }
+
+    // Refit view after fullscreen toggle
+    setTimeout(() => {
+        fitView();
+        updateMinimap();
+    }, 100);
+}
+
+export function isFullscreen(): boolean {
+    return state.isFullscreen;
+}
+
+// ============================================================
+// FEATURE: Theme Toggle (Dark/Light)
+// ============================================================
+
+export function toggleTheme(dark?: boolean): void {
+    state.isDarkTheme = dark ?? !state.isDarkTheme;
+    applyTheme(state.isDarkTheme);
+}
+
+export function isDarkTheme(): boolean {
+    return state.isDarkTheme;
+}
+
+function applyTheme(dark: boolean): void {
+    if (!svg) return;
+
+    const colors = dark ? {
+        bg: '#0f172a',
+        panelBg: 'rgba(15, 23, 42, 0.95)',
+        panelBgSolid: 'rgba(15, 23, 42, 0.98)',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#f1f5f9',
+        textMuted: '#94a3b8',
+        textDim: '#64748b'
+    } : {
+        bg: '#f8fafc',
+        panelBg: 'rgba(255, 255, 255, 0.95)',
+        panelBgSolid: 'rgba(255, 255, 255, 0.98)',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        textMuted: '#475569',
+        textDim: '#94a3b8'
+    };
+
+    // Apply to SVG background
+    svg.style.background = colors.bg;
+
+    // Apply to all panels
+    const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement];
+    panels.forEach(panel => {
+        if (panel) {
+            panel.style.background = colors.panelBg;
+            panel.style.borderColor = colors.border;
+            panel.style.color = colors.text;
+        }
+    });
+
+    // Apply to minimap
+    const minimap = document.getElementById('minimap-container');
+    if (minimap) {
+        minimap.style.background = colors.panelBg;
+        minimap.style.borderColor = colors.border;
+    }
+
+    // Dispatch custom event for index.ts to update toolbar
+    const event = new CustomEvent('theme-change', { detail: { dark } });
+    document.dispatchEvent(event);
+}
+
+// ============================================================
+// FEATURE: Hover Tooltips
+// ============================================================
+
+function showTooltip(node: FlowNode, e: MouseEvent): void {
+    if (!tooltipElement) return;
+
+    // Build tooltip content
+    let content = `
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <span style="
+                background: ${getNodeColor(node.type)};
+                padding: 3px 8px;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 600;
+                color: white;
+            ">${getNodeIcon(node.type)} ${node.type.toUpperCase()}</span>
+        </div>
+        <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${escapeHtml(node.label)}</div>
+    `;
+
+    if (node.description) {
+        content += `<div style="color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; font-size: 11px; margin-bottom: 4px;">${escapeHtml(node.description)}</div>`;
+    }
+
+    // Add details based on node type
+    if (node.type === 'join' && node.details && node.details.length > 0) {
+        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">${escapeHtml(node.details[0])}</div>`;
+    }
+
+    if (node.type === 'window' && node.windowDetails) {
+        content += `<div style="font-size: 10px; margin-top: 6px;">
+            <span style="color: #fbbf24;">${node.windowDetails.functions.length} window function(s)</span>
+        </div>`;
+    }
+
+    if (node.children && node.children.length > 0) {
+        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">
+            Contains ${node.children.length} operation(s)
+        </div>`;
+    }
+
+    // Add keyboard hint
+    content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#475569' : '#94a3b8'}; margin-top: 8px; border-top: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
+        Click to select • Double-click to zoom
+    </div>`;
+
+    tooltipElement.innerHTML = content;
+    tooltipElement.style.opacity = '1';
+    updateTooltipPosition(e);
+}
+
+function updateTooltipPosition(e: MouseEvent): void {
+    if (!tooltipElement) return;
+
+    const padding = 12;
+    const tooltipRect = tooltipElement.getBoundingClientRect();
+
+    let left = e.clientX + padding;
+    let top = e.clientY + padding;
+
+    // Keep tooltip within viewport
+    if (left + tooltipRect.width > window.innerWidth - padding) {
+        left = e.clientX - tooltipRect.width - padding;
+    }
+    if (top + tooltipRect.height > window.innerHeight - padding) {
+        top = e.clientY - tooltipRect.height - padding;
+    }
+
+    tooltipElement.style.left = `${left}px`;
+    tooltipElement.style.top = `${top}px`;
+}
+
+function hideTooltip(): void {
+    if (tooltipElement) {
+        tooltipElement.style.opacity = '0';
+    }
+}
+
+// ============================================================
+// FEATURE: Collapsible Nodes
+// ============================================================
+
+function addCollapseButton(node: FlowNode, group: SVGGElement): void {
+    const isExpanded = node.expanded !== false;
+    const buttonSize = 16;
+    const buttonX = node.x + node.width - buttonSize - 6;
+    const buttonY = node.y + 6;
+
+    // Button background
+    const buttonBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    buttonBg.setAttribute('x', String(buttonX));
+    buttonBg.setAttribute('y', String(buttonY));
+    buttonBg.setAttribute('width', String(buttonSize));
+    buttonBg.setAttribute('height', String(buttonSize));
+    buttonBg.setAttribute('rx', '3');
+    buttonBg.setAttribute('fill', 'rgba(0, 0, 0, 0.3)');
+    buttonBg.setAttribute('class', 'collapse-btn');
+    buttonBg.style.cursor = 'pointer';
+    group.appendChild(buttonBg);
+
+    // Button icon (+ or -)
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(buttonX + buttonSize / 2));
+    icon.setAttribute('y', String(buttonY + buttonSize / 2 + 4));
+    icon.setAttribute('text-anchor', 'middle');
+    icon.setAttribute('fill', 'white');
+    icon.setAttribute('font-size', '12');
+    icon.setAttribute('font-weight', '600');
+    icon.setAttribute('class', 'collapse-icon');
+    icon.style.pointerEvents = 'none';
+    icon.textContent = isExpanded ? '−' : '+';
+    group.appendChild(icon);
+
+    // Click handler
+    buttonBg.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleNodeCollapse(node.id);
+    });
+
+    // Hover effect
+    buttonBg.addEventListener('mouseenter', () => {
+        buttonBg.setAttribute('fill', 'rgba(99, 102, 241, 0.5)');
+    });
+    buttonBg.addEventListener('mouseleave', () => {
+        buttonBg.setAttribute('fill', 'rgba(0, 0, 0, 0.3)');
+    });
+}
+
+// ============================================================
+// FEATURE: Keyboard Shortcuts Help
+// ============================================================
+
+export function getKeyboardShortcuts(): Array<{ key: string; description: string }> {
+    return [
+        { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
+        { key: '/', description: 'Focus search' },
+        { key: '+/-', description: 'Zoom in/out' },
+        { key: 'R', description: 'Reset view' },
+        { key: 'F', description: 'Toggle fullscreen' },
+        { key: 'T', description: 'Toggle theme' },
+        { key: 'L', description: 'Toggle legend' },
+        { key: 'S', description: 'Toggle SQL preview' },
+        { key: 'Esc', description: 'Close panels / Exit fullscreen' },
+        { key: 'Enter', description: 'Next search result' }
+    ];
 }

@@ -232,52 +232,109 @@ function splitByComma(text: string): string[] {
 
 /**
  * Generate syntax-highlighted HTML for SQL
+ * Uses a token-based approach to avoid HTML escaping issues
  */
 export function highlightSql(sql: string): string {
     if (!sql) return '';
 
-    let result = escapeHtml(sql);
+    const tokens: Array<{ type: string; value: string }> = [];
+    let i = 0;
 
-    // Highlight keywords
-    const keywordPattern = new RegExp(
-        '\\b(' + SQL_KEYWORDS.join('|') + ')\\b',
-        'gi'
-    );
-    result = result.replace(keywordPattern,
-        '<span style="color: #c792ea; font-weight: 600;">$1</span>');
+    while (i < sql.length) {
+        // Comments (-- style)
+        if (sql[i] === '-' && sql[i + 1] === '-') {
+            let comment = '';
+            while (i < sql.length && sql[i] !== '\n') {
+                comment += sql[i++];
+            }
+            tokens.push({ type: 'comment', value: comment });
+            continue;
+        }
 
-    // Highlight strings
-    result = result.replace(
-        /'([^'\\]|\\.)*'/g,
-        '<span style="color: #c3e88d;">$&</span>'
-    );
+        // String literals
+        if (sql[i] === "'" || sql[i] === '"') {
+            const quote = sql[i];
+            let str = sql[i++];
+            while (i < sql.length && sql[i] !== quote) {
+                if (sql[i] === '\\' && i + 1 < sql.length) {
+                    str += sql[i++];
+                }
+                str += sql[i++];
+            }
+            if (i < sql.length) str += sql[i++];
+            tokens.push({ type: 'string', value: str });
+            continue;
+        }
 
-    // Highlight numbers
-    result = result.replace(
-        /\b(\d+\.?\d*)\b/g,
-        '<span style="color: #f78c6c;">$1</span>'
-    );
+        // Numbers
+        if (/\d/.test(sql[i])) {
+            let num = '';
+            while (i < sql.length && /[\d.]/.test(sql[i])) {
+                num += sql[i++];
+            }
+            tokens.push({ type: 'number', value: num });
+            continue;
+        }
 
-    // Highlight comments
-    result = result.replace(
-        /(--[^\n]*)/g,
-        '<span style="color: #546e7a; font-style: italic;">$1</span>'
-    );
+        // Words (keywords, identifiers, functions)
+        if (/[a-zA-Z_]/.test(sql[i])) {
+            let word = '';
+            while (i < sql.length && /[a-zA-Z0-9_]/.test(sql[i])) {
+                word += sql[i++];
+            }
 
-    // Highlight functions (word followed by parenthesis)
-    result = result.replace(
-        /\b([A-Z_][A-Z0-9_]*)\s*\(/gi,
-        '<span style="color: #82aaff;">$1</span>('
-    );
+            // Check if it's followed by ( - it's a function
+            let j = i;
+            while (j < sql.length && /\s/.test(sql[j])) j++;
 
-    return result;
+            if (sql[j] === '(') {
+                tokens.push({ type: 'function', value: word });
+            } else if (SQL_KEYWORDS.includes(word.toUpperCase())) {
+                tokens.push({ type: 'keyword', value: word });
+            } else {
+                tokens.push({ type: 'identifier', value: word });
+            }
+            continue;
+        }
+
+        // Whitespace
+        if (/\s/.test(sql[i])) {
+            let ws = '';
+            while (i < sql.length && /\s/.test(sql[i])) {
+                ws += sql[i++];
+            }
+            tokens.push({ type: 'whitespace', value: ws });
+            continue;
+        }
+
+        // Other characters (operators, punctuation)
+        tokens.push({ type: 'other', value: sql[i++] });
+    }
+
+    // Convert tokens to HTML
+    return tokens.map(token => {
+        const escaped = escapeHtmlSimple(token.value);
+        switch (token.type) {
+            case 'keyword':
+                return `<span style="color: #c792ea; font-weight: 600;">${escaped}</span>`;
+            case 'function':
+                return `<span style="color: #82aaff;">${escaped}</span>`;
+            case 'string':
+                return `<span style="color: #c3e88d;">${escaped}</span>`;
+            case 'number':
+                return `<span style="color: #f78c6c;">${escaped}</span>`;
+            case 'comment':
+                return `<span style="color: #546e7a; font-style: italic;">${escaped}</span>`;
+            default:
+                return escaped;
+        }
+    }).join('');
 }
 
-function escapeHtml(text: string): string {
+function escapeHtmlSimple(text: string): string {
     return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+        .replace(/>/g, '&gt;');
 }
+

@@ -18,7 +18,12 @@ import {
     toggleLegend,
     toggleFocusMode,
     toggleSqlPreview,
-    highlightColumnSources
+    highlightColumnSources,
+    toggleFullscreen,
+    isFullscreen,
+    toggleTheme,
+    isDarkTheme,
+    getKeyboardShortcuts
 } from './renderer';
 
 declare global {
@@ -106,7 +111,13 @@ function createToolbar(container: HTMLElement): void {
         ">
             <option value="MySQL">MySQL</option>
             <option value="PostgreSQL">PostgreSQL</option>
-            <option value="Transact-SQL">SQL Server</option>
+            <option value="TransactSQL">SQL Server</option>
+            <option value="Snowflake">Snowflake</option>
+            <option value="BigQuery">BigQuery</option>
+            <option value="Redshift">Redshift</option>
+            <option value="Hive">Hive / Databricks</option>
+            <option value="Athena">Athena</option>
+            <option value="Trino">Trino</option>
             <option value="MariaDB">MariaDB</option>
             <option value="SQLite">SQLite</option>
         </select>
@@ -326,16 +337,69 @@ function createToolbar(container: HTMLElement): void {
     // SQL Preview button
     const sqlBtn = document.createElement('button');
     sqlBtn.innerHTML = '{ }';
-    sqlBtn.title = 'Show formatted SQL';
+    sqlBtn.title = 'Show formatted SQL (S)';
     sqlBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 700; border-left: 1px solid rgba(148, 163, 184, 0.2);';
     sqlBtn.addEventListener('click', () => toggleSqlPreview());
     sqlBtn.addEventListener('mouseenter', () => sqlBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     sqlBtn.addEventListener('mouseleave', () => sqlBtn.style.background = 'transparent');
     featureGroup.appendChild(sqlBtn);
 
+    // Theme Toggle button
+    const themeBtn = document.createElement('button');
+    themeBtn.innerHTML = '◐';
+    themeBtn.title = 'Toggle dark/light theme (T)';
+    themeBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    themeBtn.addEventListener('click', () => {
+        toggleTheme();
+        themeBtn.innerHTML = isDarkTheme() ? '◐' : '◑';
+    });
+    themeBtn.addEventListener('mouseenter', () => themeBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    themeBtn.addEventListener('mouseleave', () => themeBtn.style.background = 'transparent');
+    featureGroup.appendChild(themeBtn);
+
+    // Fullscreen button
+    let fullscreenActive = false;
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.innerHTML = '⛶';
+    fullscreenBtn.title = 'Toggle fullscreen (F)';
+    fullscreenBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    fullscreenBtn.addEventListener('click', () => {
+        fullscreenActive = !fullscreenActive;
+        toggleFullscreen(fullscreenActive);
+        fullscreenBtn.innerHTML = fullscreenActive ? '⛶' : '⛶';
+        fullscreenBtn.style.background = fullscreenActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    });
+    fullscreenBtn.addEventListener('mouseenter', () => {
+        if (!fullscreenActive) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    fullscreenBtn.addEventListener('mouseleave', () => {
+        if (!fullscreenActive) fullscreenBtn.style.background = 'transparent';
+    });
+    featureGroup.appendChild(fullscreenBtn);
+
+    // Keyboard shortcuts help button
+    const helpBtn = document.createElement('button');
+    helpBtn.innerHTML = '?';
+    helpBtn.title = 'Keyboard shortcuts';
+    helpBtn.style.cssText = btnStyle + 'font-weight: 700; border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    helpBtn.addEventListener('click', () => {
+        showKeyboardShortcutsHelp();
+    });
+    helpBtn.addEventListener('mouseenter', () => helpBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    helpBtn.addEventListener('mouseleave', () => helpBtn.style.background = 'transparent');
+    featureGroup.appendChild(helpBtn);
+
     actions.appendChild(featureGroup);
 
     container.appendChild(actions);
+
+    // Listen for theme change events to update toolbar
+    document.addEventListener('theme-change', ((e: CustomEvent) => {
+        const dark = e.detail.dark;
+        themeBtn.innerHTML = dark ? '◐' : '◑';
+        // Update toolbar styles for light theme
+        updateToolbarTheme(dark, toolbar, actions, searchContainer);
+    }) as EventListener);
 
     // Dialect change handler
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -531,4 +595,121 @@ function truncateSql(sql: string, maxLen: number): string {
     const normalized = sql.replace(/\s+/g, ' ').trim();
     if (normalized.length <= maxLen) { return normalized; }
     return normalized.substring(0, maxLen - 3) + '...';
+}
+
+// Helper function to show keyboard shortcuts help modal
+function showKeyboardShortcutsHelp(): void {
+    const shortcuts = getKeyboardShortcuts();
+
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'shortcuts-modal';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+
+    // Create modal content
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
+        padding: 24px;
+        min-width: 320px;
+        max-width: 400px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    modal.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="margin: 0; color: #f1f5f9; font-size: 16px;">Keyboard Shortcuts</h3>
+            <button id="close-shortcuts" style="
+                background: none;
+                border: none;
+                color: #94a3b8;
+                cursor: pointer;
+                font-size: 20px;
+                padding: 4px;
+            ">&times;</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${shortcuts.map(s => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                    <span style="color: #94a3b8; font-size: 13px;">${s.description}</span>
+                    <kbd style="
+                        background: rgba(99, 102, 241, 0.2);
+                        border: 1px solid rgba(99, 102, 241, 0.3);
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        color: #a5b4fc;
+                        font-size: 11px;
+                        font-family: monospace;
+                    ">${s.key}</kbd>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Close handlers
+    const closeModal = () => overlay.remove();
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModal();
+    });
+    modal.querySelector('#close-shortcuts')?.addEventListener('click', closeModal);
+
+    // Close on Escape
+    const escHandler = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+}
+
+// Helper function to update toolbar theme
+function updateToolbarTheme(dark: boolean, toolbar: HTMLElement, actions: HTMLElement, searchContainer: HTMLElement): void {
+    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const textColor = dark ? '#f1f5f9' : '#1e293b';
+    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
+    // Update toolbar children
+    toolbar.querySelectorAll('div').forEach(el => {
+        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+            el.style.background = bgColor;
+            el.style.borderColor = borderColor;
+        }
+    });
+
+    // Update title color
+    const titleSpan = toolbar.querySelector('span');
+    if (titleSpan) titleSpan.style.color = textColor;
+
+    // Update search container
+    searchContainer.style.background = bgColor;
+    searchContainer.style.borderColor = borderColor;
+
+    // Update action buttons
+    actions.querySelectorAll('div').forEach(el => {
+        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+            el.style.background = bgColor;
+            el.style.borderColor = borderColor;
+        }
+    });
+
+    actions.querySelectorAll('button').forEach(btn => {
+        btn.style.color = textColor;
+    });
 }

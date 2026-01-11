@@ -1,7 +1,7 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 
-export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'Transact-SQL' | 'MariaDB' | 'SQLite';
+export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
 
 export interface FlowNode {
     id: string;
@@ -897,25 +897,53 @@ function extractWindowFunctionDetails(columns: any): Array<{
             let funcName = 'WINDOW';
             const expr = col.expr;
 
+            // Common window functions to check for
+            const WINDOW_FUNCS = ['LAG', 'LEAD', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
+                'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+
+            // Helper to safely get string value
+            const getStringName = (obj: any): string | null => {
+                if (typeof obj === 'string') return obj;
+                if (obj && typeof obj.name === 'string') return obj.name;
+                if (obj && typeof obj.value === 'string') return obj.value;
+                return null;
+            };
+
             // Try multiple paths to find the function name
-            if (typeof expr.name === 'string') {
-                funcName = expr.name;
-            } else if (expr.name?.name && typeof expr.name.name === 'string') {
-                funcName = expr.name.name;
-            } else if (expr.name?.value && typeof expr.name.value === 'string') {
-                funcName = expr.name.value;
-            } else if (typeof expr.type === 'string' && expr.type !== 'aggr_func' && expr.type !== 'function') {
-                funcName = expr.type;
-            } else if (expr.args?.expr?.name && typeof expr.args.expr.name === 'string') {
-                funcName = expr.args.expr.name;
+            const nameFromExpr = getStringName(expr.name);
+            if (nameFromExpr) {
+                funcName = nameFromExpr;
+            } else if (expr.type === 'aggr_func' || expr.type === 'function') {
+                const aggName = getStringName(expr.name);
+                if (aggName) funcName = aggName;
+            } else if (expr.args?.expr) {
+                const argsName = getStringName(expr.args.expr.name) || getStringName(expr.args.expr);
+                if (argsName) funcName = argsName;
             }
 
-            // Final fallback - try to stringify and extract
-            if (funcName === 'WINDOW' && expr.name) {
-                const nameStr = JSON.stringify(expr.name);
-                const match = nameStr.match(/"name"\s*:\s*"([^"]+)"/);
-                if (match) {
-                    funcName = match[1];
+            // Check for window function in alias patterns
+            if (funcName === 'WINDOW' && col.as) {
+                const alias = String(col.as).toLowerCase();
+                if (alias.includes('prev') || alias.includes('lag')) funcName = 'LAG';
+                else if (alias.includes('next') || alias.includes('lead')) funcName = 'LEAD';
+                else if (alias.includes('rank')) funcName = 'RANK';
+                else if (alias.includes('row_num')) funcName = 'ROW_NUMBER';
+                else if (alias.includes('running') || alias.includes('total')) funcName = 'SUM';
+                else if (alias.includes('avg') || alias.includes('average')) funcName = 'AVG';
+            }
+
+            // Final fallback - search JSON for known function names
+            if (funcName === 'WINDOW') {
+                try {
+                    const exprStr = JSON.stringify(expr).toUpperCase();
+                    for (const wf of WINDOW_FUNCS) {
+                        if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
+                            funcName = wf;
+                            break;
+                        }
+                    }
+                } catch {
+                    // Ignore JSON errors
                 }
             }
 
@@ -938,8 +966,11 @@ function extractWindowFunctionDetails(columns: any): Array<{
                 frame = `${f.type || 'ROWS'} ${f.start || ''} ${f.end ? 'TO ' + f.end : ''}`.trim();
             }
 
+            // Ensure funcName is a clean string
+            const cleanName = typeof funcName === 'string' ? funcName : 'WINDOW';
+
             details.push({
-                name: String(funcName).toUpperCase(),
+                name: cleanName.toUpperCase(),
                 partitionBy: partitionBy?.length > 0 ? partitionBy : undefined,
                 orderBy: orderBy?.length > 0 ? orderBy : undefined,
                 frame
@@ -1139,9 +1170,11 @@ function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
     const tableAliasMap = new Map<string, string>();
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const tableName = fromItem.table || fromItem.name || '';
-            const alias = fromItem.as || tableName;
-            if (tableName) {
+            const rawTable = fromItem.table || fromItem.name;
+            const tableName = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
+            const rawAlias = fromItem.as || tableName;
+            const alias = typeof rawAlias === 'string' ? rawAlias : (rawAlias?.table || rawAlias?.name || tableName);
+            if (tableName && alias) {
                 tableAliasMap.set(alias.toLowerCase(), tableName);
             }
         }
@@ -1194,7 +1227,8 @@ function extractSourcesFromExpr(
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {
         const column = expr.column || expr.name;
-        const tableAlias = expr.table || '';
+        const rawTable = expr.table;
+        const tableAlias = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
 
         let tableName = tableAlias;
         if (tableAlias && tableAliasMap.has(tableAlias.toLowerCase())) {
@@ -1203,8 +1237,8 @@ function extractSourcesFromExpr(
 
         // Find matching table node
         const tableNode = tableNodes.find(n =>
-            n.label.toLowerCase() === tableName.toLowerCase() ||
-            n.label.toLowerCase() === tableAlias.toLowerCase()
+            n.label.toLowerCase() === (tableName || '').toLowerCase() ||
+            n.label.toLowerCase() === (tableAlias || '').toLowerCase()
         );
 
         if (tableName || tableNodes.length === 1) {
