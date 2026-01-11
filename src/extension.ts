@@ -7,6 +7,9 @@ let lastActiveSqlDocument: vscode.TextDocument | null = null;
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
+    // Initialize VisualizationPanel with context for persistence
+    VisualizationPanel.setContext(context);
+
     // Get configuration
     const getConfig = () => vscode.workspace.getConfiguration('sqlCrack');
 

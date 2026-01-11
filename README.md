@@ -1,251 +1,222 @@
-# SQL Crack
+<p align="center">
+  <img src="https://img.shields.io/badge/VS%20Code-1.85+-blue?logo=visualstudiocode" alt="VS Code">
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen" alt="PRs Welcome">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
+</p>
 
-**Visualize SQL queries with interactive flow diagrams**
+<h1 align="center">SQL Crack</h1>
 
-SQL Crack is a lightweight Visual Studio Code extension that transforms SQL queries into clear, interactive execution flow visualizations. Inspired by Snowflake Query Profile and JSON Crack, it helps you understand complex queries at a glance.
+<p align="center">
+  <strong>Transform SQL queries into interactive visual flow diagrams</strong>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#contributing">Contributing</a>
+</p>
+
+---
+
+SQL Crack is a VS Code extension that visualizes SQL queries as interactive execution flow diagrams. Understand complex queries at a glance, track column lineage, and identify optimization opportunities.
+
+> Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
+
+<!-- Add screenshot/GIF here -->
+<!-- ![SQL Crack Demo](./assets/demo.gif) -->
 
 ## Features
 
-### Core Visualization
-- **Execution Flow Visualization** - See how your SQL query executes step by step
-- **Multiple Query Support** - Visualize multiple SQL statements with tab navigation
-- **Interactive Nodes** - Click nodes to view details, double-click to zoom
-- **Node Search** - Search nodes by name (Ctrl+F / Cmd+F)
-- **Query Statistics** - Complexity score, table/join/filter counts
-- **Optimization Hints** - Automatic detection of common SQL anti-patterns
-- **Pan & Zoom** - Navigate with mouse drag and scroll wheel
-- **Multi-Dialect Support** - MySQL, PostgreSQL, SQL Server, MariaDB, SQLite, Snowflake, BigQuery, Redshift, Hive, Athena, Trino
-- **Export Options** - PNG, SVG, or copy to clipboard
+### Visual Query Analysis
 
-### Advanced Features
-- **SQL Formatter** - Format and syntax-highlight SQL code in preview panel
-- **Pinned Tabs** - Pin multiple visualizations for easy comparison
-- **Theme Toggle** - Switch between dark and light themes with grid pattern background (JSON Crack style)
-- **Fullscreen Mode** - View visualizations in fullscreen
-- **Focus Mode** - Highlight connected nodes for better understanding
-- **Column Lineage** - Track column sources through the query pipeline
-- **Editor Sync** - Click in SQL editor to highlight corresponding nodes in visualization (auto-switches to correct query tab)
+- **Execution Flow Visualization** — See how your SQL query executes step by step
+- **Multi-Query Support** — Visualize multiple SQL statements with tab navigation (Q1, Q2, Q3...)
+- **Column Lineage Tracking** — Trace column sources through the query pipeline
+- **Query Statistics** — Complexity score, table/join/filter counts, and more
 
-## New Features
+### Interactive Experience
 
-### Batch Processing
-- Visualize multiple SQL statements in one file
-- Tab navigation between queries (Q1, Q2, Q3...)
-- Error queries highlighted in red
-- Hover over tabs to see SQL preview
+- **Click & Explore** — Click nodes to view details, double-click to zoom
+- **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
+- **Focus Mode** — Highlight connected nodes for better understanding
+- **Editor Sync** — Click in SQL editor to highlight corresponding flow nodes
 
-### Query Statistics Panel
-- **Complexity Score** - Simple, Moderate, Complex, Very Complex
-- **Metrics** - Tables, Joins, Filters, CTEs, Subqueries, Window Functions
-- **Table Usage Tracking** - See all tables used in query with usage counts
-- Color-coded badges for quick assessment
-- Theme-aware styling for both dark and light modes
+### Flexible Display Options
 
-### Optimization Hints
-Automatic detection of:
-- `SELECT *` usage (performance warning)
-- Missing `LIMIT` clause (info)
-- `DELETE`/`UPDATE` without `WHERE` (error)
-- Too many JOINs (warning)
-- Multiple subqueries (warning)
-- Cartesian products (error)
+- **View Location Toggle** — Choose where to display: beside editor, new tab, or secondary sidebar
+- **Pin Visualizations** — Save query snapshots as separate tabs for comparison
+- **Persistent Pins** — Pinned tabs survive VS Code restarts
+- **Theme Support** — Dark and light themes with grid pattern background
 
-### Enhanced Interactivity
-- **Search nodes** - Ctrl+F to search, Enter/Arrow keys for navigation
-- **Edge highlighting** - Hover/click nodes to highlight connected edges
-- **Zoom to node** - Double-click any node to zoom in
-- **Keyboard shortcuts** - Escape to clear selection, multiple shortcuts available (press ? for help)
-- **SQL Preview Panel** - View formatted SQL with syntax highlighting (S key)
-- **Legend Panel** - Color-coded legend for node types (L key)
+### Export & Share
 
-### Export & Sharing
-- **PNG** - High-DPI export with background
-- **SVG** - Vector format for scalable diagrams
-- **Clipboard** - Copy diagram directly to clipboard
+- **PNG Export** — High-DPI images with background
+- **SVG Export** — Vector format for scalable diagrams
+- **Clipboard Copy** — Quick sharing via clipboard
 
-## Supported SQL Features
+### Smart Analysis
 
-| Feature | Support |
-|---------|---------|
-| SELECT queries | Full |
-| JOINs (INNER, LEFT, RIGHT, FULL) | Full |
-| WHERE conditions | Full |
-| GROUP BY / HAVING | Full |
-| ORDER BY | Full |
-| LIMIT | Full |
-| CTEs (WITH clause) | Full |
-| Subqueries | Full |
-| UNION / INTERSECT / EXCEPT | Full |
-| Window functions | Full |
-| INSERT / UPDATE / DELETE | Basic |
+Automatic detection of SQL anti-patterns:
+
+| Issue | Severity |
+|-------|----------|
+| `SELECT *` usage | Warning |
+| Missing `LIMIT` clause | Info |
+| `DELETE`/`UPDATE` without `WHERE` | Error |
+| Excessive JOINs (5+) | Warning |
+| Cartesian products | Error |
+
+## Supported Dialects
+
+MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino
 
 ## Installation
+
+### VS Code Marketplace
+
+```
+ext install sql-crack
+```
+
+Or search for **"SQL Crack"** in the VS Code Extensions panel.
 
 ### From Source
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/user/sql-crack.git
 cd sql-crack
-
-# Install dependencies
 npm install
-
-# Build the extension
 npm run package
-
-# Install the VSIX file in VS Code
-# Extensions panel -> ... -> Install from VSIX
 ```
 
-### Development
-
-```bash
-npm install        # Install dependencies
-npm run compile    # Development build (webpack in development mode)
-npm run watch      # Watch mode for development (auto-rebuild on changes)
-npm run package    # Production build (webpack in production mode, creates .vsix)
-npm run typecheck  # Type check TypeScript code (tsc --noEmit)
-npm run lint       # Lint code with ESLint
-```
-
-Press **F5** in VS Code to launch the Extension Development Host with the extension loaded.
+Then install the generated `.vsix` file via **Extensions → ••• → Install from VSIX**.
 
 ## Usage
 
-1. Open any `.sql` file in VS Code
-2. Use one of these methods to visualize:
+### Quick Start
+
+1. Open any `.sql` file
+2. Visualize using one of:
    - Click the **graph icon** in the editor title bar
-   - Right-click and select **"SQL Crack: Visualize SQL Query"**
-   - Press **`Cmd+Shift+V`** (Mac) or **`Ctrl+Shift+V`** (Windows/Linux)
-   - Command Palette: **"SQL Crack: Visualize SQL Query"**
+   - Press `Cmd+Shift+V` (Mac) / `Ctrl+Shift+V` (Windows/Linux)
+   - Right-click → **"SQL Crack: Visualize SQL Query"**
 
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Cmd/Ctrl + Shift + V` | Open/trigger visualization |
-| `Cmd/Ctrl + F` | Focus search box |
+| `Cmd/Ctrl + Shift + V` | Open visualization |
+| `Cmd/Ctrl + F` | Search nodes |
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
-| `Escape` | Clear selection / search / close modals |
-| `L` | Toggle legend panel |
-| `S` | Toggle SQL preview panel |
-| `T` | Toggle dark/light theme |
-| `F` | Toggle fullscreen mode |
-| `?` | Show keyboard shortcuts help |
-| Mouse wheel | Zoom in/out |
-| Mouse drag | Pan canvas |
-| Double-click | Zoom to node |
+| `Escape` | Clear selection |
+| `L` | Toggle legend |
+| `S` | Toggle SQL preview |
+| `T` | Toggle theme |
+| `F` | Toggle fullscreen |
+| `?` | Show all shortcuts |
 
-### Tips
+### Node Types
 
-- **Select specific SQL** to visualize just that portion
-- **Change dialect** using the dropdown in the toolbar
-- **Click nodes** to see operation details in the side panel
-- **Hover tabs** to preview SQL for each query
-
-## Node Types & Colors
-
-| Node Type | Color | Description |
-|-----------|-------|-------------|
+| Node | Color | Description |
+|------|-------|-------------|
 | Table | Blue | Source tables |
 | Filter | Purple | WHERE/HAVING conditions |
-| Join | Pink/Green | JOIN operations (INNER=Green, LEFT=Blue, RIGHT=Amber, FULL=Purple) |
-| Aggregate | Amber | Aggregate functions (SUM, COUNT, AVG, etc.) |
+| Join | Pink | JOIN operations |
+| Aggregate | Amber | SUM, COUNT, AVG, etc. |
 | Window | Fuchsia | Window functions |
-| Case | Amber | CASE statements |
 | Select | Indigo | Column projection |
-| Sort | Green | ORDER BY operations |
+| Sort | Green | ORDER BY |
 | Limit | Cyan | LIMIT clause |
-| Result | Green | Query output |
 | CTE | Purple | Common Table Expressions |
-| Union | Orange | Set operations |
-| Subquery | Teal | Nested queries |
+| Result | Green | Query output |
 
-**Note**: Join nodes display venn diagrams with distinct colors from node backgrounds for better visual distinction. All text and UI elements are theme-aware for optimal visibility in both dark and light themes.
+## Configuration
 
-## Architecture
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sqlCrack.defaultDialect` | `MySQL` | Default SQL dialect for parsing |
+| `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
+| `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, or `secondary-sidebar` |
+
+## Privacy
+
+- **100% Local** — All processing happens in VS Code
+- **No Network Calls** — Your SQL never leaves your machine
+- **No Telemetry** — Zero data collection
+- **Open Source** — Fully auditable code
+
+## Development
+
+```bash
+npm install          # Install dependencies
+npm run compile      # Build extension
+npm run watch        # Watch mode
+npm run typecheck    # Type check
+npm run lint         # Lint code
+```
+
+Press `F5` to launch the Extension Development Host.
+
+### Architecture
 
 ```
 sql-crack/
 ├── src/
-│   ├── extension.ts          # VS Code extension entry point
-│   ├── visualizationPanel.ts # Webview panel management & VS Code API integration
-│   ├── types.d.ts            # Type declarations for dagre and process
+│   ├── extension.ts           # Extension entry point
+│   ├── visualizationPanel.ts  # Webview panel management
 │   └── webview/
-│       ├── index.ts          # Webview entry point, toolbar, UI setup
-│       ├── sqlParser.ts      # SQL parsing, AST processing, stats & hints generation
-│       ├── renderer.ts       # SVG rendering, graph layout, interaction handlers
-│       └── sqlFormatter.ts   # SQL formatting, syntax highlighting, diff utility
-├── dist/                     # Compiled JavaScript output (webpack bundle)
-├── out/                      # TypeScript compilation output (if using tsc directly)
-├── package.json              # Extension manifest and dependencies
-├── tsconfig.json             # TypeScript configuration
-├── webpack.config.js         # Webpack bundling configuration (extension + webview)
-└── jest.config.js            # Jest test configuration
+│       ├── index.ts           # UI & interactions
+│       ├── sqlParser.ts       # SQL parsing & analysis
+│       ├── renderer.ts        # SVG rendering & layout
+│       └── sqlFormatter.ts    # SQL formatting
+├── package.json
+├── tsconfig.json
+└── webpack.config.js
 ```
-
-### Source Files Overview
-
-- **extension.ts**: Main extension entry point, registers commands, handles activation
-- **visualizationPanel.ts**: Manages webview panel lifecycle, VS Code messaging, HTML generation
-- **webview/index.ts**: Webview application entry, creates toolbar UI, handles user interactions
-- **webview/sqlParser.ts**: SQL parsing using node-sql-parser, generates flow graph (nodes/edges), calculates statistics
-- **webview/renderer.ts**: SVG rendering engine, graph layout with dagre, pan/zoom, search, export functionality
-- **webview/sqlFormatter.ts**: SQL code formatting, syntax highlighting, query diff algorithm
-- **types.d.ts**: TypeScript type definitions for external libraries (dagre, process)
 
 ### Tech Stack
 
-- **VS Code Extension API** - Extension framework
-- **TypeScript** - Type-safe development
-- **node-sql-parser** - SQL parsing (multi-dialect)
-- **dagre** - Graph layout algorithm
-- **Pure SVG** - Lightweight rendering
-- **Webpack** - Bundling
-
-### Bundle Size
-
-| File | Size | Description |
-|------|------|-------------|
-| extension.js | ~3-5 KB | Extension host code (VS Code API integration) |
-| webview.js | ~2.5 MB | Webview bundle (includes dagre, node-sql-parser, rendering logic) |
-
-The webview bundle is larger due to:
-- `node-sql-parser` (~1.5 MB) - Multi-dialect SQL parsing library
-- `dagre` (~200 KB) - Graph layout algorithm
-- Rendering and UI code (~800 KB)
-
-## Configuration
-
-The extension supports the following VS Code settings:
-
-- **sqlCrack.defaultDialect** (default: `"MySQL"`): Default SQL dialect for parsing queries
-  - Options: MySQL, PostgreSQL, TransactSQL, Snowflake, BigQuery, Redshift, Hive, Athena, Trino, MariaDB, SQLite
-- **sqlCrack.syncEditorToFlow** (default: `true`): Enable/disable highlighting flow nodes when clicking in SQL editor
-
-## Privacy
-
-- **100% Local** - All processing happens in VS Code
-- **No Network Calls** - Your SQL never leaves your machine
-- **No Telemetry** - No usage data collected
-- **Open Source** - All code is auditable
+- **VS Code Extension API** — Extension framework
+- **TypeScript** — Type-safe development
+- **node-sql-parser** — Multi-dialect SQL parsing
+- **dagre** — Graph layout algorithm
+- **Pure SVG** — Lightweight rendering
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! Here's how you can help:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Reporting Issues
+
+Found a bug or have a feature request? [Open an issue](https://github.com/user/sql-crack/issues) with:
+
+- Clear description of the problem/feature
+- Steps to reproduce (for bugs)
+- SQL query example (if applicable)
+- VS Code and extension version
 
 ## License
 
-MIT License
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
-- SQL parsing by [node-sql-parser](https://github.com/taozhi8833998/node-sql-parser)
-- Graph layout by [dagre](https://github.com/dagrejs/dagre)
+- [JSON Crack](https://jsoncrack.com/) — Visual inspiration
+- [node-sql-parser](https://github.com/taozhi8833998/node-sql-parser) — SQL parsing
+- [dagre](https://github.com/dagrejs/dagre) — Graph layout
 
 ---
 
-**Made for the SQL community**
+<p align="center">
+  Made with SQL for the SQL community
+</p>
