@@ -18,7 +18,6 @@ SQL Crack is a lightweight Visual Studio Code extension that transforms SQL quer
 - **Export Options** - PNG, SVG, or copy to clipboard
 
 ### Advanced Features
-- **SQL Diff Tool** - Compare two SQL queries side-by-side with syntax highlighting
 - **SQL Formatter** - Format and syntax-highlight SQL code in preview panel
 - **Pinned Tabs** - Pin multiple visualizations for easy comparison
 - **Theme Toggle** - Switch between dark and light themes
@@ -132,7 +131,6 @@ Press **F5** in VS Code to launch the Extension Development Host with the extens
 | `S` | Toggle SQL preview panel |
 | `T` | Toggle dark/light theme |
 | `F` | Toggle fullscreen mode |
-| `D` | Open SQL diff modal |
 | `?` | Show keyboard shortcuts help |
 | Mouse wheel | Zoom in/out |
 | Mouse drag | Pan canvas |

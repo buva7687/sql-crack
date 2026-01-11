@@ -406,11 +406,6 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleSqlPreview();
         }
-        // D to show diff modal
-        if (e.key === 'd' || e.key === 'D') {
-            e.preventDefault();
-            document.dispatchEvent(new CustomEvent('show-diff-modal'));
-        }
         // / to focus search (like vim)
         if (e.key === '/') {
             e.preventDefault();
