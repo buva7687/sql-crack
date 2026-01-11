@@ -39,6 +39,7 @@ const state: ViewState = {
 
 let svg: SVGSVGElement | null = null;
 let mainGroup: SVGGElement | null = null;
+let backgroundRect: SVGRectElement | null = null;
 let detailsPanel: HTMLDivElement | null = null;
 let statsPanel: HTMLDivElement | null = null;
 let hintsPanel: HTMLDivElement | null = null;
@@ -63,7 +64,7 @@ export function initRenderer(container: HTMLElement): void {
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
 
-    // Add defs for markers (arrows)
+    // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -82,8 +83,21 @@ export function initRenderer(container: HTMLElement): void {
                 <feMergeNode in="SourceGraphic"/>
             </feMerge>
         </filter>
+        <!-- Grid pattern for light theme -->
+        <pattern id="grid-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+            <rect width="20" height="20" fill="#ffffff"/>
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+        </pattern>
     `;
     svg.appendChild(defs);
+
+    // Create background rectangle for pattern (light theme)
+    backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    backgroundRect.setAttribute('width', '100%');
+    backgroundRect.setAttribute('height', '100%');
+    backgroundRect.setAttribute('fill', '#0f172a');
+    backgroundRect.style.pointerEvents = 'none';
+    svg.appendChild(backgroundRect);
 
     // Create main group for pan/zoom
     mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -517,8 +531,17 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     // Hover effect with tooltip
     const rect = group.querySelector('.node-rect') as SVGRectElement;
     if (rect) {
+        // Get the correct color based on node type
+        const getColor = () => {
+            if (node.type === 'join') {
+                const joinType = node.label || 'INNER JOIN';
+                return getJoinColor(joinType);
+            }
+            return getNodeColor(node.type);
+        };
+        
         group.addEventListener('mouseenter', (e) => {
-            rect.setAttribute('fill', lightenColor(getNodeColor(node.type), 20));
+            rect.setAttribute('fill', lightenColor(getColor(), 20));
             highlightConnectedEdges(node.id, true);
             showTooltip(node, e as MouseEvent);
         });
@@ -528,7 +551,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
 
         group.addEventListener('mouseleave', () => {
-            rect.setAttribute('fill', getNodeColor(node.type));
+            rect.setAttribute('fill', getColor());
             if (state.selectedNodeId !== node.id) {
                 highlightConnectedEdges(node.id, false);
             }
@@ -561,6 +584,16 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // Determine visual style based on table category
     const isTable = node.type === 'table';
     const tableCategory = node.tableCategory || 'physical';
+    const isDark = state.isDarkTheme;
+    
+    // Text colors based on theme - standard nodes always have colored backgrounds, so white text is usually fine
+    // But for light theme, we might need darker text on lighter backgrounds
+    // Since standard nodes use colored backgrounds (blue, purple, etc.), white text should work
+    // But let's be safe and use theme-aware colors for better contrast
+    const textColor = isDark ? '#ffffff' : '#ffffff'; // Keep white for colored backgrounds
+    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.9)';
+    const textColorDim = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.8)';
+    const strokeColor = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
 
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -587,7 +620,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
             rect.setAttribute('stroke-dasharray', '5,3');
         } else {
             // Physical table: solid border for emphasis
-            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            rect.setAttribute('stroke', strokeColor);
             rect.setAttribute('stroke-width', '2');
         }
     }
@@ -626,7 +659,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 12));
     iconText.setAttribute('y', String(node.y + 24));
-    iconText.setAttribute('fill', 'rgba(255,255,255,0.8)');
+    iconText.setAttribute('fill', textColorMuted);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
     group.appendChild(iconText);
@@ -635,7 +668,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 32));
     label.setAttribute('y', String(node.y + 26));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', textColor);
     label.setAttribute('font-size', '13');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -647,7 +680,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         const desc = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         desc.setAttribute('x', String(node.x + 12));
         desc.setAttribute('y', String(node.y + 44));
-        desc.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        desc.setAttribute('fill', textColorDim);
         desc.setAttribute('font-size', '10');
         desc.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         desc.textContent = truncate(node.description, 20);
@@ -658,6 +691,12 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
 function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     const joinType = node.label || 'INNER JOIN';
     const joinColor = getJoinColor(joinType);
+    const isDark = state.isDarkTheme;
+    
+    // Text colors based on theme - use white for dark theme, dark for light theme
+    const textColor = isDark ? '#ffffff' : '#1e293b';
+    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(30,41,59,0.8)';
+    const textColorDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(30,41,59,0.7)';
 
     // Background rect with join-specific color
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -678,7 +717,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     vennContainer.setAttribute('width', '32');
     vennContainer.setAttribute('height', '20');
     const vennDiv = document.createElement('div');
-    vennDiv.innerHTML = getJoinVennDiagram(joinType);
+    vennDiv.innerHTML = getJoinVennDiagram(joinType, isDark);
     vennDiv.style.cssText = 'display: flex; align-items: center; justify-content: center;';
     vennContainer.appendChild(vennDiv);
     group.appendChild(vennContainer);
@@ -687,7 +726,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 44));
     label.setAttribute('y', String(node.y + 20));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', textColor);
     label.setAttribute('font-size', '11');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -699,7 +738,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
         const condition = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         condition.setAttribute('x', String(node.x + 8));
         condition.setAttribute('y', String(node.y + 38));
-        condition.setAttribute('fill', 'rgba(255,255,255,0.8)');
+        condition.setAttribute('fill', textColorMuted);
         condition.setAttribute('font-size', '9');
         condition.setAttribute('font-family', 'monospace');
         condition.textContent = truncate(node.details[0], 18);
@@ -710,7 +749,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
             const tableName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             tableName.setAttribute('x', String(node.x + 8));
             tableName.setAttribute('y', String(node.y + 52));
-            tableName.setAttribute('fill', 'rgba(255,255,255,0.6)');
+            tableName.setAttribute('fill', textColorDim);
             tableName.setAttribute('font-size', '9');
             tableName.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
             tableName.textContent = truncate(node.details[1], 18);
@@ -1550,6 +1589,13 @@ function updateDetailsPanel(nodeId: string | null): void {
 function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
+    const isDark = state.isDarkTheme;
+    const textColor = isDark ? '#f1f5f9' : '#1e293b';
+    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
+    const textColorDim = isDark ? '#64748b' : '#94a3b8';
+    const tableTextColor = isDark ? '#cbd5e1' : '#334155';
+    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
     const complexityColors: Record<string, string> = {
         'Simple': '#22c55e',
         'Moderate': '#eab308',
@@ -1565,15 +1611,15 @@ function updateStatsPanel(): void {
             .slice(0, 8); // Show top 8 tables
         
         tableListHtml = `
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
-                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px; font-weight: 600;">Tables Used:</div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 6px; font-weight: 600;">Tables Used:</div>
                 <div style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;">
                     ${sortedTables.map(([tableName, count]) => `
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                            <span style="color: #cbd5e1; font-family: monospace;">${escapeHtml(tableName)}</span>
+                            <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
                             <span style="
-                                background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
-                                color: ${count > 1 ? '#fbbf24' : '#94a3b8'};
+                                background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
+                                color: ${count > 1 ? '#f59e0b' : textColorMuted};
                                 padding: 2px 6px;
                                 border-radius: 4px;
                                 font-weight: 600;
@@ -1583,7 +1629,7 @@ function updateStatsPanel(): void {
                         </div>
                     `).join('')}
                     ${currentTableUsage.size > 8 ? `
-                        <div style="font-size: 9px; color: #64748b; font-style: italic;">
+                        <div style="font-size: 9px; color: ${textColorDim}; font-style: italic;">
                             +${currentTableUsage.size - 8} more
                         </div>
                     ` : ''}
@@ -1594,7 +1640,7 @@ function updateStatsPanel(): void {
 
     statsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span style="font-weight: 600; color: #f1f5f9;">Query Stats</span>
+            <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
             <span style="
                 background: ${complexityColors[currentStats.complexity]};
                 color: white;
@@ -1606,24 +1652,24 @@ function updateStatsPanel(): void {
         </div>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.tables}</div>
-                <div style="font-size: 10px;">Tables</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.tables}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Tables</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.joins}</div>
-                <div style="font-size: 10px;">Joins</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.joins}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Joins</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.conditions}</div>
-                <div style="font-size: 10px;">Filters</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.conditions}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Filters</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.complexityScore}</div>
-                <div style="font-size: 10px;">Score</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.complexityScore}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Score</div>
             </div>
         </div>
         ${currentStats.ctes > 0 || currentStats.subqueries > 0 || currentStats.windowFunctions > 0 ? `
-            <div style="display: flex; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+            <div style="display: flex; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; color: ${textColorMuted};">
                 ${currentStats.ctes > 0 ? `<span>CTEs: ${currentStats.ctes}</span>` : ''}
                 ${currentStats.subqueries > 0 ? `<span>Subqueries: ${currentStats.subqueries}</span>` : ''}
                 ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
@@ -2632,7 +2678,7 @@ function applyTheme(dark: boolean): void {
         textMuted: '#94a3b8',
         textDim: '#64748b'
     } : {
-        bg: '#f8fafc',
+        bg: '#ffffff',
         panelBg: 'rgba(255, 255, 255, 0.95)',
         panelBgSolid: 'rgba(255, 255, 255, 0.98)',
         border: 'rgba(148, 163, 184, 0.3)',
@@ -2641,8 +2687,15 @@ function applyTheme(dark: boolean): void {
         textDim: '#94a3b8'
     };
 
-    // Apply to SVG background
-    svg.style.background = colors.bg;
+    // Apply to SVG background - use pattern for light theme, solid color for dark
+    if (backgroundRect) {
+        if (dark) {
+            backgroundRect.setAttribute('fill', colors.bg);
+        } else {
+            // Use grid pattern for light theme (JSON Crack style)
+            backgroundRect.setAttribute('fill', 'url(#grid-pattern)');
+        }
+    }
 
     // Apply to all panels
     const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement];
@@ -2664,6 +2717,19 @@ function applyTheme(dark: boolean): void {
     // Dispatch custom event for index.ts to update toolbar
     const event = new CustomEvent('theme-change', { detail: { dark } });
     document.dispatchEvent(event);
+    
+    // Update panels with new theme colors
+    if (currentStats) {
+        updateStatsPanel();
+    }
+    if (currentHints.length > 0) {
+        updateHintsPanel();
+    }
+    
+    // Re-render all nodes to update colors for theme
+    if (currentNodes.length > 0) {
+        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, tableUsage: currentTableUsage });
+    }
 }
 
 // ============================================================
@@ -2893,52 +2959,54 @@ function findNodeAtLine(line: number): FlowNode | null {
 // FEATURE: Join Type Venn Diagrams
 // ============================================================
 
-export function getJoinVennDiagram(joinType: string): string {
+export function getJoinVennDiagram(joinType: string, isDark: boolean = true): string {
     const type = joinType.toUpperCase();
+    const strokeColor = isDark ? '#94a3b8' : '#475569';
 
     // SVG Venn diagram icons for different join types
+    // Using different colors from node backgrounds for better contrast
     const diagrams: Record<string, string> = {
         'INNER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <path d="M12 3.5 A6 6 0 0 1 12 12.5 A6 6 0 0 1 12 3.5" fill="#22c55e" opacity="0.6"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <path d="M12 3.5 A6 6 0 0 1 12 12.5 A6 6 0 0 1 12 3.5" fill="#6366f1" opacity="0.7"/>
             </svg>`,
         'LEFT JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#2563eb" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'LEFT OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#2563eb" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'RIGHT JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#d97706" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'RIGHT OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#d97706" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'FULL JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'FULL OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'CROSS JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <rect x="2" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <rect x="14" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <line x1="10" y1="8" x2="14" y2="8" stroke="#64748b" stroke-width="1" stroke-dasharray="2"/>
+                <rect x="2" y="2" width="8" height="12" fill="#dc2626" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <rect x="14" y="2" width="8" height="12" fill="#dc2626" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <line x1="10" y1="8" x2="14" y2="8" stroke="${strokeColor}" stroke-width="1" stroke-dasharray="2"/>
             </svg>`
     };
 

@@ -20,11 +20,11 @@ SQL Crack is a lightweight Visual Studio Code extension that transforms SQL quer
 ### Advanced Features
 - **SQL Formatter** - Format and syntax-highlight SQL code in preview panel
 - **Pinned Tabs** - Pin multiple visualizations for easy comparison
-- **Theme Toggle** - Switch between dark and light themes
+- **Theme Toggle** - Switch between dark and light themes with grid pattern background (JSON Crack style)
 - **Fullscreen Mode** - View visualizations in fullscreen
 - **Focus Mode** - Highlight connected nodes for better understanding
 - **Column Lineage** - Track column sources through the query pipeline
-- **Editor Sync** - Click in SQL editor to highlight corresponding nodes in visualization
+- **Editor Sync** - Click in SQL editor to highlight corresponding nodes in visualization (auto-switches to correct query tab)
 
 ## New Features
 
@@ -37,7 +37,9 @@ SQL Crack is a lightweight Visual Studio Code extension that transforms SQL quer
 ### Query Statistics Panel
 - **Complexity Score** - Simple, Moderate, Complex, Very Complex
 - **Metrics** - Tables, Joins, Filters, CTEs, Subqueries, Window Functions
+- **Table Usage Tracking** - See all tables used in query with usage counts
 - Color-coded badges for quick assessment
+- Theme-aware styling for both dark and light modes
 
 ### Optimization Hints
 Automatic detection of:
@@ -149,9 +151,10 @@ Press **F5** in VS Code to launch the Extension Development Host with the extens
 |-----------|-------|-------------|
 | Table | Blue | Source tables |
 | Filter | Purple | WHERE/HAVING conditions |
-| Join | Pink | JOIN operations |
-| Aggregate | Amber | GROUP BY operations |
+| Join | Pink/Green | JOIN operations (INNER=Green, LEFT=Blue, RIGHT=Amber, FULL=Purple) |
+| Aggregate | Amber | Aggregate functions (SUM, COUNT, AVG, etc.) |
 | Window | Fuchsia | Window functions |
+| Case | Amber | CASE statements |
 | Select | Indigo | Column projection |
 | Sort | Green | ORDER BY operations |
 | Limit | Cyan | LIMIT clause |
@@ -159,6 +162,8 @@ Press **F5** in VS Code to launch the Extension Development Host with the extens
 | CTE | Purple | Common Table Expressions |
 | Union | Orange | Set operations |
 | Subquery | Teal | Nested queries |
+
+**Note**: Join nodes display venn diagrams with distinct colors from node backgrounds for better visual distinction. All text and UI elements are theme-aware for optimal visibility in both dark and light themes.
 
 ## Architecture
 
