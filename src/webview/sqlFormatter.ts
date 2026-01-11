@@ -338,3 +338,245 @@ function escapeHtmlSimple(text: string): string {
         .replace(/>/g, '&gt;');
 }
 
+// ============================================================
+// FEATURE: SQL Diff
+// ============================================================
+
+export interface DiffLine {
+    type: 'same' | 'added' | 'removed' | 'modified';
+    lineNumber1?: number;
+    lineNumber2?: number;
+    content: string;
+    oldContent?: string;
+}
+
+export interface DiffResult {
+    lines: DiffLine[];
+    stats: {
+        added: number;
+        removed: number;
+        modified: number;
+        same: number;
+    };
+}
+
+/**
+ * Compare two SQL queries and return a diff result
+ * Uses a simple line-by-line diff algorithm
+ */
+export function diffSql(sql1: string, sql2: string): DiffResult {
+    // Format both queries for consistent comparison
+    const formatted1 = formatSql(sql1);
+    const formatted2 = formatSql(sql2);
+
+    const lines1 = formatted1.split('\n');
+    const lines2 = formatted2.split('\n');
+
+    const diff = computeLCS(lines1, lines2);
+
+    return diff;
+}
+
+/**
+ * Compute diff using Longest Common Subsequence algorithm
+ */
+function computeLCS(lines1: string[], lines2: string[]): DiffResult {
+    const m = lines1.length;
+    const n = lines2.length;
+
+    // Build LCS table
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (lines1[i - 1].trim() === lines2[j - 1].trim()) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack to find diff
+    const diffLines: DiffLine[] = [];
+    let i = m, j = n;
+
+    const tempLines: DiffLine[] = [];
+
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && lines1[i - 1].trim() === lines2[j - 1].trim()) {
+            tempLines.unshift({
+                type: 'same',
+                lineNumber1: i,
+                lineNumber2: j,
+                content: lines2[j - 1]
+            });
+            i--;
+            j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            tempLines.unshift({
+                type: 'added',
+                lineNumber2: j,
+                content: lines2[j - 1]
+            });
+            j--;
+        } else if (i > 0) {
+            tempLines.unshift({
+                type: 'removed',
+                lineNumber1: i,
+                content: lines1[i - 1]
+            });
+            i--;
+        }
+    }
+
+    // Merge adjacent added/removed into modified when they're on same position
+    for (let k = 0; k < tempLines.length; k++) {
+        const line = tempLines[k];
+
+        // Check if this removed line is followed by added line (potential modification)
+        if (line.type === 'removed' && k + 1 < tempLines.length && tempLines[k + 1].type === 'added') {
+            const nextLine = tempLines[k + 1];
+            // Check if lines are similar (modification rather than complete replacement)
+            if (areSimilarLines(line.content, nextLine.content)) {
+                diffLines.push({
+                    type: 'modified',
+                    lineNumber1: line.lineNumber1,
+                    lineNumber2: nextLine.lineNumber2,
+                    content: nextLine.content,
+                    oldContent: line.content
+                });
+                k++; // Skip the next line as we've merged it
+                continue;
+            }
+        }
+
+        diffLines.push(line);
+    }
+
+    // Calculate stats
+    const stats = {
+        added: diffLines.filter(l => l.type === 'added').length,
+        removed: diffLines.filter(l => l.type === 'removed').length,
+        modified: diffLines.filter(l => l.type === 'modified').length,
+        same: diffLines.filter(l => l.type === 'same').length
+    };
+
+    return { lines: diffLines, stats };
+}
+
+/**
+ * Check if two lines are similar (for detecting modifications vs add/remove)
+ */
+function areSimilarLines(line1: string, line2: string): boolean {
+    const words1 = line1.trim().toLowerCase().split(/\s+/);
+    const words2 = line2.trim().toLowerCase().split(/\s+/);
+
+    if (words1.length === 0 || words2.length === 0) return false;
+
+    // Count common words
+    const set1 = new Set(words1);
+    let common = 0;
+    for (const word of words2) {
+        if (set1.has(word)) common++;
+    }
+
+    // If more than 30% of words are common, consider it a modification
+    const similarity = common / Math.max(words1.length, words2.length);
+    return similarity > 0.3;
+}
+
+/**
+ * Generate HTML for diff visualization
+ */
+export function generateDiffHtml(diff: DiffResult, darkTheme: boolean = true): string {
+    const colors = darkTheme ? {
+        added: { bg: 'rgba(34, 197, 94, 0.15)', border: '#22c55e', text: '#86efac' },
+        removed: { bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', text: '#fca5a5' },
+        modified: { bg: 'rgba(234, 179, 8, 0.15)', border: '#eab308', text: '#fde047' },
+        same: { bg: 'transparent', border: 'transparent', text: '#94a3b8' },
+        lineNum: '#64748b',
+        codeBg: '#1e293b'
+    } : {
+        added: { bg: 'rgba(34, 197, 94, 0.1)', border: '#22c55e', text: '#166534' },
+        removed: { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', text: '#991b1b' },
+        modified: { bg: 'rgba(234, 179, 8, 0.1)', border: '#eab308', text: '#854d0e' },
+        same: { bg: 'transparent', border: 'transparent', text: '#475569' },
+        lineNum: '#94a3b8',
+        codeBg: '#f1f5f9'
+    };
+
+    let html = `<div style="font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 12px; line-height: 1.6;">`;
+
+    for (const line of diff.lines) {
+        const style = colors[line.type];
+        const lineNum1 = line.lineNumber1?.toString().padStart(3, ' ') || '   ';
+        const lineNum2 = line.lineNumber2?.toString().padStart(3, ' ') || '   ';
+
+        const prefix = line.type === 'added' ? '+' :
+                      line.type === 'removed' ? '-' :
+                      line.type === 'modified' ? '~' : ' ';
+
+        const escapedContent = escapeHtmlSimple(line.content);
+
+        html += `
+            <div style="
+                display: flex;
+                background: ${style.bg};
+                border-left: 3px solid ${style.border};
+                padding: 2px 8px;
+                margin: 1px 0;
+            ">
+                <span style="color: ${colors.lineNum}; min-width: 30px; user-select: none;">${lineNum1}</span>
+                <span style="color: ${colors.lineNum}; min-width: 30px; user-select: none;">${lineNum2}</span>
+                <span style="color: ${style.text}; min-width: 16px; font-weight: 600;">${prefix}</span>
+                <span style="color: ${style.text}; flex: 1; white-space: pre-wrap;">${highlightSqlInline(escapedContent, darkTheme)}</span>
+            </div>
+        `;
+
+        // Show old content for modified lines
+        if (line.type === 'modified' && line.oldContent) {
+            const escapedOld = escapeHtmlSimple(line.oldContent);
+            html += `
+                <div style="
+                    display: flex;
+                    background: ${colors.removed.bg};
+                    border-left: 3px solid transparent;
+                    padding: 2px 8px;
+                    margin: 1px 0;
+                    opacity: 0.6;
+                ">
+                    <span style="color: ${colors.lineNum}; min-width: 30px;"></span>
+                    <span style="color: ${colors.lineNum}; min-width: 30px;"></span>
+                    <span style="color: ${colors.removed.text}; min-width: 16px; font-weight: 600;">-</span>
+                    <span style="color: ${colors.removed.text}; flex: 1; white-space: pre-wrap; text-decoration: line-through;">${highlightSqlInline(escapedOld, darkTheme)}</span>
+                </div>
+            `;
+        }
+    }
+
+    html += `</div>`;
+    return html;
+}
+
+/**
+ * Simple inline SQL highlighting (reuses keywords from highlightSql)
+ */
+function highlightSqlInline(html: string, darkTheme: boolean): string {
+    const keywordColor = darkTheme ? '#c792ea' : '#7c3aed';
+    const functionColor = darkTheme ? '#82aaff' : '#2563eb';
+    const stringColor = darkTheme ? '#c3e88d' : '#16a34a';
+    const numberColor = darkTheme ? '#f78c6c' : '#ea580c';
+
+    // Highlight keywords (already escaped, so we match on the escaped text)
+    const keywordPattern = new RegExp(
+        '\\b(' + SQL_KEYWORDS.join('|') + ')\\b',
+        'gi'
+    );
+
+    return html
+        .replace(keywordPattern, `<span style="color: ${keywordColor}; font-weight: 600;">$1</span>`)
+        .replace(/\b(\d+(?:\.\d+)?)\b/g, `<span style="color: ${numberColor};">$1</span>`)
+        .replace(/(&apos;[^&]*&apos;|&quot;[^&]*&quot;)/g, `<span style="color: ${stringColor};">$1</span>`);
+}
+

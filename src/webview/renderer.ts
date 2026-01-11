@@ -388,6 +388,11 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleSqlPreview();
         }
+        // D to show diff modal
+        if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('show-diff-modal'));
+        }
         // / to focus search (like vim)
         if (e.key === '/') {
             e.preventDefault();
@@ -2345,6 +2350,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'T', description: 'Toggle theme' },
         { key: 'L', description: 'Toggle legend' },
         { key: 'S', description: 'Toggle SQL preview' },
+        { key: 'D', description: 'Compare queries (diff)' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];

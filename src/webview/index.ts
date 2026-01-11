@@ -3,6 +3,7 @@ import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
 import { parseSqlBatch, ParseResult, SqlDialect, BatchParseResult } from './sqlParser';
+import { diffSql, generateDiffHtml } from './sqlFormatter';
 import {
     initRenderer,
     render,
@@ -377,6 +378,18 @@ function createToolbar(container: HTMLElement): void {
     });
     featureGroup.appendChild(fullscreenBtn);
 
+    // Query Diff button
+    const diffBtn = document.createElement('button');
+    diffBtn.innerHTML = '⇄';
+    diffBtn.title = 'Compare SQL queries (D)';
+    diffBtn.style.cssText = btnStyle + 'font-size: 14px; border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    diffBtn.addEventListener('click', () => {
+        showQueryDiffModal();
+    });
+    diffBtn.addEventListener('mouseenter', () => diffBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    diffBtn.addEventListener('mouseleave', () => diffBtn.style.background = 'transparent');
+    featureGroup.appendChild(diffBtn);
+
     // Keyboard shortcuts help button
     const helpBtn = document.createElement('button');
     helpBtn.innerHTML = '?';
@@ -400,6 +413,11 @@ function createToolbar(container: HTMLElement): void {
         // Update toolbar styles for light theme
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
     }) as EventListener);
+
+    // Listen for show-diff-modal event (from keyboard shortcut)
+    document.addEventListener('show-diff-modal', () => {
+        showQueryDiffModal();
+    });
 
     // Dialect change handler
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -712,4 +730,282 @@ function updateToolbarTheme(dark: boolean, toolbar: HTMLElement, actions: HTMLEl
     actions.querySelectorAll('button').forEach(btn => {
         btn.style.color = textColor;
     });
+}
+
+// Helper function to show Query Diff modal
+function showQueryDiffModal(): void {
+    const dark = isDarkTheme();
+    const colors = dark ? {
+        bg: 'rgba(15, 23, 42, 0.98)',
+        panelBg: '#1e293b',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#f1f5f9',
+        textMuted: '#94a3b8',
+        inputBg: '#0f172a',
+        inputBorder: 'rgba(148, 163, 184, 0.3)'
+    } : {
+        bg: 'rgba(255, 255, 255, 0.98)',
+        panelBg: '#f8fafc',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        textMuted: '#64748b',
+        inputBg: '#ffffff',
+        inputBorder: 'rgba(148, 163, 184, 0.4)'
+    };
+
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'diff-modal';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+
+    // Create modal content
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: ${colors.bg};
+        border: 1px solid ${colors.border};
+        border-radius: 12px;
+        padding: 24px;
+        width: 90vw;
+        max-width: 1200px;
+        height: 85vh;
+        display: flex;
+        flex-direction: column;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    // Pre-fill query 1 with current SQL
+    const currentSql = window.initialSqlCode || '';
+
+    modal.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; color: ${colors.text}; font-size: 18px;">
+                ⇄ Query Diff
+            </h3>
+            <button id="close-diff" style="
+                background: none;
+                border: none;
+                color: ${colors.textMuted};
+                cursor: pointer;
+                font-size: 24px;
+                padding: 4px;
+            ">&times;</button>
+        </div>
+
+        <div id="diff-input-section" style="display: flex; gap: 16px; flex: 1; min-height: 0;">
+            <!-- Query 1 input -->
+            <div style="flex: 1; display: flex; flex-direction: column;">
+                <label style="color: ${colors.textMuted}; font-size: 12px; margin-bottom: 8px; font-weight: 600;">
+                    Query 1 (Original)
+                </label>
+                <textarea id="diff-query1" placeholder="Paste first SQL query here..." style="
+                    flex: 1;
+                    background: ${colors.inputBg};
+                    border: 1px solid ${colors.inputBorder};
+                    border-radius: 8px;
+                    padding: 12px;
+                    color: ${colors.text};
+                    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+                    font-size: 12px;
+                    resize: none;
+                    outline: none;
+                ">${escapeHtml(currentSql)}</textarea>
+            </div>
+
+            <!-- Query 2 input -->
+            <div style="flex: 1; display: flex; flex-direction: column;">
+                <label style="color: ${colors.textMuted}; font-size: 12px; margin-bottom: 8px; font-weight: 600;">
+                    Query 2 (Modified)
+                </label>
+                <textarea id="diff-query2" placeholder="Paste second SQL query here..." style="
+                    flex: 1;
+                    background: ${colors.inputBg};
+                    border: 1px solid ${colors.inputBorder};
+                    border-radius: 8px;
+                    padding: 12px;
+                    color: ${colors.text};
+                    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+                    font-size: 12px;
+                    resize: none;
+                    outline: none;
+                "></textarea>
+            </div>
+        </div>
+
+        <div id="diff-result-section" style="display: none; flex: 1; flex-direction: column; min-height: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div id="diff-stats" style="display: flex; gap: 16px;"></div>
+                <button id="back-to-input" style="
+                    background: transparent;
+                    border: 1px solid ${colors.border};
+                    border-radius: 6px;
+                    color: ${colors.textMuted};
+                    padding: 6px 12px;
+                    font-size: 12px;
+                    cursor: pointer;
+                ">← Edit Queries</button>
+            </div>
+            <div id="diff-output" style="
+                flex: 1;
+                overflow-y: auto;
+                background: ${colors.panelBg};
+                border: 1px solid ${colors.border};
+                border-radius: 8px;
+                padding: 12px;
+            "></div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+            <button id="swap-queries" style="
+                background: transparent;
+                border: 1px solid ${colors.border};
+                border-radius: 6px;
+                color: ${colors.textMuted};
+                padding: 8px 16px;
+                font-size: 13px;
+                cursor: pointer;
+            ">⇄ Swap</button>
+            <button id="clear-queries" style="
+                background: transparent;
+                border: 1px solid ${colors.border};
+                border-radius: 6px;
+                color: ${colors.textMuted};
+                padding: 8px 16px;
+                font-size: 13px;
+                cursor: pointer;
+            ">Clear</button>
+            <button id="compare-queries" style="
+                background: rgba(99, 102, 241, 0.9);
+                border: none;
+                border-radius: 6px;
+                color: white;
+                padding: 8px 24px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+            ">Compare</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Get elements
+    const query1Input = modal.querySelector('#diff-query1') as HTMLTextAreaElement;
+    const query2Input = modal.querySelector('#diff-query2') as HTMLTextAreaElement;
+    const inputSection = modal.querySelector('#diff-input-section') as HTMLElement;
+    const resultSection = modal.querySelector('#diff-result-section') as HTMLElement;
+    const diffOutput = modal.querySelector('#diff-output') as HTMLElement;
+    const diffStats = modal.querySelector('#diff-stats') as HTMLElement;
+
+    // Close handlers
+    const closeModal = () => overlay.remove();
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModal();
+    });
+    modal.querySelector('#close-diff')?.addEventListener('click', closeModal);
+
+    // Swap queries
+    modal.querySelector('#swap-queries')?.addEventListener('click', () => {
+        const temp = query1Input.value;
+        query1Input.value = query2Input.value;
+        query2Input.value = temp;
+    });
+
+    // Clear queries
+    modal.querySelector('#clear-queries')?.addEventListener('click', () => {
+        query1Input.value = '';
+        query2Input.value = '';
+        inputSection.style.display = 'flex';
+        resultSection.style.display = 'none';
+    });
+
+    // Back to input
+    modal.querySelector('#back-to-input')?.addEventListener('click', () => {
+        inputSection.style.display = 'flex';
+        resultSection.style.display = 'none';
+    });
+
+    // Compare queries
+    modal.querySelector('#compare-queries')?.addEventListener('click', () => {
+        const sql1 = query1Input.value.trim();
+        const sql2 = query2Input.value.trim();
+
+        if (!sql1 || !sql2) {
+            alert('Please enter both SQL queries to compare.');
+            return;
+        }
+
+        // Compute diff
+        const diff = diffSql(sql1, sql2);
+
+        // Show stats
+        diffStats.innerHTML = `
+            <span style="
+                background: rgba(34, 197, 94, 0.2);
+                color: ${dark ? '#86efac' : '#166534'};
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+            ">+${diff.stats.added} added</span>
+            <span style="
+                background: rgba(239, 68, 68, 0.2);
+                color: ${dark ? '#fca5a5' : '#991b1b'};
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+            ">-${diff.stats.removed} removed</span>
+            <span style="
+                background: rgba(234, 179, 8, 0.2);
+                color: ${dark ? '#fde047' : '#854d0e'};
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+            ">~${diff.stats.modified} modified</span>
+            <span style="
+                color: ${colors.textMuted};
+                padding: 4px 10px;
+                font-size: 12px;
+            ">${diff.stats.same} unchanged</span>
+        `;
+
+        // Generate and show diff HTML
+        diffOutput.innerHTML = generateDiffHtml(diff, dark);
+
+        // Switch to result view
+        inputSection.style.display = 'none';
+        resultSection.style.display = 'flex';
+    });
+
+    // Close on Escape
+    const escHandler = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // Focus on query 2 input
+    query2Input.focus();
+}
+
+// Helper to escape HTML
+function escapeHtml(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
