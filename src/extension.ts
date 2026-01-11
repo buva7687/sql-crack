@@ -88,11 +88,99 @@ export function activate(context: vscode.ExtensionContext) {
         const config = getConfig();
         const syncEnabled = config.get<boolean>('syncEditorToFlow');
 
-        if (syncEnabled && e.textEditor.document.languageId === 'sql') {
+        if (syncEnabled && e.textEditor.document.languageId === 'sql' && VisualizationPanel.currentPanel) {
             const line = e.selections[0].active.line + 1; // 1-indexed
+            const sql = e.textEditor.document.getText();
+            
+            // Determine which query this line belongs to
+            const queryIndex = getQueryIndexForLine(sql, line);
+            if (queryIndex !== null && queryIndex >= 0) {
+                VisualizationPanel.sendQueryIndex(queryIndex);
+            }
+            
             VisualizationPanel.sendCursorPosition(line);
         }
     });
+
+    // Helper function to determine which query index a line belongs to
+    function getQueryIndexForLine(sql: string, lineNumber: number): number | null {
+        const statements = splitSqlStatements(sql);
+        let currentLine = 1;
+        const lines = sql.split('\n');
+
+        for (let queryIndex = 0; queryIndex < statements.length; queryIndex++) {
+            const stmt = statements[queryIndex];
+            // Find the starting line of this statement
+            let stmtStartLine = currentLine;
+            const stmtFirstLine = stmt.trim().split('\n')[0];
+            for (let i = currentLine - 1; i < lines.length; i++) {
+                if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
+                    stmtStartLine = i + 1;
+                    break;
+                }
+            }
+            
+            const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
+            
+            // Check if the line number falls within this query's range
+            if (lineNumber >= stmtStartLine && lineNumber <= stmtEndLine) {
+                return queryIndex;
+            }
+            
+            currentLine = stmtStartLine + stmt.split('\n').length;
+        }
+        
+        return null;
+    }
+
+    // Helper function to split SQL into statements (simplified version)
+    function splitSqlStatements(sql: string): string[] {
+        const statements: string[] = [];
+        let current = '';
+        let inString = false;
+        let stringChar = '';
+        let depth = 0;
+
+        for (let i = 0; i < sql.length; i++) {
+            const char = sql[i];
+            const prevChar = i > 0 ? sql[i - 1] : '';
+
+            // Handle string literals
+            if ((char === "'" || char === '"') && prevChar !== '\\') {
+                if (!inString) {
+                    inString = true;
+                    stringChar = char;
+                } else if (char === stringChar) {
+                    inString = false;
+                }
+            }
+
+            // Handle parentheses depth
+            if (!inString) {
+                if (char === '(') { depth++; }
+                if (char === ')') { depth--; }
+            }
+
+            // Split on semicolon at depth 0
+            if (char === ';' && !inString && depth === 0) {
+                const trimmed = current.trim();
+                if (trimmed) {
+                    statements.push(trimmed);
+                }
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+
+        // Add last statement
+        const trimmed = current.trim();
+        if (trimmed) {
+            statements.push(trimmed);
+        }
+
+        return statements;
+    }
 
     // Listen for document changes (for auto-refresh if needed)
     let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {

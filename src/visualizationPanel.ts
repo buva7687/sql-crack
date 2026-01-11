@@ -64,6 +64,15 @@ export class VisualizationPanel {
         }
     }
 
+    public static sendQueryIndex(queryIndex: number) {
+        if (VisualizationPanel.currentPanel) {
+            VisualizationPanel.currentPanel._postMessage({
+                command: 'switchToQuery',
+                queryIndex: queryIndex
+            });
+        }
+    }
+
     public static markAsStale() {
         if (VisualizationPanel.currentPanel) {
             VisualizationPanel.currentPanel._isStale = true;
