@@ -118,6 +118,7 @@ export interface ParseResult {
 export interface BatchParseResult {
     queries: ParseResult[];
     totalStats: QueryStats;
+    queryLineRanges?: Array<{ startLine: number; endLine: number }>; // Line ranges for each query (1-indexed)
 }
 
 const NODE_COLORS: Record<FlowNode['type'], string> = {
@@ -256,6 +257,7 @@ export function splitSqlStatements(sql: string): string[] {
 export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): BatchParseResult {
     const statements = splitSqlStatements(sql);
     const queries: ParseResult[] = [];
+    const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
     // Track line offsets for each statement
     let currentLine = 1;
@@ -286,6 +288,10 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         }
 
         queries.push(result);
+
+        // Calculate end line for this statement
+        const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
+        queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
 
         // Update current line past this statement
         currentLine = stmtStartLine + stmt.split('\n').length;
@@ -329,7 +335,7 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         totalStats.complexity = 'Very Complex';
     }
 
-    return { queries, totalStats };
+    return { queries, totalStats, queryLineRanges };
 }
 
 // Extract line numbers for SQL keywords

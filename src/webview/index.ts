@@ -74,6 +74,9 @@ function setupVSCodeMessageListener(): void {
             case 'cursorPosition':
                 handleCursorPosition(message.line);
                 break;
+            case 'switchToQuery':
+                handleSwitchToQuery(message.queryIndex);
+                break;
             case 'markStale':
                 markAsStale();
                 break;
@@ -98,6 +101,22 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
 function handleCursorPosition(line: number): void {
     // Import from renderer - highlight node at line
     highlightNodeAtLine(line);
+}
+
+function handleSwitchToQuery(queryIndex: number): void {
+    if (!batchResult || queryIndex < 0 || queryIndex >= batchResult.queries.length) {
+        return;
+    }
+    
+    // Only switch if it's a different query
+    if (currentQueryIndex !== queryIndex) {
+        currentQueryIndex = queryIndex;
+        renderCurrentQuery();
+        updateBatchTabs();
+    }
+    
+    // Also highlight the node at the cursor position
+    // This will be handled by the cursorPosition message that follows
 }
 
 function markAsStale(): void {
