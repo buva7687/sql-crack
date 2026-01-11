@@ -96,19 +96,21 @@ export function initRenderer(container: HTMLElement): void {
     detailsPanel.className = 'details-panel';
     detailsPanel.style.cssText = `
         position: absolute;
-        right: 0;
-        top: 0;
-        width: 280px;
-        height: 100%;
+        right: 16px;
+        top: 50%;
+        width: 320px;
+        max-height: 70vh;
         background: rgba(15, 23, 42, 0.98);
-        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
         padding: 20px;
         box-sizing: border-box;
         overflow-y: auto;
-        transform: translateX(100%);
+        transform: translate(calc(100% + 16px), -50%);
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         z-index: 200;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     `;
     container.appendChild(detailsPanel);
 
@@ -1383,14 +1385,14 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (!detailsPanel) { return; }
 
     if (!nodeId) {
-        detailsPanel.style.transform = 'translateX(100%)';
+        detailsPanel.style.transform = 'translate(calc(100% + 16px), -50%)';
         return;
     }
 
     const node = currentNodes.find(n => n.id === nodeId);
     if (!node) { return; }
 
-    detailsPanel.style.transform = 'translateX(0)';
+    detailsPanel.style.transform = 'translate(0, -50%)';
 
     // Build details section based on node type
     let detailsSection = '';
