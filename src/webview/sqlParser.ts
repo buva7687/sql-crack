@@ -46,12 +46,14 @@ export interface FlowNode {
     };
     // For CASE nodes - case details
     caseDetails?: {
-        conditions: Array<{
-            when: string;
-            then: string;
+        cases: Array<{
+            conditions: Array<{
+                when: string;
+                then: string;
+            }>;
+            elseValue?: string;
+            alias?: string;
         }>;
-        elseValue?: string;
-        alias?: string;
     };
     // For SELECT nodes - column details with source tracking
     columns?: ColumnInfo[];
@@ -109,6 +111,7 @@ export interface ParseResult {
     hints: OptimizationHint[];
     sql: string;
     columnLineage: ColumnLineage[];
+    tableUsage: Map<string, number>; // Table name -> usage count
     error?: string;
 }
 
@@ -144,6 +147,7 @@ let nodeCounter = 0;
 let hasSelectStar = false;
 let hasNoLimit = false;
 let statementType = '';
+let tableUsageMap: Map<string, number> = new Map();
 
 function resetStats(): void {
     stats = {
@@ -162,6 +166,13 @@ function resetStats(): void {
     hasSelectStar = false;
     hasNoLimit = true;
     statementType = '';
+    tableUsageMap = new Map();
+}
+
+// Track table usage
+function trackTableUsage(tableName: string): void {
+    const normalizedName = tableName.toLowerCase();
+    tableUsageMap.set(normalizedName, (tableUsageMap.get(normalizedName) || 0) + 1);
 }
 
 function calculateComplexity(): void {
@@ -447,7 +458,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const edges: FlowEdge[] = [];
 
     if (!sql || !sql.trim()) {
-        return { nodes, edges, stats, hints, sql, columnLineage: [], error: 'No SQL provided' };
+        return { nodes, edges, stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
     }
 
     const parser = new Parser();
@@ -475,10 +486,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Extract column lineage
         const columnLineage = extractColumnLineage(statements[0], nodes);
 
-        return { nodes, edges, stats, hints, sql, columnLineage };
+        return { nodes, edges, stats, hints, sql, columnLineage, tableUsage: tableUsageMap };
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Parse error';
-        return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], error: message };
+        return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
     }
 }
 
@@ -649,6 +660,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 // Create table node for join tables too
                 stats.tables++;
                 const tableName = getTableName(fromItem);
+                trackTableUsage(tableName);
                 const tableId = genId('table');
                 // Determine table category
                 const isCteRef = cteNames.has(tableName.toLowerCase());
@@ -803,6 +815,65 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             });
         }
         previousId = havingId;
+    }
+
+    // Check for aggregate functions in columns - with detailed breakdown
+    const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns);
+    // Always show aggregate node when aggregate functions are present (similar to window functions)
+    if (aggregateFuncDetails.length > 0) {
+        const aggregateId = genId('aggregate');
+
+        // Calculate height based on number of functions
+        const baseHeight = 50;
+        const perFuncHeight = 28;
+        const aggregateHeight = baseHeight + aggregateFuncDetails.length * perFuncHeight;
+
+        nodes.push({
+            id: aggregateId,
+            type: 'aggregate',
+            label: 'AGGREGATE',
+            description: `${aggregateFuncDetails.length} aggregate function${aggregateFuncDetails.length > 1 ? 's' : ''}`,
+            aggregateDetails: { functions: aggregateFuncDetails },
+            x: 0, y: 0, width: 220, height: Math.min(aggregateHeight, 180)
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: aggregateId
+            });
+        }
+        previousId = aggregateId;
+    }
+
+    // Check for CASE statements in columns - with detailed breakdown
+    const caseStatementDetails = extractCaseStatementDetails(stmt.columns);
+    if (caseStatementDetails.length > 0) {
+        const caseId = genId('case');
+
+        // Calculate height based on number of CASE statements
+        const baseHeight = 50;
+        const perCaseHeight = 35; // More height per CASE due to multiple conditions
+        const caseHeight = baseHeight + caseStatementDetails.length * perCaseHeight;
+
+        nodes.push({
+            id: caseId,
+            type: 'case',
+            label: 'CASE',
+            description: `${caseStatementDetails.length} CASE statement${caseStatementDetails.length > 1 ? 's' : ''}`,
+            caseDetails: { cases: caseStatementDetails },
+            x: 0, y: 0, width: 220, height: Math.min(caseHeight, 200)
+        });
+
+        if (previousId) {
+            edges.push({
+                id: genId('e'),
+                source: previousId,
+                target: caseId
+            });
+        }
+        previousId = caseId;
     }
 
     // Check for window functions in columns - with detailed breakdown
@@ -1001,6 +1072,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
     if (!tableName || fromItem.join) { return null; } // Skip join tables, handled separately
 
     stats.tables++;
+    trackTableUsage(tableName);
     const tableId = genId('table');
     // Determine if this is a CTE reference
     const isCteRef = cteNames.has(tableName.toLowerCase());
@@ -1173,6 +1245,129 @@ function extractWindowFunctionDetails(columns: any): Array<{
     }
 
     return details;
+}
+
+// Extract aggregate functions from SELECT columns (not just GROUP BY)
+function extractAggregateFunctionDetails(columns: any): Array<{
+    name: string;
+    expression: string;
+    alias?: string;
+}> {
+    if (!columns || !Array.isArray(columns)) { return []; }
+
+    const aggregateFuncs = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT', 'STRING_AGG', 'ARRAY_AGG'];
+    const details: Array<{ name: string; expression: string; alias?: string }> = [];
+
+    function extractAggregatesFromExpr(expr: any): void {
+        if (!expr) return;
+
+        // Check if this is an aggregate function
+        if (expr.type === 'aggr_func' || (expr.name && aggregateFuncs.includes(String(expr.name).toUpperCase()))) {
+            const funcName = String(expr.name || 'AGG').toUpperCase();
+            
+            // Extract arguments/expression
+            let expression = funcName + '()';
+            if (expr.args) {
+                const args = expr.args.value || expr.args;
+                if (Array.isArray(args)) {
+                    const argStrs = args.map((arg: any) => {
+                        if (arg.column) return arg.column;
+                        if (arg.value) return String(arg.value);
+                        if (arg.expr?.column) return arg.expr.column;
+                        return '?';
+                    });
+                    expression = funcName + '(' + argStrs.join(', ') + ')';
+                } else if (args.column) {
+                    expression = funcName + '(' + args.column + ')';
+                }
+            }
+
+            details.push({
+                name: funcName,
+                expression: expression,
+                alias: undefined
+            });
+            return;
+        }
+
+        // Recursively check nested expressions
+        if (expr.args) {
+            const args = expr.args.value || expr.args;
+            if (Array.isArray(args)) {
+                args.forEach(extractAggregatesFromExpr);
+            } else {
+                extractAggregatesFromExpr(args);
+            }
+        }
+        if (expr.left) extractAggregatesFromExpr(expr.left);
+        if (expr.right) extractAggregatesFromExpr(expr.right);
+    }
+
+    for (const col of columns) {
+        if (col.expr) {
+            extractAggregatesFromExpr(col.expr);
+            // Store alias if present
+            if (col.as && details.length > 0) {
+                details[details.length - 1].alias = col.as;
+            }
+        }
+    }
+
+    return details;
+}
+
+// Extract CASE statements from SELECT columns
+function extractCaseStatementDetails(columns: any): Array<{
+    conditions: Array<{ when: string; then: string }>;
+    elseValue?: string;
+    alias?: string;
+}> {
+    if (!columns || !Array.isArray(columns)) { return []; }
+
+    const caseDetails: Array<{
+        conditions: Array<{ when: string; then: string }>;
+        elseValue?: string;
+        alias?: string;
+    }> = [];
+
+    function formatExpr(expr: any): string {
+        if (!expr) return '?';
+        if (expr.column) return expr.column;
+        if (expr.value) return String(expr.value);
+        if (expr.type === 'binary_expr') {
+            const left = formatExpr(expr.left);
+            const right = formatExpr(expr.right);
+            return `${left} ${expr.operator} ${right}`;
+        }
+        return 'expr';
+    }
+
+    for (const col of columns) {
+        if (col.expr && col.expr.type === 'case') {
+            const caseExpr = col.expr;
+            const conditions: Array<{ when: string; then: string }> = [];
+
+            if (caseExpr.args && Array.isArray(caseExpr.args)) {
+                for (const arg of caseExpr.args) {
+                    if (arg.cond && arg.result) {
+                        conditions.push({
+                            when: formatExpr(arg.cond),
+                            then: formatExpr(arg.result)
+                        });
+                    }
+                }
+            }
+
+            const elseValue = caseExpr.else ? formatExpr(caseExpr.else) : undefined;
+            const alias = col.as;
+
+            if (conditions.length > 0) {
+                caseDetails.push({ conditions, elseValue, alias });
+            }
+        }
+    }
+
+    return caseDetails;
 }
 
 // Parse CTE or Subquery internal structure for nested visualization

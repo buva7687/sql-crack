@@ -53,6 +53,7 @@ let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
+let currentTableUsage: Map<string, number> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -439,6 +440,7 @@ export function render(result: ParseResult): void {
     currentHints = result.hints;
     currentSql = result.sql;
     currentColumnLineage = result.columnLineage || [];
+    currentTableUsage = result.tableUsage || new Map();
 
     // Reset highlight state
     state.highlightedColumnSources = [];
@@ -497,12 +499,18 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
     const isWindowNode = node.type === 'window' && node.windowDetails;
+    const isAggregateNode = node.type === 'aggregate' && node.aggregateDetails && node.label === 'AGGREGATE';
+    const isCaseNode = node.type === 'case' && node.caseDetails;
     const isJoinNode = node.type === 'join';
 
     if (isContainer) {
         renderContainerNode(node, group);
     } else if (isWindowNode) {
         renderWindowNode(node, group);
+    } else if (isAggregateNode) {
+        renderAggregateNode(node, group);
+    } else if (isCaseNode) {
+        renderCaseNode(node, group);
     } else if (isJoinNode) {
         renderJoinNode(node, group);
     } else {
@@ -1074,6 +1082,192 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     }
 }
 
+function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
+    const aggregateDetails = node.aggregateDetails!;
+    const padding = 10;
+    const headerHeight = 32;
+    const funcHeight = 24;
+
+    // Main container
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    // Icon and title
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + 10));
+    icon.setAttribute('y', String(node.y + 22));
+    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('font-size', '12');
+    icon.textContent = 'Σ';
+    group.appendChild(icon);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', String(node.x + 28));
+    title.setAttribute('y', String(node.y + 22));
+    title.setAttribute('fill', 'white');
+    title.setAttribute('font-size', '12');
+    title.setAttribute('font-weight', '600');
+    title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    title.textContent = `AGGREGATE (${aggregateDetails.functions.length})`;
+    group.appendChild(title);
+
+    // Render each aggregate function
+    let yOffset = node.y + headerHeight + 8;
+    for (const func of aggregateDetails.functions.slice(0, 4)) { // Max 4 visible
+        // Function pill
+        const funcPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        funcPill.setAttribute('x', String(node.x + padding));
+        funcPill.setAttribute('y', String(yOffset));
+        funcPill.setAttribute('width', String(node.width - padding * 2));
+        funcPill.setAttribute('height', String(funcHeight));
+        funcPill.setAttribute('rx', '4');
+        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        group.appendChild(funcPill);
+
+        // Function expression
+        const funcText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        funcText.setAttribute('x', String(node.x + padding + 6));
+        funcText.setAttribute('y', String(yOffset + 16));
+        funcText.setAttribute('fill', '#fbbf24');
+        funcText.setAttribute('font-size', '10');
+        funcText.setAttribute('font-weight', '600');
+        funcText.setAttribute('font-family', 'monospace');
+        const truncatedExpr = func.expression.length > 25 ? func.expression.substring(0, 22) + '...' : func.expression;
+        funcText.textContent = truncatedExpr;
+        group.appendChild(funcText);
+
+        yOffset += funcHeight + 4;
+    }
+
+    // Show "more" indicator if there are more functions
+    if (aggregateDetails.functions.length > 4) {
+        const moreText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        moreText.setAttribute('x', String(node.x + node.width / 2));
+        moreText.setAttribute('y', String(node.y + node.height - 8));
+        moreText.setAttribute('text-anchor', 'middle');
+        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('font-size', '9');
+        moreText.textContent = `+${aggregateDetails.functions.length - 4} more`;
+        group.appendChild(moreText);
+    }
+}
+
+function renderCaseNode(node: FlowNode, group: SVGGElement): void {
+    const caseDetails = node.caseDetails!;
+    const padding = 10;
+    const headerHeight = 32;
+    const caseHeight = 40;
+
+    // Main container
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    // Icon and title
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + 10));
+    icon.setAttribute('y', String(node.y + 22));
+    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('font-size', '12');
+    icon.textContent = '?';
+    group.appendChild(icon);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', String(node.x + 28));
+    title.setAttribute('y', String(node.y + 22));
+    title.setAttribute('fill', 'white');
+    title.setAttribute('font-size', '12');
+    title.setAttribute('font-weight', '600');
+    title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    title.textContent = `CASE (${caseDetails.cases.length})`;
+    group.appendChild(title);
+
+    // Render each CASE statement
+    let yOffset = node.y + headerHeight + 8;
+    for (const caseStmt of caseDetails.cases.slice(0, 3)) { // Max 3 visible
+        // CASE pill
+        const casePill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        casePill.setAttribute('x', String(node.x + padding));
+        casePill.setAttribute('y', String(yOffset));
+        casePill.setAttribute('width', String(node.width - padding * 2));
+        casePill.setAttribute('height', String(caseHeight));
+        casePill.setAttribute('rx', '4');
+        casePill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        group.appendChild(casePill);
+
+        // CASE conditions count
+        const caseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        caseText.setAttribute('x', String(node.x + padding + 6));
+        caseText.setAttribute('y', String(yOffset + 18));
+        caseText.setAttribute('fill', '#fbbf24');
+        caseText.setAttribute('font-size', '10');
+        caseText.setAttribute('font-weight', '600');
+        caseText.setAttribute('font-family', 'monospace');
+        caseText.textContent = `${caseStmt.conditions.length} WHEN condition${caseStmt.conditions.length > 1 ? 's' : ''}`;
+        group.appendChild(caseText);
+
+        if (caseStmt.elseValue) {
+            const elseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            elseText.setAttribute('x', String(node.x + padding + 6));
+            elseText.setAttribute('y', String(yOffset + 32));
+            elseText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            elseText.setAttribute('font-size', '9');
+            const truncatedElse = caseStmt.elseValue.length > 20 ? caseStmt.elseValue.substring(0, 17) + '...' : caseStmt.elseValue;
+            elseText.textContent = 'ELSE: ' + truncatedElse;
+            group.appendChild(elseText);
+        }
+
+        yOffset += caseHeight + 4;
+    }
+
+    // Show "more" indicator if there are more CASE statements
+    if (caseDetails.cases.length > 3) {
+        const moreText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        moreText.setAttribute('x', String(node.x + node.width / 2));
+        moreText.setAttribute('y', String(node.y + node.height - 8));
+        moreText.setAttribute('text-anchor', 'middle');
+        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('font-size', '9');
+        moreText.textContent = `+${caseDetails.cases.length - 3} more`;
+        group.appendChild(moreText);
+    }
+}
+
 function toggleNodeExpansion(node: FlowNode): void {
     node.expanded = !node.expanded;
 
@@ -1234,6 +1428,69 @@ function updateDetailsPanel(nodeId: string | null): void {
             </div>
         `;
     }
+
+    // Aggregate function details
+    if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
+        detailsSection += `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Aggregate Functions</div>
+                ${node.aggregateDetails.functions.map(func => `
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                        <div style="color: #f59e0b; font-weight: 600; font-size: 13px; font-family: monospace; margin-bottom: 4px;">
+                            ${escapeHtml(func.expression)}
+                        </div>
+                        ${func.alias ? `
+                            <div style="color: #94a3b8; font-size: 11px; font-family: monospace;">
+                                Alias: ${escapeHtml(func.alias)}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+                ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+                        <div style="color: #94a3b8; font-size: 11px; margin-bottom: 4px;">GROUP BY:</div>
+                        <div style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    // CASE statement details
+    if (node.caseDetails && node.caseDetails.cases.length > 0) {
+        detailsSection += `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">CASE Statements</div>
+                ${node.caseDetails.cases.map((caseStmt, idx) => `
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                        ${caseStmt.alias ? `
+                            <div style="color: #eab308; font-weight: 600; font-size: 12px; margin-bottom: 8px;">
+                                ${escapeHtml(caseStmt.alias)}
+                            </div>
+                        ` : ''}
+                        ${caseStmt.conditions.map((cond, condIdx) => `
+                            <div style="margin-bottom: 6px;">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                    <span style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">WHEN</span>
+                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 6px; margin-left: 40px;">
+                                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">THEN</span>
+                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${caseStmt.elseValue ? `
+                            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                                <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">ELSE</span>
+                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
     // Children details for CTEs and subqueries
     else if (node.children && node.children.length > 0) {
         detailsSection = `
@@ -1303,6 +1560,41 @@ function updateStatsPanel(): void {
         'Very Complex': '#ef4444'
     };
 
+    // Build table list HTML
+    let tableListHtml = '';
+    if (currentTableUsage && currentTableUsage.size > 0) {
+        const sortedTables = Array.from(currentTableUsage.entries())
+            .sort((a, b) => b[1] - a[1]) // Sort by usage count descending
+            .slice(0, 8); // Show top 8 tables
+        
+        tableListHtml = `
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px; font-weight: 600;">Tables Used:</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;">
+                    ${sortedTables.map(([tableName, count]) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                            <span style="color: #cbd5e1; font-family: monospace;">${escapeHtml(tableName)}</span>
+                            <span style="
+                                background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
+                                color: ${count > 1 ? '#fbbf24' : '#94a3b8'};
+                                padding: 2px 6px;
+                                border-radius: 4px;
+                                font-weight: 600;
+                                min-width: 20px;
+                                text-align: center;
+                            ">${count}</span>
+                        </div>
+                    `).join('')}
+                    ${currentTableUsage.size > 8 ? `
+                        <div style="font-size: 9px; color: #64748b; font-style: italic;">
+                            +${currentTableUsage.size - 8} more
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
     statsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-weight: 600; color: #f1f5f9;">Query Stats</span>
@@ -1340,6 +1632,7 @@ function updateStatsPanel(): void {
                 ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
             </div>
         ` : ''}
+        ${tableListHtml}
     `;
 }
 
@@ -2137,7 +2430,8 @@ export function toggleNodeCollapse(nodeId: string): void {
         stats: currentStats!,
         hints: currentHints,
         sql: currentSql,
-        columnLineage: currentColumnLineage
+        columnLineage: currentColumnLineage,
+        tableUsage: currentTableUsage
     };
     render(result);
 }
