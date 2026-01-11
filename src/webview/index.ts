@@ -24,25 +24,99 @@ import {
     isFullscreen,
     toggleTheme,
     isDarkTheme,
-    getKeyboardShortcuts
+    getKeyboardShortcuts,
+    highlightNodeAtLine
 } from './renderer';
 
 declare global {
     interface Window {
         initialSqlCode: string;
         vscodeTheme?: string;
+        defaultDialect?: string;
+        fileName?: string;
+        vscodeApi?: {
+            postMessage: (message: any) => void;
+        };
     }
 }
 
+// Pinned visualization tabs
+interface PinnedTab {
+    id: string;
+    name: string;
+    sql: string;
+    dialect: SqlDialect;
+    result: BatchParseResult | null;
+}
+
 // Current state
-let currentDialect: SqlDialect = 'MySQL';
+let currentDialect: SqlDialect = (window.defaultDialect as SqlDialect) || 'MySQL';
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
+let pinnedTabs: PinnedTab[] = [];
+let activeTabId: string | null = null;
+let isStale: boolean = false;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     init();
+    setupVSCodeMessageListener();
 });
+
+// Listen for messages from VS Code extension
+function setupVSCodeMessageListener(): void {
+    window.addEventListener('message', (event) => {
+        const message = event.data;
+        switch (message.command) {
+            case 'refresh':
+                handleRefresh(message.sql, message.options);
+                break;
+            case 'cursorPosition':
+                handleCursorPosition(message.line);
+                break;
+            case 'markStale':
+                markAsStale();
+                break;
+        }
+    });
+}
+
+function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
+    window.initialSqlCode = sql;
+    currentDialect = options.dialect as SqlDialect;
+
+    // Update dialect dropdown
+    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
+    if (dialectSelect) {
+        dialectSelect.value = currentDialect;
+    }
+
+    visualize(sql);
+    clearStaleIndicator();
+}
+
+function handleCursorPosition(line: number): void {
+    // Import from renderer - highlight node at line
+    highlightNodeAtLine(line);
+}
+
+function markAsStale(): void {
+    isStale = true;
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.style.background = 'rgba(234, 179, 8, 0.3)';
+        refreshBtn.title = 'Query changed - click to refresh';
+    }
+}
+
+function clearStaleIndicator(): void {
+    isStale = false;
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.style.background = 'transparent';
+        refreshBtn.title = 'Refresh visualization';
+    }
+}
 
 function init(): void {
     const container = document.getElementById('root');
@@ -304,11 +378,50 @@ function createToolbar(container: HTMLElement): void {
         overflow: hidden;
     `;
 
+    // Refresh button
+    const refreshBtn = document.createElement('button');
+    refreshBtn.id = 'refresh-btn';
+    refreshBtn.innerHTML = '↻';
+    refreshBtn.title = 'Refresh visualization';
+    refreshBtn.style.cssText = btnStyle + 'font-size: 16px;';
+    refreshBtn.addEventListener('click', () => {
+        // Request refresh from VS Code extension
+        if (window.vscodeApi) {
+            window.vscodeApi.postMessage({ command: 'requestRefresh' });
+        } else {
+            // Fallback: re-visualize current SQL
+            const sql = window.initialSqlCode || '';
+            if (sql) {
+                visualize(sql);
+                clearStaleIndicator();
+            }
+        }
+    });
+    refreshBtn.addEventListener('mouseenter', () => {
+        if (!isStale) refreshBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    refreshBtn.addEventListener('mouseleave', () => {
+        if (!isStale) refreshBtn.style.background = 'transparent';
+    });
+    featureGroup.appendChild(refreshBtn);
+
+    // Pin/Save tab button
+    const pinBtn = document.createElement('button');
+    pinBtn.innerHTML = '📌';
+    pinBtn.title = 'Pin current visualization (save as tab)';
+    pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    pinBtn.addEventListener('click', () => {
+        pinCurrentVisualization();
+    });
+    pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
+    featureGroup.appendChild(pinBtn);
+
     // Legend button
     const legendBtn = document.createElement('button');
     legendBtn.innerHTML = '🎨';
-    legendBtn.title = 'Show color legend';
-    legendBtn.style.cssText = btnStyle;
+    legendBtn.title = 'Show color legend (L)';
+    legendBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
     legendBtn.addEventListener('click', () => {
         toggleLegend();
     });
@@ -1008,4 +1121,206 @@ function escapeHtml(str: string): string {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// ============================================================
+// FEATURE: Pinned Visualization Tabs
+// ============================================================
+
+function pinCurrentVisualization(): void {
+    const sql = window.initialSqlCode || '';
+    if (!sql.trim()) {
+        alert('No visualization to pin');
+        return;
+    }
+
+    const tabId = 'tab-' + Date.now();
+    const tabName = window.fileName || `Query ${pinnedTabs.length + 1}`;
+
+    const pinnedTab: PinnedTab = {
+        id: tabId,
+        name: tabName.replace('.sql', ''),
+        sql: sql,
+        dialect: currentDialect,
+        result: batchResult
+    };
+
+    pinnedTabs.push(pinnedTab);
+    activeTabId = tabId;
+
+    updateTabsUI();
+}
+
+function updateTabsUI(): void {
+    let tabsContainer = document.getElementById('pinned-tabs-container');
+
+    if (!tabsContainer) {
+        tabsContainer = createTabsContainer();
+    }
+
+    // Show tabs container if there are pinned tabs
+    tabsContainer.style.display = pinnedTabs.length > 0 ? 'flex' : 'none';
+
+    // Render tabs
+    const tabsList = tabsContainer.querySelector('#tabs-list') as HTMLElement;
+    if (!tabsList) return;
+
+    tabsList.innerHTML = '';
+
+    // Add "Current" tab
+    const currentTab = createTabElement({
+        id: 'current',
+        name: 'Current',
+        sql: window.initialSqlCode || '',
+        dialect: currentDialect,
+        result: batchResult
+    }, activeTabId === null);
+    tabsList.appendChild(currentTab);
+
+    // Add pinned tabs
+    for (const tab of pinnedTabs) {
+        const tabEl = createTabElement(tab, activeTabId === tab.id);
+        tabsList.appendChild(tabEl);
+    }
+}
+
+function createTabsContainer(): HTMLElement {
+    const container = document.createElement('div');
+    container.id = 'pinned-tabs-container';
+    container.style.cssText = `
+        position: absolute;
+        top: 60px;
+        left: 16px;
+        display: none;
+        align-items: center;
+        gap: 4px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 4px;
+        z-index: 100;
+        max-width: calc(100% - 350px);
+        overflow-x: auto;
+    `;
+
+    const tabsList = document.createElement('div');
+    tabsList.id = 'tabs-list';
+    tabsList.style.cssText = `
+        display: flex;
+        gap: 4px;
+    `;
+    container.appendChild(tabsList);
+
+    const root = document.getElementById('root');
+    if (root) {
+        root.appendChild(container);
+    }
+
+    return container;
+}
+
+function createTabElement(tab: PinnedTab, isActive: boolean): HTMLElement {
+    const tabEl = document.createElement('div');
+    tabEl.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
+        color: ${isActive ? '#f1f5f9' : '#94a3b8'};
+        transition: background 0.15s;
+        white-space: nowrap;
+    `;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = tab.name;
+    nameSpan.style.maxWidth = '120px';
+    nameSpan.style.overflow = 'hidden';
+    nameSpan.style.textOverflow = 'ellipsis';
+    tabEl.appendChild(nameSpan);
+
+    // Click to switch tab
+    tabEl.addEventListener('click', () => {
+        switchToTab(tab.id === 'current' ? null : tab.id);
+    });
+
+    // Hover effect
+    tabEl.addEventListener('mouseenter', () => {
+        if (!isActive) tabEl.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    tabEl.addEventListener('mouseleave', () => {
+        if (!isActive) tabEl.style.background = 'transparent';
+    });
+
+    // Close button for pinned tabs (not current)
+    if (tab.id !== 'current') {
+        const closeBtn = document.createElement('span');
+        closeBtn.textContent = '×';
+        closeBtn.style.cssText = `
+            font-size: 14px;
+            font-weight: 600;
+            opacity: 0.6;
+            padding: 0 2px;
+        `;
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            unpinTab(tab.id);
+        });
+        closeBtn.addEventListener('mouseenter', () => closeBtn.style.opacity = '1');
+        closeBtn.addEventListener('mouseleave', () => closeBtn.style.opacity = '0.6');
+        tabEl.appendChild(closeBtn);
+    }
+
+    return tabEl;
+}
+
+function switchToTab(tabId: string | null): void {
+    activeTabId = tabId;
+
+    if (tabId === null) {
+        // Switch to current (live) view
+        const sql = window.initialSqlCode || '';
+        if (sql) {
+            visualize(sql);
+        }
+    } else {
+        // Switch to pinned tab
+        const tab = pinnedTabs.find(t => t.id === tabId);
+        if (tab && tab.result) {
+            currentDialect = tab.dialect;
+            batchResult = tab.result;
+            currentQueryIndex = 0;
+            renderCurrentQuery();
+
+            // Update dialect dropdown
+            const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
+            if (dialectSelect) {
+                dialectSelect.value = currentDialect;
+            }
+        }
+    }
+
+    updateTabsUI();
+}
+
+function unpinTab(tabId: string): void {
+    const index = pinnedTabs.findIndex(t => t.id === tabId);
+    if (index === -1) return;
+
+    pinnedTabs.splice(index, 1);
+
+    // If we unpinned the active tab, switch to current
+    if (activeTabId === tabId) {
+        activeTabId = null;
+        const sql = window.initialSqlCode || '';
+        if (sql) {
+            visualize(sql);
+        }
+    }
+
+    updateTabsUI();
 }

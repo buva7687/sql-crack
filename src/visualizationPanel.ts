@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
+interface VisualizationOptions {
+    dialect: string;
+    fileName: string;
+}
+
 export class VisualizationPanel {
     public static currentPanel: VisualizationPanel | undefined;
     public static readonly viewType = 'sqlCrackVisualization';
@@ -8,12 +13,15 @@ export class VisualizationPanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
+    private _currentSql: string = '';
+    private _currentOptions: VisualizationOptions;
+    private _isStale: boolean = false;
 
-    public static createOrShow(extensionUri: vscode.Uri, sqlCode: string) {
+    public static createOrShow(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions) {
         // If we already have a panel, update it
         if (VisualizationPanel.currentPanel) {
             VisualizationPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-            VisualizationPanel.currentPanel._update(sqlCode);
+            VisualizationPanel.currentPanel._update(sqlCode, options);
             return;
         }
 
@@ -31,18 +39,50 @@ export class VisualizationPanel {
             }
         );
 
-        VisualizationPanel.currentPanel = new VisualizationPanel(panel, extensionUri, sqlCode);
+        VisualizationPanel.currentPanel = new VisualizationPanel(panel, extensionUri, sqlCode, options);
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, sqlCode: string) {
+    public static refresh(sqlCode: string, options: VisualizationOptions) {
+        if (VisualizationPanel.currentPanel) {
+            VisualizationPanel.currentPanel._postMessage({
+                command: 'refresh',
+                sql: sqlCode,
+                options: options
+            });
+            VisualizationPanel.currentPanel._currentSql = sqlCode;
+            VisualizationPanel.currentPanel._currentOptions = options;
+            VisualizationPanel.currentPanel._isStale = false;
+        }
+    }
+
+    public static sendCursorPosition(line: number) {
+        if (VisualizationPanel.currentPanel) {
+            VisualizationPanel.currentPanel._postMessage({
+                command: 'cursorPosition',
+                line: line
+            });
+        }
+    }
+
+    public static markAsStale() {
+        if (VisualizationPanel.currentPanel) {
+            VisualizationPanel.currentPanel._isStale = true;
+            VisualizationPanel.currentPanel._postMessage({
+                command: 'markStale'
+            });
+        }
+    }
+
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._currentSql = sqlCode;
+        this._currentOptions = options;
 
         // Set the webview's initial html content
-        this._update(sqlCode);
+        this._update(sqlCode, options);
 
         // Listen for when the panel is disposed
-        // This happens when the user closes the panel or when the panel is closed programmatically
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
         // Handle messages from the webview
@@ -55,6 +95,14 @@ export class VisualizationPanel {
                     case 'info':
                         vscode.window.showInformationMessage(message.text);
                         return;
+                    case 'requestRefresh':
+                        // Webview requested a refresh
+                        vscode.commands.executeCommand('sql-crack.refresh');
+                        return;
+                    case 'goToLine':
+                        // Jump to line in editor
+                        this._goToLine(message.line);
+                        return;
                 }
             },
             null,
@@ -62,27 +110,39 @@ export class VisualizationPanel {
         );
     }
 
-    private _update(sqlCode: string) {
+    private _goToLine(line: number) {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === 'sql') {
+            const position = new vscode.Position(line - 1, 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }
+    }
+
+    private _postMessage(message: any) {
+        this._panel.webview.postMessage(message);
+    }
+
+    private _update(sqlCode: string, options: VisualizationOptions) {
+        this._currentSql = sqlCode;
+        this._currentOptions = options;
+        this._isStale = false;
         const webview = this._panel.webview;
-        this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode);
+        this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
     }
 
     private _escapeForInlineScript(sqlCode: string): string {
-        // Use JSON.stringify and then escape closing </script to avoid breaking out of the script tag
         const json = JSON.stringify(sqlCode);
         return json.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
     }
 
-    private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string) {
-        // Local path to main script run in the webview
+    private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string, options: VisualizationOptions) {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview.js')
         );
 
-        // Use a nonce to only allow specific scripts to be run
         const nonce = getNonce();
 
-        // Get VS Code theme kind
         const themeKind = vscode.window.activeColorTheme.kind;
         const vscodeTheme = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
 
@@ -112,6 +172,12 @@ export class VisualizationPanel {
     <script nonce="${nonce}">
         window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
         window.vscodeTheme = ${JSON.stringify(vscodeTheme)};
+        window.defaultDialect = ${JSON.stringify(options.dialect)};
+        window.fileName = ${JSON.stringify(options.fileName)};
+
+        // VS Code API for messaging
+        const vscode = acquireVsCodeApi();
+        window.vscodeApi = vscode;
     </script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -120,8 +186,6 @@ export class VisualizationPanel {
 
     public dispose() {
         VisualizationPanel.currentPanel = undefined;
-
-        // Clean up our resources
         this._panel.dispose();
 
         while (this._disposables.length) {

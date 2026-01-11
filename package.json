@@ -45,7 +45,36 @@
         "mac": "cmd+shift+v",
         "when": "editorLangId == sql"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "SQL Crack",
+      "properties": {
+        "sqlCrack.defaultDialect": {
+          "type": "string",
+          "default": "MySQL",
+          "enum": ["MySQL", "PostgreSQL", "TransactSQL", "Snowflake", "BigQuery", "Redshift", "Hive", "Athena", "Trino", "MariaDB", "SQLite"],
+          "enumDescriptions": [
+            "MySQL dialect",
+            "PostgreSQL dialect",
+            "SQL Server / T-SQL dialect",
+            "Snowflake dialect",
+            "Google BigQuery dialect",
+            "Amazon Redshift dialect",
+            "Apache Hive / Databricks dialect",
+            "Amazon Athena dialect",
+            "Trino (formerly Presto) dialect",
+            "MariaDB dialect",
+            "SQLite dialect"
+          ],
+          "description": "Default SQL dialect for parsing queries"
+        },
+        "sqlCrack.syncEditorToFlow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight flow nodes when clicking in SQL editor"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

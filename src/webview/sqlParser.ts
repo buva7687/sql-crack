@@ -5,7 +5,7 @@ export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'S
 
 export interface FlowNode {
     id: string;
-    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window';
+    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window' | 'case';
     label: string;
     description?: string;
     details?: string[];
@@ -13,6 +13,11 @@ export interface FlowNode {
     y: number;
     width: number;
     height: number;
+    // Line numbers in SQL for editor sync
+    startLine?: number;
+    endLine?: number;
+    // Join type for differentiated styling
+    joinType?: string;
     // For nested visualizations (CTEs, subqueries)
     children?: FlowNode[];
     childEdges?: FlowEdge[];
@@ -26,6 +31,25 @@ export interface FlowNode {
             orderBy?: string[];
             frame?: string;
         }>;
+    };
+    // For aggregate nodes - function details
+    aggregateDetails?: {
+        functions: Array<{
+            name: string;
+            expression: string;
+            alias?: string;
+        }>;
+        groupBy?: string[];
+        having?: string;
+    };
+    // For CASE nodes - case details
+    caseDetails?: {
+        conditions: Array<{
+            when: string;
+            then: string;
+        }>;
+        elseValue?: string;
+        alias?: string;
     };
     // For SELECT nodes - column details with source tracking
     columns?: ColumnInfo[];
@@ -104,6 +128,7 @@ const NODE_COLORS: Record<FlowNode['type'], string> = {
     union: '#f97316',      // orange
     subquery: '#14b8a6',   // teal
     window: '#d946ef',     // fuchsia
+    case: '#eab308',       // yellow
 };
 
 export function getNodeColor(type: FlowNode['type']): string {

@@ -1599,7 +1599,8 @@ function getNodeIcon(type: FlowNode['type']): string {
         cte: '↻',
         union: '∪',
         subquery: '⊂',
-        window: '▦'
+        window: '▦',
+        case: '⎇'
     };
     return icons[type] || '○';
 }
@@ -2354,4 +2355,165 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];
+}
+
+// ============================================================
+// FEATURE: Editor to Flow Sync (highlight node at cursor line)
+// ============================================================
+
+let highlightedLineNodeId: string | null = null;
+
+export function highlightNodeAtLine(line: number): void {
+    // Clear previous highlight
+    if (highlightedLineNodeId) {
+        const prevGroup = document.querySelector(`g[data-id="${highlightedLineNodeId}"]`);
+        if (prevGroup) {
+            prevGroup.classList.remove('cursor-highlighted');
+            const rect = prevGroup.querySelector('.node-rect') as SVGRectElement;
+            if (rect) {
+                const node = currentNodes.find(n => n.id === highlightedLineNodeId);
+                if (node) {
+                    rect.setAttribute('stroke', 'transparent');
+                    rect.setAttribute('stroke-width', '0');
+                }
+            }
+        }
+        highlightedLineNodeId = null;
+    }
+
+    // Find node that contains this line
+    const node = findNodeAtLine(line);
+    if (!node) return;
+
+    // Highlight the node
+    const group = document.querySelector(`g[data-id="${node.id}"]`);
+    if (group) {
+        group.classList.add('cursor-highlighted');
+        const rect = group.querySelector('.node-rect') as SVGRectElement;
+        if (rect) {
+            rect.setAttribute('stroke', '#fbbf24');
+            rect.setAttribute('stroke-width', '3');
+        }
+        highlightedLineNodeId = node.id;
+
+        // Optionally zoom to the node
+        // zoomToNode(node);
+    }
+}
+
+function findNodeAtLine(line: number): FlowNode | null {
+    // Find node whose line range contains the cursor line
+    for (const node of currentNodes) {
+        if (node.startLine && node.endLine) {
+            if (line >= node.startLine && line <= node.endLine) {
+                return node;
+            }
+        } else if (node.startLine && line === node.startLine) {
+            return node;
+        }
+    }
+
+    // Fallback: find closest node by start line
+    let closest: FlowNode | null = null;
+    let minDist = Infinity;
+
+    for (const node of currentNodes) {
+        if (node.startLine) {
+            const dist = Math.abs(node.startLine - line);
+            if (dist < minDist) {
+                minDist = dist;
+                closest = node;
+            }
+        }
+    }
+
+    return minDist <= 5 ? closest : null;
+}
+
+// ============================================================
+// FEATURE: Join Type Venn Diagrams
+// ============================================================
+
+export function getJoinVennDiagram(joinType: string): string {
+    const type = joinType.toUpperCase();
+
+    // SVG Venn diagram icons for different join types
+    const diagrams: Record<string, string> = {
+        'INNER JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <path d="M12 3.5 A6 6 0 0 1 12 12.5 A6 6 0 0 1 12 3.5" fill="#22c55e" opacity="0.6"/>
+            </svg>`,
+        'LEFT JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'LEFT OUTER JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'RIGHT JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'RIGHT OUTER JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'FULL JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'FULL OUTER JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+            </svg>`,
+        'CROSS JOIN': `
+            <svg width="24" height="16" viewBox="0 0 24 16">
+                <rect x="2" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <rect x="14" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <line x1="10" y1="8" x2="14" y2="8" stroke="#64748b" stroke-width="1" stroke-dasharray="2"/>
+            </svg>`
+    };
+
+    // Find matching diagram
+    for (const [key, svg] of Object.entries(diagrams)) {
+        if (type.includes(key.replace(' JOIN', '')) || type === key) {
+            return svg;
+        }
+    }
+
+    // Default to inner join
+    return diagrams['INNER JOIN'];
+}
+
+export function getJoinColor(joinType: string): string {
+    const type = joinType.toUpperCase();
+
+    if (type.includes('LEFT')) return '#3b82f6';      // Blue
+    if (type.includes('RIGHT')) return '#f59e0b';     // Amber
+    if (type.includes('FULL')) return '#8b5cf6';      // Purple
+    if (type.includes('CROSS')) return '#ef4444';     // Red
+    if (type.includes('INNER')) return '#22c55e';     // Green
+
+    return '#6366f1'; // Default indigo
+}
+
+export function getJoinDescription(joinType: string): string {
+    const type = joinType.toUpperCase();
+
+    if (type.includes('LEFT')) return 'Returns all rows from left table, matched rows from right';
+    if (type.includes('RIGHT')) return 'Returns all rows from right table, matched rows from left';
+    if (type.includes('FULL')) return 'Returns all rows from both tables';
+    if (type.includes('CROSS')) return 'Returns Cartesian product of both tables';
+    if (type.includes('INNER')) return 'Returns only matching rows from both tables';
+
+    return 'Combines rows from two tables';
 }
