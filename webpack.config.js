@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 
 const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--mode=production');
 
@@ -22,74 +23,73 @@ const extensionConfig = {
     rules: [
       {
         test: /\.ts$/,
-        exclude: [/node_modules/, /__tests__/, /\.test\.ts$/],
+        exclude: /node_modules/,
         use: [
           {
             loader: 'ts-loader',
             options: {
-              transpileOnly: true,
-              onlyCompileBundledFiles: true
+              compilerOptions: {
+                module: 'es2020'
+              }
             }
           }
         ]
       }
     ]
   },
-  devtool: false,
-  infrastructureLogging: {
-    level: "log",
-  },
+  devtool: false
 };
 
 /**@type {import('webpack').Configuration}*/
 const webviewConfig = {
   target: 'web',
   mode: isProduction ? 'production' : 'none',
-  entry: './src/webview/index.tsx',
+  entry: './src/webview/index.ts',
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'webview.js'
   },
   resolve: {
-    extensions: ['.ts', '.tsx', '.js', '.jsx'],
-    alias: isProduction ? {
-      'react': 'react/cjs/react.production.min.js',
-      'react-dom': 'react-dom/cjs/react-dom.production.min.js'
-    } : {}
+    extensions: ['.ts', '.js'],
+    fallback: {
+      "process": require.resolve("process/browser"),
+      "path": false,
+      "fs": false
+    }
   },
   module: {
     rules: [
       {
-        test: /\.tsx?$/,
-        exclude: [/node_modules/, /__tests__/, /\.test\.tsx?$/],
+        test: /\.ts$/,
+        exclude: /node_modules/,
         use: [
           {
             loader: 'ts-loader',
             options: {
-              transpileOnly: true,
-              onlyCompileBundledFiles: true
+              compilerOptions: {
+                module: 'es2020'
+              }
             }
           }
         ]
-      },
-      {
-        test: /\.css$/,
-        use: ['style-loader', 'css-loader']
       }
     ]
   },
   optimization: isProduction ? {
     minimize: true,
     usedExports: true,
-    sideEffects: false,
-    splitChunks: false, // Don't split chunks for VS Code extension
-    runtimeChunk: false
+    sideEffects: true
   } : undefined,
   performance: {
     hints: isProduction ? 'warning' : false,
-    maxAssetSize: 2500000, // 2.5 MB
-    maxEntrypointSize: 2500000
+    maxAssetSize: 1000000, // 1 MB target
+    maxEntrypointSize: 1000000
   },
+  plugins: [
+    new webpack.ProvidePlugin({
+      process: 'process/browser',
+    })
+  ],
   devtool: false
 };
 
