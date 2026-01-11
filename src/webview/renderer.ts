@@ -260,6 +260,21 @@ export function initRenderer(container: HTMLElement): void {
 
     // Setup event listeners
     setupEventListeners();
+
+    // Setup ResizeObserver for auto-resize when panel changes
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    const resizeObserver = new ResizeObserver(() => {
+        // Debounce resize events
+        if (resizeTimeout) {
+            clearTimeout(resizeTimeout);
+        }
+        resizeTimeout = setTimeout(() => {
+            if (currentNodes.length > 0) {
+                fitView();
+            }
+        }, 150);
+    });
+    resizeObserver.observe(container);
 }
 
 function setupEventListeners(): void {
@@ -482,11 +497,14 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
     const isWindowNode = node.type === 'window' && node.windowDetails;
+    const isJoinNode = node.type === 'join';
 
     if (isContainer) {
         renderContainerNode(node, group);
     } else if (isWindowNode) {
         renderWindowNode(node, group);
+    } else if (isJoinNode) {
+        renderJoinNode(node, group);
     } else {
         renderStandardNode(node, group);
     }
@@ -535,6 +553,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
 }
 
 function renderStandardNode(node: FlowNode, group: SVGGElement): void {
+    // Determine visual style based on table category
+    const isTable = node.type === 'table';
+    const tableCategory = node.tableCategory || 'physical';
+
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
@@ -545,7 +567,54 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     rect.setAttribute('fill', getNodeColor(node.type));
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
+
+    // Apply different styles based on table category
+    if (isTable) {
+        if (tableCategory === 'cte_reference') {
+            // CTE reference: double border effect with dashed inner
+            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.8)'); // purple for CTE
+            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('stroke-dasharray', '8,4');
+        } else if (tableCategory === 'derived') {
+            // Derived table: dashed border
+            rect.setAttribute('stroke', 'rgba(20, 184, 166, 0.8)'); // teal for derived
+            rect.setAttribute('stroke-width', '2');
+            rect.setAttribute('stroke-dasharray', '5,3');
+        } else {
+            // Physical table: solid border for emphasis
+            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            rect.setAttribute('stroke-width', '2');
+        }
+    }
     group.appendChild(rect);
+
+    // Add category indicator badge for tables
+    if (isTable && tableCategory !== 'physical') {
+        const badgeText = tableCategory === 'cte_reference' ? 'CTE' : 'DERIVED';
+        const badgeColor = tableCategory === 'cte_reference' ? '#a855f7' : '#14b8a6';
+
+        // Badge background
+        const badge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        badge.setAttribute('x', String(node.x + node.width - 45));
+        badge.setAttribute('y', String(node.y - 8));
+        badge.setAttribute('width', '42');
+        badge.setAttribute('height', '16');
+        badge.setAttribute('rx', '4');
+        badge.setAttribute('fill', badgeColor);
+        group.appendChild(badge);
+
+        // Badge text
+        const badgeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        badgeLabel.setAttribute('x', String(node.x + node.width - 24));
+        badgeLabel.setAttribute('y', String(node.y + 4));
+        badgeLabel.setAttribute('text-anchor', 'middle');
+        badgeLabel.setAttribute('fill', 'white');
+        badgeLabel.setAttribute('font-size', '9');
+        badgeLabel.setAttribute('font-weight', '600');
+        badgeLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        badgeLabel.textContent = badgeText;
+        group.appendChild(badgeLabel);
+    }
 
     // Icon based on type
     const icon = getNodeIcon(node.type);
@@ -578,6 +647,70 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         desc.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         desc.textContent = truncate(node.description, 20);
         group.appendChild(desc);
+    }
+}
+
+function renderJoinNode(node: FlowNode, group: SVGGElement): void {
+    const joinType = node.label || 'INNER JOIN';
+    const joinColor = getJoinColor(joinType);
+
+    // Background rect with join-specific color
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '8');
+    rect.setAttribute('fill', joinColor);
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Venn diagram visualization
+    const vennContainer = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+    vennContainer.setAttribute('x', String(node.x + 8));
+    vennContainer.setAttribute('y', String(node.y + 6));
+    vennContainer.setAttribute('width', '32');
+    vennContainer.setAttribute('height', '20');
+    const vennDiv = document.createElement('div');
+    vennDiv.innerHTML = getJoinVennDiagram(joinType);
+    vennDiv.style.cssText = 'display: flex; align-items: center; justify-content: center;';
+    vennContainer.appendChild(vennDiv);
+    group.appendChild(vennContainer);
+
+    // Join type label
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + 44));
+    label.setAttribute('y', String(node.y + 20));
+    label.setAttribute('fill', 'white');
+    label.setAttribute('font-size', '11');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    label.textContent = truncate(joinType, 12);
+    group.appendChild(label);
+
+    // Join condition (if available)
+    if (node.details && node.details.length > 0) {
+        const condition = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        condition.setAttribute('x', String(node.x + 8));
+        condition.setAttribute('y', String(node.y + 38));
+        condition.setAttribute('fill', 'rgba(255,255,255,0.8)');
+        condition.setAttribute('font-size', '9');
+        condition.setAttribute('font-family', 'monospace');
+        condition.textContent = truncate(node.details[0], 18);
+        group.appendChild(condition);
+
+        // Table name if present
+        if (node.details.length > 1) {
+            const tableName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            tableName.setAttribute('x', String(node.x + 8));
+            tableName.setAttribute('y', String(node.y + 52));
+            tableName.setAttribute('fill', 'rgba(255,255,255,0.6)');
+            tableName.setAttribute('font-size', '9');
+            tableName.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+            tableName.textContent = truncate(node.details[1], 18);
+            group.appendChild(tableName);
+        }
     }
 }
 
@@ -1672,6 +1805,41 @@ function updateLegendPanel(): void {
                     </div>
                 </div>
             `).join('')}
+        </div>
+        <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
+            <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="
+                        background: #3b82f6;
+                        width: 24px;
+                        height: 16px;
+                        border-radius: 3px;
+                        border: 2px solid rgba(255,255,255,0.3);
+                    "></span>
+                    <div style="color: #e2e8f0; font-size: 10px;">Physical Table</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="
+                        background: #3b82f6;
+                        width: 24px;
+                        height: 16px;
+                        border-radius: 3px;
+                        border: 3px dashed rgba(168, 85, 247, 0.8);
+                    "></span>
+                    <div style="color: #e2e8f0; font-size: 10px;">CTE Reference</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="
+                        background: #14b8a6;
+                        width: 24px;
+                        height: 16px;
+                        border-radius: 3px;
+                        border: 2px dashed rgba(20, 184, 166, 0.8);
+                    "></span>
+                    <div style="color: #e2e8f0; font-size: 10px;">Derived Table</div>
+                </div>
+            </div>
         </div>
     `;
 

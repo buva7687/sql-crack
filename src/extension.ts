@@ -1,11 +1,26 @@
 import * as vscode from 'vscode';
 import { VisualizationPanel } from './visualizationPanel';
 
+// Track the last active SQL document for refresh functionality
+let lastActiveSqlDocument: vscode.TextDocument | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
     // Get configuration
     const getConfig = () => vscode.workspace.getConfiguration('sqlCrack');
+
+    // Track active SQL document
+    let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor && editor.document.languageId === 'sql') {
+            lastActiveSqlDocument = editor.document;
+        }
+    });
+
+    // Initialize with current editor if it's SQL
+    if (vscode.window.activeTextEditor?.document.languageId === 'sql') {
+        lastActiveSqlDocument = vscode.window.activeTextEditor.document;
+    }
 
     // Command: Visualize SQL
     let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', () => {
@@ -22,6 +37,9 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showWarningMessage('Please open a SQL file to visualize');
             return;
         }
+
+        // Track this document
+        lastActiveSqlDocument = document;
 
         // Get selected text or entire document
         const selection = editor.selection;
@@ -47,18 +65,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Command: Refresh visualization
     let refreshCommand = vscode.commands.registerCommand('sql-crack.refresh', () => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.languageId === 'sql') {
-            const sqlCode = editor.document.getText();
+        // Use last active SQL document, not current active editor
+        const document = lastActiveSqlDocument;
+        if (document) {
+            const sqlCode = document.getText();
             const config = getConfig();
             const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
-                fileName: editor.document.fileName.split('/').pop() || 'Query'
+                fileName: document.fileName.split('/').pop() || 'Query'
             });
+        } else {
+            vscode.window.showWarningMessage('No SQL file to refresh. Please open a SQL file first.');
         }
     });
+
+    context.subscriptions.push(activeEditorListener);
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {

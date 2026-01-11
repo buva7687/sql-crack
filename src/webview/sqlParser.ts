@@ -18,6 +18,8 @@ export interface FlowNode {
     endLine?: number;
     // Join type for differentiated styling
     joinType?: string;
+    // Table category for visual distinction
+    tableCategory?: 'physical' | 'derived' | 'cte_reference';
     // For nested visualizations (CTEs, subqueries)
     children?: FlowNode[];
     childEdges?: FlowEdge[];
@@ -244,8 +246,38 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     const statements = splitSqlStatements(sql);
     const queries: ParseResult[] = [];
 
+    // Track line offsets for each statement
+    let currentLine = 1;
+    const lines = sql.split('\n');
+
     for (const stmt of statements) {
-        queries.push(parseSql(stmt, dialect));
+        // Find the starting line of this statement in the original SQL
+        let stmtStartLine = currentLine;
+        const stmtFirstLine = stmt.trim().split('\n')[0];
+        for (let i = currentLine - 1; i < lines.length; i++) {
+            if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
+                stmtStartLine = i + 1;
+                break;
+            }
+        }
+
+        const result = parseSql(stmt, dialect);
+
+        // Adjust line numbers by adding the offset
+        const lineOffset = stmtStartLine - 1;
+        for (const node of result.nodes) {
+            if (node.startLine) {
+                node.startLine += lineOffset;
+            }
+            if (node.endLine) {
+                node.endLine += lineOffset;
+            }
+        }
+
+        queries.push(result);
+
+        // Update current line past this statement
+        currentLine = stmtStartLine + stmt.split('\n').length;
     }
 
     // Calculate total stats
@@ -289,6 +321,125 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     return { queries, totalStats };
 }
 
+// Extract line numbers for SQL keywords
+function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
+    const lines = sql.split('\n');
+    const keywordLines = new Map<string, number[]>();
+
+    const keywords = [
+        'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
+        'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'CROSS JOIN', 'JOIN',
+        'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN',
+        'WITH', 'UNION', 'INTERSECT', 'EXCEPT', 'AS'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const lineNum = i + 1; // 1-indexed
+        const upperLine = lines[i].toUpperCase();
+
+        for (const keyword of keywords) {
+            // Check for keyword at word boundary
+            const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+            if (regex.test(upperLine)) {
+                if (!keywordLines.has(keyword)) {
+                    keywordLines.set(keyword, []);
+                }
+                keywordLines.get(keyword)!.push(lineNum);
+            }
+        }
+    }
+
+    return keywordLines;
+}
+
+// Assign line numbers to nodes based on their type and label
+function assignLineNumbers(nodes: FlowNode[], sql: string): void {
+    const keywordLines = extractKeywordLineNumbers(sql);
+
+    // Track used line numbers to avoid duplicates
+    const usedJoinLines: number[] = [];
+
+    for (const node of nodes) {
+        switch (node.type) {
+            case 'table': {
+                // Tables appear in FROM or JOIN clauses
+                const fromLines = keywordLines.get('FROM') || [];
+                if (fromLines.length > 0) {
+                    node.startLine = fromLines[0];
+                }
+                break;
+            }
+            case 'join': {
+                // Find the appropriate join line
+                const joinTypes = ['INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN',
+                                   'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN',
+                                   'CROSS JOIN', 'JOIN'];
+                for (const jt of joinTypes) {
+                    if (node.label.toUpperCase().includes(jt.replace(' JOIN', ''))) {
+                        const lines = keywordLines.get(jt) || keywordLines.get('JOIN') || [];
+                        // Find first unused line
+                        for (const line of lines) {
+                            if (!usedJoinLines.includes(line)) {
+                                node.startLine = line;
+                                usedJoinLines.push(line);
+                                break;
+                            }
+                        }
+                        if (node.startLine) break;
+                    }
+                }
+                break;
+            }
+            case 'filter': {
+                if (node.label === 'WHERE') {
+                    const whereLines = keywordLines.get('WHERE') || [];
+                    if (whereLines.length > 0) node.startLine = whereLines[0];
+                } else if (node.label === 'HAVING') {
+                    const havingLines = keywordLines.get('HAVING') || [];
+                    if (havingLines.length > 0) node.startLine = havingLines[0];
+                }
+                break;
+            }
+            case 'aggregate': {
+                const groupLines = keywordLines.get('GROUP BY') || [];
+                if (groupLines.length > 0) node.startLine = groupLines[0];
+                break;
+            }
+            case 'sort': {
+                const orderLines = keywordLines.get('ORDER BY') || [];
+                if (orderLines.length > 0) node.startLine = orderLines[0];
+                break;
+            }
+            case 'limit': {
+                const limitLines = keywordLines.get('LIMIT') || [];
+                if (limitLines.length > 0) node.startLine = limitLines[0];
+                break;
+            }
+            case 'select': {
+                const selectLines = keywordLines.get('SELECT') || [];
+                if (selectLines.length > 0) node.startLine = selectLines[0];
+                break;
+            }
+            case 'cte': {
+                const withLines = keywordLines.get('WITH') || [];
+                if (withLines.length > 0) node.startLine = withLines[0];
+                break;
+            }
+            case 'union': {
+                const unionLines = keywordLines.get('UNION') || keywordLines.get('INTERSECT') || keywordLines.get('EXCEPT') || [];
+                if (unionLines.length > 0) node.startLine = unionLines[0];
+                break;
+            }
+            case 'result': {
+                // Result is at the end - use last SELECT line
+                const selectLines = keywordLines.get('SELECT') || [];
+                if (selectLines.length > 0) node.startLine = selectLines[0];
+                break;
+            }
+        }
+    }
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     nodeCounter = 0;
     resetStats();
@@ -317,6 +468,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Use dagre for layout
         layoutGraph(nodes, edges);
+
+        // Assign line numbers to nodes for editor sync
+        assignLineNumbers(nodes, sql);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(statements[0], nodes);
@@ -432,8 +586,16 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
     return rootId;
 }
 
-function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string {
+function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames: Set<string> = new Set()): string {
     const nodeIds: string[] = [];
+
+    // Collect CTE names first
+    if (stmt.with && Array.isArray(stmt.with)) {
+        for (const cte of stmt.with) {
+            const cteName = cte.name?.value || cte.name || 'CTE';
+            cteNames.add(cteName.toLowerCase());
+        }
+    }
 
     // Process CTEs first - with nested sub-graph
     if (stmt.with && Array.isArray(stmt.with)) {
@@ -477,7 +639,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
         for (const fromItem of stmt.from) {
             // Create table node for non-join tables
             if (!fromItem.join) {
-                const tableId = processFromItem(fromItem, nodes, edges);
+                const tableId = processFromItem(fromItem, nodes, edges, cteNames);
                 if (tableId) {
                     tableIds.push(tableId);
                     const tableName = getTableName(fromItem);
@@ -488,12 +650,15 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
                 stats.tables++;
                 const tableName = getTableName(fromItem);
                 const tableId = genId('table');
+                // Determine table category
+                const isCteRef = cteNames.has(tableName.toLowerCase());
                 nodes.push({
                     id: tableId,
                     type: 'table',
                     label: tableName,
-                    description: 'Joined table',
+                    description: isCteRef ? 'CTE reference' : 'Joined table',
                     details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
+                    tableCategory: isCteRef ? 'cte_reference' : 'physical',
                     x: 0, y: 0, width: 140, height: 60
                 });
                 tableIds.push(tableId);
@@ -799,7 +964,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string 
     return resultId;
 }
 
-function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
+function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
         stats.subqueries++;
@@ -825,6 +990,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
             children: hasChildren ? subChildren : undefined,
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
             expanded: true, // Always expanded for data source subqueries
+            tableCategory: 'derived',
             x: 0, y: 0, width: containerWidth, height: containerHeight
         });
         return subqueryId;
@@ -836,12 +1002,15 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[]): s
 
     stats.tables++;
     const tableId = genId('table');
+    // Determine if this is a CTE reference
+    const isCteRef = cteNames.has(tableName.toLowerCase());
     nodes.push({
         id: tableId,
         type: 'table',
         label: tableName,
-        description: 'Source table',
+        description: isCteRef ? 'CTE reference' : 'Source table',
         details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
+        tableCategory: isCteRef ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
     });
 
