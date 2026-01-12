@@ -25,7 +25,17 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
 
-## 🎉 What's New in Phase 1
+## 🎉 What's New
+
+### Phase 2: Developer Productivity & Quality ⚡ NEW
+
+**Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges.
+
+**Query Complexity Insights** — Enhanced metrics showing CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators.
+
+**Smart Quality Warnings** — Hover over warning badges to see detailed explanations with severity levels (low/medium/high) and actionable suggestions.
+
+### Phase 1: Core Professional Features ✅
 
 **Enhanced Interactive Navigation** — Click nodes to jump to SQL, click edges to view JOIN/WHERE clauses, and navigate nested CTEs with breadcrumb trails.
 
@@ -232,11 +242,11 @@ SQL Crack follows a phased development approach focused on delivering profession
 - Enhanced tooltips with SQL fragments
 - CTE expansion controls
 
-### 🚧 Phase 2: Developer Productivity & Quality (In Progress)
-- Column-level lineage visualization with visual flow lines
-- Diff-aware visualization for PR reviews
-- Advanced SQL annotations and warnings
-- Query complexity insights
+### ✅ Phase 2: Developer Productivity & Quality (PARTIALLY COMPLETED)
+- ✅ Advanced SQL annotations and warnings
+- ✅ Query complexity insights
+- 📅 Column-level lineage visualization with visual flow lines (Planned)
+- 📅 Diff-aware visualization for PR reviews (Planned)
 
 ### 📅 Phase 3: Performance & Optimization (Planned)
 - Performance signal detection
