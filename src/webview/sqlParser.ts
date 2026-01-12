@@ -20,11 +20,17 @@ export interface FlowNode {
     joinType?: string;
     // Table category for visual distinction
     tableCategory?: 'physical' | 'derived' | 'cte_reference';
+    // Access mode for read/write differentiation
+    accessMode?: 'read' | 'write' | 'derived';
+    // Operation type for write operations
+    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
     // For nested visualizations (CTEs, subqueries)
     children?: FlowNode[];
     childEdges?: FlowEdge[];
     expanded?: boolean;
     collapsible?: boolean; // Can this node be collapsed?
+    parentId?: string; // Parent CTE/Subquery ID for breadcrumb navigation
+    depth?: number; // Depth in CTE hierarchy (0 = root, 1 = first level CTE, etc.)
     // For window functions - detailed breakdown
     windowDetails?: {
         functions: Array<{
@@ -57,6 +63,9 @@ export interface FlowNode {
     };
     // For SELECT nodes - column details with source tracking
     columns?: ColumnInfo[];
+    // For visual column lineage
+    visibleColumns?: string[]; // Column names to display in the node
+    columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
 }
 
 export interface FlowEdge {
@@ -64,6 +73,20 @@ export interface FlowEdge {
     source: string;
     target: string;
     label?: string;
+    sqlClause?: string; // The actual SQL clause (JOIN condition, WHERE clause, etc.)
+    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow'; // Type of SQL clause
+    startLine?: number; // Starting line of the clause in the SQL
+    endLine?: number;   // Ending line of the clause in the SQL
+}
+
+// Column-level lineage connection
+export interface ColumnFlow {
+    id: string;
+    sourceNodeId: string;
+    targetNodeId: string;
+    sourceColumn: string;
+    targetColumn: string;
+    transformationType: 'passthrough' | 'renamed' | 'aggregated' | 'calculated';
 }
 
 export interface QueryStats {
@@ -90,9 +113,11 @@ export interface ColumnInfo {
     name: string;           // Column name or alias
     expression: string;     // Full expression
     sourceTable?: string;   // Source table name if direct column
-    sourceColumn?: string;  // Source column name if direct column  
+    sourceColumn?: string;  // Source column name if direct column
     isAggregate?: boolean;  // Is this an aggregate function?
     isWindowFunc?: boolean; // Is this a window function?
+    transformationType?: 'passthrough' | 'renamed' | 'aggregated' | 'calculated'; // Type of transformation
+    sourceNodeId?: string;  // ID of the source node (table/CTE)
 }
 
 export interface ColumnLineage {
@@ -111,6 +136,7 @@ export interface ParseResult {
     hints: OptimizationHint[];
     sql: string;
     columnLineage: ColumnLineage[];
+    columnFlows?: ColumnFlow[]; // Column-level lineage connections
     tableUsage: Map<string, number>; // Table name -> usage count
     error?: string;
 }

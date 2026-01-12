@@ -1,4 +1,4 @@
-import { FlowNode, FlowEdge, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
+import { FlowNode, FlowEdge, ColumnFlow, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
 import { formatSql, highlightSql } from './sqlFormatter';
 
 interface ViewState {
@@ -17,6 +17,9 @@ interface ViewState {
     highlightedColumnSources: string[]; // Node IDs to highlight for column flow
     isFullscreen: boolean;
     isDarkTheme: boolean;
+    breadcrumbPath: FlowNode[]; // Current CTE/Subquery breadcrumb path
+    showColumnLineage: boolean; // Toggle column-level lineage view
+    selectedColumn: string | null; // Currently selected column for highlighting
 }
 
 const state: ViewState = {
@@ -34,7 +37,10 @@ const state: ViewState = {
     legendVisible: false,
     highlightedColumnSources: [],
     isFullscreen: false,
-    isDarkTheme: true
+    isDarkTheme: true,
+    breadcrumbPath: [],
+    showColumnLineage: false,
+    selectedColumn: null
 };
 
 let svg: SVGSVGElement | null = null;
@@ -46,10 +52,12 @@ let hintsPanel: HTMLDivElement | null = null;
 let legendPanel: HTMLDivElement | null = null;
 let sqlPreviewPanel: HTMLDivElement | null = null;
 let tooltipElement: HTMLDivElement | null = null;
+let breadcrumbPanel: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
+let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
 let currentSql: string = '';
@@ -127,6 +135,29 @@ export function initRenderer(container: HTMLElement): void {
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     `;
     container.appendChild(detailsPanel);
+
+    // Create breadcrumb panel
+    breadcrumbPanel = document.createElement('div');
+    breadcrumbPanel.className = 'breadcrumb-panel';
+    breadcrumbPanel.style.cssText = `
+        position: absolute;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        color: #cbd5e1;
+        z-index: 150;
+        display: none;
+        max-width: 80%;
+        overflow-x: auto;
+        white-space: nowrap;
+    `;
+    container.appendChild(breadcrumbPanel);
 
     // Create stats panel
     statsPanel = document.createElement('div');
@@ -606,16 +637,25 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
 
-    // Apply different styles based on table category
+    // Apply different styles based on table category and access mode
     if (isTable) {
-        if (tableCategory === 'cte_reference') {
+        // Access mode coloring (read/write differentiation)
+        if (node.accessMode === 'write') {
+            // Write operations: Red border with "WRITE" emphasis
+            rect.setAttribute('stroke', 'rgba(239, 68, 68, 0.9)'); // red for write
+            rect.setAttribute('stroke-width', '3');
+        } else if (node.accessMode === 'read') {
+            // Read operations: Blue border
+            rect.setAttribute('stroke', 'rgba(59, 130, 246, 0.8)'); // blue for read
+            rect.setAttribute('stroke-width', '3');
+        } else if (tableCategory === 'cte_reference') {
             // CTE reference: double border effect with dashed inner
             rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.8)'); // purple for CTE
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('stroke-dasharray', '8,4');
-        } else if (tableCategory === 'derived') {
+        } else if (tableCategory === 'derived' || node.accessMode === 'derived') {
             // Derived table: dashed border
-            rect.setAttribute('stroke', 'rgba(20, 184, 166, 0.8)'); // teal for derived
+            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.7)'); // purple for derived
             rect.setAttribute('stroke-width', '2');
             rect.setAttribute('stroke-dasharray', '5,3');
         } else {
@@ -626,33 +666,65 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     }
     group.appendChild(rect);
 
-    // Add category indicator badge for tables
-    if (isTable && tableCategory !== 'physical') {
-        const badgeText = tableCategory === 'cte_reference' ? 'CTE' : 'DERIVED';
-        const badgeColor = tableCategory === 'cte_reference' ? '#a855f7' : '#14b8a6';
+    // Add badges for access mode and category
+    const badges: Array<{ text: string; color: string }> = [];
+
+    // Access mode badges (highest priority)
+    if (node.accessMode === 'read') {
+        badges.push({ text: 'READ', color: '#3b82f6' }); // Blue
+    } else if (node.accessMode === 'write') {
+        badges.push({ text: 'WRITE', color: '#ef4444' }); // Red
+    } else if (node.accessMode === 'derived') {
+        badges.push({ text: 'DERIVED', color: '#a855f7' }); // Purple
+    }
+
+    // Table category badges
+    if (isTable && tableCategory === 'cte_reference' && !node.accessMode) {
+        badges.push({ text: 'CTE', color: '#a855f7' }); // Purple
+    } else if (isTable && tableCategory === 'derived' && !node.accessMode) {
+        badges.push({ text: 'DERIVED', color: '#14b8a6' }); // Teal
+    }
+
+    // Operation type badges
+    if (node.operationType && node.operationType !== 'SELECT') {
+        const opColors: Record<string, string> = {
+            'INSERT': '#10b981', // Green
+            'UPDATE': '#f59e0b', // Amber
+            'DELETE': '#dc2626', // Dark Red
+            'MERGE': '#8b5cf6',  // Violet
+            'CREATE_TABLE_AS': '#06b6d4' // Cyan
+        };
+        const opColor = opColors[node.operationType] || '#64748b';
+        badges.push({ text: node.operationType, color: opColor });
+    }
+
+    // Render all badges
+    badges.forEach((badge, index) => {
+        const badgeWidth = badge.text.length * 7 + 10;
+        const badgeX = node.x + node.width - badgeWidth - (index * (badgeWidth + 4));
 
         // Badge background
-        const badge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        badge.setAttribute('x', String(node.x + node.width - 45));
-        badge.setAttribute('y', String(node.y - 8));
-        badge.setAttribute('width', '42');
-        badge.setAttribute('height', '16');
-        badge.setAttribute('rx', '4');
-        badge.setAttribute('fill', badgeColor);
-        group.appendChild(badge);
+        const badgeRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        badgeRect.setAttribute('x', String(badgeX));
+        badgeRect.setAttribute('y', String(node.y - 8));
+        badgeRect.setAttribute('width', String(badgeWidth));
+        badgeRect.setAttribute('height', '16');
+        badgeRect.setAttribute('rx', '4');
+        badgeRect.setAttribute('fill', badge.color);
+        group.appendChild(badgeRect);
 
         // Badge text
         const badgeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        badgeLabel.setAttribute('x', String(node.x + node.width - 24));
+        badgeLabel.setAttribute('x', String(badgeX + badgeWidth / 2));
         badgeLabel.setAttribute('y', String(node.y + 4));
         badgeLabel.setAttribute('text-anchor', 'middle');
         badgeLabel.setAttribute('fill', 'white');
         badgeLabel.setAttribute('font-size', '9');
-        badgeLabel.setAttribute('font-weight', '600');
+        badgeLabel.setAttribute('font-weight', '700');
         badgeLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        badgeLabel.textContent = badgeText;
+        badgeLabel.textContent = badge.text;
         group.appendChild(badgeLabel);
-    }
+    });
 
     // Icon based on type
     const icon = getNodeIcon(node.type);
@@ -1342,8 +1414,300 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     path.setAttribute('class', 'edge');
     path.setAttribute('data-source', edge.source);
     path.setAttribute('data-target', edge.target);
+    path.setAttribute('data-edge-id', edge.id);
+
+    // Store SQL clause information if available
+    if (edge.sqlClause) {
+        path.setAttribute('data-sql-clause', edge.sqlClause);
+    }
+    if (edge.clauseType) {
+        path.setAttribute('data-clause-type', edge.clauseType);
+    }
+    if (edge.startLine) {
+        path.setAttribute('data-start-line', String(edge.startLine));
+    }
+
+    // Make edge clickable with visual feedback
+    path.style.cursor = 'pointer';
+
+    // Click handler to show SQL clause and highlight
+    path.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleEdgeClick(edge);
+    });
+
+    // Hover effect for edges
+    path.addEventListener('mouseenter', () => {
+        if (!path.getAttribute('data-highlighted')) {
+            path.setAttribute('stroke', '#94a3b8');
+            path.setAttribute('stroke-width', '3');
+        }
+    });
+
+    path.addEventListener('mouseleave', () => {
+        if (!path.getAttribute('data-highlighted')) {
+            path.setAttribute('stroke', '#64748b');
+            path.setAttribute('stroke-width', '2');
+        }
+    });
 
     parent.appendChild(path);
+}
+
+function handleEdgeClick(edge: FlowEdge): void {
+    // Clear previous edge highlights
+    const edges = mainGroup?.querySelectorAll('.edge');
+    edges?.forEach(e => {
+        e.removeAttribute('data-highlighted');
+        const source = e.getAttribute('data-source');
+        const target = e.getAttribute('data-target');
+        const isConnected = state.selectedNodeId && (source === state.selectedNodeId || target === state.selectedNodeId);
+
+        if (isConnected) {
+            e.setAttribute('stroke', '#fbbf24');
+            e.setAttribute('stroke-width', '3');
+        } else {
+            e.setAttribute('stroke', '#64748b');
+            e.setAttribute('stroke-width', '2');
+        }
+    });
+
+    // Highlight clicked edge
+    const clickedEdge = mainGroup?.querySelector(`[data-edge-id="${edge.id}"]`);
+    if (clickedEdge) {
+        clickedEdge.setAttribute('data-highlighted', 'true');
+        clickedEdge.setAttribute('stroke', '#10b981'); // Green for selected edge
+        clickedEdge.setAttribute('stroke-width', '4');
+        clickedEdge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
+    }
+
+    // Show SQL clause information
+    if (edge.sqlClause) {
+        showSqlClausePanel(edge);
+    }
+
+    // Jump to line if available
+    if (edge.startLine && typeof window !== 'undefined') {
+        const vscodeApi = (window as any).vscodeApi;
+        if (vscodeApi && vscodeApi.postMessage) {
+            vscodeApi.postMessage({
+                command: 'goToLine',
+                line: edge.startLine
+            });
+        }
+    }
+}
+
+function showSqlClausePanel(edge: FlowEdge): void {
+    // Reuse or create a panel for showing SQL clause details
+    let clausePanel = document.getElementById('sql-clause-panel') as HTMLDivElement;
+
+    if (!clausePanel) {
+        clausePanel = document.createElement('div');
+        clausePanel.id = 'sql-clause-panel';
+        clausePanel.style.cssText = `
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.98);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 12px;
+            padding: 16px 20px;
+            max-width: 600px;
+            z-index: 1000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        `;
+
+        containerElement?.appendChild(clausePanel);
+    }
+
+    // Build content
+    const clauseType = edge.clauseType || 'flow';
+    const clauseTypeLabel = clauseType.toUpperCase();
+    const clauseColor = getClauseTypeColor(clauseType);
+
+    clausePanel.innerHTML = `
+        <button style="
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px 8px;
+        " onclick="this.parentElement.style.display='none'">✕</button>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+            <div style="
+                background: ${clauseColor};
+                color: white;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            ">${clauseTypeLabel}</div>
+            <div style="color: #cbd5e1; font-size: 13px; font-weight: 600;">
+                ${edge.label || 'Data Flow'}
+            </div>
+        </div>
+        <div style="
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+            color: #e2e8f0;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+        ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
+        ${edge.startLine ? `
+            <div style="color: #94a3b8; font-size: 11px; margin-top: 8px;">
+                📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
+            </div>
+        ` : ''}
+    `;
+
+    clausePanel.style.display = 'block';
+}
+
+function getClauseTypeColor(clauseType: string): string {
+    switch (clauseType) {
+        case 'join': return '#3b82f6'; // Blue
+        case 'where': return '#8b5cf6'; // Purple
+        case 'having': return '#ec4899'; // Pink
+        case 'on': return '#06b6d4'; // Cyan
+        case 'filter': return '#f59e0b'; // Amber
+        default: return '#64748b'; // Gray
+    }
+}
+
+function escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateBreadcrumb(nodeId: string | null): void {
+    if (!breadcrumbPanel) { return; }
+
+    if (!nodeId) {
+        // Hide breadcrumb if no node selected
+        breadcrumbPanel.style.display = 'none';
+        state.breadcrumbPath = [];
+        return;
+    }
+
+    const node = currentNodes.find(n => n.id === nodeId);
+    if (!node) {
+        breadcrumbPanel.style.display = 'none';
+        return;
+    }
+
+    // Only show breadcrumb for CTEs, subqueries, or nested structures
+    if (node.type !== 'cte' && node.type !== 'subquery' && !node.parentId && !node.depth) {
+        breadcrumbPanel.style.display = 'none';
+        state.breadcrumbPath = [];
+        return;
+    }
+
+    // Build breadcrumb path from root to current node
+    const path: FlowNode[] = [];
+    let current: FlowNode | undefined = node;
+
+    while (current) {
+        path.unshift(current);
+        if (current.parentId) {
+            current = currentNodes.find(n => n.id === current!.parentId);
+        } else {
+            break;
+        }
+    }
+
+    // Always include "Main Query" at the beginning if we have CTEs
+    if (path.length > 0 && path[0].type === 'cte') {
+        path.unshift({
+            id: 'main-query',
+            label: 'Main Query',
+            type: 'select',
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            depth: 0
+        });
+    }
+
+    state.breadcrumbPath = path;
+    renderBreadcrumb();
+}
+
+function renderBreadcrumb(): void {
+    if (!breadcrumbPanel || state.breadcrumbPath.length === 0) {
+        if (breadcrumbPanel) {
+            breadcrumbPanel.style.display = 'none';
+        }
+        return;
+    }
+
+    breadcrumbPanel.innerHTML = '';
+    breadcrumbPanel.style.display = 'flex';
+    breadcrumbPanel.style.alignItems = 'center';
+    breadcrumbPanel.style.gap = '8px';
+
+    state.breadcrumbPath.forEach((node, index) => {
+        // Create breadcrumb item
+        const item = document.createElement('span');
+        item.style.cssText = `
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            font-weight: ${index === state.breadcrumbPath.length - 1 ? '600' : '400'};
+            color: ${index === state.breadcrumbPath.length - 1 ? '#f1f5f9' : '#94a3b8'};
+        `;
+        item.textContent = node.label;
+
+        // Add hover effect
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(148, 163, 184, 0.2)';
+        });
+
+        item.addEventListener('mouseleave', () => {
+            item.style.background = 'transparent';
+        });
+
+        // Click to focus on this node
+        if (node.id !== 'main-query') {
+            item.addEventListener('click', () => {
+                selectNode(node.id);
+                zoomToNode(node);
+            });
+        } else {
+            // For main query, reset to full view
+            item.addEventListener('click', () => {
+                selectNode(null);
+                resetView();
+            });
+        }
+
+        breadcrumbPanel!.appendChild(item);
+
+        // Add separator
+        if (index < state.breadcrumbPath.length - 1) {
+            const separator = document.createElement('span');
+            separator.style.color = '#64748b';
+            separator.style.fontSize = '10px';
+            separator.textContent = '›';
+            breadcrumbPanel!.appendChild(separator);
+        }
+    });
 }
 
 function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
@@ -1411,8 +1775,25 @@ function selectNode(nodeId: string | null): void {
         });
     }
 
+    // Jump to SQL definition if node has a line number
+    if (nodeId) {
+        const node = currentNodes.find(n => n.id === nodeId);
+        if (node?.startLine && typeof window !== 'undefined') {
+            const vscodeApi = (window as any).vscodeApi;
+            if (vscodeApi && vscodeApi.postMessage) {
+                vscodeApi.postMessage({
+                    command: 'goToLine',
+                    line: node.startLine
+                });
+            }
+        }
+    }
+
     // Update details panel
     updateDetailsPanel(nodeId);
+
+    // Update breadcrumb navigation
+    updateBreadcrumb(nodeId);
 }
 
 function updateDetailsPanel(nodeId: string | null): void {
@@ -2088,12 +2469,6 @@ function lightenColor(hex: string, percent: number): string {
     return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
 }
 
-function escapeHtml(str: string): string {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
 // ============================================================
 // FEATURE: Color Legend
 // ============================================================
@@ -2758,14 +3133,81 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
         content += `<div style="color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; font-size: 11px; margin-bottom: 4px;">${escapeHtml(node.description)}</div>`;
     }
 
+    // Show SQL fragment if we have line numbers
+    if (node.startLine && currentSql) {
+        const sqlLines = currentSql.split('\n');
+        const startIdx = Math.max(0, node.startLine - 1);
+        const endIdx = node.endLine ? Math.min(sqlLines.length, node.endLine) : startIdx + 1;
+        const fragment = sqlLines.slice(startIdx, endIdx).join('\n').trim();
+
+        if (fragment) {
+            const displayFragment = fragment.length > 120 ? fragment.substring(0, 120) + '...' : fragment;
+            content += `
+                <div style="
+                    margin-top: 8px;
+                    padding: 8px;
+                    background: rgba(30, 41, 59, 0.6);
+                    border: 1px solid rgba(148, 163, 184, 0.2);
+                    border-radius: 4px;
+                    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+                    font-size: 10px;
+                    color: #e2e8f0;
+                    line-height: 1.4;
+                    white-space: pre-wrap;
+                    word-break: break-all;
+                    max-width: 300px;
+                ">
+                    ${escapeHtml(displayFragment)}
+                </div>
+            `;
+
+            // Add line number reference
+            content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
+                📍 Line ${node.startLine}${node.endLine && node.endLine !== node.startLine ? `-${node.endLine}` : ''}
+            </div>`;
+        }
+    }
+
     // Add details based on node type
     if (node.type === 'join' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">${escapeHtml(node.details[0])}</div>`;
+        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">
+            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
+        </div>`;
+    }
+
+    if (node.type === 'filter' && node.details && node.details.length > 0) {
+        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">
+            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
+        </div>`;
+    }
+
+    if (node.type === 'aggregate' && node.aggregateDetails) {
+        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#fbbf24' : '#f59e0b'};">
+            ${node.aggregateDetails.functions.length} aggregate function(s)
+        </div>`;
+        if (node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0) {
+            content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
+                Group by: ${escapeHtml(node.aggregateDetails.groupBy.join(', '))}
+            </div>`;
+        }
     }
 
     if (node.type === 'window' && node.windowDetails) {
         content += `<div style="font-size: 10px; margin-top: 6px;">
             <span style="color: #fbbf24;">${node.windowDetails.functions.length} window function(s)</span>
+        </div>`;
+        node.windowDetails.functions.forEach((fn, idx) => {
+            if (idx < 3) { // Show first 3
+                content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
+                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${fn.partitionBy.join(', ')})` : ''}
+                </div>`;
+            }
+        });
+    }
+
+    if (node.type === 'select' && node.columns && node.columns.length > 0) {
+        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">
+            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Columns:</strong> ${node.columns.length}
         </div>`;
     }
 
