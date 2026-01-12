@@ -2132,6 +2132,68 @@ function updateStatsPanel(): void {
                 ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
             </div>
         ` : ''}
+        ${(currentStats.maxCteDepth !== undefined || currentStats.maxFanOut !== undefined || currentStats.criticalPathLength !== undefined || currentStats.complexityBreakdown) ? `
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Complexity Insights</div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px;">
+                    ${currentStats.maxCteDepth !== undefined ? `
+                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
+                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.maxCteDepth}</div>
+                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">CTE Depth</div>
+                        </div>
+                    ` : ''}
+                    ${currentStats.maxFanOut !== undefined ? `
+                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
+                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.maxFanOut}</div>
+                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Max Fan-Out</div>
+                        </div>
+                    ` : ''}
+                    ${currentStats.criticalPathLength !== undefined ? `
+                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
+                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.criticalPathLength}</div>
+                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Path Length</div>
+                        </div>
+                    ` : ''}
+                </div>
+                ${currentStats.complexityBreakdown ? `
+                    <div style="background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 8px; border-radius: 4px;">
+                        <div style="font-size: 9px; color: ${textColorMuted}; margin-bottom: 6px; font-weight: 600;">Complexity Breakdown:</div>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            ${currentStats.complexityBreakdown.joins > 0 ? `
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                    <span style="color: ${textColorMuted};">Joins</span>
+                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.joins}</span>
+                                </div>
+                            ` : ''}
+                            ${currentStats.complexityBreakdown.subqueries > 0 ? `
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                    <span style="color: ${textColorMuted};">Subqueries</span>
+                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.subqueries}</span>
+                                </div>
+                            ` : ''}
+                            ${currentStats.complexityBreakdown.ctes > 0 ? `
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                    <span style="color: ${textColorMuted};">CTEs</span>
+                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.ctes}</span>
+                                </div>
+                            ` : ''}
+                            ${currentStats.complexityBreakdown.aggregations > 0 ? `
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                    <span style="color: ${textColorMuted};">Aggregations</span>
+                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.aggregations}</span>
+                                </div>
+                            ` : ''}
+                            ${currentStats.complexityBreakdown.windowFunctions > 0 ? `
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                    <span style="color: ${textColorMuted};">Window Functions</span>
+                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.windowFunctions}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        ` : ''}
         ${tableListHtml}
     `;
 }

@@ -245,9 +245,10 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Click-to-jump navigation with source document tracking
 - ✅ Edge click to view SQL clauses (JOIN/WHERE conditions)
 
-### ✅ Phase 2: Developer Productivity & Quality (PARTIALLY COMPLETED)
-- ✅ Advanced SQL annotations and warnings
-- ✅ Query complexity insights
+### ✅ Phase 2: Developer Productivity & Quality (COMPLETED)
+- ✅ Advanced SQL annotations and warnings (unused CTEs, dead columns, duplicate subqueries, repeated table scans)
+- ✅ Query complexity insights (CTE depth, fan-out analysis, critical path length, complexity breakdown)
+- ✅ Smart quality warnings with severity levels and actionable suggestions
 - 📅 Column-level lineage visualization with visual flow lines (Planned)
 - 📅 Diff-aware visualization for PR reviews (Planned)
 
