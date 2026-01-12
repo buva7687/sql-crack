@@ -21,9 +21,27 @@
 
 ---
 
-SQL Crack is a VS Code extension that visualizes SQL queries as interactive execution flow diagrams. Understand complex queries at a glance, track column lineage, and identify optimization opportunities.
+SQL Crack is a VS Code extension that visualizes SQL queries as interactive execution flow diagrams. Understand complex queries at a glance, track column lineage, and identify optimization opportunities with professional-grade visual analysis.
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
+
+## 🎉 What's New
+
+### Phase 2: Developer Productivity & Quality ⚡ NEW
+
+**Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges.
+
+**Query Complexity Insights** — Enhanced metrics showing CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators.
+
+**Smart Quality Warnings** — Hover over warning badges to see detailed explanations with severity levels (low/medium/high) and actionable suggestions.
+
+### Phase 1: Core Professional Features ✅
+
+**Enhanced Interactive Navigation** — Click nodes to jump to SQL, click edges to view JOIN/WHERE clauses, and navigate nested CTEs with breadcrumb trails.
+
+**Read vs Write Differentiation** — Instantly identify data access patterns with color-coded borders and operation badges (INSERT, UPDATE, DELETE, etc.).
+
+**Smart Tooltips** — Hover to see actual SQL fragments, line numbers, and detailed operation information without leaving the visualization.
 
 <!-- Add screenshot/GIF here -->
 <!-- ![SQL Crack Demo](./assets/demo.gif) -->
@@ -37,12 +55,29 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Column Lineage Tracking** — Trace column sources through the query pipeline
 - **Query Statistics** — Complexity score, table/join/filter counts, and more
 
+### Interactive Navigation ⭐ NEW
+
+- **Click Node → Jump to SQL** — Click any node to instantly navigate to its definition in your SQL editor
+- **Click Edge → View SQL Clauses** — Click connections to see JOIN conditions, WHERE clauses, and filters with line numbers
+- **Breadcrumb Navigation** — Navigate through nested CTEs with an interactive breadcrumb trail showing the query hierarchy
+- **Enhanced Tooltips** — Hover over nodes to see actual SQL fragments, line numbers, and detailed operation information
+- **Double-Click to Zoom** — Focus on specific parts of complex queries
+
+### Smart Analysis & Differentiation ⭐ NEW
+
+- **Read vs Write Visualization** — Clear visual distinction between data operations:
+  - **READ** operations (Blue border + badge)
+  - **WRITE** operations (Red border + badge)
+  - **DERIVED** tables (Purple border + badge)
+- **Operation Type Badges** — See INSERT, UPDATE, DELETE, MERGE, and CREATE TABLE AS operations at a glance
+- **CTE Expansion Controls** — Collapse or expand Common Table Expressions to manage visual complexity
+- **CTE Preview on Hover** — See CTE details without expanding the entire structure
+
 ### Interactive Experience
 
-- **Click & Explore** — Click nodes to view details, double-click to zoom
 - **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
 - **Focus Mode** — Highlight connected nodes for better understanding
-- **Editor Sync** — Click in SQL editor to highlight corresponding flow nodes
+- **Bidirectional Editor Sync** — Click in SQL editor to highlight flow nodes, click nodes to jump to SQL
 
 ### Flexible Display Options
 
@@ -104,6 +139,15 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
    - Press `Cmd+Shift+V` (Mac) / `Ctrl+Shift+V` (Windows/Linux)
    - Right-click → **"SQL Crack: Visualize SQL Query"**
 
+### Interactive Features
+
+- **Navigate to SQL**: Click any node to jump to its definition in the editor
+- **View SQL Clauses**: Click edge connections to see JOIN conditions and WHERE clauses
+- **Navigate CTEs**: Use the breadcrumb trail at the top to navigate through nested Common Table Expressions
+- **Collapse/Expand**: Click the +/- button on CTE nodes to collapse or expand nested operations
+- **View Details**: Hover over nodes to see SQL fragments and line numbers
+- **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click nodes to focus
+
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -119,20 +163,22 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 | `F` | Toggle fullscreen |
 | `?` | Show all shortcuts |
 
-### Node Types
+### Node Types & Visual Indicators
 
-| Node | Color | Description |
-|------|-------|-------------|
-| Table | Blue | Source tables |
-| Filter | Purple | WHERE/HAVING conditions |
-| Join | Pink | JOIN operations |
-| Aggregate | Amber | SUM, COUNT, AVG, etc. |
-| Window | Fuchsia | Window functions |
-| Select | Indigo | Column projection |
-| Sort | Green | ORDER BY |
-| Limit | Cyan | LIMIT clause |
-| CTE | Purple | Common Table Expressions |
-| Result | Green | Query output |
+| Node Type | Color | Description | Badges |
+|-----------|-------|-------------|--------|
+| Table | Blue | Source tables | READ (Blue), WRITE (Red), DERIVED (Purple) |
+| Filter | Purple | WHERE/HAVING conditions | — |
+| Join | Pink | JOIN operations | — |
+| Aggregate | Amber | SUM, COUNT, AVG, etc. | — |
+| Window | Fuchsia | Window functions | — |
+| Select | Indigo | Column projection | — |
+| Sort | Green | ORDER BY | — |
+| Limit | Cyan | LIMIT clause | — |
+| CTE | Purple | Common Table Expressions | CTE (Purple) |
+| Result | Green | Query output | — |
+
+**Operation Badges**: INSERT (Green), UPDATE (Amber), DELETE (Dark Red), MERGE (Violet), CREATE TABLE AS (Cyan)
 
 ## Configuration
 
@@ -185,6 +231,38 @@ sql-crack/
 - **node-sql-parser** — Multi-dialect SQL parsing
 - **dagre** — Graph layout algorithm
 - **Pure SVG** — Lightweight rendering
+
+## Roadmap
+
+SQL Crack follows a phased development approach focused on delivering professional-grade SQL visualization features:
+
+### ✅ Phase 1: Core Professional Features (COMPLETED)
+- ✅ Enhanced interactive navigation (click-to-jump, edge highlighting, breadcrumbs)
+- ✅ Read vs Write differentiation with visual badges
+- ✅ Enhanced tooltips with SQL fragments and line numbers
+- ✅ CTE expansion controls with breadcrumb navigation
+- ✅ Fullscreen mode with UI element hiding
+- ✅ Click-to-jump navigation with source document tracking
+- ✅ Edge click to view SQL clauses (JOIN/WHERE conditions)
+
+### ✅ Phase 2: Developer Productivity & Quality (COMPLETED)
+- ✅ Advanced SQL annotations and warnings (unused CTEs, dead columns, duplicate subqueries, repeated table scans)
+- ✅ Query complexity insights (CTE depth, fan-out analysis, critical path length, complexity breakdown)
+- ✅ Smart quality warnings with severity levels and actionable suggestions
+- 📅 Column-level lineage visualization with visual flow lines (Planned)
+- 📅 Diff-aware visualization for PR reviews (Planned)
+
+### 📅 Phase 3: Performance & Optimization (Planned)
+- Performance signal detection
+- Query plan integration
+- Optimization opportunity analysis
+
+### 📅 Phase 4: Workspace Awareness (Planned)
+- Cross-file lineage tracking
+- dbt integration
+- Workspace dependency graphs
+
+See [FEATURE_TODO.md](FEATURE_TODO.md) for the complete feature roadmap with detailed specifications.
 
 ## Contributing
 

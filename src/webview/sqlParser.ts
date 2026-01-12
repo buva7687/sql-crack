@@ -20,11 +20,17 @@ export interface FlowNode {
     joinType?: string;
     // Table category for visual distinction
     tableCategory?: 'physical' | 'derived' | 'cte_reference';
+    // Access mode for read/write differentiation
+    accessMode?: 'read' | 'write' | 'derived';
+    // Operation type for write operations
+    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
     // For nested visualizations (CTEs, subqueries)
     children?: FlowNode[];
     childEdges?: FlowEdge[];
     expanded?: boolean;
     collapsible?: boolean; // Can this node be collapsed?
+    parentId?: string; // Parent CTE/Subquery ID for breadcrumb navigation
+    depth?: number; // Depth in CTE hierarchy (0 = root, 1 = first level CTE, etc.)
     // For window functions - detailed breakdown
     windowDetails?: {
         functions: Array<{
@@ -57,6 +63,13 @@ export interface FlowNode {
     };
     // For SELECT nodes - column details with source tracking
     columns?: ColumnInfo[];
+    // For visual column lineage
+    visibleColumns?: string[]; // Column names to display in the node
+    columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
+    // For warning indicators
+    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex'; severity: 'low' | 'medium' | 'high'; message: string }>;
+    complexityLevel?: 'low' | 'medium' | 'high'; // Visual complexity indicator
+    isBottleneck?: boolean; // Critical path indicator
 }
 
 export interface FlowEdge {
@@ -64,6 +77,20 @@ export interface FlowEdge {
     source: string;
     target: string;
     label?: string;
+    sqlClause?: string; // The actual SQL clause (JOIN condition, WHERE clause, etc.)
+    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow'; // Type of SQL clause
+    startLine?: number; // Starting line of the clause in the SQL
+    endLine?: number;   // Ending line of the clause in the SQL
+}
+
+// Column-level lineage connection
+export interface ColumnFlow {
+    id: string;
+    sourceNodeId: string;
+    targetNodeId: string;
+    sourceColumn: string;
+    targetColumn: string;
+    transformationType: 'passthrough' | 'renamed' | 'aggregated' | 'calculated';
 }
 
 export interface QueryStats {
@@ -77,12 +104,26 @@ export interface QueryStats {
     conditions: number;
     complexity: 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
     complexityScore: number;
+    // Enhanced metrics
+    maxCteDepth?: number;        // Maximum nesting depth of CTEs
+    maxFanOut?: number;          // Maximum number of outgoing edges from a single node
+    criticalPathLength?: number; // Length of the longest execution path
+    complexityBreakdown?: {      // Breakdown of complexity score
+        joins: number;
+        subqueries: number;
+        ctes: number;
+        aggregations: number;
+        windowFunctions: number;
+    };
 }
 
 export interface OptimizationHint {
     type: 'warning' | 'info' | 'error';
     message: string;
     suggestion?: string;
+    category?: 'performance' | 'quality' | 'best-practice' | 'complexity';
+    nodeId?: string; // Related node ID for targeted warnings
+    severity?: 'low' | 'medium' | 'high';
 }
 
 // Column lineage tracking
@@ -90,9 +131,11 @@ export interface ColumnInfo {
     name: string;           // Column name or alias
     expression: string;     // Full expression
     sourceTable?: string;   // Source table name if direct column
-    sourceColumn?: string;  // Source column name if direct column  
+    sourceColumn?: string;  // Source column name if direct column
     isAggregate?: boolean;  // Is this an aggregate function?
     isWindowFunc?: boolean; // Is this a window function?
+    transformationType?: 'passthrough' | 'renamed' | 'aggregated' | 'calculated'; // Type of transformation
+    sourceNodeId?: string;  // ID of the source node (table/CTE)
 }
 
 export interface ColumnLineage {
@@ -111,6 +154,7 @@ export interface ParseResult {
     hints: OptimizationHint[];
     sql: string;
     columnLineage: ColumnLineage[];
+    columnFlows?: ColumnFlow[]; // Column-level lineage connections
     tableUsage: Map<string, number>; // Table name -> usage count
     error?: string;
 }
@@ -286,6 +330,15 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
                 node.endLine += lineOffset;
             }
         }
+        // Also adjust line numbers for edges
+        for (const edge of result.edges) {
+            if (edge.startLine) {
+                edge.startLine += lineOffset;
+            }
+            if (edge.endLine) {
+                edge.endLine += lineOffset;
+            }
+        }
 
         queries.push(result);
 
@@ -379,11 +432,43 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     for (const node of nodes) {
         switch (node.type) {
             case 'table': {
-                // Tables appear in FROM or JOIN clauses
+                // Try to find the actual line where this table appears
+                const tableName = node.label.toLowerCase().trim();
+                const sqlLines = sql.split('\n');
                 const fromLines = keywordLines.get('FROM') || [];
-                if (fromLines.length > 0) {
-                    node.startLine = fromLines[0];
+                const joinLines = [
+                    ...(keywordLines.get('JOIN') || []),
+                    ...(keywordLines.get('INNER JOIN') || []),
+                    ...(keywordLines.get('LEFT JOIN') || []),
+                    ...(keywordLines.get('RIGHT JOIN') || []),
+                    ...(keywordLines.get('FULL JOIN') || []),
+                    ...(keywordLines.get('CROSS JOIN') || [])
+                ];
+                
+                // Search all lines for the table name
+                let foundLine: number | undefined;
+                const searchStartLine = Math.min(...fromLines, ...joinLines, sqlLines.length);
+                
+                // Search from the beginning, but prioritize lines after FROM/JOIN
+                for (let i = 0; i < sqlLines.length; i++) {
+                    const line = sqlLines[i].toLowerCase();
+                    // Check if this line contains the table name as a word boundary
+                    // Also check for table aliases (e.g., "employees e" or "employees AS e")
+                    const tableRegex = new RegExp(`\\b${tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                    if (tableRegex.test(line)) {
+                        // Make sure it's in a FROM or JOIN context
+                        if (i >= searchStartLine - 1 || 
+                            line.includes('from') || 
+                            line.includes('join') ||
+                            (i > 0 && (sqlLines[i-1].toLowerCase().includes('from') || sqlLines[i-1].toLowerCase().includes('join')))) {
+                            foundLine = i + 1;
+                            break;
+                        }
+                    }
                 }
+                
+                // Fallback to first FROM line if not found
+                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : undefined);
                 break;
             }
             case 'join': {
@@ -483,6 +568,12 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Generate optimization hints
         generateHints(statements[0]);
 
+        // Detect advanced issues (unused CTEs, dead columns, etc.)
+        detectAdvancedIssues(nodes, edges, sql);
+
+        // Calculate enhanced complexity metrics
+        calculateEnhancedMetrics(nodes, edges);
+
         // Use dagre for layout
         layoutGraph(nodes, edges);
 
@@ -554,9 +645,625 @@ function generateHints(stmt: any): void {
         hints.push({
             type: 'error',
             message: 'Possible Cartesian product',
-            suggestion: 'Multiple tables without JOIN conditions will produce all row combinations'
+            suggestion: 'Multiple tables without JOIN conditions will produce all row combinations',
+            category: 'performance',
+            severity: 'high'
         });
     }
+}
+
+// Advanced quality checks - detect unused CTEs, dead columns, duplicate subqueries
+// Phase 2 Feature: Advanced SQL Annotations
+function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string): void {
+    // Detect unused CTEs
+    // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
+    const cteNodes = nodes.filter(n => n.type === 'cte');
+    const referencedCTEs = new Set<string>();
+    
+    // Build a set of all CTE names (without "WITH " prefix for accurate matching)
+    const allCteNames = new Set<string>();
+    cteNodes.forEach(cteNode => {
+        let cteName = cteNode.label.toLowerCase();
+        if (cteName.startsWith('with ')) {
+            cteName = cteName.substring(5).trim();
+        }
+        allCteNames.add(cteName);
+    });
+
+    // Track which CTEs are actually referenced in the query
+    // Check all table nodes, not just those marked as cte_reference
+    nodes.forEach(node => {
+        if (node.type === 'table') {
+            const tableName = node.label.toLowerCase().trim();
+            // Check if this table name matches any CTE name
+            if (allCteNames.has(tableName)) {
+                referencedCTEs.add(tableName);
+            }
+            // Also check if it's marked as cte_reference (backup check)
+            if (node.tableCategory === 'cte_reference') {
+                referencedCTEs.add(tableName);
+            }
+        }
+    });
+
+    cteNodes.forEach(cteNode => {
+        // Extract CTE name from label (remove "WITH " prefix if present)
+        // This ensures accurate matching between CTE definitions and references
+        let cteName = cteNode.label.toLowerCase();
+        if (cteName.startsWith('with ')) {
+            cteName = cteName.substring(5).trim();
+        }
+        
+        if (!referencedCTEs.has(cteName)) {
+            // CTE is defined but never used
+            if (!cteNode.warnings) cteNode.warnings = [];
+            cteNode.warnings.push({
+                type: 'unused',
+                severity: 'medium',
+                message: 'This CTE is never referenced in the query'
+            });
+
+            hints.push({
+                type: 'warning',
+                message: `Unused CTE: "${cteNode.label}"`,
+                suggestion: 'Remove this CTE as it is not used anywhere in the query',
+                category: 'quality',
+                nodeId: cteNode.id,
+                severity: 'medium'
+            });
+        }
+    });
+
+    // ============================================================
+    // Phase 2 Feature: Duplicate Subquery Detection
+    // ============================================================
+    // Detects duplicate or similar subqueries that could be extracted to CTEs
+    // for better maintainability and performance.
+    //
+    // Detection Strategy:
+    // 1. Collect FROM subqueries (already have nodes in the graph)
+    // 2. Extract subqueries from WHERE/SELECT/HAVING clauses using SQL parsing
+    // 3. Normalize subqueries for comparison (remove whitespace, aliases)
+    // 4. Group by similarity (same FROM table, same aggregate, same WHERE presence)
+    // 5. Add warnings to nodes and hints to the hints panel
+    // ============================================================
+    
+    interface SubqueryMatch {
+        sql: string;           // The subquery SQL
+        normalized: string;    // Normalized signature for comparison
+        location: 'from' | 'where' | 'select' | 'having';
+        node?: FlowNode;       // For FROM subqueries that have nodes
+        parentNodeId?: string; // For WHERE/SELECT subqueries
+    }
+    
+    const allSubqueries: SubqueryMatch[] = [];
+    const sqlLower = sql.toLowerCase();
+    
+    // 1. Collect FROM subqueries (already have nodes)
+    const subqueryNodes = nodes.filter(n => n.type === 'subquery');
+    subqueryNodes.forEach(node => {
+        const desc = (node.description || node.label || '').toLowerCase();
+        if (desc) {
+            // Create normalized signature
+            const normalized = desc.replace(/\s+/g, ' ').trim();
+            allSubqueries.push({
+                sql: desc,
+                normalized: normalized,
+                location: 'from',
+                node: node,
+                parentNodeId: node.parentId
+            });
+        }
+    });
+    
+    // 2. Extract subqueries from SQL using balanced parentheses matching
+    // This handles nested subqueries correctly by tracking parenthesis depth
+    const extractSubquery = (sql: string, startIndex: number): { sql: string; endIndex: number } | null => {
+        if (sql[startIndex] !== '(') return null;
+        
+        let depth = 0;
+        let i = startIndex;
+        let start = i + 1; // Skip opening (
+        
+        while (i < sql.length) {
+            if (sql[i] === '(') depth++;
+            if (sql[i] === ')') {
+                depth--;
+                if (depth === 0) {
+                    return {
+                        sql: sql.substring(start, i).trim(),
+                        endIndex: i
+                    };
+                }
+            }
+            i++;
+        }
+        return null;
+    };
+    
+    // Find all (SELECT ...) patterns
+    let searchIndex = 0;
+    
+    while (searchIndex < sql.length) {
+        // Look for SELECT keyword
+        const selectPos = sqlLower.indexOf('select', searchIndex);
+        if (selectPos === -1) break;
+        
+        // Check if it's inside parentheses (subquery)
+        // Look backwards for opening parenthesis
+        let parenPos = -1;
+        for (let i = selectPos - 1; i >= 0 && i >= selectPos - 100; i--) {
+            if (sql[i] === '(') {
+                parenPos = i;
+                break;
+            }
+            if (sql[i] === ')' || sql[i] === ';') break; // Not a subquery
+        }
+        
+        if (parenPos >= 0) {
+            const subquery = extractSubquery(sql, parenPos);
+            if (subquery && subquery.sql.toLowerCase().includes('from')) {
+                // Normalize: remove extra whitespace, lowercase, remove table aliases for comparison
+                let normalized = subquery.sql.replace(/\s+/g, ' ').toLowerCase();
+                // Remove table aliases (e.g., "orders o" -> "orders")
+                normalized = normalized.replace(/\b(\w+)\s+\w+\b/g, '$1');
+                
+                // Determine location based on context
+                const beforeMatch = sql.substring(Math.max(0, parenPos - 100), parenPos).toLowerCase();
+                let location: 'where' | 'select' | 'having' = 'where';
+                if (beforeMatch.includes('select') && !beforeMatch.includes('where') && !beforeMatch.includes('having') && !beforeMatch.includes('from')) {
+                    location = 'select';
+                } else if (beforeMatch.includes('having')) {
+                    location = 'having';
+                }
+                
+                allSubqueries.push({
+                    sql: subquery.sql,
+                    normalized: normalized,
+                    location: location
+                });
+                
+                searchIndex = subquery.endIndex + 1;
+            } else {
+                searchIndex = selectPos + 6;
+            }
+        } else {
+            searchIndex = selectPos + 6;
+        }
+    }
+    
+    // 3. Group subqueries by normalized signature for exact duplicate detection
+    const subqueryGroups = new Map<string, SubqueryMatch[]>();
+    allSubqueries.forEach(subq => {
+        if (!subqueryGroups.has(subq.normalized)) {
+            subqueryGroups.set(subq.normalized, []);
+        }
+        subqueryGroups.get(subq.normalized)!.push(subq);
+    });
+    
+    // 4. Detect similar subqueries (not just identical)
+    // Similarity criteria: same FROM table, same aggregate function, same WHERE presence
+    const similarGroups: SubqueryMatch[][] = [];
+    const processed = new Set<string>();
+    
+    allSubqueries.forEach((subq1, idx1) => {
+        if (processed.has(subq1.normalized)) return;
+        
+        const similar: SubqueryMatch[] = [subq1];
+        allSubqueries.forEach((subq2, idx2) => {
+            if (idx1 >= idx2 || processed.has(subq2.normalized)) return;
+            
+            // Check if subqueries are similar (same FROM table and similar structure)
+            const sig1 = subq1.normalized;
+            const sig2 = subq2.normalized;
+            
+            // Extract key parts: FROM table and aggregate function
+            const from1 = sig1.match(/from\s+(\w+)/);
+            const from2 = sig2.match(/from\s+(\w+)/);
+            const agg1 = sig1.match(/(avg|count|sum|max|min)\s*\(/);
+            const agg2 = sig2.match(/(avg|count|sum|max|min)\s*\(/);
+            const where1 = sig1.includes('where');
+            const where2 = sig2.includes('where');
+            
+            // Consider similar if: same FROM table, same aggregate (or both have aggregates), both have WHERE
+            if (from1 && from2 && from1[1] === from2[1] && 
+                where1 === where2 && 
+                (agg1 && agg2 && agg1[1] === agg2[1] || (!agg1 && !agg2))) {
+                similar.push(subq2);
+                processed.add(subq2.normalized);
+            }
+        });
+        
+        if (similar.length > 1) {
+            similarGroups.push(similar);
+            processed.add(subq1.normalized);
+        }
+    });
+    
+    // Add warnings for similar groups
+    similarGroups.forEach(group => {
+        group.forEach(subq => {
+            if (subq.node) {
+                if (!subq.node.warnings) subq.node.warnings = [];
+                subq.node.warnings.push({
+                    type: 'complex',
+                    severity: 'low',
+                    message: `Similar subquery (${group.length} duplicates detected)`
+                });
+            } else {
+                let targetNode: FlowNode | undefined;
+                if (subq.location === 'where' || subq.location === 'having') {
+                    targetNode = nodes.find(n => 
+                        n.type === 'filter' && 
+                        n.label === (subq.location === 'having' ? 'HAVING' : 'WHERE')
+                    );
+                } else if (subq.location === 'select') {
+                    targetNode = nodes.find(n => n.type === 'select');
+                }
+                
+                if (targetNode) {
+                    if (!targetNode.warnings) targetNode.warnings = [];
+                    targetNode.warnings.push({
+                        type: 'complex',
+                        severity: 'low',
+                        message: `Duplicate subquery in ${subq.location.toUpperCase()} (${group.length} similar found)`
+                    });
+                }
+            }
+        });
+        
+            hints.push({
+                type: 'info',
+            message: `${group.length} similar subqueries detected`,
+                suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
+                category: 'quality',
+                severity: 'low'
+            });
+    });
+    
+    // Also check exact matches (original logic)
+    subqueryGroups.forEach((group, signature) => {
+        // Only flag if we have 2+ identical subqueries and signature is meaningful (at least 15 chars)
+        if (group.length > 1 && signature.length > 15 && !processed.has(signature)) {
+            group.forEach(subq => {
+                if (subq.node) {
+                    // FROM subquery - has a node, add warning to it
+                    if (!subq.node.warnings) subq.node.warnings = [];
+                    subq.node.warnings.push({
+                        type: 'complex',
+                        severity: 'low',
+                        message: `Similar subquery (${group.length} duplicates detected)`
+                    });
+                } else {
+                    // WHERE/SELECT subquery - find the appropriate node to warn
+                    let targetNode: FlowNode | undefined;
+                    
+                    if (subq.location === 'where' || subq.location === 'having') {
+                        // Find WHERE or HAVING filter node
+                        targetNode = nodes.find(n => 
+                            n.type === 'filter' && 
+                            n.label === (subq.location === 'having' ? 'HAVING' : 'WHERE')
+                        );
+                    } else if (subq.location === 'select') {
+                        // Find SELECT node
+                        targetNode = nodes.find(n => n.type === 'select');
+                    }
+                    
+                    if (targetNode) {
+                        if (!targetNode.warnings) targetNode.warnings = [];
+                        targetNode.warnings.push({
+                            type: 'complex',
+                            severity: 'low',
+                            message: `Duplicate subquery in ${subq.location.toUpperCase()} (${group.length} similar found)`
+                        });
+                    }
+                }
+            });
+            
+            // Add hint
+            hints.push({
+                type: 'info',
+                message: `${group.length} similar subqueries detected`,
+                suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
+                category: 'quality',
+                severity: 'low'
+            });
+        }
+    });
+
+    // ============================================================
+    // Phase 2 Feature: Dead Column Detection
+    // ============================================================
+    // Detects columns that are selected but never used in WHERE/ORDER BY/
+    // GROUP BY/HAVING/JOIN clauses. These "dead columns" add unnecessary
+    // data transfer and reduce query clarity.
+    //
+    // Detection Strategy:
+    // 1. Extract column names from SELECT node (from AST) and SQL string (fallback)
+    // 2. For each column, check if it appears in WHERE/ORDER BY/GROUP BY/HAVING/JOIN clauses
+    // 3. Use word boundary regex to ensure exact column name matches
+    // 4. Add warnings to SELECT node and hints to the hints panel
+    // ============================================================
+    
+    const selectNodes = nodes.filter(n => n.type === 'select' && n.columns);
+    selectNodes.forEach(selectNode => {
+        if (!selectNode.columns || selectNode.columns.length === 0) return;
+
+        // Normalize SQL: remove comments, normalize whitespace for reliable matching
+        const normalizedSql = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+        const sqlLower = normalizedSql.toLowerCase();
+
+        // Extract column names directly from SQL SELECT clause as fallback
+        // This ensures we have the actual column names as they appear in SQL,
+        // which may differ from AST-extracted names (handles aliases, expressions)
+        const selectClauseMatch = normalizedSql.match(/select\s+(.+?)\s+from/i);
+        const sqlColumnNamesMap = new Map<string, string[]>(); // column name -> [all variations]
+        if (selectClauseMatch) {
+            const selectClause = selectClauseMatch[1];
+            // Split by comma, handling potential commas in expressions
+            const columnParts: string[] = [];
+            let current = '';
+            let parenDepth = 0;
+            for (let i = 0; i < selectClause.length; i++) {
+                const char = selectClause[i];
+                if (char === '(') parenDepth++;
+                else if (char === ')') parenDepth--;
+                else if (char === ',' && parenDepth === 0) {
+                    columnParts.push(current.trim());
+                    current = '';
+                    continue;
+                }
+                current += char;
+            }
+            if (current.trim()) columnParts.push(current.trim());
+            
+            columnParts.forEach(part => {
+                const trimmed = part.trim();
+                // Extract column name and alias
+                // Pattern: "column_name" or "column_name AS alias" or "table.column" or just "column"
+                const aliasMatch = trimmed.match(/\s+as\s+(\w+)$/i);
+                const columnMatch = trimmed.match(/(?:^|\s)(\w+)(?:\s|$)/);
+                
+                if (aliasMatch) {
+                    const alias = aliasMatch[1];
+                    const colName = columnMatch ? columnMatch[1] : null;
+                    if (colName && colName !== alias) {
+                        sqlColumnNamesMap.set(alias.toLowerCase(), [alias, colName]);
+                    } else {
+                        sqlColumnNamesMap.set(alias.toLowerCase(), [alias]);
+                    }
+                } else if (columnMatch) {
+                    const colName = columnMatch[1];
+                    sqlColumnNamesMap.set(colName.toLowerCase(), [colName]);
+                }
+            });
+        }
+
+        selectNode.columns.forEach(col => {
+            const colName = col.name;
+            // Build list of all possible column name variations to check
+            const colNamesToCheck = new Set<string>();
+            colNamesToCheck.add(colName);
+            if (col.sourceColumn && col.sourceColumn !== colName) {
+                colNamesToCheck.add(col.sourceColumn);
+            }
+            // Add SQL-extracted names that match this column
+            const colNameLower = colName.toLowerCase();
+            if (sqlColumnNamesMap.has(colNameLower)) {
+                sqlColumnNamesMap.get(colNameLower)!.forEach(name => colNamesToCheck.add(name));
+            }
+            // Also check if any SQL column name matches (case-insensitive)
+            sqlColumnNamesMap.forEach((names, key) => {
+                if (key === colNameLower) {
+                    names.forEach(name => colNamesToCheck.add(name));
+                }
+            });
+            
+            let isUsed = false;
+
+            // Check if column is used in any query clause using SQL string analysis
+            // This is more reliable than AST traversal for detecting column usage
+            if (normalizedSql) {
+                for (const nameToCheck of Array.from(colNamesToCheck)) {
+                    if (isUsed) break;
+                    
+                    // Escape special regex characters to prevent regex injection
+                    const escapedColName = nameToCheck.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Use word boundary pattern to ensure exact column name matches
+                    // (prevents matching partial names like "order_id" matching "order")
+                    const wordBoundaryPattern = new RegExp(`\\b${escapedColName}\\b`, 'i');
+                    
+                    // Check WHERE clause: extract text between WHERE and next clause keyword
+                    const whereMatch = sqlLower.match(/\bwhere\b\s+(.+?)(?:\s+(?:order|group|having|limit)\s+by|\s+limit|\s*;|\s*$)/i);
+                    if (whereMatch && wordBoundaryPattern.test(whereMatch[1])) {
+                        isUsed = true;
+                        break;
+                    }
+                    
+                    // Check ORDER BY clause: extract text between ORDER BY and LIMIT/end
+                    const orderByMatch = sqlLower.match(/\border\s+by\b\s+(.+?)(?:\s+limit|\s*;|\s*$)/i);
+                    if (orderByMatch && wordBoundaryPattern.test(orderByMatch[1])) {
+                        isUsed = true;
+                        break;
+                    }
+                    
+                    // Check GROUP BY clause: extract text between GROUP BY and HAVING/ORDER BY/LIMIT/end
+                    const groupByMatch = sqlLower.match(/\bgroup\s+by\b\s+(.+?)(?:\s+(?:having|order|limit)|\s*;|\s*$)/i);
+                    if (groupByMatch && wordBoundaryPattern.test(groupByMatch[1])) {
+                        isUsed = true;
+                        break;
+                    }
+                    
+                    // Check HAVING clause: extract text between HAVING and ORDER BY/LIMIT/end
+                    const havingMatch = sqlLower.match(/\bhaving\b\s+(.+?)(?:\s+(?:order|limit)|\s*;|\s*$)/i);
+                    if (havingMatch && wordBoundaryPattern.test(havingMatch[1])) {
+                        isUsed = true;
+                        break;
+                    }
+                    
+                    // Check JOIN ON clauses: find all "JOIN table ON condition" patterns
+                    // and check if column appears in the ON condition
+                    const joinOnPattern = /\bjoin\b\s+\w+(?:\s+\w+)?\s+\bon\b\s+(.+?)(?:\s+(?:join|where|group|having|order|limit)|\s*;|\s*$)/gi;
+                    let joinMatch;
+                    while ((joinMatch = joinOnPattern.exec(sqlLower)) !== null) {
+                        if (wordBoundaryPattern.test(joinMatch[1])) {
+                            isUsed = true;
+                            break;
+                        }
+                    }
+                    if (isUsed) break;
+                }
+            }
+
+            // If column is not used in any clause, it's a dead column
+            if (!isUsed) {
+                if (!selectNode.warnings) selectNode.warnings = [];
+                selectNode.warnings.push({
+                    type: 'dead-column',
+                    severity: 'low',
+                    message: `Column "${colName}" is not used in WHERE/ORDER BY/GROUP BY/HAVING/JOIN clauses`
+                });
+            }
+        });
+        
+        // Add optimization hint to hints panel if dead columns are detected
+        // This provides a summary in the hints panel for better visibility
+        const deadColumns = selectNode.warnings?.filter(w => w.type === 'dead-column') || [];
+        if (deadColumns.length > 0) {
+            const deadColNames = deadColumns.map(w => {
+                const match = w.message.match(/Column "([^"]+)"/);
+                return match ? match[1] : '';
+            }).filter(Boolean);
+            
+            hints.push({
+                type: 'info',
+                message: `${deadColumns.length} dead column${deadColumns.length > 1 ? 's' : ''} detected: ${deadColNames.slice(0, 3).join(', ')}${deadColNames.length > 3 ? ` and ${deadColNames.length - 3} more` : ''}`,
+                suggestion: 'Remove unused columns from SELECT clause to improve query clarity and reduce data transfer',
+                category: 'quality',
+                nodeId: selectNode.id,
+                severity: 'low'
+            });
+        }
+    });
+
+    // Detect repeated table scans
+    const tableUsage = new Map<string, FlowNode[]>();
+    nodes.filter(n => n.type === 'table' && n.tableCategory === 'physical').forEach(node => {
+        const tableName = node.label.toLowerCase();
+        if (!tableUsage.has(tableName)) {
+            tableUsage.set(tableName, []);
+        }
+        tableUsage.get(tableName)!.push(node);
+    });
+
+    tableUsage.forEach((usages, tableName) => {
+        if (usages.length > 1) {
+            usages.forEach(node => {
+                if (!node.warnings) node.warnings = [];
+                node.warnings.push({
+                    type: 'repeated-scan',
+                    severity: 'medium',
+                    message: `Table "${tableName}" is scanned ${usages.length} times`
+                });
+            });
+
+            hints.push({
+                type: 'warning',
+                message: `Table "${tableName}" scanned ${usages.length} times`,
+                suggestion: 'Consider using a CTE or subquery to scan the table once',
+                category: 'performance',
+                severity: 'medium'
+            });
+        }
+    });
+}
+
+// Calculate enhanced complexity metrics
+function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
+    // Calculate max CTE depth
+    let maxDepth = 0;
+    nodes.forEach(node => {
+        if (node.type === 'cte' && node.depth !== undefined) {
+            maxDepth = Math.max(maxDepth, node.depth);
+        }
+    });
+    stats.maxCteDepth = maxDepth;
+
+    // Calculate max fan-out (number of outgoing edges per node)
+    const fanOutMap = new Map<string, number>();
+    edges.forEach(edge => {
+        const count = fanOutMap.get(edge.source) || 0;
+        fanOutMap.set(edge.source, count + 1);
+    });
+    stats.maxFanOut = Math.max(0, ...Array.from(fanOutMap.values()));
+
+    // Calculate critical path length (longest path from source to result)
+    const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
+        if (visited.has(nodeId)) return 0;
+        visited.add(nodeId);
+
+        const outgoing = edges.filter(e => e.source === nodeId);
+        if (outgoing.length === 0) return 1;
+
+        const maxChildPath = Math.max(
+            ...outgoing.map(edge => calculatePathLength(edge.target, new Set(visited)))
+        );
+        return 1 + maxChildPath;
+    };
+
+    // Find root nodes (nodes with no incoming edges)
+    const nodesWithIncoming = new Set(edges.map(e => e.target));
+    const rootNodes = nodes.filter(n => !nodesWithIncoming.has(n.id));
+
+    stats.criticalPathLength = Math.max(
+        0,
+        ...rootNodes.map(node => calculatePathLength(node.id, new Set()))
+    );
+
+    // Complexity breakdown
+    stats.complexityBreakdown = {
+        joins: stats.joins * 3,           // Joins add significant complexity
+        subqueries: stats.subqueries * 2,
+        ctes: stats.ctes * 2,
+        aggregations: stats.aggregations * 1,
+        windowFunctions: stats.windowFunctions * 2
+    };
+
+    // Identify bottlenecks (nodes with high fan-out or in critical path)
+    nodes.forEach(node => {
+        const fanOut = fanOutMap.get(node.id) || 0;
+        if (fanOut >= 3) {
+            if (!node.warnings) node.warnings = [];
+            node.warnings.push({
+                type: 'fan-out',
+                severity: fanOut >= 5 ? 'high' : 'medium',
+                message: `High fan-out: ${fanOut} outgoing connections`
+            });
+        }
+
+        // Mark nodes with high complexity
+        if ((node.type === 'join' && stats.joins > 3) ||
+            (node.type === 'aggregate' && node.aggregateDetails && node.aggregateDetails.functions.length > 3)) {
+            if (!node.warnings) node.warnings = [];
+            node.warnings.push({
+                type: 'complex',
+                severity: 'medium',
+                message: 'Complex operation - may impact performance'
+            });
+        }
+    });
+
+    // Assign complexity levels to nodes
+    nodes.forEach(node => {
+        if (node.type === 'join') {
+            node.complexityLevel = stats.joins > 5 ? 'high' : stats.joins > 2 ? 'medium' : 'low';
+        } else if (node.type === 'aggregate') {
+            const funcCount = node.aggregateDetails?.functions.length || 0;
+            node.complexityLevel = funcCount > 4 ? 'high' : funcCount > 2 ? 'medium' : 'low';
+        } else if (node.type === 'subquery') {
+            node.complexityLevel = stats.subqueries > 2 ? 'high' : 'low';
+        }
+    });
 }
 
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
@@ -579,8 +1286,14 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
     });
 
     // Process table for UPDATE/DELETE/INSERT
+    // Phase 1 Feature: Read vs Write Differentiation
+    // Mark write operations with accessMode and operationType for visual distinction
     if (stmt.table) {
         const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        // Determine operation type and access mode for write operations
+        const opType = statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+        const accessMode: 'write' = 'write';
+        
         for (const t of tables) {
             stats.tables++;
             const tableId = genId('table');
@@ -590,6 +1303,8 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
                 type: 'table',
                 label: String(tableName),
                 description: 'Target table',
+                accessMode: accessMode, // Mark as write operation for red border/badge
+                operationType: opType,  // Store operation type for badge display
                 x: 0, y: 0, width: 140, height: 60
             });
             edges.push({
@@ -626,8 +1341,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const cteChildEdges: FlowEdge[] = [];
 
             if (cte.stmt) {
-                // Recursively parse the CTE's SELECT statement
-                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges);
+                // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
+                // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
+                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges, cteId, 0);
             }
 
             // Calculate container size based on children
@@ -642,6 +1358,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 children: cteChildren.length > 0 ? cteChildren : undefined,
                 childEdges: cteChildEdges.length > 0 ? cteChildEdges : undefined,
                 expanded: true,
+                depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
             nodeIds.push(cteId);
@@ -716,12 +1433,20 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                     x: 0, y: 0, width: 140, height: 60
                 });
 
+                // Extract join condition SQL for edge
+                const joinConditionSql = fromItem.on ? formatCondition(fromItem.on) : '';
+                
+                // Phase 1 Feature: Click Edge → View SQL Clauses
                 // Connect left side to join (previous join result or first table)
+                // Store SQL clause and line number for edge click navigation
                 if (leftTableId) {
                     edges.push({
                         id: genId('e'),
                         source: leftTableId,
-                        target: joinId
+                        target: joinId,
+                        sqlClause: joinConditionSql, // SQL clause for edge click display
+                        clauseType: 'join',         // Type of clause for styling
+                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -730,7 +1455,10 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                     edges.push({
                         id: genId('e'),
                         source: rightTableId,
-                        target: joinId
+                        target: joinId,
+                        sqlClause: joinConditionSql, // SQL clause for edge click display
+                        clauseType: 'on',           // Type of clause for styling
+                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -767,11 +1495,18 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             x: 0, y: 0, width: 140, height: 60
         });
 
+        // Phase 1 Feature: Click Edge → View SQL Clauses
+        // Store WHERE clause SQL and line number for edge click navigation
         if (previousId) {
+            // Format WHERE clause SQL
+            const whereClauseSql = conditions.join(' AND ');
             edges.push({
                 id: genId('e'),
                 source: previousId,
-                target: whereId
+                target: whereId,
+                sqlClause: whereClauseSql, // SQL clause for edge click display
+                clauseType: 'where',      // Type of clause for styling
+                startLine: stmt.where?.location?.start?.line // Line number for navigation
             });
         }
         previousId = whereId;
@@ -915,12 +1650,15 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     // Process SELECT columns
     const selectId = genId('select');
     const columns = extractColumns(stmt.columns);
+    // Extract column info for dead column detection
+    const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns);
     nodes.push({
         id: selectId,
         type: 'select',
         label: 'SELECT',
         description: 'Project columns',
         details: columns.length <= 5 ? columns : [`${columns.length} columns`],
+        columns: columnInfos, // Store column info for dead column detection
         x: 0, y: 0, width: 140, height: 60
     });
 
@@ -1051,7 +1789,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
         // Parse subquery's internal structure
         const subChildren: FlowNode[] = [];
         const subChildEdges: FlowEdge[] = [];
-        parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges);
+        parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0);
 
         // Subqueries as data sources should always be expanded
         // Calculate container size based on children
@@ -1068,6 +1806,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
             expanded: true, // Always expanded for data source subqueries
             tableCategory: 'derived',
+            depth: 0, // Subquery depth
             x: 0, y: 0, width: containerWidth, height: containerHeight
         });
         return subqueryId;
@@ -1097,7 +1836,19 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
 
 function getTableName(item: any): string {
     if (typeof item === 'string') { return item; }
-    return item.table || item.as || item.name || 'table';
+    
+    // For table references, prefer the actual table name over alias
+    // The AST structure varies by parser, so check multiple possible fields
+    if (item.table) {
+        // If table is an object, extract the name
+        if (typeof item.table === 'object') {
+            return item.table.table || item.table.name || item.table.value || item.as || 'table';
+        }
+        return item.table;
+    }
+    
+    // Fallback to name, then alias, then default
+    return item.name || item.as || 'table';
 }
 
 function extractColumns(columns: any): string[] {
@@ -1117,6 +1868,57 @@ function extractColumns(columns: any): string[] {
         if (col.expr?.name) { return `${col.expr.name}()`; }
         return 'expr';
     }).slice(0, 10); // Limit to first 10
+}
+
+/**
+ * Extract column information from SELECT statement AST for dead column detection.
+ * 
+ * This function extracts detailed column information including:
+ * - Column name (prioritizing alias if present)
+ * - Source column and table references
+ * - Aggregate and window function indicators
+ * - Transformation types (renamed, aggregated, calculated, passthrough)
+ * 
+ * @param columns - Column AST nodes from the SELECT statement
+ * @returns Array of ColumnInfo objects for dead column detection
+ */
+function extractColumnInfos(columns: any): ColumnInfo[] {
+    if (!columns || columns === '*') {
+        return [];
+    }
+    if (!Array.isArray(columns)) { return []; }
+
+    return columns.map((col: any): ColumnInfo => {
+        // Extract column name - prioritize alias, then column name, then expression
+        let name: string;
+        if (col.as) {
+            name = String(col.as);
+        } else if (col.expr?.column) {
+            name = String(col.expr.column);
+        } else if (col.expr?.name) {
+            name = String(col.expr.name);
+        } else if (col.expr?.value) {
+            name = String(col.expr.value);
+        } else if (typeof col === 'string') {
+            name = col;
+        } else {
+            name = 'expr';
+        }
+        
+        const expression = col.expr ? JSON.stringify(col.expr) : name;
+        
+        return {
+            name: String(name),
+            expression: expression,
+            sourceColumn: col.expr?.column ? String(col.expr.column) : undefined,
+            sourceTable: col.expr?.table ? (typeof col.expr.table === 'string' ? col.expr.table : String(col.expr.table.table || col.expr.table.name || '')) : undefined,
+            isAggregate: col.expr?.type === 'aggr_func' || false,
+            isWindowFunc: !!col.expr?.over,
+            transformationType: col.as && col.expr?.column ? 'renamed' : 
+                               col.expr?.type === 'aggr_func' ? 'aggregated' :
+                               col.expr?.over ? 'calculated' : 'passthrough'
+        };
+    });
 }
 
 function extractWindowFunctions(columns: any): string[] {
@@ -1377,7 +2179,9 @@ function extractCaseStatementDetails(columns: any): Array<{
 }
 
 // Parse CTE or Subquery internal structure for nested visualization
-function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): void {
+// Phase 1 Feature: Breadcrumb Navigation
+// Parse CTE/subquery internals and set parentId/depth for breadcrumb trail navigation
+function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[], parentId?: string, depth: number = 0): void {
     if (!stmt) { return; }
 
     let previousId: string | null = null;
@@ -1394,6 +2198,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
                         type: 'table',
                         label: tableName,
                         description: 'Table',
+                        parentId: parentId,
+                        depth: depth + 1,
                         x: 0, y: 0, width: 100, height: 32
                     });
                     if (previousId) {
@@ -1414,6 +2220,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
                     type: 'join',
                     label: `${fromItem.join} ${joinTable}`,
                     description: 'Join',
+                    parentId: parentId,
+                    depth: depth + 1,
                     x: 0, y: 0, width: 120, height: 32
                 });
                 if (previousId) {
@@ -1432,6 +2240,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'filter',
             label: 'WHERE',
             description: 'Filter',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 80, height: 32
         });
         if (previousId) {
@@ -1448,6 +2258,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'aggregate',
             label: 'GROUP BY',
             description: 'Aggregate',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {
@@ -1464,6 +2276,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'sort',
             label: 'ORDER BY',
             description: 'Sort',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {

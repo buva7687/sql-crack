@@ -62,7 +62,8 @@ export function activate(context: vscode.ExtensionContext) {
         // Create or show visualization panel
         VisualizationPanel.createOrShow(context.extensionUri, sqlCode, {
             dialect: defaultDialect,
-            fileName: document.fileName.split('/').pop() || 'Query'
+            fileName: document.fileName.split('/').pop() || 'Query',
+            documentUri: document.uri
         });
     });
 
@@ -77,7 +78,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
-                fileName: document.fileName.split('/').pop() || 'Query'
+                fileName: document.fileName.split('/').pop() || 'Query',
+                documentUri: document.uri
             });
         } else {
             vscode.window.showWarningMessage('No SQL file to refresh. Please open a SQL file first.');
