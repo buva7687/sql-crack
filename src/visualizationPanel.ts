@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 interface VisualizationOptions {
     dialect: string;
     fileName: string;
+    documentUri?: vscode.Uri; // Store the document URI for navigation
 }
 
 export type ViewLocation = 'beside' | 'tab' | 'secondary-sidebar';
@@ -30,6 +31,7 @@ export class VisualizationPanel {
     private _isStale: boolean = false;
     private _isPinned: boolean = false;
     private _pinId: string | undefined;
+    private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
 
     public static setContext(context: vscode.ExtensionContext) {
         VisualizationPanel._context = context;
@@ -76,7 +78,9 @@ export class VisualizationPanel {
             }
         );
 
-        VisualizationPanel.currentPanel = new VisualizationPanel(panel, extensionUri, sqlCode, options, false);
+        const newPanel = new VisualizationPanel(panel, extensionUri, sqlCode, options, false);
+        newPanel._sourceDocumentUri = options.documentUri;
+        VisualizationPanel.currentPanel = newPanel;
     }
 
     public static createPinnedPanel(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions, pinId?: string): string {
@@ -98,6 +102,7 @@ export class VisualizationPanel {
         );
 
         const pinnedPanel = new VisualizationPanel(panel, extensionUri, sqlCode, options, true, id);
+        pinnedPanel._sourceDocumentUri = options.documentUri;
         VisualizationPanel.pinnedPanels.set(id, pinnedPanel);
 
         // Save to workspace state
@@ -161,9 +166,13 @@ export class VisualizationPanel {
                 return;
             }
 
+            // Try to find the document URI if we can match by name
+            let documentUri: vscode.Uri | undefined;
+            // For pinned tabs, we don't have the original URI, so we'll try to find it
             VisualizationPanel.createPinnedPanel(extensionUri, pin.sql, {
                 dialect: pin.dialect,
-                fileName: pin.name
+                fileName: pin.name,
+                documentUri: documentUri
             }, pin.id);
         }
     }
@@ -177,6 +186,7 @@ export class VisualizationPanel {
             });
             VisualizationPanel.currentPanel._currentSql = sqlCode;
             VisualizationPanel.currentPanel._currentOptions = options;
+            VisualizationPanel.currentPanel._sourceDocumentUri = options.documentUri;
             VisualizationPanel.currentPanel._isStale = false;
         }
     }
@@ -257,6 +267,12 @@ export class VisualizationPanel {
                     case 'goToLine':
                         this._goToLine(message.line);
                         return;
+                    case 'requestFullscreen':
+                        // VS Code doesn't support programmatic fullscreen, but we can maximize the panel
+                        if (message.enable) {
+                            this._panel.reveal(vscode.ViewColumn.Active, true);
+                        }
+                        return;
                     case 'pinVisualization':
                         // Create a new pinned panel
                         if (VisualizationPanel._context) {
@@ -310,12 +326,45 @@ export class VisualizationPanel {
         vscode.window.showInformationMessage(`View location changed to: ${location}`);
     }
 
-    private _goToLine(line: number) {
+    /**
+     * Phase 1 Feature: Click Node → Jump to SQL
+     * Navigate to the specified line in the source SQL document.
+     * Uses the tracked source document URI to ensure navigation to the correct file,
+     * even if the user has switched to a different editor.
+     * 
+     * @param line - Line number (1-indexed) to navigate to
+     */
+    private async _goToLine(line: number) {
+        console.log('_goToLine called with line:', line, 'sourceDocumentUri:', this._sourceDocumentUri?.toString());
+        
+        // Try to use the source document URI if available (preferred method)
+        const targetUri = this._sourceDocumentUri;
+        
+        if (targetUri) {
+            // Open the document and navigate to the line
+            try {
+                const document = await vscode.workspace.openTextDocument(targetUri);
+                const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+                const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+                console.log('Successfully navigated to line', line, 'in document:', targetUri.toString());
+                return;
+            } catch (error) {
+                console.error('Failed to open document:', error);
+            }
+        }
+        
+        // Fallback to active editor if source document URI is not available
         const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.languageId === 'sql') {
-            const position = new vscode.Position(line - 1, 0);
+        if (editor) {
+            const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+            console.log('Navigated to line', line, 'in active editor');
+        } else {
+            console.warn('No active editor found, cannot navigate to line', line);
+            vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);
         }
     }
 
@@ -326,6 +375,7 @@ export class VisualizationPanel {
     private _update(sqlCode: string, options: VisualizationOptions) {
         this._currentSql = sqlCode;
         this._currentOptions = options;
+        this._sourceDocumentUri = options.documentUri;
         this._isStale = false;
         const webview = this._panel.webview;
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);

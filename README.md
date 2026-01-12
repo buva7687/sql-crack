@@ -237,10 +237,13 @@ sql-crack/
 SQL Crack follows a phased development approach focused on delivering professional-grade SQL visualization features:
 
 ### ✅ Phase 1: Core Professional Features (COMPLETED)
-- Enhanced interactive navigation (click-to-jump, edge highlighting, breadcrumbs)
-- Read vs Write differentiation with visual badges
-- Enhanced tooltips with SQL fragments
-- CTE expansion controls
+- ✅ Enhanced interactive navigation (click-to-jump, edge highlighting, breadcrumbs)
+- ✅ Read vs Write differentiation with visual badges
+- ✅ Enhanced tooltips with SQL fragments and line numbers
+- ✅ CTE expansion controls with breadcrumb navigation
+- ✅ Fullscreen mode with UI element hiding
+- ✅ Click-to-jump navigation with source document tracking
+- ✅ Edge click to view SQL clauses (JOIN/WHERE conditions)
 
 ### ✅ Phase 2: Developer Productivity & Quality (PARTIALLY COMPLETED)
 - ✅ Advanced SQL annotations and warnings

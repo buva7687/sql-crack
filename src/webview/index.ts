@@ -171,6 +171,7 @@ function init(): void {
 
 function createToolbar(container: HTMLElement): void {
     const toolbar = document.createElement('div');
+    toolbar.id = 'sql-crack-toolbar';
     toolbar.style.cssText = `
         position: absolute;
         top: 16px;
@@ -292,6 +293,7 @@ function createToolbar(container: HTMLElement): void {
 
     // Action buttons (top right)
     const actions = document.createElement('div');
+    actions.id = 'sql-crack-actions';
     actions.style.cssText = `
         position: absolute;
         top: 16px;
@@ -588,24 +590,30 @@ function createToolbar(container: HTMLElement): void {
     featureGroup.appendChild(themeBtn);
 
     // Fullscreen button
-    let fullscreenActive = false;
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.innerHTML = '⛶';
     fullscreenBtn.title = 'Toggle fullscreen (F)';
     fullscreenBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    
+    const updateFullscreenButton = () => {
+        const isFull = isFullscreen();
+        fullscreenBtn.style.background = isFull ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    };
+    
     fullscreenBtn.addEventListener('click', () => {
-        fullscreenActive = !fullscreenActive;
-        toggleFullscreen(fullscreenActive);
-        fullscreenBtn.innerHTML = fullscreenActive ? '⛶' : '⛶';
-        fullscreenBtn.style.background = fullscreenActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        toggleFullscreen();
+        setTimeout(updateFullscreenButton, 50);
     });
     fullscreenBtn.addEventListener('mouseenter', () => {
-        if (!fullscreenActive) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+        if (!isFullscreen()) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
     });
     fullscreenBtn.addEventListener('mouseleave', () => {
-        if (!fullscreenActive) fullscreenBtn.style.background = 'transparent';
+        updateFullscreenButton();
     });
     featureGroup.appendChild(fullscreenBtn);
+    
+    // Listen for fullscreen changes to update button state
+    document.addEventListener('fullscreenchange', updateFullscreenButton);
 
     // Keyboard shortcuts help button
     const helpBtn = document.createElement('button');

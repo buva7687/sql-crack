@@ -1826,16 +1826,41 @@ function selectNode(nodeId: string | null): void {
         });
     }
 
-    // Jump to SQL definition if node has a line number
+    // Phase 1 Feature: Click Node → Jump to SQL
+    // Navigate to the SQL definition when a node is clicked
     if (nodeId) {
         const node = currentNodes.find(n => n.id === nodeId);
-        if (node?.startLine && typeof window !== 'undefined') {
+        if (node && typeof window !== 'undefined') {
             const vscodeApi = (window as any).vscodeApi;
             if (vscodeApi && vscodeApi.postMessage) {
-                vscodeApi.postMessage({
-                    command: 'goToLine',
-                    line: node.startLine
-                });
+                // Try to find line number from node or search in SQL
+                let lineNumber = node.startLine;
+                
+                // Fallback: If no line number assigned, search for table name in SQL
+                // This handles cases where line number assignment might have failed
+                if (!lineNumber && node.type === 'table' && currentSql) {
+                    const tableName = node.label.toLowerCase();
+                    const sqlLines = currentSql.split('\n');
+                    for (let i = 0; i < sqlLines.length; i++) {
+                        const line = sqlLines[i].toLowerCase();
+                        // Look for table name as a word boundary match to avoid partial matches
+                        if (line.match(new RegExp(`\\b${tableName}\\b`))) {
+                            lineNumber = i + 1;
+                            break;
+                        }
+                    }
+                }
+                
+                if (lineNumber) {
+                    console.log('Navigating to line', lineNumber, 'for node:', node.label, node.type);
+                    vscodeApi.postMessage({
+                        command: 'goToLine',
+                        line: lineNumber
+                    });
+                } else {
+                    // Debug: log when line number is missing
+                    console.log('No line number found for node:', node.label, node.type, 'startLine:', node.startLine, 'currentSql length:', currentSql?.length);
+                }
             }
         }
     }
@@ -3050,40 +3075,180 @@ function calculateQueryDepth(): number {
 }
 
 // ============================================================
-// FEATURE: Fullscreen Mode
+// Phase 1 Feature: Fullscreen Mode
 // ============================================================
+// Toggle fullscreen mode to maximize visualization area.
+// Hides all UI elements (toolbars, panels) and makes SVG fill the viewport.
+// Uses individual style properties instead of cssText to preserve fonts and sizes.
 
 export function toggleFullscreen(enable?: boolean): void {
     state.isFullscreen = enable ?? !state.isFullscreen;
 
-    if (!containerElement) return;
+    const rootElement = document.getElementById('root');
+    const body = document.body;
+    const html = document.documentElement;
+    const svgElement = svg;
+    
+    if (!rootElement) {
+        console.error('Root element not found for fullscreen');
+        return;
+    }
+
+    // Find all UI elements to hide/show using IDs and classes
+    const toolbar = document.getElementById('sql-crack-toolbar') as HTMLElement;
+    const actions = document.getElementById('sql-crack-actions') as HTMLElement;
+    const batchTabs = document.getElementById('batch-tabs') as HTMLElement;
+    const breadcrumb = document.querySelector('.breadcrumb-panel') as HTMLElement;
+    const detailsPanel = document.querySelector('.details-panel') as HTMLElement;
+    const statsPanel = document.querySelector('.stats-panel') as HTMLElement;
+    const hintsPanel = document.querySelector('.hints-panel') as HTMLElement;
+    const legendPanel = document.querySelector('.legend-panel') as HTMLElement;
+    const sqlPreviewPanel = document.querySelector('.sql-preview-panel') as HTMLElement;
 
     if (state.isFullscreen) {
-        // Save original styles
-        containerElement.dataset.originalStyles = containerElement.style.cssText;
+        // Save original styles and visibility (only save what we'll change)
+        // Using individual properties instead of cssText to preserve fonts and other styles
+        rootElement.dataset.originalPosition = rootElement.style.position || '';
+        rootElement.dataset.originalTop = rootElement.style.top || '';
+        rootElement.dataset.originalLeft = rootElement.style.left || '';
+        rootElement.dataset.originalWidth = rootElement.style.width || '';
+        rootElement.dataset.originalHeight = rootElement.style.height || '';
+        rootElement.dataset.originalMargin = rootElement.style.margin || '';
+        rootElement.dataset.originalPadding = rootElement.style.padding || '';
+        rootElement.dataset.originalOverflow = rootElement.style.overflow || '';
+        rootElement.dataset.originalZIndex = rootElement.style.zIndex || '';
+        
+        if (svgElement) {
+            svgElement.dataset.originalWidth = svgElement.style.width || '';
+            svgElement.dataset.originalHeight = svgElement.style.height || '';
+            svgElement.dataset.originalPosition = svgElement.style.position || '';
+            svgElement.dataset.originalTop = svgElement.style.top || '';
+            svgElement.dataset.originalLeft = svgElement.style.left || '';
+        }
+        
+        if (body) {
+            body.dataset.originalMargin = body.style.margin || '';
+            body.dataset.originalPadding = body.style.padding || '';
+            body.dataset.originalOverflow = body.style.overflow || '';
+            body.dataset.originalWidth = body.style.width || '';
+            body.dataset.originalHeight = body.style.height || '';
+        }
+        
+        if (html) {
+            html.dataset.originalMargin = html.style.margin || '';
+            html.dataset.originalPadding = html.style.padding || '';
+            html.dataset.originalOverflow = html.style.overflow || '';
+            html.dataset.originalWidth = html.style.width || '';
+            html.dataset.originalHeight = html.style.height || '';
+        }
+        
+        // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        uiElements.forEach(el => {
+            if (el) {
+                el.dataset.originalDisplay = el.style.display || '';
+                el.style.display = 'none';
+            }
+        });
 
-        // Go fullscreen
-        containerElement.style.cssText = `
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            z-index: 9999 !important;
-            background: ${state.isDarkTheme ? '#0f172a' : '#f8fafc'};
-        `;
+        // Make root fill the entire viewport (only set necessary properties)
+        // Using individual properties preserves fonts, colors, and other styles
+        rootElement.style.position = 'fixed';
+        rootElement.style.top = '0';
+        rootElement.style.left = '0';
+        rootElement.style.width = '100vw';
+        rootElement.style.height = '100vh';
+        rootElement.style.margin = '0';
+        rootElement.style.padding = '0';
+        rootElement.style.overflow = 'hidden';
+        rootElement.style.zIndex = '99999';
+        // Don't change background - let it inherit or use existing
+        
+        if (svgElement) {
+            svgElement.style.width = '100vw';
+            svgElement.style.height = '100vh';
+            svgElement.style.position = 'absolute';
+            svgElement.style.top = '0';
+            svgElement.style.left = '0';
+        }
+        
+        if (body) {
+            body.style.margin = '0';
+            body.style.padding = '0';
+            body.style.overflow = 'hidden';
+            body.style.width = '100vw';
+            body.style.height = '100vh';
+        }
+        
+        if (html) {
+            html.style.margin = '0';
+            html.style.padding = '0';
+            html.style.overflow = 'hidden';
+            html.style.width = '100vw';
+            html.style.height = '100vh';
+        }
 
-        // Try to use browser fullscreen API
-        if (containerElement.requestFullscreen) {
-            containerElement.requestFullscreen().catch(() => {
-                // Fallscreen API failed, but CSS fullscreen still works
+        // Request fullscreen via VS Code API (for panel maximization)
+        if (typeof window !== 'undefined' && (window as any).vscodeApi) {
+            (window as any).vscodeApi.postMessage({
+                command: 'requestFullscreen',
+                enable: true
             });
         }
     } else {
-        // Restore original styles
-        containerElement.style.cssText = containerElement.dataset.originalStyles || '';
+        // Request exit fullscreen via VS Code API
+        if (typeof window !== 'undefined' && (window as any).vscodeApi) {
+            (window as any).vscodeApi.postMessage({
+                command: 'requestFullscreen',
+                enable: false
+            });
+        }
 
-        // Exit browser fullscreen
+        // Restore UI elements
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        uiElements.forEach(el => {
+            if (el && el.dataset.originalDisplay !== undefined) {
+                el.style.display = el.dataset.originalDisplay;
+                delete el.dataset.originalDisplay;
+            }
+        });
+
+        // Restore original styles (only the properties we changed)
+        rootElement.style.position = rootElement.dataset.originalPosition || '';
+        rootElement.style.top = rootElement.dataset.originalTop || '';
+        rootElement.style.left = rootElement.dataset.originalLeft || '';
+        rootElement.style.width = rootElement.dataset.originalWidth || '';
+        rootElement.style.height = rootElement.dataset.originalHeight || '';
+        rootElement.style.margin = rootElement.dataset.originalMargin || '';
+        rootElement.style.padding = rootElement.dataset.originalPadding || '';
+        rootElement.style.overflow = rootElement.dataset.originalOverflow || '';
+        rootElement.style.zIndex = rootElement.dataset.originalZIndex || '';
+        
+        if (svgElement) {
+            svgElement.style.width = svgElement.dataset.originalWidth || '';
+            svgElement.style.height = svgElement.dataset.originalHeight || '';
+            svgElement.style.position = svgElement.dataset.originalPosition || '';
+            svgElement.style.top = svgElement.dataset.originalTop || '';
+            svgElement.style.left = svgElement.dataset.originalLeft || '';
+        }
+        
+        if (body) {
+            body.style.margin = body.dataset.originalMargin || '';
+            body.style.padding = body.dataset.originalPadding || '';
+            body.style.overflow = body.dataset.originalOverflow || '';
+            body.style.width = body.dataset.originalWidth || '';
+            body.style.height = body.dataset.originalHeight || '';
+        }
+        
+        if (html) {
+            html.style.margin = html.dataset.originalMargin || '';
+            html.style.padding = html.dataset.originalPadding || '';
+            html.style.overflow = html.dataset.originalOverflow || '';
+            html.style.width = html.dataset.originalWidth || '';
+            html.style.height = html.dataset.originalHeight || '';
+        }
+
+        // Exit browser fullscreen if active
         if (document.fullscreenElement) {
             document.exitFullscreen().catch(() => {});
         }

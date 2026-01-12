@@ -330,6 +330,15 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
                 node.endLine += lineOffset;
             }
         }
+        // Also adjust line numbers for edges
+        for (const edge of result.edges) {
+            if (edge.startLine) {
+                edge.startLine += lineOffset;
+            }
+            if (edge.endLine) {
+                edge.endLine += lineOffset;
+            }
+        }
 
         queries.push(result);
 
@@ -423,11 +432,43 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     for (const node of nodes) {
         switch (node.type) {
             case 'table': {
-                // Tables appear in FROM or JOIN clauses
+                // Try to find the actual line where this table appears
+                const tableName = node.label.toLowerCase().trim();
+                const sqlLines = sql.split('\n');
                 const fromLines = keywordLines.get('FROM') || [];
-                if (fromLines.length > 0) {
-                    node.startLine = fromLines[0];
+                const joinLines = [
+                    ...(keywordLines.get('JOIN') || []),
+                    ...(keywordLines.get('INNER JOIN') || []),
+                    ...(keywordLines.get('LEFT JOIN') || []),
+                    ...(keywordLines.get('RIGHT JOIN') || []),
+                    ...(keywordLines.get('FULL JOIN') || []),
+                    ...(keywordLines.get('CROSS JOIN') || [])
+                ];
+                
+                // Search all lines for the table name
+                let foundLine: number | undefined;
+                const searchStartLine = Math.min(...fromLines, ...joinLines, sqlLines.length);
+                
+                // Search from the beginning, but prioritize lines after FROM/JOIN
+                for (let i = 0; i < sqlLines.length; i++) {
+                    const line = sqlLines[i].toLowerCase();
+                    // Check if this line contains the table name as a word boundary
+                    // Also check for table aliases (e.g., "employees e" or "employees AS e")
+                    const tableRegex = new RegExp(`\\b${tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                    if (tableRegex.test(line)) {
+                        // Make sure it's in a FROM or JOIN context
+                        if (i >= searchStartLine - 1 || 
+                            line.includes('from') || 
+                            line.includes('join') ||
+                            (i > 0 && (sqlLines[i-1].toLowerCase().includes('from') || sqlLines[i-1].toLowerCase().includes('join')))) {
+                            foundLine = i + 1;
+                            break;
+                        }
+                    }
                 }
+                
+                // Fallback to first FROM line if not found
+                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : undefined);
                 break;
             }
             case 'join': {
@@ -612,21 +653,47 @@ function generateHints(stmt: any): void {
 }
 
 // Advanced quality checks - detect unused CTEs, dead columns, duplicate subqueries
+// Phase 2 Feature: Advanced SQL Annotations
 function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[]): void {
     // Detect unused CTEs
+    // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
     const cteNodes = nodes.filter(n => n.type === 'cte');
     const referencedCTEs = new Set<string>();
+    
+    // Build a set of all CTE names (without "WITH " prefix for accurate matching)
+    const allCteNames = new Set<string>();
+    cteNodes.forEach(cteNode => {
+        let cteName = cteNode.label.toLowerCase();
+        if (cteName.startsWith('with ')) {
+            cteName = cteName.substring(5).trim();
+        }
+        allCteNames.add(cteName);
+    });
 
-    // Track which CTEs are actually referenced
+    // Track which CTEs are actually referenced in the query
+    // Check all table nodes, not just those marked as cte_reference
     nodes.forEach(node => {
-        if (node.type === 'table' && node.tableCategory === 'cte_reference') {
-            // Extract CTE name from label or description
-            referencedCTEs.add(node.label.toLowerCase());
+        if (node.type === 'table') {
+            const tableName = node.label.toLowerCase().trim();
+            // Check if this table name matches any CTE name
+            if (allCteNames.has(tableName)) {
+                referencedCTEs.add(tableName);
+            }
+            // Also check if it's marked as cte_reference (backup check)
+            if (node.tableCategory === 'cte_reference') {
+                referencedCTEs.add(tableName);
+            }
         }
     });
 
     cteNodes.forEach(cteNode => {
-        const cteName = cteNode.label.toLowerCase();
+        // Extract CTE name from label (remove "WITH " prefix if present)
+        // This ensures accurate matching between CTE definitions and references
+        let cteName = cteNode.label.toLowerCase();
+        if (cteName.startsWith('with ')) {
+            cteName = cteName.substring(5).trim();
+        }
+        
         if (!referencedCTEs.has(cteName)) {
             // CTE is defined but never used
             if (!cteNode.warnings) cteNode.warnings = [];
@@ -845,8 +912,14 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
     });
 
     // Process table for UPDATE/DELETE/INSERT
+    // Phase 1 Feature: Read vs Write Differentiation
+    // Mark write operations with accessMode and operationType for visual distinction
     if (stmt.table) {
         const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        // Determine operation type and access mode for write operations
+        const opType = statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+        const accessMode: 'write' = 'write';
+        
         for (const t of tables) {
             stats.tables++;
             const tableId = genId('table');
@@ -856,6 +929,8 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
                 type: 'table',
                 label: String(tableName),
                 description: 'Target table',
+                accessMode: accessMode, // Mark as write operation for red border/badge
+                operationType: opType,  // Store operation type for badge display
                 x: 0, y: 0, width: 140, height: 60
             });
             edges.push({
@@ -892,8 +967,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const cteChildEdges: FlowEdge[] = [];
 
             if (cte.stmt) {
-                // Recursively parse the CTE's SELECT statement
-                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges);
+                // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
+                // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
+                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges, cteId, 0);
             }
 
             // Calculate container size based on children
@@ -908,6 +984,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 children: cteChildren.length > 0 ? cteChildren : undefined,
                 childEdges: cteChildEdges.length > 0 ? cteChildEdges : undefined,
                 expanded: true,
+                depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
             nodeIds.push(cteId);
@@ -982,12 +1059,20 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                     x: 0, y: 0, width: 140, height: 60
                 });
 
+                // Extract join condition SQL for edge
+                const joinConditionSql = fromItem.on ? formatCondition(fromItem.on) : '';
+                
+                // Phase 1 Feature: Click Edge → View SQL Clauses
                 // Connect left side to join (previous join result or first table)
+                // Store SQL clause and line number for edge click navigation
                 if (leftTableId) {
                     edges.push({
                         id: genId('e'),
                         source: leftTableId,
-                        target: joinId
+                        target: joinId,
+                        sqlClause: joinConditionSql, // SQL clause for edge click display
+                        clauseType: 'join',         // Type of clause for styling
+                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -996,7 +1081,10 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                     edges.push({
                         id: genId('e'),
                         source: rightTableId,
-                        target: joinId
+                        target: joinId,
+                        sqlClause: joinConditionSql, // SQL clause for edge click display
+                        clauseType: 'on',           // Type of clause for styling
+                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -1033,11 +1121,18 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             x: 0, y: 0, width: 140, height: 60
         });
 
+        // Phase 1 Feature: Click Edge → View SQL Clauses
+        // Store WHERE clause SQL and line number for edge click navigation
         if (previousId) {
+            // Format WHERE clause SQL
+            const whereClauseSql = conditions.join(' AND ');
             edges.push({
                 id: genId('e'),
                 source: previousId,
-                target: whereId
+                target: whereId,
+                sqlClause: whereClauseSql, // SQL clause for edge click display
+                clauseType: 'where',      // Type of clause for styling
+                startLine: stmt.where?.location?.start?.line // Line number for navigation
             });
         }
         previousId = whereId;
@@ -1317,7 +1412,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
         // Parse subquery's internal structure
         const subChildren: FlowNode[] = [];
         const subChildEdges: FlowEdge[] = [];
-        parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges);
+        parseCteOrSubqueryInternals(fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0);
 
         // Subqueries as data sources should always be expanded
         // Calculate container size based on children
@@ -1334,6 +1429,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
             expanded: true, // Always expanded for data source subqueries
             tableCategory: 'derived',
+            depth: 0, // Subquery depth
             x: 0, y: 0, width: containerWidth, height: containerHeight
         });
         return subqueryId;
@@ -1363,7 +1459,19 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
 
 function getTableName(item: any): string {
     if (typeof item === 'string') { return item; }
-    return item.table || item.as || item.name || 'table';
+    
+    // For table references, prefer the actual table name over alias
+    // The AST structure varies by parser, so check multiple possible fields
+    if (item.table) {
+        // If table is an object, extract the name
+        if (typeof item.table === 'object') {
+            return item.table.table || item.table.name || item.table.value || item.as || 'table';
+        }
+        return item.table;
+    }
+    
+    // Fallback to name, then alias, then default
+    return item.name || item.as || 'table';
 }
 
 function extractColumns(columns: any): string[] {
@@ -1643,7 +1751,9 @@ function extractCaseStatementDetails(columns: any): Array<{
 }
 
 // Parse CTE or Subquery internal structure for nested visualization
-function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): void {
+// Phase 1 Feature: Breadcrumb Navigation
+// Parse CTE/subquery internals and set parentId/depth for breadcrumb trail navigation
+function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEdge[], parentId?: string, depth: number = 0): void {
     if (!stmt) { return; }
 
     let previousId: string | null = null;
@@ -1660,6 +1770,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
                         type: 'table',
                         label: tableName,
                         description: 'Table',
+                        parentId: parentId,
+                        depth: depth + 1,
                         x: 0, y: 0, width: 100, height: 32
                     });
                     if (previousId) {
@@ -1680,6 +1792,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
                     type: 'join',
                     label: `${fromItem.join} ${joinTable}`,
                     description: 'Join',
+                    parentId: parentId,
+                    depth: depth + 1,
                     x: 0, y: 0, width: 120, height: 32
                 });
                 if (previousId) {
@@ -1698,6 +1812,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'filter',
             label: 'WHERE',
             description: 'Filter',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 80, height: 32
         });
         if (previousId) {
@@ -1714,6 +1830,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'aggregate',
             label: 'GROUP BY',
             description: 'Aggregate',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {
@@ -1730,6 +1848,8 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             type: 'sort',
             label: 'ORDER BY',
             description: 'Sort',
+            parentId: parentId,
+            depth: depth + 1,
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {
