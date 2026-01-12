@@ -66,6 +66,10 @@ export interface FlowNode {
     // For visual column lineage
     visibleColumns?: string[]; // Column names to display in the node
     columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
+    // For warning indicators
+    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex'; severity: 'low' | 'medium' | 'high'; message: string }>;
+    complexityLevel?: 'low' | 'medium' | 'high'; // Visual complexity indicator
+    isBottleneck?: boolean; // Critical path indicator
 }
 
 export interface FlowEdge {
@@ -100,12 +104,26 @@ export interface QueryStats {
     conditions: number;
     complexity: 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
     complexityScore: number;
+    // Enhanced metrics
+    maxCteDepth?: number;        // Maximum nesting depth of CTEs
+    maxFanOut?: number;          // Maximum number of outgoing edges from a single node
+    criticalPathLength?: number; // Length of the longest execution path
+    complexityBreakdown?: {      // Breakdown of complexity score
+        joins: number;
+        subqueries: number;
+        ctes: number;
+        aggregations: number;
+        windowFunctions: number;
+    };
 }
 
 export interface OptimizationHint {
     type: 'warning' | 'info' | 'error';
     message: string;
     suggestion?: string;
+    category?: 'performance' | 'quality' | 'best-practice' | 'complexity';
+    nodeId?: string; // Related node ID for targeted warnings
+    severity?: 'low' | 'medium' | 'high';
 }
 
 // Column lineage tracking
@@ -509,6 +527,12 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Generate optimization hints
         generateHints(statements[0]);
 
+        // Detect advanced issues (unused CTEs, dead columns, etc.)
+        detectAdvancedIssues(nodes, edges);
+
+        // Calculate enhanced complexity metrics
+        calculateEnhancedMetrics(nodes, edges);
+
         // Use dagre for layout
         layoutGraph(nodes, edges);
 
@@ -580,9 +604,225 @@ function generateHints(stmt: any): void {
         hints.push({
             type: 'error',
             message: 'Possible Cartesian product',
-            suggestion: 'Multiple tables without JOIN conditions will produce all row combinations'
+            suggestion: 'Multiple tables without JOIN conditions will produce all row combinations',
+            category: 'performance',
+            severity: 'high'
         });
     }
+}
+
+// Advanced quality checks - detect unused CTEs, dead columns, duplicate subqueries
+function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[]): void {
+    // Detect unused CTEs
+    const cteNodes = nodes.filter(n => n.type === 'cte');
+    const referencedCTEs = new Set<string>();
+
+    // Track which CTEs are actually referenced
+    nodes.forEach(node => {
+        if (node.type === 'table' && node.tableCategory === 'cte_reference') {
+            // Extract CTE name from label or description
+            referencedCTEs.add(node.label.toLowerCase());
+        }
+    });
+
+    cteNodes.forEach(cteNode => {
+        const cteName = cteNode.label.toLowerCase();
+        if (!referencedCTEs.has(cteName)) {
+            // CTE is defined but never used
+            if (!cteNode.warnings) cteNode.warnings = [];
+            cteNode.warnings.push({
+                type: 'unused',
+                severity: 'medium',
+                message: 'This CTE is never referenced in the query'
+            });
+
+            hints.push({
+                type: 'warning',
+                message: `Unused CTE: "${cteNode.label}"`,
+                suggestion: 'Remove this CTE as it is not used anywhere in the query',
+                category: 'quality',
+                nodeId: cteNode.id,
+                severity: 'medium'
+            });
+        }
+    });
+
+    // Detect duplicate/similar subqueries
+    const subqueryNodes = nodes.filter(n => n.type === 'subquery');
+    const subquerySignatures = new Map<string, FlowNode[]>();
+
+    subqueryNodes.forEach(node => {
+        // Create a simple signature based on description
+        const signature = node.description?.toLowerCase() || '';
+        if (signature) {
+            if (!subquerySignatures.has(signature)) {
+                subquerySignatures.set(signature, []);
+            }
+            subquerySignatures.get(signature)!.push(node);
+        }
+    });
+
+    subquerySignatures.forEach((duplicates, signature) => {
+        if (duplicates.length > 1) {
+            hints.push({
+                type: 'info',
+                message: `${duplicates.length} similar subqueries detected`,
+                suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
+                category: 'quality',
+                severity: 'low'
+            });
+        }
+    });
+
+    // Detect dead columns (columns selected but never used downstream)
+    const selectNodes = nodes.filter(n => n.type === 'select' && n.columns);
+    selectNodes.forEach(selectNode => {
+        if (!selectNode.columns) return;
+
+        // For each column, check if it's used in any downstream operations
+        selectNode.columns.forEach(col => {
+            // Simple heuristic: if it's not the final select and not used in joins/filters
+            const isUsedDownstream = edges.some(edge => {
+                if (edge.source === selectNode.id) {
+                    const targetNode = nodes.find(n => n.id === edge.target);
+                    // Check if column is referenced in target node's description or details
+                    const hasReference = targetNode?.description?.includes(col.name) ||
+                                       targetNode?.details?.some(d => d.includes(col.name));
+                    return hasReference;
+                }
+                return false;
+            });
+
+            if (!isUsedDownstream && selectNode.type !== 'result') {
+                // This is a dead column
+                if (!selectNode.warnings) selectNode.warnings = [];
+                selectNode.warnings.push({
+                    type: 'dead-column',
+                    severity: 'low',
+                    message: `Column "${col.name}" may not be used downstream`
+                });
+            }
+        });
+    });
+
+    // Detect repeated table scans
+    const tableUsage = new Map<string, FlowNode[]>();
+    nodes.filter(n => n.type === 'table' && n.tableCategory === 'physical').forEach(node => {
+        const tableName = node.label.toLowerCase();
+        if (!tableUsage.has(tableName)) {
+            tableUsage.set(tableName, []);
+        }
+        tableUsage.get(tableName)!.push(node);
+    });
+
+    tableUsage.forEach((usages, tableName) => {
+        if (usages.length > 1) {
+            usages.forEach(node => {
+                if (!node.warnings) node.warnings = [];
+                node.warnings.push({
+                    type: 'repeated-scan',
+                    severity: 'medium',
+                    message: `Table "${tableName}" is scanned ${usages.length} times`
+                });
+            });
+
+            hints.push({
+                type: 'warning',
+                message: `Table "${tableName}" scanned ${usages.length} times`,
+                suggestion: 'Consider using a CTE or subquery to scan the table once',
+                category: 'performance',
+                severity: 'medium'
+            });
+        }
+    });
+}
+
+// Calculate enhanced complexity metrics
+function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
+    // Calculate max CTE depth
+    let maxDepth = 0;
+    nodes.forEach(node => {
+        if (node.type === 'cte' && node.depth !== undefined) {
+            maxDepth = Math.max(maxDepth, node.depth);
+        }
+    });
+    stats.maxCteDepth = maxDepth;
+
+    // Calculate max fan-out (number of outgoing edges per node)
+    const fanOutMap = new Map<string, number>();
+    edges.forEach(edge => {
+        const count = fanOutMap.get(edge.source) || 0;
+        fanOutMap.set(edge.source, count + 1);
+    });
+    stats.maxFanOut = Math.max(0, ...Array.from(fanOutMap.values()));
+
+    // Calculate critical path length (longest path from source to result)
+    const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
+        if (visited.has(nodeId)) return 0;
+        visited.add(nodeId);
+
+        const outgoing = edges.filter(e => e.source === nodeId);
+        if (outgoing.length === 0) return 1;
+
+        const maxChildPath = Math.max(
+            ...outgoing.map(edge => calculatePathLength(edge.target, new Set(visited)))
+        );
+        return 1 + maxChildPath;
+    };
+
+    // Find root nodes (nodes with no incoming edges)
+    const nodesWithIncoming = new Set(edges.map(e => e.target));
+    const rootNodes = nodes.filter(n => !nodesWithIncoming.has(n.id));
+
+    stats.criticalPathLength = Math.max(
+        0,
+        ...rootNodes.map(node => calculatePathLength(node.id, new Set()))
+    );
+
+    // Complexity breakdown
+    stats.complexityBreakdown = {
+        joins: stats.joins * 3,           // Joins add significant complexity
+        subqueries: stats.subqueries * 2,
+        ctes: stats.ctes * 2,
+        aggregations: stats.aggregations * 1,
+        windowFunctions: stats.windowFunctions * 2
+    };
+
+    // Identify bottlenecks (nodes with high fan-out or in critical path)
+    nodes.forEach(node => {
+        const fanOut = fanOutMap.get(node.id) || 0;
+        if (fanOut >= 3) {
+            if (!node.warnings) node.warnings = [];
+            node.warnings.push({
+                type: 'fan-out',
+                severity: fanOut >= 5 ? 'high' : 'medium',
+                message: `High fan-out: ${fanOut} outgoing connections`
+            });
+        }
+
+        // Mark nodes with high complexity
+        if ((node.type === 'join' && stats.joins > 3) ||
+            (node.type === 'aggregate' && node.aggregateDetails && node.aggregateDetails.functions.length > 3)) {
+            if (!node.warnings) node.warnings = [];
+            node.warnings.push({
+                type: 'complex',
+                severity: 'medium',
+                message: 'Complex operation - may impact performance'
+            });
+        }
+    });
+
+    // Assign complexity levels to nodes
+    nodes.forEach(node => {
+        if (node.type === 'join') {
+            node.complexityLevel = stats.joins > 5 ? 'high' : stats.joins > 2 ? 'medium' : 'low';
+        } else if (node.type === 'aggregate') {
+            const funcCount = node.aggregateDetails?.functions.length || 0;
+            node.complexityLevel = funcCount > 4 ? 'high' : funcCount > 2 ? 'medium' : 'low';
+        } else if (node.type === 'subquery') {
+            node.complexityLevel = stats.subqueries > 2 ? 'high' : 'low';
+        }
+    });
 }
 
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {

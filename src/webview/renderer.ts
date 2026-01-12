@@ -664,6 +664,18 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
             rect.setAttribute('stroke-width', '2');
         }
     }
+
+    // Add complexity indicator (colored glow for medium/high complexity)
+    if (node.complexityLevel && node.complexityLevel !== 'low') {
+        const complexityColor = node.complexityLevel === 'high' ?
+            'rgba(239, 68, 68, 0.4)' :    // Red glow for high complexity
+            'rgba(245, 158, 11, 0.4)';     // Orange glow for medium complexity
+
+        rect.setAttribute('stroke', complexityColor.replace('0.4', '0.8'));
+        rect.setAttribute('stroke-width', '2');
+        rect.setAttribute('stroke-dasharray', '4,2');
+    }
+
     group.appendChild(rect);
 
     // Add badges for access mode and category
@@ -725,6 +737,45 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         badgeLabel.textContent = badge.text;
         group.appendChild(badgeLabel);
     });
+
+    // Warning badges (top-left corner)
+    if (node.warnings && node.warnings.length > 0) {
+        const warningBadgeSize = 18;
+        const warningX = node.x - 6;
+        const warningY = node.y - 6;
+
+        // Badge background circle
+        const warningCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        warningCircle.setAttribute('cx', String(warningX + warningBadgeSize / 2));
+        warningCircle.setAttribute('cy', String(warningY + warningBadgeSize / 2));
+        warningCircle.setAttribute('r', String(warningBadgeSize / 2));
+        warningCircle.setAttribute('fill', getWarningColor(node.warnings[0].severity));
+        warningCircle.setAttribute('filter', 'url(#shadow)');
+        group.appendChild(warningCircle);
+
+        // Warning icon
+        const warningIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        warningIcon.setAttribute('x', String(warningX + warningBadgeSize / 2));
+        warningIcon.setAttribute('y', String(warningY + warningBadgeSize / 2 + 5));
+        warningIcon.setAttribute('text-anchor', 'middle');
+        warningIcon.setAttribute('fill', 'white');
+        warningIcon.setAttribute('font-size', '12');
+        warningIcon.setAttribute('font-weight', '700');
+        warningIcon.textContent = getWarningIcon(node.warnings[0].type);
+        group.appendChild(warningIcon);
+
+        // If multiple warnings, show count
+        if (node.warnings.length > 1) {
+            const countBadge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            countBadge.setAttribute('x', String(warningX + warningBadgeSize + 2));
+            countBadge.setAttribute('y', String(warningY + 10));
+            countBadge.setAttribute('fill', getWarningColor(node.warnings[0].severity));
+            countBadge.setAttribute('font-size', '9');
+            countBadge.setAttribute('font-weight', '700');
+            countBadge.textContent = `+${node.warnings.length - 1}`;
+            group.appendChild(countBadge);
+        }
+    }
 
     // Icon based on type
     const icon = getNodeIcon(node.type);
@@ -2455,6 +2506,27 @@ function getNodeIcon(type: FlowNode['type']): string {
     return icons[type] || '○';
 }
 
+function getWarningIcon(warningType: string): string {
+    const icons: Record<string, string> = {
+        'unused': '⚠',
+        'dead-column': '⊗',
+        'expensive': '⚠',
+        'fan-out': '📊',
+        'repeated-scan': '🔄',
+        'complex': '🧮'
+    };
+    return icons[warningType] || '⚠';
+}
+
+function getWarningColor(severity: string): string {
+    const colors: Record<string, string> = {
+        'low': '#f59e0b',    // Amber
+        'medium': '#f97316', // Orange
+        'high': '#ef4444'    // Red
+    };
+    return colors[severity] || '#f59e0b';
+}
+
 function truncate(str: string, maxLen: number): string {
     if (str.length <= maxLen) { return str; }
     return str.substring(0, maxLen - 1) + '…';
@@ -3215,6 +3287,26 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
         content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">
             Contains ${node.children.length} operation(s)
         </div>`;
+    }
+
+    // Show warnings
+    if (node.warnings && node.warnings.length > 0) {
+        content += `<div style="margin-top: 8px; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;">`;
+        node.warnings.forEach((warning, idx) => {
+            if (idx < 3) { // Show up to 3 warnings
+                const iconStr = getWarningIcon(warning.type);
+                const colorStr = getWarningColor(warning.severity);
+                content += `<div style="font-size: 10px; color: ${colorStr}; margin-top: ${idx > 0 ? '4px' : '0'};">
+                    ${iconStr} <strong>${warning.severity.toUpperCase()}:</strong> ${escapeHtml(warning.message)}
+                </div>`;
+            }
+        });
+        if (node.warnings.length > 3) {
+            content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
+                +${node.warnings.length - 3} more warning(s)
+            </div>`;
+        }
+        content += `</div>`;
     }
 
     // Add keyboard hint
