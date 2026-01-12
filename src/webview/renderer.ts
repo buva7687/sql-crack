@@ -39,6 +39,7 @@ const state: ViewState = {
 
 let svg: SVGSVGElement | null = null;
 let mainGroup: SVGGElement | null = null;
+let backgroundRect: SVGRectElement | null = null;
 let detailsPanel: HTMLDivElement | null = null;
 let statsPanel: HTMLDivElement | null = null;
 let hintsPanel: HTMLDivElement | null = null;
@@ -53,6 +54,7 @@ let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
+let currentTableUsage: Map<string, number> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -62,7 +64,7 @@ export function initRenderer(container: HTMLElement): void {
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
 
-    // Add defs for markers (arrows)
+    // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -81,8 +83,21 @@ export function initRenderer(container: HTMLElement): void {
                 <feMergeNode in="SourceGraphic"/>
             </feMerge>
         </filter>
+        <!-- Grid pattern for light theme -->
+        <pattern id="grid-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+            <rect width="20" height="20" fill="#ffffff"/>
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+        </pattern>
     `;
     svg.appendChild(defs);
+
+    // Create background rectangle for pattern (light theme)
+    backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    backgroundRect.setAttribute('width', '100%');
+    backgroundRect.setAttribute('height', '100%');
+    backgroundRect.setAttribute('fill', '#0f172a');
+    backgroundRect.style.pointerEvents = 'none';
+    svg.appendChild(backgroundRect);
 
     // Create main group for pan/zoom
     mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -95,19 +110,21 @@ export function initRenderer(container: HTMLElement): void {
     detailsPanel.className = 'details-panel';
     detailsPanel.style.cssText = `
         position: absolute;
-        right: 0;
-        top: 0;
-        width: 280px;
-        height: 100%;
+        right: 16px;
+        top: 50%;
+        width: 320px;
+        max-height: 70vh;
         background: rgba(15, 23, 42, 0.98);
-        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
         padding: 20px;
         box-sizing: border-box;
         overflow-y: auto;
-        transform: translateX(100%);
+        transform: translate(calc(100% + 16px), -50%);
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         z-index: 200;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     `;
     container.appendChild(detailsPanel);
 
@@ -403,11 +420,6 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleSqlPreview();
         }
-        // D to show diff modal
-        if (e.key === 'd' || e.key === 'D') {
-            e.preventDefault();
-            document.dispatchEvent(new CustomEvent('show-diff-modal'));
-        }
         // / to focus search (like vim)
         if (e.key === '/') {
             e.preventDefault();
@@ -439,6 +451,7 @@ export function render(result: ParseResult): void {
     currentHints = result.hints;
     currentSql = result.sql;
     currentColumnLineage = result.columnLineage || [];
+    currentTableUsage = result.tableUsage || new Map();
 
     // Reset highlight state
     state.highlightedColumnSources = [];
@@ -497,12 +510,18 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
     const isWindowNode = node.type === 'window' && node.windowDetails;
+    const isAggregateNode = node.type === 'aggregate' && node.aggregateDetails && node.label === 'AGGREGATE';
+    const isCaseNode = node.type === 'case' && node.caseDetails;
     const isJoinNode = node.type === 'join';
 
     if (isContainer) {
         renderContainerNode(node, group);
     } else if (isWindowNode) {
         renderWindowNode(node, group);
+    } else if (isAggregateNode) {
+        renderAggregateNode(node, group);
+    } else if (isCaseNode) {
+        renderCaseNode(node, group);
     } else if (isJoinNode) {
         renderJoinNode(node, group);
     } else {
@@ -512,8 +531,17 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     // Hover effect with tooltip
     const rect = group.querySelector('.node-rect') as SVGRectElement;
     if (rect) {
+        // Get the correct color based on node type
+        const getColor = () => {
+            if (node.type === 'join') {
+                const joinType = node.label || 'INNER JOIN';
+                return getJoinColor(joinType);
+            }
+            return getNodeColor(node.type);
+        };
+        
         group.addEventListener('mouseenter', (e) => {
-            rect.setAttribute('fill', lightenColor(getNodeColor(node.type), 20));
+            rect.setAttribute('fill', lightenColor(getColor(), 20));
             highlightConnectedEdges(node.id, true);
             showTooltip(node, e as MouseEvent);
         });
@@ -523,7 +551,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
 
         group.addEventListener('mouseleave', () => {
-            rect.setAttribute('fill', getNodeColor(node.type));
+            rect.setAttribute('fill', getColor());
             if (state.selectedNodeId !== node.id) {
                 highlightConnectedEdges(node.id, false);
             }
@@ -556,6 +584,16 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // Determine visual style based on table category
     const isTable = node.type === 'table';
     const tableCategory = node.tableCategory || 'physical';
+    const isDark = state.isDarkTheme;
+    
+    // Text colors based on theme - standard nodes always have colored backgrounds, so white text is usually fine
+    // But for light theme, we might need darker text on lighter backgrounds
+    // Since standard nodes use colored backgrounds (blue, purple, etc.), white text should work
+    // But let's be safe and use theme-aware colors for better contrast
+    const textColor = isDark ? '#ffffff' : '#ffffff'; // Keep white for colored backgrounds
+    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.9)';
+    const textColorDim = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.8)';
+    const strokeColor = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
 
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -582,7 +620,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
             rect.setAttribute('stroke-dasharray', '5,3');
         } else {
             // Physical table: solid border for emphasis
-            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            rect.setAttribute('stroke', strokeColor);
             rect.setAttribute('stroke-width', '2');
         }
     }
@@ -621,7 +659,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 12));
     iconText.setAttribute('y', String(node.y + 24));
-    iconText.setAttribute('fill', 'rgba(255,255,255,0.8)');
+    iconText.setAttribute('fill', textColorMuted);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
     group.appendChild(iconText);
@@ -630,7 +668,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 32));
     label.setAttribute('y', String(node.y + 26));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', textColor);
     label.setAttribute('font-size', '13');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -642,7 +680,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         const desc = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         desc.setAttribute('x', String(node.x + 12));
         desc.setAttribute('y', String(node.y + 44));
-        desc.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        desc.setAttribute('fill', textColorDim);
         desc.setAttribute('font-size', '10');
         desc.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         desc.textContent = truncate(node.description, 20);
@@ -653,6 +691,12 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
 function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     const joinType = node.label || 'INNER JOIN';
     const joinColor = getJoinColor(joinType);
+    const isDark = state.isDarkTheme;
+    
+    // Text colors based on theme - use white for dark theme, dark for light theme
+    const textColor = isDark ? '#ffffff' : '#1e293b';
+    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(30,41,59,0.8)';
+    const textColorDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(30,41,59,0.7)';
 
     // Background rect with join-specific color
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -673,7 +717,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     vennContainer.setAttribute('width', '32');
     vennContainer.setAttribute('height', '20');
     const vennDiv = document.createElement('div');
-    vennDiv.innerHTML = getJoinVennDiagram(joinType);
+    vennDiv.innerHTML = getJoinVennDiagram(joinType, isDark);
     vennDiv.style.cssText = 'display: flex; align-items: center; justify-content: center;';
     vennContainer.appendChild(vennDiv);
     group.appendChild(vennContainer);
@@ -682,7 +726,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 44));
     label.setAttribute('y', String(node.y + 20));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', textColor);
     label.setAttribute('font-size', '11');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -694,7 +738,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
         const condition = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         condition.setAttribute('x', String(node.x + 8));
         condition.setAttribute('y', String(node.y + 38));
-        condition.setAttribute('fill', 'rgba(255,255,255,0.8)');
+        condition.setAttribute('fill', textColorMuted);
         condition.setAttribute('font-size', '9');
         condition.setAttribute('font-family', 'monospace');
         condition.textContent = truncate(node.details[0], 18);
@@ -705,7 +749,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
             const tableName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             tableName.setAttribute('x', String(node.x + 8));
             tableName.setAttribute('y', String(node.y + 52));
-            tableName.setAttribute('fill', 'rgba(255,255,255,0.6)');
+            tableName.setAttribute('fill', textColorDim);
             tableName.setAttribute('font-size', '9');
             tableName.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
             tableName.textContent = truncate(node.details[1], 18);
@@ -1074,6 +1118,192 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     }
 }
 
+function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
+    const aggregateDetails = node.aggregateDetails!;
+    const padding = 10;
+    const headerHeight = 32;
+    const funcHeight = 24;
+
+    // Main container
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    // Icon and title
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + 10));
+    icon.setAttribute('y', String(node.y + 22));
+    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('font-size', '12');
+    icon.textContent = 'Σ';
+    group.appendChild(icon);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', String(node.x + 28));
+    title.setAttribute('y', String(node.y + 22));
+    title.setAttribute('fill', 'white');
+    title.setAttribute('font-size', '12');
+    title.setAttribute('font-weight', '600');
+    title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    title.textContent = `AGGREGATE (${aggregateDetails.functions.length})`;
+    group.appendChild(title);
+
+    // Render each aggregate function
+    let yOffset = node.y + headerHeight + 8;
+    for (const func of aggregateDetails.functions.slice(0, 4)) { // Max 4 visible
+        // Function pill
+        const funcPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        funcPill.setAttribute('x', String(node.x + padding));
+        funcPill.setAttribute('y', String(yOffset));
+        funcPill.setAttribute('width', String(node.width - padding * 2));
+        funcPill.setAttribute('height', String(funcHeight));
+        funcPill.setAttribute('rx', '4');
+        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        group.appendChild(funcPill);
+
+        // Function expression
+        const funcText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        funcText.setAttribute('x', String(node.x + padding + 6));
+        funcText.setAttribute('y', String(yOffset + 16));
+        funcText.setAttribute('fill', '#fbbf24');
+        funcText.setAttribute('font-size', '10');
+        funcText.setAttribute('font-weight', '600');
+        funcText.setAttribute('font-family', 'monospace');
+        const truncatedExpr = func.expression.length > 25 ? func.expression.substring(0, 22) + '...' : func.expression;
+        funcText.textContent = truncatedExpr;
+        group.appendChild(funcText);
+
+        yOffset += funcHeight + 4;
+    }
+
+    // Show "more" indicator if there are more functions
+    if (aggregateDetails.functions.length > 4) {
+        const moreText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        moreText.setAttribute('x', String(node.x + node.width / 2));
+        moreText.setAttribute('y', String(node.y + node.height - 8));
+        moreText.setAttribute('text-anchor', 'middle');
+        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('font-size', '9');
+        moreText.textContent = `+${aggregateDetails.functions.length - 4} more`;
+        group.appendChild(moreText);
+    }
+}
+
+function renderCaseNode(node: FlowNode, group: SVGGElement): void {
+    const caseDetails = node.caseDetails!;
+    const padding = 10;
+    const headerHeight = 32;
+    const caseHeight = 40;
+
+    // Main container
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Header
+    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    header.setAttribute('x', String(node.x));
+    header.setAttribute('y', String(node.y));
+    header.setAttribute('width', String(node.width));
+    header.setAttribute('height', String(headerHeight));
+    header.setAttribute('rx', '10');
+    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    group.appendChild(header);
+
+    // Icon and title
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + 10));
+    icon.setAttribute('y', String(node.y + 22));
+    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('font-size', '12');
+    icon.textContent = '?';
+    group.appendChild(icon);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', String(node.x + 28));
+    title.setAttribute('y', String(node.y + 22));
+    title.setAttribute('fill', 'white');
+    title.setAttribute('font-size', '12');
+    title.setAttribute('font-weight', '600');
+    title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    title.textContent = `CASE (${caseDetails.cases.length})`;
+    group.appendChild(title);
+
+    // Render each CASE statement
+    let yOffset = node.y + headerHeight + 8;
+    for (const caseStmt of caseDetails.cases.slice(0, 3)) { // Max 3 visible
+        // CASE pill
+        const casePill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        casePill.setAttribute('x', String(node.x + padding));
+        casePill.setAttribute('y', String(yOffset));
+        casePill.setAttribute('width', String(node.width - padding * 2));
+        casePill.setAttribute('height', String(caseHeight));
+        casePill.setAttribute('rx', '4');
+        casePill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        group.appendChild(casePill);
+
+        // CASE conditions count
+        const caseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        caseText.setAttribute('x', String(node.x + padding + 6));
+        caseText.setAttribute('y', String(yOffset + 18));
+        caseText.setAttribute('fill', '#fbbf24');
+        caseText.setAttribute('font-size', '10');
+        caseText.setAttribute('font-weight', '600');
+        caseText.setAttribute('font-family', 'monospace');
+        caseText.textContent = `${caseStmt.conditions.length} WHEN condition${caseStmt.conditions.length > 1 ? 's' : ''}`;
+        group.appendChild(caseText);
+
+        if (caseStmt.elseValue) {
+            const elseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            elseText.setAttribute('x', String(node.x + padding + 6));
+            elseText.setAttribute('y', String(yOffset + 32));
+            elseText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            elseText.setAttribute('font-size', '9');
+            const truncatedElse = caseStmt.elseValue.length > 20 ? caseStmt.elseValue.substring(0, 17) + '...' : caseStmt.elseValue;
+            elseText.textContent = 'ELSE: ' + truncatedElse;
+            group.appendChild(elseText);
+        }
+
+        yOffset += caseHeight + 4;
+    }
+
+    // Show "more" indicator if there are more CASE statements
+    if (caseDetails.cases.length > 3) {
+        const moreText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        moreText.setAttribute('x', String(node.x + node.width / 2));
+        moreText.setAttribute('y', String(node.y + node.height - 8));
+        moreText.setAttribute('text-anchor', 'middle');
+        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('font-size', '9');
+        moreText.textContent = `+${caseDetails.cases.length - 3} more`;
+        group.appendChild(moreText);
+    }
+}
+
 function toggleNodeExpansion(node: FlowNode): void {
     node.expanded = !node.expanded;
 
@@ -1189,14 +1419,14 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (!detailsPanel) { return; }
 
     if (!nodeId) {
-        detailsPanel.style.transform = 'translateX(100%)';
+        detailsPanel.style.transform = 'translate(calc(100% + 16px), -50%)';
         return;
     }
 
     const node = currentNodes.find(n => n.id === nodeId);
     if (!node) { return; }
 
-    detailsPanel.style.transform = 'translateX(0)';
+    detailsPanel.style.transform = 'translate(0, -50%)';
 
     // Build details section based on node type
     let detailsSection = '';
@@ -1227,6 +1457,69 @@ function updateDetailsPanel(nodeId: string | null): void {
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">FRAME</span>
                                 <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // Aggregate function details
+    if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
+        detailsSection += `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Aggregate Functions</div>
+                ${node.aggregateDetails.functions.map(func => `
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                        <div style="color: #f59e0b; font-weight: 600; font-size: 13px; font-family: monospace; margin-bottom: 4px;">
+                            ${escapeHtml(func.expression)}
+                        </div>
+                        ${func.alias ? `
+                            <div style="color: #94a3b8; font-size: 11px; font-family: monospace;">
+                                Alias: ${escapeHtml(func.alias)}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+                ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+                        <div style="color: #94a3b8; font-size: 11px; margin-bottom: 4px;">GROUP BY:</div>
+                        <div style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    // CASE statement details
+    if (node.caseDetails && node.caseDetails.cases.length > 0) {
+        detailsSection += `
+            <div style="margin-bottom: 16px;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">CASE Statements</div>
+                ${node.caseDetails.cases.map((caseStmt, idx) => `
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                        ${caseStmt.alias ? `
+                            <div style="color: #eab308; font-weight: 600; font-size: 12px; margin-bottom: 8px;">
+                                ${escapeHtml(caseStmt.alias)}
+                            </div>
+                        ` : ''}
+                        ${caseStmt.conditions.map((cond, condIdx) => `
+                            <div style="margin-bottom: 6px;">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                    <span style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">WHEN</span>
+                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 6px; margin-left: 40px;">
+                                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">THEN</span>
+                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${caseStmt.elseValue ? `
+                            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                                <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">ELSE</span>
+                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -1296,6 +1589,13 @@ function updateDetailsPanel(nodeId: string | null): void {
 function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
+    const isDark = state.isDarkTheme;
+    const textColor = isDark ? '#f1f5f9' : '#1e293b';
+    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
+    const textColorDim = isDark ? '#64748b' : '#94a3b8';
+    const tableTextColor = isDark ? '#cbd5e1' : '#334155';
+    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
     const complexityColors: Record<string, string> = {
         'Simple': '#22c55e',
         'Moderate': '#eab308',
@@ -1303,9 +1603,44 @@ function updateStatsPanel(): void {
         'Very Complex': '#ef4444'
     };
 
+    // Build table list HTML
+    let tableListHtml = '';
+    if (currentTableUsage && currentTableUsage.size > 0) {
+        const sortedTables = Array.from(currentTableUsage.entries())
+            .sort((a, b) => b[1] - a[1]) // Sort by usage count descending
+            .slice(0, 8); // Show top 8 tables
+        
+        tableListHtml = `
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 6px; font-weight: 600;">Tables Used:</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;">
+                    ${sortedTables.map(([tableName, count]) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                            <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
+                            <span style="
+                                background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
+                                color: ${count > 1 ? '#f59e0b' : textColorMuted};
+                                padding: 2px 6px;
+                                border-radius: 4px;
+                                font-weight: 600;
+                                min-width: 20px;
+                                text-align: center;
+                            ">${count}</span>
+                        </div>
+                    `).join('')}
+                    ${currentTableUsage.size > 8 ? `
+                        <div style="font-size: 9px; color: ${textColorDim}; font-style: italic;">
+                            +${currentTableUsage.size - 8} more
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
     statsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span style="font-weight: 600; color: #f1f5f9;">Query Stats</span>
+            <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
             <span style="
                 background: ${complexityColors[currentStats.complexity]};
                 color: white;
@@ -1317,29 +1652,30 @@ function updateStatsPanel(): void {
         </div>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.tables}</div>
-                <div style="font-size: 10px;">Tables</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.tables}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Tables</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.joins}</div>
-                <div style="font-size: 10px;">Joins</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.joins}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Joins</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.conditions}</div>
-                <div style="font-size: 10px;">Filters</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.conditions}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Filters</div>
             </div>
             <div style="text-align: center;">
-                <div style="color: #f1f5f9; font-weight: 600;">${currentStats.complexityScore}</div>
-                <div style="font-size: 10px;">Score</div>
+                <div style="color: ${textColor}; font-weight: 600;">${currentStats.complexityScore}</div>
+                <div style="font-size: 10px; color: ${textColorMuted};">Score</div>
             </div>
         </div>
         ${currentStats.ctes > 0 || currentStats.subqueries > 0 || currentStats.windowFunctions > 0 ? `
-            <div style="display: flex; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+            <div style="display: flex; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; color: ${textColorMuted};">
                 ${currentStats.ctes > 0 ? `<span>CTEs: ${currentStats.ctes}</span>` : ''}
                 ${currentStats.subqueries > 0 ? `<span>Subqueries: ${currentStats.subqueries}</span>` : ''}
                 ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
             </div>
         ` : ''}
+        ${tableListHtml}
     `;
 }
 
@@ -2137,7 +2473,8 @@ export function toggleNodeCollapse(nodeId: string): void {
         stats: currentStats!,
         hints: currentHints,
         sql: currentSql,
-        columnLineage: currentColumnLineage
+        columnLineage: currentColumnLineage,
+        tableUsage: currentTableUsage
     };
     render(result);
 }
@@ -2341,7 +2678,7 @@ function applyTheme(dark: boolean): void {
         textMuted: '#94a3b8',
         textDim: '#64748b'
     } : {
-        bg: '#f8fafc',
+        bg: '#ffffff',
         panelBg: 'rgba(255, 255, 255, 0.95)',
         panelBgSolid: 'rgba(255, 255, 255, 0.98)',
         border: 'rgba(148, 163, 184, 0.3)',
@@ -2350,8 +2687,15 @@ function applyTheme(dark: boolean): void {
         textDim: '#94a3b8'
     };
 
-    // Apply to SVG background
-    svg.style.background = colors.bg;
+    // Apply to SVG background - use pattern for light theme, solid color for dark
+    if (backgroundRect) {
+        if (dark) {
+            backgroundRect.setAttribute('fill', colors.bg);
+        } else {
+            // Use grid pattern for light theme (JSON Crack style)
+            backgroundRect.setAttribute('fill', 'url(#grid-pattern)');
+        }
+    }
 
     // Apply to all panels
     const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement];
@@ -2373,6 +2717,19 @@ function applyTheme(dark: boolean): void {
     // Dispatch custom event for index.ts to update toolbar
     const event = new CustomEvent('theme-change', { detail: { dark } });
     document.dispatchEvent(event);
+    
+    // Update panels with new theme colors
+    if (currentStats) {
+        updateStatsPanel();
+    }
+    if (currentHints.length > 0) {
+        updateHintsPanel();
+    }
+    
+    // Re-render all nodes to update colors for theme
+    if (currentNodes.length > 0) {
+        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, tableUsage: currentTableUsage });
+    }
 }
 
 // ============================================================
@@ -2602,52 +2959,54 @@ function findNodeAtLine(line: number): FlowNode | null {
 // FEATURE: Join Type Venn Diagrams
 // ============================================================
 
-export function getJoinVennDiagram(joinType: string): string {
+export function getJoinVennDiagram(joinType: string, isDark: boolean = true): string {
     const type = joinType.toUpperCase();
+    const strokeColor = isDark ? '#94a3b8' : '#475569';
 
     // SVG Venn diagram icons for different join types
+    // Using different colors from node backgrounds for better contrast
     const diagrams: Record<string, string> = {
         'INNER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <path d="M12 3.5 A6 6 0 0 1 12 12.5 A6 6 0 0 1 12 3.5" fill="#22c55e" opacity="0.6"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <path d="M12 3.5 A6 6 0 0 1 12 12.5 A6 6 0 0 1 12 3.5" fill="#6366f1" opacity="0.7"/>
             </svg>`,
         'LEFT JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#2563eb" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'LEFT OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#3b82f6" opacity="0.5" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#2563eb" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'RIGHT JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#d97706" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'RIGHT OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#f59e0b" opacity="0.5" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="none" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#d97706" opacity="0.6" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'FULL JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'FULL OUTER JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <circle cx="8" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <circle cx="16" cy="8" r="6" fill="#8b5cf6" opacity="0.4" stroke="#64748b" stroke-width="1"/>
+                <circle cx="8" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <circle cx="16" cy="8" r="6" fill="#7c3aed" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
             </svg>`,
         'CROSS JOIN': `
             <svg width="24" height="16" viewBox="0 0 24 16">
-                <rect x="2" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <rect x="14" y="2" width="8" height="12" fill="#ef4444" opacity="0.4" stroke="#64748b" stroke-width="1"/>
-                <line x1="10" y1="8" x2="14" y2="8" stroke="#64748b" stroke-width="1" stroke-dasharray="2"/>
+                <rect x="2" y="2" width="8" height="12" fill="#dc2626" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <rect x="14" y="2" width="8" height="12" fill="#dc2626" opacity="0.5" stroke="${strokeColor}" stroke-width="1"/>
+                <line x1="10" y1="8" x2="14" y2="8" stroke="${strokeColor}" stroke-width="1" stroke-dasharray="2"/>
             </svg>`
     };
 

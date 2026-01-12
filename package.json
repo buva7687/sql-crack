@@ -72,6 +72,17 @@
           "type": "boolean",
           "default": true,
           "description": "Highlight flow nodes when clicking in SQL editor"
+        },
+        "sqlCrack.viewLocation": {
+          "type": "string",
+          "default": "beside",
+          "enum": ["beside", "tab", "secondary-sidebar"],
+          "enumDescriptions": [
+            "Opens beside the SQL file (like Markdown preview)",
+            "Opens as a new tab in the editor area",
+            "Opens in the secondary side bar (right side)"
+          ],
+          "description": "Where to display the SQL visualization panel"
         }
       }
     }

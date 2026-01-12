@@ -3,7 +3,6 @@ import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
 import { parseSqlBatch, ParseResult, SqlDialect, BatchParseResult } from './sqlParser';
-import { diffSql, generateDiffHtml } from './sqlFormatter';
 import {
     initRenderer,
     render,
@@ -34,6 +33,10 @@ declare global {
         vscodeTheme?: string;
         defaultDialect?: string;
         fileName?: string;
+        isPinnedView?: boolean;
+        pinId?: string | null;
+        viewLocation?: string;
+        persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
         };
@@ -74,6 +77,9 @@ function setupVSCodeMessageListener(): void {
             case 'cursorPosition':
                 handleCursorPosition(message.line);
                 break;
+            case 'switchToQuery':
+                handleSwitchToQuery(message.queryIndex);
+                break;
             case 'markStale':
                 markAsStale();
                 break;
@@ -98,6 +104,22 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
 function handleCursorPosition(line: number): void {
     // Import from renderer - highlight node at line
     highlightNodeAtLine(line);
+}
+
+function handleSwitchToQuery(queryIndex: number): void {
+    if (!batchResult || queryIndex < 0 || queryIndex >= batchResult.queries.length) {
+        return;
+    }
+    
+    // Only switch if it's a different query
+    if (currentQueryIndex !== queryIndex) {
+        currentQueryIndex = queryIndex;
+        renderCurrentQuery();
+        updateBatchTabs();
+    }
+    
+    // Also highlight the node at the cursor position
+    // This will be handled by the cursorPosition message that follows
 }
 
 function markAsStale(): void {
@@ -405,17 +427,111 @@ function createToolbar(container: HTMLElement): void {
     });
     featureGroup.appendChild(refreshBtn);
 
-    // Pin/Save tab button
-    const pinBtn = document.createElement('button');
-    pinBtn.innerHTML = '📌';
-    pinBtn.title = 'Pin current visualization (save as tab)';
-    pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    pinBtn.addEventListener('click', () => {
-        pinCurrentVisualization();
-    });
-    pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
-    featureGroup.appendChild(pinBtn);
+    // Pin/Save tab button (only show if not already a pinned view)
+    if (!window.isPinnedView) {
+        const pinBtn = document.createElement('button');
+        pinBtn.innerHTML = '📌';
+        pinBtn.title = 'Pin visualization as new tab';
+        pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+        pinBtn.addEventListener('click', () => {
+            // Send message to extension to create pinned panel
+            if (window.vscodeApi) {
+                // Get the current query's SQL (not the entire file)
+                let sqlToPin = window.initialSqlCode || '';
+                let queryName = window.fileName || 'Query';
+
+                // If we have batch results with multiple queries, pin the current one
+                if (batchResult && batchResult.queries.length > 1) {
+                    const currentQuery = batchResult.queries[currentQueryIndex];
+                    if (currentQuery && currentQuery.sql) {
+                        sqlToPin = currentQuery.sql;
+                        queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
+                    }
+                } else if (batchResult && batchResult.queries.length === 1) {
+                    // Single query - use its SQL
+                    const currentQuery = batchResult.queries[0];
+                    if (currentQuery && currentQuery.sql) {
+                        sqlToPin = currentQuery.sql;
+                    }
+                }
+
+                window.vscodeApi.postMessage({
+                    command: 'pinVisualization',
+                    sql: sqlToPin,
+                    dialect: currentDialect,
+                    name: queryName
+                });
+            }
+        });
+        pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+        pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
+        featureGroup.appendChild(pinBtn);
+
+        // View location dropdown button
+        const viewLocBtn = document.createElement('button');
+        viewLocBtn.innerHTML = '⊞';
+        viewLocBtn.title = 'Change view location';
+        viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+
+        const viewLocDropdown = createViewLocationDropdown();
+        viewLocBtn.appendChild(viewLocDropdown);
+
+        viewLocBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = viewLocDropdown.style.display === 'block';
+            viewLocDropdown.style.display = isVisible ? 'none' : 'block';
+        });
+
+        // Close dropdown when clicking elsewhere
+        document.addEventListener('click', () => {
+            viewLocDropdown.style.display = 'none';
+        });
+
+        viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+        viewLocBtn.addEventListener('mouseleave', () => {
+            if (viewLocDropdown.style.display !== 'block') {
+                viewLocBtn.style.background = 'transparent';
+            }
+        });
+        featureGroup.appendChild(viewLocBtn);
+
+        // Pinned tabs button (show if there are persisted pins)
+        const persistedPins = window.persistedPinnedTabs || [];
+        if (persistedPins.length > 0) {
+            const pinsBtn = document.createElement('button');
+            pinsBtn.innerHTML = '📋';
+            pinsBtn.title = `Open pinned tabs (${persistedPins.length})`;
+            pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+
+            const pinsDropdown = createPinnedTabsDropdown(persistedPins);
+            pinsBtn.appendChild(pinsDropdown);
+
+            pinsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = pinsDropdown.style.display === 'block';
+                pinsDropdown.style.display = isVisible ? 'none' : 'block';
+            });
+
+            pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+            pinsBtn.addEventListener('mouseleave', () => {
+                if (pinsDropdown.style.display !== 'block') {
+                    pinsBtn.style.background = 'transparent';
+                }
+            });
+            featureGroup.appendChild(pinsBtn);
+        }
+    } else {
+        // For pinned views, show an indicator
+        const pinnedIndicator = document.createElement('span');
+        pinnedIndicator.innerHTML = '📌 Pinned';
+        pinnedIndicator.style.cssText = `
+            color: #94a3b8;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-left: 1px solid rgba(148, 163, 184, 0.2);
+        `;
+        featureGroup.appendChild(pinnedIndicator);
+    }
 
     // Legend button
     const legendBtn = document.createElement('button');
@@ -491,18 +607,6 @@ function createToolbar(container: HTMLElement): void {
     });
     featureGroup.appendChild(fullscreenBtn);
 
-    // Query Diff button
-    const diffBtn = document.createElement('button');
-    diffBtn.innerHTML = '⇄';
-    diffBtn.title = 'Compare SQL queries (D)';
-    diffBtn.style.cssText = btnStyle + 'font-size: 14px; border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    diffBtn.addEventListener('click', () => {
-        showQueryDiffModal();
-    });
-    diffBtn.addEventListener('mouseenter', () => diffBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    diffBtn.addEventListener('mouseleave', () => diffBtn.style.background = 'transparent');
-    featureGroup.appendChild(diffBtn);
-
     // Keyboard shortcuts help button
     const helpBtn = document.createElement('button');
     helpBtn.innerHTML = '?';
@@ -527,10 +631,6 @@ function createToolbar(container: HTMLElement): void {
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
     }) as EventListener);
 
-    // Listen for show-diff-modal event (from keyboard shortcut)
-    document.addEventListener('show-diff-modal', () => {
-        showQueryDiffModal();
-    });
 
     // Dialect change handler
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -845,286 +945,206 @@ function updateToolbarTheme(dark: boolean, toolbar: HTMLElement, actions: HTMLEl
     });
 }
 
-// Helper function to show Query Diff modal
-function showQueryDiffModal(): void {
-    const dark = isDarkTheme();
-    const colors = dark ? {
-        bg: 'rgba(15, 23, 42, 0.98)',
-        panelBg: '#1e293b',
-        border: 'rgba(148, 163, 184, 0.2)',
-        text: '#f1f5f9',
-        textMuted: '#94a3b8',
-        inputBg: '#0f172a',
-        inputBorder: 'rgba(148, 163, 184, 0.3)'
-    } : {
-        bg: 'rgba(255, 255, 255, 0.98)',
-        panelBg: '#f8fafc',
-        border: 'rgba(148, 163, 184, 0.3)',
-        text: '#1e293b',
-        textMuted: '#64748b',
-        inputBg: '#ffffff',
-        inputBorder: 'rgba(148, 163, 184, 0.4)'
-    };
 
-    // Create modal overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'diff-modal';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
+// ============================================================
+// FEATURE: View Location Toggle
+// ============================================================
+
+function createViewLocationDropdown(): HTMLElement {
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 180px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
-    // Create modal content
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        background: ${colors.bg};
-        border: 1px solid ${colors.border};
-        border-radius: 12px;
-        padding: 24px;
-        width: 90vw;
-        max-width: 1200px;
-        height: 85vh;
-        display: flex;
-        flex-direction: column;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    const currentLocation = window.viewLocation || 'beside';
+
+    const locations = [
+        { id: 'beside', label: 'Side by Side', icon: '⫝', desc: 'Next to SQL file' },
+        { id: 'tab', label: 'New Tab', icon: '⊟', desc: 'As editor tab' },
+        { id: 'secondary-sidebar', label: 'Secondary Sidebar', icon: '⫿', desc: 'Right sidebar' }
+    ];
+
+    const header = document.createElement('div');
+    header.textContent = 'View Location';
+    header.style.cssText = `
+        padding: 4px 12px 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #64748b;
+        letter-spacing: 0.5px;
     `;
+    dropdown.appendChild(header);
 
-    // Pre-fill query 1 with current SQL
-    const currentSql = window.initialSqlCode || '';
-
-    modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="margin: 0; color: ${colors.text}; font-size: 18px;">
-                ⇄ Query Diff
-            </h3>
-            <button id="close-diff" style="
-                background: none;
-                border: none;
-                color: ${colors.textMuted};
-                cursor: pointer;
-                font-size: 24px;
-                padding: 4px;
-            ">&times;</button>
-        </div>
-
-        <div id="diff-input-section" style="display: flex; gap: 16px; flex: 1; min-height: 0;">
-            <!-- Query 1 input -->
-            <div style="flex: 1; display: flex; flex-direction: column;">
-                <label style="color: ${colors.textMuted}; font-size: 12px; margin-bottom: 8px; font-weight: 600;">
-                    Query 1 (Original)
-                </label>
-                <textarea id="diff-query1" placeholder="Paste first SQL query here..." style="
-                    flex: 1;
-                    background: ${colors.inputBg};
-                    border: 1px solid ${colors.inputBorder};
-                    border-radius: 8px;
-                    padding: 12px;
-                    color: ${colors.text};
-                    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-                    font-size: 12px;
-                    resize: none;
-                    outline: none;
-                ">${escapeHtml(currentSql)}</textarea>
-            </div>
-
-            <!-- Query 2 input -->
-            <div style="flex: 1; display: flex; flex-direction: column;">
-                <label style="color: ${colors.textMuted}; font-size: 12px; margin-bottom: 8px; font-weight: 600;">
-                    Query 2 (Modified)
-                </label>
-                <textarea id="diff-query2" placeholder="Paste second SQL query here..." style="
-                    flex: 1;
-                    background: ${colors.inputBg};
-                    border: 1px solid ${colors.inputBorder};
-                    border-radius: 8px;
-                    padding: 12px;
-                    color: ${colors.text};
-                    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-                    font-size: 12px;
-                    resize: none;
-                    outline: none;
-                "></textarea>
-            </div>
-        </div>
-
-        <div id="diff-result-section" style="display: none; flex: 1; flex-direction: column; min-height: 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div id="diff-stats" style="display: flex; gap: 16px;"></div>
-                <button id="back-to-input" style="
-                    background: transparent;
-                    border: 1px solid ${colors.border};
-                    border-radius: 6px;
-                    color: ${colors.textMuted};
-                    padding: 6px 12px;
-                    font-size: 12px;
-                    cursor: pointer;
-                ">← Edit Queries</button>
-            </div>
-            <div id="diff-output" style="
-                flex: 1;
-                overflow-y: auto;
-                background: ${colors.panelBg};
-                border: 1px solid ${colors.border};
-                border-radius: 8px;
-                padding: 12px;
-            "></div>
-        </div>
-
-        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
-            <button id="swap-queries" style="
-                background: transparent;
-                border: 1px solid ${colors.border};
-                border-radius: 6px;
-                color: ${colors.textMuted};
-                padding: 8px 16px;
-                font-size: 13px;
-                cursor: pointer;
-            ">⇄ Swap</button>
-            <button id="clear-queries" style="
-                background: transparent;
-                border: 1px solid ${colors.border};
-                border-radius: 6px;
-                color: ${colors.textMuted};
-                padding: 8px 16px;
-                font-size: 13px;
-                cursor: pointer;
-            ">Clear</button>
-            <button id="compare-queries" style="
-                background: rgba(99, 102, 241, 0.9);
-                border: none;
-                border-radius: 6px;
-                color: white;
-                padding: 8px 24px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-            ">Compare</button>
-        </div>
-    `;
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // Get elements
-    const query1Input = modal.querySelector('#diff-query1') as HTMLTextAreaElement;
-    const query2Input = modal.querySelector('#diff-query2') as HTMLTextAreaElement;
-    const inputSection = modal.querySelector('#diff-input-section') as HTMLElement;
-    const resultSection = modal.querySelector('#diff-result-section') as HTMLElement;
-    const diffOutput = modal.querySelector('#diff-output') as HTMLElement;
-    const diffStats = modal.querySelector('#diff-stats') as HTMLElement;
-
-    // Close handlers
-    const closeModal = () => overlay.remove();
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
-    });
-    modal.querySelector('#close-diff')?.addEventListener('click', closeModal);
-
-    // Swap queries
-    modal.querySelector('#swap-queries')?.addEventListener('click', () => {
-        const temp = query1Input.value;
-        query1Input.value = query2Input.value;
-        query2Input.value = temp;
-    });
-
-    // Clear queries
-    modal.querySelector('#clear-queries')?.addEventListener('click', () => {
-        query1Input.value = '';
-        query2Input.value = '';
-        inputSection.style.display = 'flex';
-        resultSection.style.display = 'none';
-    });
-
-    // Back to input
-    modal.querySelector('#back-to-input')?.addEventListener('click', () => {
-        inputSection.style.display = 'flex';
-        resultSection.style.display = 'none';
-    });
-
-    // Compare queries
-    modal.querySelector('#compare-queries')?.addEventListener('click', () => {
-        const sql1 = query1Input.value.trim();
-        const sql2 = query2Input.value.trim();
-
-        if (!sql1 || !sql2) {
-            alert('Please enter both SQL queries to compare.');
-            return;
-        }
-
-        // Compute diff
-        const diff = diffSql(sql1, sql2);
-
-        // Show stats
-        diffStats.innerHTML = `
-            <span style="
-                background: rgba(34, 197, 94, 0.2);
-                color: ${dark ? '#86efac' : '#166534'};
-                padding: 4px 10px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-            ">+${diff.stats.added} added</span>
-            <span style="
-                background: rgba(239, 68, 68, 0.2);
-                color: ${dark ? '#fca5a5' : '#991b1b'};
-                padding: 4px 10px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-            ">-${diff.stats.removed} removed</span>
-            <span style="
-                background: rgba(234, 179, 8, 0.2);
-                color: ${dark ? '#fde047' : '#854d0e'};
-                padding: 4px 10px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-            ">~${diff.stats.modified} modified</span>
-            <span style="
-                color: ${colors.textMuted};
-                padding: 4px 10px;
-                font-size: 12px;
-            ">${diff.stats.same} unchanged</span>
+    locations.forEach(loc => {
+        const item = document.createElement('div');
+        const isActive = currentLocation === loc.id;
+        item.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
+            transition: background 0.15s;
         `;
 
-        // Generate and show diff HTML
-        diffOutput.innerHTML = generateDiffHtml(diff, dark);
+        item.innerHTML = `
+            <span style="font-size: 14px;">${loc.icon}</span>
+            <div>
+                <div style="font-size: 12px; font-weight: 500;">${loc.label}</div>
+                <div style="font-size: 10px; color: #64748b;">${loc.desc}</div>
+            </div>
+            ${isActive ? '<span style="margin-left: auto; color: #818cf8;">✓</span>' : ''}
+        `;
 
-        // Switch to result view
-        inputSection.style.display = 'none';
-        resultSection.style.display = 'flex';
+        item.addEventListener('mouseenter', () => {
+            if (!isActive) item.style.background = 'rgba(148, 163, 184, 0.1)';
+        });
+        item.addEventListener('mouseleave', () => {
+            if (!isActive) item.style.background = 'transparent';
+        });
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'changeViewLocation',
+                    location: loc.id
+                });
+            }
+            dropdown.style.display = 'none';
+        });
+
+        dropdown.appendChild(item);
     });
 
-    // Close on Escape
-    const escHandler = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
-
-    // Focus on query 2 input
-    query2Input.focus();
+    return dropdown;
 }
 
-// Helper to escape HTML
-function escapeHtml(str: string): string {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+function createPinnedTabsDropdown(pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>): HTMLElement {
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 220px;
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+
+    const header = document.createElement('div');
+    header.textContent = 'Pinned Visualizations';
+    header.style.cssText = `
+        padding: 4px 12px 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #64748b;
+        letter-spacing: 0.5px;
+    `;
+    dropdown.appendChild(header);
+
+    pins.forEach(pin => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #e2e8f0;
+            transition: background 0.15s;
+        `;
+
+        const date = new Date(pin.timestamp);
+        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        item.innerHTML = `
+            <span style="font-size: 12px;">📌</span>
+            <div style="flex: 1; overflow: hidden;">
+                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
+                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • ${timeStr}</div>
+            </div>
+        `;
+
+        // Delete button
+        const deleteBtn = document.createElement('span');
+        deleteBtn.innerHTML = '×';
+        deleteBtn.style.cssText = `
+            font-size: 16px;
+            color: #64748b;
+            padding: 0 4px;
+            cursor: pointer;
+        `;
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'unpinTab',
+                    pinId: pin.id
+                });
+            }
+            item.remove();
+        });
+        deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444');
+        deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = '#64748b');
+        item.appendChild(deleteBtn);
+
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(148, 163, 184, 0.1)';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = 'transparent';
+        });
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'openPinnedTab',
+                    pinId: pin.id
+                });
+            }
+            dropdown.style.display = 'none';
+        });
+
+        dropdown.appendChild(item);
+    });
+
+    if (pins.length === 0) {
+        const empty = document.createElement('div');
+        empty.textContent = 'No pinned visualizations';
+        empty.style.cssText = `
+            padding: 12px;
+            font-size: 12px;
+            color: #64748b;
+            text-align: center;
+        `;
+        dropdown.appendChild(empty);
+    }
+
+    return dropdown;
 }
 
 // ============================================================
-// FEATURE: Pinned Visualization Tabs
+// FEATURE: Pinned Visualization Tabs (Legacy - in-panel tabs)
 // ============================================================
 
 function pinCurrentVisualization(): void {
