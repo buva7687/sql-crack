@@ -257,15 +257,17 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Query-level column lineage visualization (click-to-trace with full transformation path)
 - 📅 Diff-aware visualization for PR reviews (Planned)
 
-### 📅 Phase 3: Performance & Optimization (Planned)
-- Performance signal detection
-- Query plan integration
-- Optimization opportunity analysis
+### 📅 Phase 3: Static Performance Analysis (Planned)
+- Heuristic-based optimization hints (filter pushdown, join order, repeated scans)
+- Anti-pattern detection with actionable suggestions
+- Query structure analysis for potential bottlenecks
+
+> **Note:** True query plan analysis and cost-based optimization require database connectivity, which is outside the scope of this local-only tool.
 
 ### 📅 Phase 4: Workspace Awareness (Planned)
-- Cross-file lineage tracking
-- dbt integration
-- Workspace dependency graphs
+- Cross-file lineage tracking (parse SQL files to build dependency graphs)
+- dbt integration (parse `ref()`, `source()` macros and YAML configs)
+- Workspace-wide table/view dependency visualization
 
 ## Contributing
 
