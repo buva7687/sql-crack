@@ -4096,7 +4096,6 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'L', description: 'Toggle legend' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column flows' },
-        { key: 'D', description: 'Compare queries (diff)' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];
