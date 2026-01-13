@@ -1001,6 +1001,15 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) return;
 
+        // Skip dead column detection for top-level SELECT nodes (final query output)
+        // A SELECT with no parentId is a top-level query - all its columns are output columns
+        // Dead column detection should only apply to intermediate SELECTs (CTEs/subqueries)
+        // where columns might be selected but not used downstream
+        if (!selectNode.parentId) {
+            // This is a top-level SELECT - all columns are valid output, skip dead column detection
+            return;
+        }
+
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
         const normalizedSql = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
         const sqlLower = normalizedSql.toLowerCase();
