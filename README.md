@@ -25,80 +25,42 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
 
-## 🎉 What's New
-
-### Phase 2: Developer Productivity & Quality ⚡ NEW
-
-**Query-Level Column Lineage** — Click-to-trace column lineage visualization. Select any output column to see its complete transformation path from source tables through JOINs, aggregations, and calculations. Highlights relevant nodes and shows step-by-step lineage in a visual timeline.
-
-> **Note:** This is query-level lineage analysis based on SQL parsing — it traces columns within a single query's execution flow. It does not provide object-to-object lineage tracking across your database schema or metadata catalog.
-
-**Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges.
-
-**Query Complexity Insights** — Enhanced metrics showing CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators.
-
-**Smart Quality Warnings** — Hover over warning badges to see detailed explanations with severity levels (low/medium/high) and actionable suggestions.
-
-### Phase 1: Core Professional Features ✅
-
-**Enhanced Interactive Navigation** — Click nodes to jump to SQL, click edges to view JOIN/WHERE clauses, and navigate nested CTEs with breadcrumb trails.
-
-**Read vs Write Differentiation** — Instantly identify data access patterns with color-coded borders and operation badges (INSERT, UPDATE, DELETE, etc.).
-
-**Smart Tooltips** — Hover to see actual SQL fragments, line numbers, and detailed operation information without leaving the visualization.
-
 <!-- Add screenshot/GIF here -->
 <!-- ![SQL Crack Demo](./assets/demo.gif) -->
 
 ## Features
 
-### Visual Query Analysis
+### Core Visualization
 
 - **Execution Flow Visualization** — See how your SQL query executes step by step
 - **Multi-Query Support** — Visualize multiple SQL statements with tab navigation (Q1, Q2, Q3...)
-- **Query-Level Column Lineage** — Click any output column to trace its full transformation path from source tables (query-level analysis, not metadata-based)
-- **Query Statistics** — Complexity score, table/join/filter counts, and more
+- **Query-Level Column Lineage** — Click any output column to trace its full transformation path from source tables through JOINs, aggregations, and calculations. Highlights relevant nodes and shows step-by-step lineage in a visual timeline.
+  
+  > **Note:** This is query-level lineage analysis based on SQL parsing — it traces columns within a single query's execution flow. It does not provide object-to-object lineage tracking across your database schema or metadata catalog.
 
-### Interactive Navigation ⭐ NEW
+- **Query Statistics** — Complexity score, table/join/filter counts, CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators
+
+### Interactive Navigation
 
 - **Click Node → Jump to SQL** — Click any node to instantly navigate to its definition in your SQL editor
 - **Click Edge → View SQL Clauses** — Click connections to see JOIN conditions, WHERE clauses, and filters with line numbers
 - **Breadcrumb Navigation** — Navigate through nested CTEs with an interactive breadcrumb trail showing the query hierarchy
-- **Enhanced Tooltips** — Hover over nodes to see actual SQL fragments, line numbers, and detailed operation information
+- **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
+- **Focus Mode** — Highlight connected nodes for better understanding
+- **Bidirectional Editor Sync** — Click in SQL editor to highlight flow nodes, click nodes to jump to SQL
 - **Double-Click to Zoom** — Focus on specific parts of complex queries
+- **Enhanced Tooltips** — Hover over nodes to see actual SQL fragments, line numbers, and detailed operation information
 
-### Smart Analysis & Differentiation ⭐ NEW
+### Smart Analysis & Quality
 
 - **Read vs Write Visualization** — Clear visual distinction between data operations:
   - **READ** operations (Blue border + badge)
   - **WRITE** operations (Red border + badge)
   - **DERIVED** tables (Purple border + badge)
 - **Operation Type Badges** — See INSERT, UPDATE, DELETE, MERGE, and CREATE TABLE AS operations at a glance
-- **CTE Expansion Controls** — Collapse or expand Common Table Expressions to manage visual complexity
-- **CTE Preview on Hover** — See CTE details without expanding the entire structure
-
-### Interactive Experience
-
-- **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
-- **Focus Mode** — Highlight connected nodes for better understanding
-- **Bidirectional Editor Sync** — Click in SQL editor to highlight flow nodes, click nodes to jump to SQL
-
-### Flexible Display Options
-
-- **View Location Toggle** — Choose where to display: beside editor, new tab, or secondary sidebar
-- **Pin Visualizations** — Save query snapshots as separate tabs for comparison
-- **Persistent Pins** — Pinned tabs survive VS Code restarts
-- **Theme Support** — Dark and light themes with grid pattern background
-
-### Export & Share
-
-- **PNG Export** — High-DPI images with background
-- **SVG Export** — Vector format for scalable diagrams
-- **Clipboard Copy** — Quick sharing via clipboard
-
-### Smart Analysis
-
-Automatic detection of SQL anti-patterns:
+- **Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges
+- **Smart Quality Warnings** — Hover over warning badges to see detailed explanations with severity levels (low/medium/high) and actionable suggestions
+- **Anti-Pattern Detection** — Automatic detection of SQL anti-patterns:
 
 | Issue | Severity |
 |-------|----------|
@@ -107,6 +69,21 @@ Automatic detection of SQL anti-patterns:
 | `DELETE`/`UPDATE` without `WHERE` | Error |
 | Excessive JOINs (5+) | Warning |
 | Cartesian products | Error |
+
+### CTE Management
+
+- **CTE Expansion Controls** — Collapse or expand Common Table Expressions to manage visual complexity
+- **CTE Preview on Hover** — See CTE details without expanding the entire structure
+
+### Display & Export
+
+- **View Location Toggle** — Choose where to display: beside editor, new tab, or secondary sidebar
+- **Pin Visualizations** — Save query snapshots as separate tabs for comparison
+- **Persistent Pins** — Pinned tabs survive VS Code restarts
+- **Theme Support** — Dark and light themes with grid pattern background
+- **PNG Export** — High-DPI images with background
+- **SVG Export** — Vector format for scalable diagrams
+- **Clipboard Copy** — Quick sharing via clipboard
 
 ## Supported Dialects
 
