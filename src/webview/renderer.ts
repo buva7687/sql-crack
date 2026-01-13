@@ -21,6 +21,8 @@ interface ViewState {
     showColumnLineage: boolean; // Toggle column-level lineage view
     showColumnFlows: boolean; // Toggle column flow visualization
     selectedColumn: string | null; // Currently selected column for highlighting
+    zoomedNodeId: string | null; // Currently zoomed node ID (for toggle behavior)
+    previousZoomState: { scale: number; offsetX: number; offsetY: number } | null; // Previous zoom state before zooming to node
 }
 
 const state: ViewState = {
@@ -42,7 +44,9 @@ const state: ViewState = {
     breadcrumbPath: [],
     showColumnLineage: false,
     showColumnFlows: false,
-    selectedColumn: null
+    selectedColumn: null,
+    zoomedNodeId: null,
+    previousZoomState: null
 };
 
 let svg: SVGSVGElement | null = null;
@@ -493,6 +497,10 @@ export function render(result: ParseResult): void {
 
     // Reset highlight state
     state.highlightedColumnSources = [];
+    
+    // Reset zoom state when rendering new query
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
 
     // Clear previous content
     mainGroup.innerHTML = '';
@@ -2295,12 +2303,34 @@ function fitView(): void {
     state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
     state.offsetY = (availableHeight - graphHeight * state.scale) / 2 - minY * state.scale + 50;
 
+    // Reset zoom state tracking when fitting view
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
+
     updateTransform();
 }
 
 function zoomToNode(node: FlowNode): void {
     if (!svg) { return; }
 
+    // Simple toggle behavior: if already zoomed to any node, restore to fit view
+    if (state.zoomedNodeId !== null) {
+        // Restore to fit view (default state)
+        fitView();
+        return;
+    }
+
+    // Save current state before zooming (only if not already saved)
+    // This preserves the original fit view state so we can restore to it later
+    if (!state.previousZoomState) {
+        state.previousZoomState = {
+            scale: state.scale,
+            offsetX: state.offsetX,
+            offsetY: state.offsetY
+        };
+    }
+
+    // Zoom to the node
     const rect = svg.getBoundingClientRect();
     const targetScale = 1.5;
 
@@ -2311,6 +2341,7 @@ function zoomToNode(node: FlowNode): void {
     state.scale = targetScale;
     state.offsetX = rect.width / 2 - centerX * state.scale - 140; // Offset for panels
     state.offsetY = rect.height / 2 - centerY * state.scale;
+    state.zoomedNodeId = node.id;
 
     updateTransform();
 }
