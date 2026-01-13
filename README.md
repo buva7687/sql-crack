@@ -72,8 +72,10 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 ### CTE Management
 
-- **CTE Expansion Controls** — Collapse or expand Common Table Expressions to manage visual complexity
-- **CTE Preview on Hover** — See CTE details without expanding the entire structure
+- **Floating Cloud Design** — CTEs and subqueries use an elegant floating cloud visualization: nodes stay compact and fixed-size, with internal flows displayed in a floating cloud panel to the left when expanded
+- **Click to Expand/Collapse** — Single-click any CTE or subquery node to toggle expansion and view its internal operations in the floating cloud
+- **Default Collapsed** — CTEs and subqueries start collapsed by default to reduce visual clutter, expand on demand to explore their internal structure
+- **Visual Flow in Cloud** — Expanded CTEs/subqueries show their complete internal execution flow with proper node connections and layout within the floating cloud
 
 ### Display & Export
 
@@ -125,7 +127,7 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 - **Navigate to SQL**: Click any node to jump to its definition in the editor
 - **View SQL Clauses**: Click edge connections to see JOIN conditions and WHERE clauses
 - **Navigate CTEs**: Use the breadcrumb trail at the top to navigate through nested Common Table Expressions
-- **Collapse/Expand**: Click the +/- button on CTE nodes to collapse or expand nested operations
+- **Expand/Collapse CTEs & Subqueries**: Click any CTE or subquery node to expand and view its internal flow in a floating cloud panel, click again to collapse
 - **View Details**: Hover over nodes to see SQL fragments and line numbers
 - **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click nodes to focus on that node and its immediate neighbors
 
@@ -232,6 +234,8 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Query complexity insights (CTE depth, fan-out analysis, critical path length, complexity breakdown)
 - ✅ Smart quality warnings with severity levels and actionable suggestions
 - ✅ Query-level column lineage visualization (click-to-trace with full transformation path)
+- ✅ Floating cloud design for CTE and subquery visualization with improved layout and expand/collapse controls
+- ✅ Enhanced CTE parsing to handle various AST structures from node-sql-parser
 - 📅 Diff-aware visualization for PR reviews (Planned)
 
 ### 📅 Phase 3: Static Performance Analysis (Planned)

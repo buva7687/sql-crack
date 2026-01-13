@@ -1361,10 +1361,27 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const cteChildren: FlowNode[] = [];
             const cteChildEdges: FlowEdge[] = [];
 
-            if (cte.stmt) {
+            // CTE statement can be in different locations depending on parser output
+            // Handle various AST structures from node-sql-parser
+            let cteStmt = null;
+            if (cte.stmt?.ast) {
+                cteStmt = cte.stmt.ast;
+            } else if (cte.stmt?.type === 'select' || cte.stmt?.from) {
+                cteStmt = cte.stmt;
+            } else if (cte.ast) {
+                cteStmt = cte.ast;
+            } else if (cte.expr?.ast) {
+                cteStmt = cte.expr.ast;
+            } else if (cte.definition?.ast) {
+                cteStmt = cte.definition.ast;
+            } else if (cte.definition) {
+                cteStmt = cte.definition;
+            }
+
+            if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
                 // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
-                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges, cteId, 0);
+                parseCteOrSubqueryInternals(cteStmt, cteChildren, cteChildEdges, cteId, 0);
             }
 
             // Calculate container size based on children
@@ -1377,8 +1394,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 label: `WITH ${cteName}`,
                 description: 'Common Table Expression',
                 children: cteChildren.length > 0 ? cteChildren : undefined,
-                childEdges: cteChildEdges.length > 0 ? cteChildEdges : undefined,
-                expanded: true,
+                childEdges: cteChildren.length > 0 ? cteChildEdges : undefined, // Keep empty array if children exist
+                expanded: false, // Start collapsed, expand on click to show subflow
+                collapsible: cteChildren.length > 0, // Only collapsible if has children
                 depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
@@ -1825,7 +1843,8 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
             description: hasChildren ? `Derived table with ${subChildren.length} operations` : 'Derived table',
             children: hasChildren ? subChildren : undefined,
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
-            expanded: true, // Always expanded for data source subqueries
+            expanded: false, // Start collapsed, expand on click to show subflow
+            collapsible: hasChildren, // Only collapsible if has children
             tableCategory: 'derived',
             depth: 0, // Subquery depth
             x: 0, y: 0, width: containerWidth, height: containerHeight
@@ -2272,7 +2291,12 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 
     // Add GROUP BY if present
-    if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+    // groupby can be an array or an object with columns property
+    const hasGroupBy = stmt.groupby && (
+        (Array.isArray(stmt.groupby) && stmt.groupby.length > 0) ||
+        (stmt.groupby.columns && Array.isArray(stmt.groupby.columns) && stmt.groupby.columns.length > 0)
+    );
+    if (hasGroupBy) {
         const groupId = genId('child_group');
         nodes.push({
             id: groupId,
@@ -2290,7 +2314,12 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 
     // Add ORDER BY if present
-    if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
+    // orderby can be an array or an object with columns property
+    const hasOrderBy = stmt.orderby && (
+        (Array.isArray(stmt.orderby) && stmt.orderby.length > 0) ||
+        (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
+    );
+    if (hasOrderBy) {
         const sortId = genId('child_sort');
         nodes.push({
             id: sortId,

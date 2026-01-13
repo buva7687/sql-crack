@@ -1,5 +1,6 @@
 import { FlowNode, FlowEdge, ColumnFlow, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
 import { formatSql, highlightSql } from './sqlFormatter';
+import dagre from 'dagre';
 
 interface ViewState {
     scale: number;
@@ -484,6 +485,22 @@ function updateTransform(): void {
     }
 }
 
+// Pre-calculate dimensions for expandable nodes (CTE/subquery) before rendering edges
+// With floating cloud design, CTE/subquery nodes stay fixed size - cloud is separate
+function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
+    for (const node of nodes) {
+        if (node.type === 'cte' && node.children && node.children.length > 0) {
+            // CTE nodes stay fixed size - cloud is rendered separately
+            node.width = 180;
+            node.height = 60;
+        } else if (node.type === 'subquery' && node.children && node.children.length > 0) {
+            // Subquery nodes also use fixed size with floating cloud
+            node.width = 180;
+            node.height = 60;
+        }
+    }
+}
+
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
@@ -521,6 +538,10 @@ export function render(result: ParseResult): void {
 
     // Store column flows
     currentColumnFlows = result.columnFlows || [];
+
+    // Pre-calculate dimensions for expandable nodes (CTE/subquery) before rendering
+    // This ensures edges are drawn correctly
+    preCalculateExpandableDimensions(result.nodes);
 
     // Render edges first (behind nodes)
     const edgesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -613,17 +634,28 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
     }
 
-    // Click to select
+    // Click handler - toggle expand for CTE/subquery, select for others
     group.addEventListener('click', (e) => {
         e.stopPropagation();
-        selectNode(node.id);
+
+        // For CTE and subquery nodes with children, toggle expand on click
+        if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
+            toggleNodeCollapse(node.id);
+        } else {
+            selectNode(node.id);
+        }
         hideTooltip();
     });
 
     // Double click to zoom to node
     group.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        zoomToNode(node);
+        // For expandable nodes, double-click also toggles (in case single click was used for something else)
+        if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
+            toggleNodeCollapse(node.id);
+        } else {
+            zoomToNode(node);
+        }
     });
 
     // Add collapse button for CTEs and subqueries with children
@@ -916,143 +948,230 @@ function renderContainerNode(node: FlowNode, group: SVGGElement): void {
 }
 
 function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
-    const padding = 6;
-    const headerHeight = 28;
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30;
+    const cloudPadding = 15;
 
-    // Outer container with dashed border effect
-    const outerRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    outerRect.setAttribute('x', String(node.x));
-    outerRect.setAttribute('y', String(node.y));
-    outerRect.setAttribute('width', String(node.width));
-    outerRect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 55));
-    outerRect.setAttribute('rx', '8');
-    outerRect.setAttribute('fill', '#1e293b');
-    outerRect.setAttribute('stroke', getNodeColor(node.type));
-    outerRect.setAttribute('stroke-width', '2');
-    outerRect.setAttribute('stroke-dasharray', '6,3');
-    outerRect.setAttribute('filter', 'url(#shadow)');
-    outerRect.setAttribute('class', 'node-rect');
-    group.appendChild(outerRect);
+    // Subquery node stays fixed size
+    node.width = nodeWidth;
+    node.height = nodeHeight;
 
-    // Header with solid background
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x + 2));
-    header.setAttribute('y', String(node.y + 2));
-    header.setAttribute('width', String(node.width - 4));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '6');
-    header.setAttribute('fill', getNodeColor(node.type));
-    group.appendChild(header);
-
-    // Subquery icon and label
-    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    iconText.setAttribute('x', String(node.x + 10));
-    iconText.setAttribute('y', String(node.y + 20));
-    iconText.setAttribute('fill', 'white');
-    iconText.setAttribute('font-size', '11');
-    iconText.textContent = '⊂';
-    group.appendChild(iconText);
-
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String(node.x + 24));
-    label.setAttribute('y', String(node.y + 20));
-    label.setAttribute('fill', 'white');
-    label.setAttribute('font-size', '11');
-    label.setAttribute('font-weight', '600');
-    label.setAttribute('font-family', 'monospace');
-    label.textContent = truncate(node.label, 20);
-    group.appendChild(label);
-
-    // Render children (internal operations)
+    // Layout children for cloud if expanded
+    let cloudWidth = 160;
+    let cloudHeight = 150;
+    const childEdges = node.childEdges || []; // Handle undefined childEdges
     if (isExpanded && hasChildren && node.children) {
-        let yOffset = node.y + headerHeight + 8;
-
-        for (const child of node.children) {
-            // Small operation badge
-            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            badge.setAttribute('x', String(node.x + padding + 4));
-            badge.setAttribute('y', String(yOffset));
-            badge.setAttribute('width', String(node.width - padding * 2 - 8));
-            badge.setAttribute('height', '20');
-            badge.setAttribute('rx', '4');
-            badge.setAttribute('fill', getNodeColor(child.type));
-            badge.setAttribute('opacity', '0.85');
-            group.appendChild(badge);
-
-            // Operation icon
-            const opIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            opIcon.setAttribute('x', String(node.x + padding + 10));
-            opIcon.setAttribute('y', String(yOffset + 14));
-            opIcon.setAttribute('fill', 'white');
-            opIcon.setAttribute('font-size', '9');
-            opIcon.textContent = getNodeIcon(child.type);
-            group.appendChild(opIcon);
-
-            // Operation label
-            const opLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            opLabel.setAttribute('x', String(node.x + padding + 24));
-            opLabel.setAttribute('y', String(yOffset + 14));
-            opLabel.setAttribute('fill', 'white');
-            opLabel.setAttribute('font-size', '9');
-            opLabel.setAttribute('font-weight', '500');
-            opLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            opLabel.textContent = truncate(child.label, 18);
-            group.appendChild(opLabel);
-
-            yOffset += 24;
-        }
-    } else if (!hasChildren) {
-        // Show "Derived Table" text when no internal details
-        const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        descText.setAttribute('x', String(node.x + node.width / 2));
-        descText.setAttribute('y', String(node.y + 44));
-        descText.setAttribute('text-anchor', 'middle');
-        descText.setAttribute('fill', '#64748b');
-        descText.setAttribute('font-size', '10');
-        descText.textContent = 'Derived Table';
-        group.appendChild(descText);
+        const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+        cloudWidth = layoutSize.width + cloudPadding * 2;
+        cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
     }
-}
 
-function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
-    const padding = 8;
-    const headerHeight = 36;
+    // Render the floating cloud to the LEFT of the subquery node when expanded
+    if (isExpanded && hasChildren && node.children) {
+        const cloudX = node.x - cloudWidth - cloudGap;
+        const cloudY = node.y - (cloudHeight - nodeHeight) / 2;
 
-    // Container background
+        // Cloud container with dashed border (matching subquery style)
+        const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        cloud.setAttribute('x', String(cloudX));
+        cloud.setAttribute('y', String(cloudY));
+        cloud.setAttribute('width', String(cloudWidth));
+        cloud.setAttribute('height', String(cloudHeight));
+        cloud.setAttribute('rx', '16');
+        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('stroke-width', '2');
+        cloud.setAttribute('stroke-dasharray', '6,3');
+        cloud.setAttribute('filter', 'url(#shadow)');
+        group.appendChild(cloud);
+
+        // Cloud title (subquery alias)
+        const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
+        cloudTitle.setAttribute('y', String(cloudY + 20));
+        cloudTitle.setAttribute('text-anchor', 'middle');
+        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('font-size', '11');
+        cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        cloudTitle.textContent = node.label;
+        group.appendChild(cloudTitle);
+
+        // Render internal flow inside cloud
+        renderCloudSubflow(
+            node,
+            node.children,
+            childEdges,
+            group,
+            cloudX + cloudPadding,
+            cloudY + 30,
+            cloudWidth - cloudPadding * 2,
+            cloudHeight - 30 - cloudPadding
+        );
+
+        // Arrow from cloud to subquery node
+        const arrowStartX = cloudX + cloudWidth;
+        const arrowStartY = cloudY + cloudHeight / 2;
+        const arrowEndX = node.x;
+        const arrowEndY = node.y + nodeHeight / 2;
+
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (arrowStartX + arrowEndX) / 2;
+        arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+        arrowPath.setAttribute('fill', 'none');
+        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke-width', '2');
+        arrowPath.setAttribute('stroke-dasharray', '5,3');
+        arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
+        group.appendChild(arrowPath);
+    }
+
+    // Main subquery node (with dashed border)
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
-    rect.setAttribute('width', String(node.width));
-    rect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 50));
+    rect.setAttribute('width', String(nodeWidth));
+    rect.setAttribute('height', String(nodeHeight));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', '#1e293b');
+    rect.setAttribute('stroke', getNodeColor(node.type));
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('stroke-dasharray', '6,3');
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Subquery icon
+    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('x', String(node.x + 12));
+    iconText.setAttribute('y', String(node.y + 26));
+    iconText.setAttribute('fill', getNodeColor(node.type));
+    iconText.setAttribute('font-size', '14');
+    iconText.textContent = '⊂';
+    group.appendChild(iconText);
+
+    // Label
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + 30));
+    label.setAttribute('y', String(node.y + 26));
+    label.setAttribute('fill', 'white');
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('font-family', 'monospace');
+    label.textContent = truncate(node.label, 14);
+    group.appendChild(label);
+
+    // Description
+    const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    descText.setAttribute('x', String(node.x + 12));
+    descText.setAttribute('y', String(node.y + 45));
+    descText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+    descText.setAttribute('font-size', '10');
+    descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    if (hasChildren && node.children) {
+        descText.textContent = isExpanded ? 'Click to collapse' : `${node.children.length} operations`;
+    } else {
+        descText.textContent = 'Derived Table';
+    }
+    group.appendChild(descText);
+}
+
+function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30; // Gap between cloud and CTE node
+    const cloudPadding = 15;
+
+    // CTE node stays fixed size - it's just a reference/output node
+    node.width = nodeWidth;
+    node.height = nodeHeight;
+
+    // Layout children for cloud if expanded
+    let cloudWidth = 160;
+    let cloudHeight = 150;
+    const childEdges = node.childEdges || []; // Handle undefined childEdges
+    if (isExpanded && hasChildren && node.children) {
+        const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+        cloudWidth = layoutSize.width + cloudPadding * 2;
+        cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+    }
+
+    // Render the floating cloud to the LEFT of the CTE node when expanded
+    if (isExpanded && hasChildren && node.children) {
+        const cloudX = node.x - cloudWidth - cloudGap;
+        const cloudY = node.y - (cloudHeight - nodeHeight) / 2; // Center vertically
+
+        // Cloud container background
+        const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        cloud.setAttribute('x', String(cloudX));
+        cloud.setAttribute('y', String(cloudY));
+        cloud.setAttribute('width', String(cloudWidth));
+        cloud.setAttribute('height', String(cloudHeight));
+        cloud.setAttribute('rx', '16');
+        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('stroke-width', '2');
+        cloud.setAttribute('filter', 'url(#shadow)');
+        group.appendChild(cloud);
+
+        // Cloud title (CTE name without "WITH ")
+        const cteName = node.label.replace('WITH ', '');
+        const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
+        cloudTitle.setAttribute('y', String(cloudY + 20));
+        cloudTitle.setAttribute('text-anchor', 'middle');
+        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('font-size', '11');
+        cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        cloudTitle.textContent = cteName;
+        group.appendChild(cloudTitle);
+
+        // Render internal flow inside cloud
+        renderCloudSubflow(
+            node,
+            node.children,
+            childEdges,
+            group,
+            cloudX + cloudPadding,
+            cloudY + 30,
+            cloudWidth - cloudPadding * 2,
+            cloudHeight - 30 - cloudPadding
+        );
+
+        // Arrow from cloud to CTE node
+        const arrowStartX = cloudX + cloudWidth;
+        const arrowStartY = cloudY + cloudHeight / 2;
+        const arrowEndX = node.x;
+        const arrowEndY = node.y + nodeHeight / 2;
+
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (arrowStartX + arrowEndX) / 2;
+        arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+        arrowPath.setAttribute('fill', 'none');
+        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke-width', '2');
+        arrowPath.setAttribute('stroke-dasharray', '5,3');
+        arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
+        group.appendChild(arrowPath);
+    }
+
+    // Main CTE node (simple reference box)
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(nodeWidth));
+    rect.setAttribute('height', String(nodeHeight));
     rect.setAttribute('rx', '10');
     rect.setAttribute('fill', getNodeColor(node.type));
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
-    // Header bar
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x));
-    header.setAttribute('y', String(node.y));
-    header.setAttribute('width', String(node.width));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
-    group.appendChild(header);
-
-    const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    headerClip.setAttribute('x', String(node.x));
-    headerClip.setAttribute('y', String(node.y + headerHeight - 10));
-    headerClip.setAttribute('width', String(node.width));
-    headerClip.setAttribute('height', '10');
-    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
-    group.appendChild(headerClip);
-
     // Icon
     const icon = getNodeIcon(node.type);
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    iconText.setAttribute('x', String(node.x + 12));
-    iconText.setAttribute('y', String(node.y + 24));
+    iconText.setAttribute('x', String(node.x + 14));
+    iconText.setAttribute('y', String(node.y + 26));
     iconText.setAttribute('fill', 'rgba(255,255,255,0.9)');
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
@@ -1060,68 +1179,330 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
 
     // Label
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String(node.x + 32));
-    label.setAttribute('y', String(node.y + 24));
+    label.setAttribute('x', String(node.x + 34));
+    label.setAttribute('y', String(node.y + 26));
     label.setAttribute('fill', 'white');
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-    label.textContent = truncate(node.label, 18);
+    label.textContent = truncate(node.label, 16);
     group.appendChild(label);
 
-    // Render children if expanded
-    if (isExpanded && hasChildren && node.children) {
-        const childrenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        childrenGroup.setAttribute('class', 'children-group');
-
-        // Inner content area
-        const innerBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        innerBg.setAttribute('x', String(node.x + padding));
-        innerBg.setAttribute('y', String(node.y + headerHeight + 4));
-        innerBg.setAttribute('width', String(node.width - padding * 2));
-        innerBg.setAttribute('height', String(node.height - headerHeight - padding - 4));
-        innerBg.setAttribute('rx', '6');
-        innerBg.setAttribute('fill', 'rgba(0,0,0,0.15)');
-        childrenGroup.appendChild(innerBg);
-
-        // Render child nodes as mini pills
-        let yOffset = node.y + headerHeight + 12;
-        for (const child of node.children) {
-            const childPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            childPill.setAttribute('x', String(node.x + padding + 6));
-            childPill.setAttribute('y', String(yOffset));
-            childPill.setAttribute('width', String(node.width - padding * 2 - 12));
-            childPill.setAttribute('height', '24');
-            childPill.setAttribute('rx', '4');
-            childPill.setAttribute('fill', getNodeColor(child.type));
-            childPill.setAttribute('opacity', '0.9');
-            childrenGroup.appendChild(childPill);
-
-            // Child icon
-            const childIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            childIcon.setAttribute('x', String(node.x + padding + 12));
-            childIcon.setAttribute('y', String(yOffset + 16));
-            childIcon.setAttribute('fill', 'rgba(255,255,255,0.9)');
-            childIcon.setAttribute('font-size', '10');
-            childIcon.textContent = getNodeIcon(child.type);
-            childrenGroup.appendChild(childIcon);
-
-            // Child label
-            const childLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            childLabel.setAttribute('x', String(node.x + padding + 26));
-            childLabel.setAttribute('y', String(yOffset + 16));
-            childLabel.setAttribute('fill', 'white');
-            childLabel.setAttribute('font-size', '10');
-            childLabel.setAttribute('font-weight', '500');
-            childLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            childLabel.textContent = truncate(child.label, 16);
-            childrenGroup.appendChild(childLabel);
-
-            yOffset += 30;
-        }
-
-        group.appendChild(childrenGroup);
+    // Description or child count
+    const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    descText.setAttribute('x', String(node.x + 14));
+    descText.setAttribute('y', String(node.y + 45));
+    descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+    descText.setAttribute('font-size', '10');
+    descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    if (hasChildren && node.children) {
+        descText.textContent = isExpanded ? 'Click to collapse' : `${node.children.length} operations`;
+    } else {
+        descText.textContent = 'Common Table Expression';
     }
+    group.appendChild(descText);
+}
+
+// Layout children nodes using dagre for subflow visualization
+function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
+    if (children.length === 0) {
+        return { width: 200, height: 100 };
+    }
+
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+        rankdir: 'LR', // Left to right for horizontal flow inside container
+        nodesep: 30,
+        ranksep: 40,
+        marginx: 20,
+        marginy: 20
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Set default sizes for child nodes
+    for (const child of children) {
+        // Set appropriate width based on label length
+        const labelWidth = Math.max(80, child.label.length * 7 + 30);
+        child.width = labelWidth;
+        child.height = 36;
+        g.setNode(child.id, { width: child.width, height: child.height });
+    }
+
+    // Add edges
+    for (const edge of edges) {
+        g.setEdge(edge.source, edge.target);
+    }
+
+    // Run layout
+    dagre.layout(g);
+
+    // Apply positions (relative to container)
+    let maxX = 0;
+    let maxY = 0;
+    for (const child of children) {
+        const layoutNode = g.node(child.id);
+        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
+            child.x = layoutNode.x - child.width / 2;
+            child.y = layoutNode.y - child.height / 2;
+            maxX = Math.max(maxX, child.x + child.width);
+            maxY = Math.max(maxY, child.y + child.height);
+        }
+    }
+
+    return {
+        width: maxX + 20, // Add padding
+        height: maxY + 20
+    };
+}
+
+// Layout children nodes VERTICALLY (top to bottom) for cloud visualization
+function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
+    if (children.length === 0) {
+        return { width: 120, height: 100 };
+    }
+
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+        rankdir: 'TB', // Top to bottom for vertical flow
+        nodesep: 15,
+        ranksep: 25,
+        marginx: 10,
+        marginy: 10
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Set default sizes for child nodes
+    for (const child of children) {
+        const labelWidth = Math.max(100, Math.min(140, child.label.length * 8 + 30));
+        child.width = labelWidth;
+        child.height = 40;
+        g.setNode(child.id, { width: child.width, height: child.height });
+    }
+
+    // Add edges
+    for (const edge of edges) {
+        g.setEdge(edge.source, edge.target);
+    }
+
+    // Run layout
+    dagre.layout(g);
+
+    // Apply positions
+    let maxX = 0;
+    let maxY = 0;
+    for (const child of children) {
+        const layoutNode = g.node(child.id);
+        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
+            child.x = layoutNode.x - child.width / 2;
+            child.y = layoutNode.y - child.height / 2;
+            maxX = Math.max(maxX, child.x + child.width);
+            maxY = Math.max(maxY, child.y + child.height);
+        }
+    }
+
+    return {
+        width: maxX + 10,
+        height: maxY + 10
+    };
+}
+
+// Render internal flow inside the floating cloud container
+function renderCloudSubflow(
+    parentNode: FlowNode,
+    children: FlowNode[],
+    childEdges: FlowEdge[],
+    group: SVGGElement,
+    offsetX: number,
+    offsetY: number,
+    containerWidth: number,
+    containerHeight: number
+): void {
+    // Draw child edges first (behind nodes)
+    for (const edge of childEdges) {
+        const sourceNode = children.find(n => n.id === edge.source);
+        const targetNode = children.find(n => n.id === edge.target);
+
+        if (sourceNode && targetNode) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+            // Calculate connection points (bottom of source to top of target for vertical layout)
+            const sourceX = offsetX + sourceNode.x + sourceNode.width / 2;
+            const sourceY = offsetY + sourceNode.y + sourceNode.height;
+            const targetX = offsetX + targetNode.x + targetNode.width / 2;
+            const targetY = offsetY + targetNode.y;
+
+            // Create curved path
+            const midY = (sourceY + targetY) / 2;
+            const d = `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`;
+
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.4)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+
+            group.appendChild(path);
+        }
+    }
+
+    // Draw child nodes with full styling (like main flow nodes)
+    for (const child of children) {
+        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        childGroup.setAttribute('class', 'cloud-subflow-node');
+
+        const childX = offsetX + child.x;
+        const childY = offsetY + child.y;
+
+        // Node rectangle with full styling
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String(childX));
+        rect.setAttribute('y', String(childY));
+        rect.setAttribute('width', String(child.width));
+        rect.setAttribute('height', String(child.height));
+        rect.setAttribute('rx', '8');
+        rect.setAttribute('fill', getNodeColor(child.type));
+        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
+        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('filter', 'url(#shadow)');
+        childGroup.appendChild(rect);
+
+        // Node icon
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        icon.setAttribute('x', String(childX + 10));
+        icon.setAttribute('y', String(childY + child.height / 2 + 5));
+        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('font-size', '12');
+        icon.textContent = getNodeIcon(child.type);
+        childGroup.appendChild(icon);
+
+        // Node label
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', String(childX + 26));
+        label.setAttribute('y', String(childY + child.height / 2 + 4));
+        label.setAttribute('fill', 'white');
+        label.setAttribute('font-size', '11');
+        label.setAttribute('font-weight', '500');
+        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        label.textContent = truncate(child.label, 14);
+        childGroup.appendChild(label);
+
+        group.appendChild(childGroup);
+    }
+}
+
+// Render the subflow (children and edges) inside a container node
+function renderSubflow(
+    parentNode: FlowNode,
+    children: FlowNode[],
+    childEdges: FlowEdge[],
+    group: SVGGElement,
+    offsetX: number,
+    offsetY: number,
+    containerWidth: number,
+    containerHeight: number
+): void {
+    // Create a clipping path for the subflow area
+    const clipId = `clip-${parentNode.id}`;
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+    clipPath.setAttribute('id', clipId);
+    const clipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    clipRect.setAttribute('x', String(offsetX));
+    clipRect.setAttribute('y', String(offsetY));
+    clipRect.setAttribute('width', String(containerWidth));
+    clipRect.setAttribute('height', String(containerHeight));
+    clipRect.setAttribute('rx', '6');
+    clipPath.appendChild(clipRect);
+    defs.appendChild(clipPath);
+    group.appendChild(defs);
+
+    // Create subflow group with clipping
+    const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    subflowGroup.setAttribute('class', 'subflow-group');
+    subflowGroup.setAttribute('clip-path', `url(#${clipId})`);
+
+    // Background for subflow area
+    const subflowBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    subflowBg.setAttribute('x', String(offsetX));
+    subflowBg.setAttribute('y', String(offsetY));
+    subflowBg.setAttribute('width', String(containerWidth));
+    subflowBg.setAttribute('height', String(containerHeight));
+    subflowBg.setAttribute('rx', '6');
+    subflowBg.setAttribute('fill', 'rgba(0, 0, 0, 0.2)');
+    subflowGroup.appendChild(subflowBg);
+
+    // Draw child edges first (behind nodes)
+    for (const edge of childEdges) {
+        const sourceNode = children.find(n => n.id === edge.source);
+        const targetNode = children.find(n => n.id === edge.target);
+
+        if (sourceNode && targetNode) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+            // Calculate connection points
+            const sourceX = offsetX + sourceNode.x + sourceNode.width;
+            const sourceY = offsetY + sourceNode.y + sourceNode.height / 2;
+            const targetX = offsetX + targetNode.x;
+            const targetY = offsetY + targetNode.y + targetNode.height / 2;
+
+            // Create curved path
+            const midX = (sourceX + targetX) / 2;
+            const d = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
+
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+
+            subflowGroup.appendChild(path);
+        }
+    }
+
+    // Draw child nodes
+    for (const child of children) {
+        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        childGroup.setAttribute('class', 'subflow-node');
+
+        const childX = offsetX + child.x;
+        const childY = offsetY + child.y;
+
+        // Node rectangle
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String(childX));
+        rect.setAttribute('y', String(childY));
+        rect.setAttribute('width', String(child.width));
+        rect.setAttribute('height', String(child.height));
+        rect.setAttribute('rx', '6');
+        rect.setAttribute('fill', getNodeColor(child.type));
+        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
+        rect.setAttribute('stroke-width', '1');
+        childGroup.appendChild(rect);
+
+        // Node icon
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        icon.setAttribute('x', String(childX + 8));
+        icon.setAttribute('y', String(childY + child.height / 2 + 4));
+        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('font-size', '11');
+        icon.textContent = getNodeIcon(child.type);
+        childGroup.appendChild(icon);
+
+        // Node label
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', String(childX + 22));
+        label.setAttribute('y', String(childY + child.height / 2 + 4));
+        label.setAttribute('fill', 'white');
+        label.setAttribute('font-size', '10');
+        label.setAttribute('font-weight', '500');
+        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        label.textContent = truncate(child.label, 14);
+        childGroup.appendChild(label);
+
+        subflowGroup.appendChild(childGroup);
+    }
+
+    group.appendChild(subflowGroup);
 }
 
 function renderWindowNode(node: FlowNode, group: SVGGElement): void {
