@@ -19,6 +19,7 @@ interface ViewState {
     isDarkTheme: boolean;
     breadcrumbPath: FlowNode[]; // Current CTE/Subquery breadcrumb path
     showColumnLineage: boolean; // Toggle column-level lineage view
+    showColumnFlows: boolean; // Toggle column flow visualization
     selectedColumn: string | null; // Currently selected column for highlighting
 }
 
@@ -40,6 +41,7 @@ const state: ViewState = {
     isDarkTheme: true,
     breadcrumbPath: [],
     showColumnLineage: false,
+    showColumnFlows: false,
     selectedColumn: null
 };
 
@@ -451,6 +453,11 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleSqlPreview();
         }
+        // C to toggle column flows
+        if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            toggleColumnFlows();
+        }
         // / to focus search (like vim)
         if (e.key === '/') {
             e.preventDefault();
@@ -504,6 +511,9 @@ export function render(result: ParseResult): void {
         return;
     }
 
+    // Store column flows
+    currentColumnFlows = result.columnFlows || [];
+
     // Render edges first (behind nodes)
     const edgesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     edgesGroup.setAttribute('class', 'edges');
@@ -511,6 +521,11 @@ export function render(result: ParseResult): void {
         renderEdge(edge, edgesGroup);
     }
     mainGroup.appendChild(edgesGroup);
+
+    // Show column lineage panel if enabled
+    if (state.showColumnFlows) {
+        showColumnLineagePanel();
+    }
 
     // Render nodes
     const nodesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2711,6 +2726,33 @@ function updateLegendPanel(): void {
                 </div>
             </div>
         </div>
+        ${state.showColumnFlows ? `
+            <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
+                <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #10b981; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Source Table</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #3b82f6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Renamed/Alias</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #f59e0b; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Aggregated</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #8b5cf6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Calculated</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #ec4899; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Joined</div>
+                    </div>
+                </div>
+            </div>
+        ` : ''}
     `;
 
     legendPanel.querySelector('#close-legend')?.addEventListener('click', () => {
@@ -3402,7 +3444,7 @@ function applyTheme(dark: boolean): void {
     
     // Re-render all nodes to update colors for theme
     if (currentNodes.length > 0) {
-        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, tableUsage: currentTableUsage });
+        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, columnFlows: currentColumnFlows, tableUsage: currentTableUsage });
     }
 }
 
@@ -3574,6 +3616,391 @@ function hideTooltip(): void {
 }
 
 // ============================================================
+// REDESIGNED: Column-Level Lineage Visualization
+// Click-based approach with full lineage paths
+// ============================================================
+
+let selectedColumnLineage: ColumnFlow | null = null;
+let columnLineagePanel: HTMLElement | null = null;
+
+/**
+ * Toggle column lineage mode
+ */
+export function toggleColumnFlows(show?: boolean): void {
+    state.showColumnFlows = show !== undefined ? show : !state.showColumnFlows;
+
+    if (state.showColumnFlows) {
+        showColumnLineagePanel();
+    } else {
+        hideColumnLineagePanel();
+        clearLineageHighlights();
+    }
+
+    // Update legend
+    updateLegendPanel();
+}
+
+/**
+ * Show the column lineage selection panel
+ */
+function showColumnLineagePanel(): void {
+    if (!currentColumnFlows || currentColumnFlows.length === 0) {
+        return;
+    }
+
+    // Remove existing panel
+    hideColumnLineagePanel();
+
+    // Create panel
+    columnLineagePanel = document.createElement('div');
+    columnLineagePanel.id = 'column-lineage-panel';
+    columnLineagePanel.style.cssText = `
+        position: fixed;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        border-radius: 12px;
+        padding: 16px;
+        max-height: 70vh;
+        overflow-y: auto;
+        z-index: 1000;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        min-width: 220px;
+        max-width: 280px;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `
+        font-weight: 600;
+        font-size: 13px;
+        color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    `;
+    header.innerHTML = `
+        <span>Column Lineage</span>
+        <span style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+    `;
+    columnLineagePanel.appendChild(header);
+
+    // List output columns
+    const columnList = document.createElement('div');
+    columnList.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+    for (const flow of currentColumnFlows) {
+        const columnItem = createColumnItem(flow);
+        columnList.appendChild(columnItem);
+    }
+
+    columnLineagePanel.appendChild(columnList);
+    document.body.appendChild(columnLineagePanel);
+}
+
+/**
+ * Create a clickable column item
+ */
+function createColumnItem(flow: ColumnFlow): HTMLElement {
+    const item = document.createElement('div');
+    item.style.cssText = `
+        padding: 10px 12px;
+        background: ${state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)'};
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 2px solid transparent;
+    `;
+
+    // Get first and last step for summary
+    const firstStep = flow.lineagePath[0];
+    const lastStep = flow.lineagePath[flow.lineagePath.length - 1];
+
+    // Determine overall transformation type
+    const hasAggregation = flow.lineagePath.some(s => s.transformation === 'aggregated');
+    const hasCalculation = flow.lineagePath.some(s => s.transformation === 'calculated');
+    const hasRename = flow.lineagePath.some(s => s.transformation === 'renamed');
+
+    let badge = '';
+    let badgeColor = '#10b981';
+    if (hasAggregation) {
+        badge = 'AGG';
+        badgeColor = '#f59e0b';
+    } else if (hasCalculation) {
+        badge = 'CALC';
+        badgeColor = '#8b5cf6';
+    } else if (hasRename) {
+        badge = 'ALIAS';
+        badgeColor = '#3b82f6';
+    }
+
+    item.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="font-weight: 600; font-size: 12px; color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};">
+                ${escapeHtml(flow.outputColumn)}
+            </span>
+            ${badge ? `<span style="
+                background: ${badgeColor};
+                color: white;
+                font-size: 9px;
+                font-weight: 600;
+                padding: 2px 5px;
+                border-radius: 3px;
+            ">${badge}</span>` : ''}
+        </div>
+        <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
+            ${firstStep ? escapeHtml(firstStep.nodeName) + '.' + escapeHtml(firstStep.columnName) : 'Unknown source'}
+        </div>
+    `;
+
+    // Hover effect
+    item.addEventListener('mouseenter', () => {
+        item.style.background = state.isDarkTheme ? 'rgba(71, 85, 105, 0.7)' : 'rgba(226, 232, 240, 0.9)';
+    });
+
+    item.addEventListener('mouseleave', () => {
+        if (selectedColumnLineage?.id !== flow.id) {
+            item.style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+            item.style.borderColor = 'transparent';
+        }
+    });
+
+    // Click to show lineage
+    item.addEventListener('click', () => {
+        // Update selection state
+        selectedColumnLineage = flow;
+
+        // Update all items styling
+        const allItems = columnLineagePanel?.querySelectorAll('div[style*="cursor: pointer"]');
+        allItems?.forEach((el) => {
+            (el as HTMLElement).style.borderColor = 'transparent';
+            (el as HTMLElement).style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+        });
+
+        // Highlight selected
+        item.style.borderColor = '#6366f1';
+        item.style.background = state.isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+
+        // Show lineage path and highlight nodes
+        showLineagePath(flow);
+        highlightLineageNodes(flow);
+    });
+
+    return item;
+}
+
+/**
+ * Hide the column lineage panel
+ */
+function hideColumnLineagePanel(): void {
+    if (columnLineagePanel) {
+        columnLineagePanel.remove();
+        columnLineagePanel = null;
+    }
+    selectedColumnLineage = null;
+}
+
+/**
+ * Show the lineage path in the details panel
+ */
+function showLineagePath(flow: ColumnFlow): void {
+    if (!detailsPanel) return;
+
+    const transformationColors: Record<string, string> = {
+        source: '#10b981',
+        passthrough: '#64748b',
+        renamed: '#3b82f6',
+        aggregated: '#f59e0b',
+        calculated: '#8b5cf6',
+        joined: '#ec4899'
+    };
+
+    const transformationLabels: Record<string, string> = {
+        source: 'Source',
+        passthrough: 'Pass',
+        renamed: 'Renamed',
+        aggregated: 'Aggregated',
+        calculated: 'Calculated',
+        joined: 'Joined'
+    };
+
+    // Build path visualization
+    let pathHtml = '';
+    for (let i = 0; i < flow.lineagePath.length; i++) {
+        const step = flow.lineagePath[i];
+        const isFirst = i === 0;
+        const isLast = i === flow.lineagePath.length - 1;
+
+        pathHtml += `
+            <div style="display: flex; align-items: flex-start; gap: 10px; ${!isLast ? 'margin-bottom: 4px;' : ''}">
+                <div style="
+                    width: 8px;
+                    min-width: 8px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                ">
+                    <div style="
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        background: ${transformationColors[step.transformation] || '#64748b'};
+                        ${isFirst ? 'box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);' : ''}
+                        ${isLast ? 'box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);' : ''}
+                    "></div>
+                    ${!isLast ? `<div style="width: 2px; height: 28px; background: ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.3)' : 'rgba(0, 0, 0, 0.1)'};"></div>` : ''}
+                </div>
+                <div style="flex: 1; padding-bottom: ${!isLast ? '8px' : '0'};">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                        <span style="
+                            font-weight: 600;
+                            font-size: 11px;
+                            color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};
+                        ">${escapeHtml(step.columnName)}</span>
+                        <span style="
+                            font-size: 9px;
+                            padding: 1px 4px;
+                            border-radius: 3px;
+                            background: ${transformationColors[step.transformation] || '#64748b'};
+                            color: white;
+                        ">${transformationLabels[step.transformation] || step.transformation}</span>
+                    </div>
+                    <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
+                        ${escapeHtml(step.nodeName)}
+                        ${step.expression ? `<br><code style="font-size: 9px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">${escapeHtml(step.expression)}</code>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    detailsPanel.innerHTML = `
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};">
+            Column Lineage
+        </div>
+        <div style="
+            background: ${state.isDarkTheme ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)'};
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+        ">
+            <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 4px;">Output Column</div>
+            <div style="font-weight: 600; font-size: 14px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">
+                ${escapeHtml(flow.outputColumn)}
+            </div>
+        </div>
+        <div style="font-size: 11px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 10px;">
+            Transformation Path (${flow.lineagePath.length} steps)
+        </div>
+        <div style="padding-left: 4px;">
+            ${pathHtml}
+        </div>
+    `;
+
+    detailsPanel.style.transform = 'translate(0, -50%)';
+}
+
+/**
+ * Highlight nodes in the lineage path
+ */
+function highlightLineageNodes(flow: ColumnFlow): void {
+    if (!mainGroup) return;
+
+    // Reset all nodes to dimmed state
+    const allNodes = mainGroup.querySelectorAll('.node-group');
+    allNodes.forEach((node) => {
+        (node as SVGElement).style.opacity = '0.3';
+    });
+
+    // Reset all edges to dimmed state
+    const allEdges = mainGroup.querySelectorAll('.edge-path, .edge-arrow');
+    allEdges.forEach((edge) => {
+        (edge as SVGElement).style.opacity = '0.15';
+    });
+
+    // Get node IDs in the lineage path
+    const lineageNodeIds = new Set(flow.lineagePath.map(s => s.nodeId));
+
+    // Highlight nodes in the path
+    for (const step of flow.lineagePath) {
+        const nodeGroup = mainGroup.querySelector(`[data-node-id="${step.nodeId}"]`);
+        if (nodeGroup) {
+            (nodeGroup as SVGElement).style.opacity = '1';
+
+            // Add glow effect
+            const rect = nodeGroup.querySelector('rect');
+            if (rect) {
+                rect.setAttribute('stroke', '#6366f1');
+                rect.setAttribute('stroke-width', '3');
+            }
+        }
+    }
+
+    // Highlight edges between lineage nodes
+    const allEdgePaths = mainGroup.querySelectorAll('.edge-path');
+    allEdgePaths.forEach((edgePath) => {
+        const edge = edgePath as SVGElement;
+        const sourceId = edge.getAttribute('data-source');
+        const targetId = edge.getAttribute('data-target');
+
+        if (sourceId && targetId && lineageNodeIds.has(sourceId) && lineageNodeIds.has(targetId)) {
+            edge.style.opacity = '1';
+            edge.setAttribute('stroke', '#6366f1');
+            edge.setAttribute('stroke-width', '3');
+
+            // Also highlight the arrow
+            const arrow = mainGroup?.querySelector(`.edge-arrow[data-source="${sourceId}"][data-target="${targetId}"]`);
+            if (arrow) {
+                (arrow as SVGElement).style.opacity = '1';
+            }
+        }
+    });
+}
+
+/**
+ * Clear all lineage highlights
+ */
+function clearLineageHighlights(): void {
+    if (!mainGroup) return;
+
+    // Reset all nodes
+    const allNodes = mainGroup.querySelectorAll('.node-group');
+    allNodes.forEach((node) => {
+        (node as SVGElement).style.opacity = '1';
+
+        const rect = node.querySelector('rect');
+        if (rect) {
+            rect.removeAttribute('stroke');
+            rect.removeAttribute('stroke-width');
+        }
+    });
+
+    // Reset all edges
+    const allEdges = mainGroup.querySelectorAll('.edge-path');
+    allEdges.forEach((edge) => {
+        const edgeEl = edge as SVGElement;
+        edgeEl.style.opacity = '1';
+        edgeEl.setAttribute('stroke', state.isDarkTheme ? '#64748b' : '#94a3b8');
+        edgeEl.setAttribute('stroke-width', '1.5');
+    });
+
+    const allArrows = mainGroup.querySelectorAll('.edge-arrow');
+    allArrows.forEach((arrow) => {
+        (arrow as SVGElement).style.opacity = '1';
+    });
+
+    // Hide details panel
+    if (detailsPanel) {
+        detailsPanel.style.transform = 'translate(100%, -50%)';
+    }
+}
+
+// ============================================================
 // FEATURE: Collapsible Nodes
 // ============================================================
 
@@ -3637,6 +4064,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'T', description: 'Toggle theme' },
         { key: 'L', description: 'Toggle legend' },
         { key: 'S', description: 'Toggle SQL preview' },
+        { key: 'C', description: 'Toggle column flows' },
         { key: 'D', description: 'Compare queries (diff)' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }

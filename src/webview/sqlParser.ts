@@ -83,14 +83,20 @@ export interface FlowEdge {
     endLine?: number;   // Ending line of the clause in the SQL
 }
 
-// Column-level lineage connection
+// Column-level lineage connection - redesigned for full path tracing
 export interface ColumnFlow {
     id: string;
-    sourceNodeId: string;
-    targetNodeId: string;
-    sourceColumn: string;
-    targetColumn: string;
-    transformationType: 'passthrough' | 'renamed' | 'aggregated' | 'calculated';
+    outputColumn: string;           // Final output column name
+    outputNodeId: string;           // Node that outputs this column (usually SELECT)
+    // Full lineage path from source to output
+    lineagePath: Array<{
+        nodeId: string;
+        nodeName: string;           // Human-readable node name
+        nodeType: string;           // table, select, aggregate, etc.
+        columnName: string;         // Column name at this step
+        transformation: 'source' | 'passthrough' | 'renamed' | 'aggregated' | 'calculated' | 'joined';
+        expression?: string;        // Transformation expression if any
+    }>;
 }
 
 export interface QueryStats {
@@ -583,7 +589,13 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Extract column lineage
         const columnLineage = extractColumnLineage(statements[0], nodes);
 
-        return { nodes, edges, stats, hints, sql, columnLineage, tableUsage: tableUsageMap };
+        // Generate column flows for visualization
+        const columnFlows = generateColumnFlows(statements[0], nodes, edges);
+
+        // Calculate column positions on nodes
+        calculateColumnPositions(nodes);
+
+        return { nodes, edges, stats, hints, sql, columnLineage, columnFlows, tableUsage: tableUsageMap };
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Parse error';
         return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
@@ -2487,5 +2499,367 @@ function extractSourcesFromExpr(
                 extractSourcesFromExpr(caseArg.result, sources, tableAliasMap, tableNodes);
             }
         }
+    }
+}
+
+// ============================================================
+// REDESIGNED: Column-Level Lineage Visualization
+// Now builds FULL lineage paths from source tables to output
+// ============================================================
+
+/**
+ * Generate column flows with full lineage paths from source to output
+ */
+function generateColumnFlows(
+    stmt: any,
+    nodes: FlowNode[],
+    edges: FlowEdge[]
+): ColumnFlow[] {
+    const columnFlows: ColumnFlow[] = [];
+    if (!stmt || stmt.type?.toLowerCase() !== 'select') {
+        return columnFlows;
+    }
+
+    // Build node map for quick lookup
+    const nodeMap = new Map<string, FlowNode>();
+    nodes.forEach(node => nodeMap.set(node.id, node));
+
+    // Build edge map: target -> sources (for tracing backwards)
+    const incomingEdges = new Map<string, string[]>();
+    edges.forEach(edge => {
+        if (!incomingEdges.has(edge.target)) {
+            incomingEdges.set(edge.target, []);
+        }
+        incomingEdges.get(edge.target)!.push(edge.source);
+    });
+
+    // Find SELECT nodes (output nodes)
+    const selectNodes = nodes.filter(n => n.type === 'select');
+    if (selectNodes.length === 0) return columnFlows;
+
+    // Process each SELECT node's output columns
+    for (const selectNode of selectNodes) {
+        if (!selectNode.columns || selectNode.columns.length === 0) continue;
+
+        for (const outputCol of selectNode.columns) {
+            // Build full lineage path for this output column
+            const lineagePath = buildColumnLineagePath(
+                outputCol,
+                selectNode,
+                nodeMap,
+                incomingEdges
+            );
+
+            if (lineagePath.length > 0) {
+                const flowId = `lineage_${selectNode.id}_${outputCol.name}`;
+                columnFlows.push({
+                    id: flowId,
+                    outputColumn: outputCol.name,
+                    outputNodeId: selectNode.id,
+                    lineagePath
+                });
+            }
+        }
+    }
+
+    return columnFlows;
+}
+
+/**
+ * Build complete lineage path from source table to output column
+ */
+function buildColumnLineagePath(
+    column: ColumnInfo,
+    currentNode: FlowNode,
+    nodeMap: Map<string, FlowNode>,
+    incomingEdges: Map<string, string[]>,
+    visited: Set<string> = new Set()
+): ColumnFlow['lineagePath'] {
+    const path: ColumnFlow['lineagePath'] = [];
+
+    // Prevent infinite loops
+    if (visited.has(currentNode.id)) return path;
+    visited.add(currentNode.id);
+
+    // Determine transformation at current node
+    const transformation = getTransformationType(column, currentNode);
+
+    // Add current node to path
+    path.push({
+        nodeId: currentNode.id,
+        nodeName: currentNode.label,
+        nodeType: currentNode.type,
+        columnName: column.name,
+        transformation,
+        expression: column.expression !== column.name ? column.expression : undefined
+    });
+
+    // If this is a table node, we've reached the source
+    if (currentNode.type === 'table') {
+        // Mark as source
+        path[path.length - 1].transformation = 'source';
+        return path;
+    }
+
+    // Trace back through incoming edges
+    const incoming = incomingEdges.get(currentNode.id) || [];
+
+    for (const sourceNodeId of incoming) {
+        const sourceNode = nodeMap.get(sourceNodeId);
+        if (!sourceNode) continue;
+
+        // Find matching source column
+        const sourceColumn = findSourceColumn(column, sourceNode, currentNode);
+
+        if (sourceColumn) {
+            // Recursively trace this source
+            const sourcePath = buildColumnLineagePath(
+                sourceColumn,
+                sourceNode,
+                nodeMap,
+                incomingEdges,
+                new Set(visited)
+            );
+
+            if (sourcePath.length > 0) {
+                // Prepend source path (source comes before current)
+                return [...sourcePath, ...path];
+            }
+        }
+    }
+
+    // If we couldn't trace further and column has explicit source info
+    if (column.sourceTable && column.sourceColumn) {
+        // Try to find the source table node
+        for (const node of nodeMap.values()) {
+            if (node.type === 'table' &&
+                (node.label.toLowerCase() === column.sourceTable.toLowerCase() ||
+                 node.label.toLowerCase().includes(column.sourceTable.toLowerCase()))) {
+                path.unshift({
+                    nodeId: node.id,
+                    nodeName: node.label,
+                    nodeType: 'table',
+                    columnName: column.sourceColumn,
+                    transformation: 'source'
+                });
+                break;
+            }
+        }
+    }
+
+    return path;
+}
+
+/**
+ * Find the source column in a source node that maps to the target column
+ */
+function findSourceColumn(
+    targetColumn: ColumnInfo,
+    sourceNode: FlowNode,
+    targetNode: FlowNode
+): ColumnInfo | null {
+    // If target column has explicit source info, use it
+    if (targetColumn.sourceColumn && targetColumn.sourceTable) {
+        if (sourceNode.label.toLowerCase().includes(targetColumn.sourceTable.toLowerCase())) {
+            return {
+                name: targetColumn.sourceColumn,
+                expression: targetColumn.sourceColumn,
+                sourceTable: targetColumn.sourceTable
+            };
+        }
+    }
+
+    // For aggregate nodes, extract column from expression
+    if (sourceNode.type === 'aggregate' && sourceNode.aggregateDetails) {
+        for (const aggFunc of sourceNode.aggregateDetails.functions) {
+            const outputName = aggFunc.alias || aggFunc.name;
+            if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
+                targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+                return {
+                    name: outputName,
+                    expression: aggFunc.expression,
+                    isAggregate: true
+                };
+            }
+        }
+    }
+
+    // For window nodes, check window functions
+    if (sourceNode.type === 'window' && sourceNode.windowDetails) {
+        for (const winFunc of sourceNode.windowDetails.functions) {
+            if (winFunc.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+                return {
+                    name: winFunc.name,
+                    expression: `${winFunc.name}() OVER (...)`,
+                    isWindowFunc: true
+                };
+            }
+        }
+    }
+
+    // Check source node columns
+    if (sourceNode.columns) {
+        for (const sourceCol of sourceNode.columns) {
+            // Direct name match
+            if (sourceCol.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+                return sourceCol;
+            }
+            // Source column match
+            if (sourceCol.name.toLowerCase() === targetColumn.sourceColumn?.toLowerCase()) {
+                return sourceCol;
+            }
+            // Expression match
+            if (targetColumn.expression?.toLowerCase().includes(sourceCol.name.toLowerCase())) {
+                return sourceCol;
+            }
+        }
+    }
+
+    // For JOIN nodes, check if the column could pass through
+    if (sourceNode.type === 'join') {
+        return {
+            name: targetColumn.sourceColumn || targetColumn.name,
+            expression: targetColumn.sourceColumn || targetColumn.name,
+            sourceTable: targetColumn.sourceTable
+        };
+    }
+
+    // Default: assume passthrough with same name
+    return {
+        name: targetColumn.sourceColumn || targetColumn.name,
+        expression: targetColumn.sourceColumn || targetColumn.name
+    };
+}
+
+/**
+ * Determine the transformation type at a node
+ */
+function getTransformationType(
+    column: ColumnInfo,
+    node: FlowNode
+): ColumnFlow['lineagePath'][0]['transformation'] {
+    // Source tables
+    if (node.type === 'table') {
+        return 'source';
+    }
+
+    // Aggregations
+    if (column.isAggregate || node.type === 'aggregate') {
+        return 'aggregated';
+    }
+
+    // Window functions
+    if (column.isWindowFunc || node.type === 'window') {
+        return 'calculated';
+    }
+
+    // JOINs
+    if (node.type === 'join') {
+        return 'joined';
+    }
+
+    // Renamed columns
+    if (column.sourceColumn &&
+        column.name.toLowerCase() !== column.sourceColumn.toLowerCase()) {
+        return 'renamed';
+    }
+
+    // Calculated expressions
+    if (column.expression &&
+        column.expression !== column.name &&
+        !column.expression.match(/^[\w.]+$/)) {
+        return 'calculated';
+    }
+
+    return 'passthrough';
+}
+
+/**
+ * Calculate column positions on nodes for visual rendering
+ * Positions are stored as RELATIVE offsets from the node's origin (node.x, node.y)
+ * The renderer will add node.x/node.y to get absolute coordinates
+ */
+function calculateColumnPositions(nodes: FlowNode[]): void {
+    for (const node of nodes) {
+        if (!node.columns || node.columns.length === 0) {
+            continue;
+        }
+
+        const positions = new Map<string, { x: number; y: number }>();
+        const visibleColumns: string[] = [];
+
+        // Calculate positions based on node type (relative to node origin)
+        switch (node.type) {
+            case 'table':
+                // Position columns vertically along the right edge
+                const spacing = 18;
+
+                node.columns.forEach((col, index) => {
+                    if (index < 10) { // Limit visible columns
+                        visibleColumns.push(col.name);
+                        positions.set(col.name, {
+                            x: node.width,  // Right edge (relative)
+                            y: 20 + index * spacing  // Offset from top (relative)
+                        });
+                    }
+                });
+                break;
+
+            case 'select':
+                // Position columns horizontally at the bottom
+                const hSpacing = 80;
+
+                node.columns.forEach((col, index) => {
+                    if (index < 8) { // Limit visible columns
+                        visibleColumns.push(col.name);
+                        positions.set(col.name, {
+                            x: 10 + (index % 4) * hSpacing,  // Offset from left (relative)
+                            y: node.height + Math.floor(index / 4) * 15  // Bottom edge (relative)
+                        });
+                    }
+                });
+                break;
+
+            case 'aggregate':
+                // Position at output point (center bottom)
+                if (node.aggregateDetails) {
+                    node.aggregateDetails.functions.forEach((func, index) => {
+                        const colName = func.alias || func.name;
+                        visibleColumns.push(colName);
+                        positions.set(colName, {
+                            x: node.width / 2,  // Center (relative)
+                            y: node.height + (index * 15)  // Below node (relative)
+                        });
+                    });
+                }
+                break;
+
+            case 'window':
+                // Position at output point
+                if (node.windowDetails) {
+                    node.windowDetails.functions.forEach((func, index) => {
+                        visibleColumns.push(func.name);
+                        positions.set(func.name, {
+                            x: node.width / 2,  // Center (relative)
+                            y: node.height + (index * 15)  // Below node (relative)
+                        });
+                    });
+                }
+                break;
+
+            default:
+                // For other node types, position at center bottom
+                node.columns.slice(0, 5).forEach((col, index) => {
+                    visibleColumns.push(col.name);
+                    positions.set(col.name, {
+                        x: node.width / 2,  // Center (relative)
+                        y: node.height + (index * 12)  // Below node (relative)
+                    });
+                });
+                break;
+        }
+
+        node.columnPositions = positions;
+        node.visibleColumns = visibleColumns;
     }
 }

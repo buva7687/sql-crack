@@ -29,6 +29,10 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 ### Phase 2: Developer Productivity & Quality ⚡ NEW
 
+**Query-Level Column Lineage** — Click-to-trace column lineage visualization. Select any output column to see its complete transformation path from source tables through JOINs, aggregations, and calculations. Highlights relevant nodes and shows step-by-step lineage in a visual timeline.
+
+> **Note:** This is query-level lineage analysis based on SQL parsing — it traces columns within a single query's execution flow. It does not provide object-to-object lineage tracking across your database schema or metadata catalog.
+
 **Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges.
 
 **Query Complexity Insights** — Enhanced metrics showing CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators.
@@ -52,7 +56,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 - **Execution Flow Visualization** — See how your SQL query executes step by step
 - **Multi-Query Support** — Visualize multiple SQL statements with tab navigation (Q1, Q2, Q3...)
-- **Column Lineage Tracking** — Trace column sources through the query pipeline
+- **Query-Level Column Lineage** — Click any output column to trace its full transformation path from source tables (query-level analysis, not metadata-based)
 - **Query Statistics** — Complexity score, table/join/filter counts, and more
 
 ### Interactive Navigation ⭐ NEW
@@ -157,6 +161,7 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
 | `Escape` | Clear selection |
+| `C` | Toggle column lineage mode |
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `T` | Toggle theme |
@@ -249,7 +254,7 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Advanced SQL annotations and warnings (unused CTEs, dead columns, duplicate subqueries, repeated table scans)
 - ✅ Query complexity insights (CTE depth, fan-out analysis, critical path length, complexity breakdown)
 - ✅ Smart quality warnings with severity levels and actionable suggestions
-- 📅 Column-level lineage visualization with visual flow lines (Planned)
+- ✅ Query-level column lineage visualization (click-to-trace with full transformation path)
 - 📅 Diff-aware visualization for PR reviews (Planned)
 
 ### 📅 Phase 3: Performance & Optimization (Planned)
@@ -261,8 +266,6 @@ SQL Crack follows a phased development approach focused on delivering profession
 - Cross-file lineage tracking
 - dbt integration
 - Workspace dependency graphs
-
-See [FEATURE_TODO.md](FEATURE_TODO.md) for the complete feature roadmap with detailed specifications.
 
 ## Contributing
 

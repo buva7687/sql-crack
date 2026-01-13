@@ -18,6 +18,7 @@ import {
     toggleLegend,
     toggleFocusMode,
     toggleSqlPreview,
+    toggleColumnFlows,
     highlightColumnSources,
     toggleFullscreen,
     isFullscreen,
@@ -575,6 +576,25 @@ function createToolbar(container: HTMLElement): void {
     sqlBtn.addEventListener('mouseenter', () => sqlBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     sqlBtn.addEventListener('mouseleave', () => sqlBtn.style.background = 'transparent');
     featureGroup.appendChild(sqlBtn);
+
+    // Column Flow toggle button
+    let columnFlowActive = false;
+    const columnFlowBtn = document.createElement('button');
+    columnFlowBtn.innerHTML = '📊';
+    columnFlowBtn.title = 'Toggle column flow visualization (C)';
+    columnFlowBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    columnFlowBtn.addEventListener('click', () => {
+        columnFlowActive = !columnFlowActive;
+        toggleColumnFlows(columnFlowActive);
+        columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    });
+    columnFlowBtn.addEventListener('mouseenter', () => {
+        if (!columnFlowActive) columnFlowBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    columnFlowBtn.addEventListener('mouseleave', () => {
+        if (!columnFlowActive) columnFlowBtn.style.background = 'transparent';
+    });
+    featureGroup.appendChild(columnFlowBtn);
 
     // Theme Toggle button
     const themeBtn = document.createElement('button');
