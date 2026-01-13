@@ -2311,11 +2311,25 @@ function fitView(): void {
 }
 
 function zoomToNode(node: FlowNode): void {
-    if (!svg) { return; }
+    if (!svg || !mainGroup) { return; }
 
     // Simple toggle behavior: if already zoomed to any node, restore to fit view
     if (state.zoomedNodeId !== null) {
-        // Restore to fit view (default state)
+        // Show all nodes and edges again
+        const allNodes = mainGroup.querySelectorAll('.node');
+        allNodes.forEach(nodeEl => {
+            (nodeEl as SVGGElement).style.display = '';
+            (nodeEl as SVGGElement).style.opacity = '1';
+        });
+        const allEdges = mainGroup.querySelectorAll('.edge');
+        allEdges.forEach(edgeEl => {
+            (edgeEl as SVGPathElement).style.display = '';
+            (edgeEl as SVGPathElement).style.opacity = '1';
+        });
+        
+        // Clear focus mode and restore to fit view (default state)
+        clearFocusMode();
+        state.focusModeEnabled = false;
         fitView();
         return;
     }
@@ -2330,17 +2344,84 @@ function zoomToNode(node: FlowNode): void {
         };
     }
 
-    // Zoom to the node
-    const rect = svg.getBoundingClientRect();
-    const targetScale = 1.5;
+    // Select the node first
+    selectNode(node.id);
 
-    // Center the node
-    const centerX = node.x + node.width / 2;
-    const centerY = node.y + node.height / 2;
+    // Get only immediate neighbors (1 hop away) for context, not all connected nodes
+    const immediateNeighbors = new Set<string>();
+    immediateNeighbors.add(node.id);
+    
+    // Find immediate upstream and downstream nodes (direct connections only)
+    for (const edge of currentEdges) {
+        if (edge.target === node.id) {
+            immediateNeighbors.add(edge.source);
+        }
+        if (edge.source === node.id) {
+            immediateNeighbors.add(edge.target);
+        }
+    }
+
+    // Hide all nodes and edges that are not the clicked node or its immediate neighbors
+    const allNodes = mainGroup.querySelectorAll('.node');
+    allNodes.forEach(nodeEl => {
+        const id = nodeEl.getAttribute('data-id');
+        if (id && !immediateNeighbors.has(id)) {
+            (nodeEl as SVGGElement).style.display = 'none';
+        } else {
+            (nodeEl as SVGGElement).style.display = '';
+            (nodeEl as SVGGElement).style.opacity = '1';
+        }
+    });
+
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        const source = edgeEl.getAttribute('data-source');
+        const target = edgeEl.getAttribute('data-target');
+        if (source && target && immediateNeighbors.has(source) && immediateNeighbors.has(target)) {
+            (edgeEl as SVGPathElement).style.display = '';
+            (edgeEl as SVGPathElement).style.opacity = '1';
+        } else {
+            (edgeEl as SVGPathElement).style.display = 'none';
+        }
+    });
+
+    // Calculate bounds of visible nodes (the clicked node and its immediate neighbors)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const visibleNodes = currentNodes.filter(n => immediateNeighbors.has(n.id));
+    for (const n of visibleNodes) {
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + n.width);
+        maxY = Math.max(maxY, n.y + n.height);
+    }
+
+    // If only one node, use its bounds with some padding
+    if (visibleNodes.length === 1) {
+        const padding = 100;
+        minX = node.x - padding;
+        minY = node.y - padding;
+        maxX = node.x + node.width + padding;
+        maxY = node.y + node.height + padding;
+    }
+
+    // Calculate zoom to fit the visible nodes in the viewport
+    const rect = svg.getBoundingClientRect();
+    const availableWidth = rect.width - 320; // Account for panels
+    const availableHeight = rect.height - 100;
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+    
+    const scaleX = (availableWidth * 0.8) / graphWidth; // Use 80% of available space
+    const scaleY = (availableHeight * 0.8) / graphHeight;
+    const targetScale = Math.min(scaleX, scaleY, 5.0); // Cap at 5x zoom
+
+    // Center the visible nodes
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
 
     state.scale = targetScale;
-    state.offsetX = rect.width / 2 - centerX * state.scale - 140; // Offset for panels
-    state.offsetY = rect.height / 2 - centerY * state.scale;
+    state.offsetX = availableWidth / 2 - centerX * state.scale + 50;
+    state.offsetY = availableHeight / 2 - centerY * state.scale + 50;
     state.zoomedNodeId = node.id;
 
     updateTransform();

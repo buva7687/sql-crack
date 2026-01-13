@@ -48,7 +48,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
 - **Focus Mode** — Highlight connected nodes for better understanding
 - **Bidirectional Editor Sync** — Click in SQL editor to highlight flow nodes, click nodes to jump to SQL
-- **Double-Click to Zoom** — Focus on specific parts of complex queries
+- **Double-Click to Zoom** — Double-click any node to focus on it and its immediate neighbors (hides other nodes), double-click again to restore full view
 - **Enhanced Tooltips** — Hover over nodes to see actual SQL fragments, line numbers, and detailed operation information
 
 ### Smart Analysis & Quality
@@ -127,7 +127,7 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 - **Navigate CTEs**: Use the breadcrumb trail at the top to navigate through nested Common Table Expressions
 - **Collapse/Expand**: Click the +/- button on CTE nodes to collapse or expand nested operations
 - **View Details**: Hover over nodes to see SQL fragments and line numbers
-- **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click nodes to focus
+- **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click nodes to focus on that node and its immediate neighbors
 
 ### Keyboard Shortcuts
 
