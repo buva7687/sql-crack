@@ -10,6 +10,16 @@ interface ViewState {
     isDragging: boolean;
     dragStartX: number;
     dragStartY: number;
+    isDraggingNode: boolean; // True when dragging a node
+    isDraggingCloud: boolean; // True when dragging a cloud container
+    draggingNodeId: string | null; // ID of node being dragged
+    draggingCloudNodeId: string | null; // ID of node whose cloud is being dragged
+    dragNodeStartX: number; // Node's x position when drag started
+    dragNodeStartY: number; // Node's y position when drag started
+    dragCloudStartOffsetX: number; // Cloud offset X when drag started
+    dragCloudStartOffsetY: number; // Cloud offset Y when drag started
+    dragMouseStartX: number; // Mouse x position when drag started
+    dragMouseStartY: number; // Mouse y position when drag started
     searchTerm: string;
     searchResults: string[];
     currentSearchIndex: number;
@@ -34,6 +44,16 @@ const state: ViewState = {
     isDragging: false,
     dragStartX: 0,
     dragStartY: 0,
+    isDraggingNode: false,
+    isDraggingCloud: false,
+    draggingNodeId: null,
+    draggingCloudNodeId: null,
+    dragNodeStartX: 0,
+    dragNodeStartY: 0,
+    dragCloudStartOffsetX: 0,
+    dragCloudStartOffsetY: 0,
+    dragMouseStartX: 0,
+    dragMouseStartY: 0,
     searchTerm: '',
     searchResults: [],
     currentSearchIndex: -1,
@@ -70,6 +90,10 @@ let currentHints: OptimizationHint[] = [];
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
+// Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
+let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
+// Store references to cloud and arrow elements for dynamic updates
+let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement }> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -335,9 +359,17 @@ export function initRenderer(container: HTMLElement): void {
 function setupEventListeners(): void {
     if (!svg) { return; }
 
-    // Pan
+    // Pan (only if not dragging a node/cloud)
     svg.addEventListener('mousedown', (e) => {
-        if (e.target === svg || (e.target as Element).tagName === 'svg') {
+        // Check if clicking on a draggable node or cloud
+        const target = e.target as Element;
+        const cloudGroup = target.closest('.cloud-container');
+        const nodeGroup = target.closest('.node[data-id]');
+        if (cloudGroup || nodeGroup) {
+            // Node/cloud dragging will be handled by node-specific handlers
+            return;
+        }
+        if (e.target === svg || target.tagName === 'svg') {
             state.isDragging = true;
             state.dragStartX = e.clientX - state.offsetX;
             state.dragStartY = e.clientY - state.offsetY;
@@ -345,8 +377,59 @@ function setupEventListeners(): void {
         }
     });
 
+    /**
+     * Handle mouse movement for dragging operations:
+     * - Cloud dragging: Updates cloud offset independently, keeping node position fixed
+     * - Node dragging: Moves node and updates cloud/arrow positions relative to node
+     * - Panning: Moves the entire view when dragging on empty space
+     */
     svg.addEventListener('mousemove', (e) => {
-        if (state.isDragging) {
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            // Handle cloud container dragging - update cloud offset independently
+            // The cloud can be moved anywhere while the node stays in place
+            const rect = svg!.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            const node = currentNodes.find(n => n.id === state.draggingCloudNodeId);
+            if (node) {
+                // Calculate new cloud offset relative to node position
+                const deltaX = mouseX - state.dragMouseStartX;
+                const deltaY = mouseY - state.dragMouseStartY;
+                
+                const newOffsetX = state.dragCloudStartOffsetX + deltaX;
+                const newOffsetY = state.dragCloudStartOffsetY + deltaY;
+                
+                // Update cloud offset (stored relative to node position)
+                cloudOffsets.set(node.id, { offsetX: newOffsetX, offsetY: newOffsetY });
+                
+                // Update cloud and arrow positions (arrow will adjust based on cloud location)
+                updateCloudAndArrow(node);
+            }
+        } else if (state.isDraggingNode && state.draggingNodeId) {
+            // Handle node dragging - move node, cloud follows with relative offset
+            // When dragging a CTE/subquery node, the cloud maintains its offset relative to the node
+            const rect = svg!.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            const deltaX = mouseX - state.dragMouseStartX;
+            const deltaY = mouseY - state.dragMouseStartY;
+            
+            const node = currentNodes.find(n => n.id === state.draggingNodeId);
+            if (node) {
+                // Update node position
+                node.x = state.dragNodeStartX + deltaX;
+                node.y = state.dragNodeStartY + deltaY;
+                
+                // Update cloud and arrow positions (maintains relative offset)
+                updateCloudAndArrow(node);
+                
+                // Also update edges connected to this node
+                updateNodeEdges(node);
+            }
+        } else if (state.isDragging) {
+            // Handle panning - move the entire view when dragging on empty space
             state.offsetX = e.clientX - state.dragStartX;
             state.offsetY = e.clientY - state.dragStartY;
             updateTransform();
@@ -354,12 +437,52 @@ function setupEventListeners(): void {
     });
 
     svg.addEventListener('mouseup', () => {
+        // Restore cloud opacity if dragging cloud
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
+            if (cloudGroup) {
+                cloudGroup.style.opacity = '1';
+            }
+        }
+        
+        // Restore node opacity if dragging node
+        if (state.isDraggingNode && state.draggingNodeId) {
+            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
+            if (nodeGroup) {
+                nodeGroup.style.opacity = '1';
+            }
+        }
+        
         state.isDragging = false;
+        state.isDraggingNode = false;
+        state.isDraggingCloud = false;
+        state.draggingNodeId = null;
+        state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
     });
 
     svg.addEventListener('mouseleave', () => {
+        // Restore cloud opacity if dragging cloud
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
+            if (cloudGroup) {
+                cloudGroup.style.opacity = '1';
+            }
+        }
+        
+        // Restore node opacity if dragging node
+        if (state.isDraggingNode && state.draggingNodeId) {
+            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
+            if (nodeGroup) {
+                nodeGroup.style.opacity = '1';
+            }
+        }
+        
         state.isDragging = false;
+        state.isDraggingNode = false;
+        state.isDraggingCloud = false;
+        state.draggingNodeId = null;
+        state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
     });
 
@@ -483,6 +606,117 @@ function updateTransform(): void {
             });
         }
     }
+}
+
+/**
+ * Update cloud container and arrow positions when node or cloud is dragged.
+ * Arrow positioning is dynamic: if cloud is to the right of node, arrow starts from left side of cloud.
+ * If cloud is to the left of node, arrow starts from right side of cloud.
+ */
+function updateCloudAndArrow(node: FlowNode): void {
+    const cloudData = cloudElements.get(node.id);
+    if (!cloudData || !node.children || node.children.length === 0) {
+        return;
+    }
+
+    const isExpanded = !node.collapsible || (node as any).expanded !== false;
+    if (!isExpanded) {
+        return;
+    }
+
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30;
+    const cloudPadding = 15;
+
+    // Get or calculate cloud dimensions
+    const childEdges = node.childEdges || [];
+    const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+    const cloudWidth = layoutSize.width + cloudPadding * 2;
+    const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
+
+    // Get custom offset or use default (to the left)
+    // If no offset exists, initialize it with default position
+    if (!cloudOffsets.has(node.id)) {
+        cloudOffsets.set(node.id, { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 });
+    }
+    const offset = cloudOffsets.get(node.id)!;
+    const cloudX = node.x + offset.offsetX;
+    const cloudY = node.y + offset.offsetY;
+
+    // Update cloud container position
+    cloudData.cloud.setAttribute('x', String(cloudX));
+    cloudData.cloud.setAttribute('y', String(cloudY));
+
+    // Update cloud title position
+    cloudData.title.setAttribute('x', String(cloudX + cloudWidth / 2));
+    cloudData.title.setAttribute('y', String(cloudY + 20));
+
+    // Determine which side of the node the cloud is on
+    const cloudCenterX = cloudX + cloudWidth / 2;
+    const nodeCenterX = node.x + nodeWidth / 2;
+    const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+    // Update arrow path - arrow starts from the side of cloud closest to the node
+    let arrowStartX: number;
+    let arrowStartY: number;
+    let arrowEndX: number;
+    let arrowEndY: number;
+
+    if (cloudIsOnRight) {
+        // Cloud is to the right of node: arrow starts from left side of cloud, points to right side of node
+        arrowStartX = cloudX; // Left side of cloud
+        arrowStartY = cloudY + cloudHeight / 2;
+        arrowEndX = node.x + nodeWidth; // Right side of node
+        arrowEndY = node.y + nodeHeight / 2;
+    } else {
+        // Cloud is to the left of node: arrow starts from right side of cloud, points to left side of node
+        arrowStartX = cloudX + cloudWidth; // Right side of cloud
+        arrowStartY = cloudY + cloudHeight / 2;
+        arrowEndX = node.x; // Left side of node
+        arrowEndY = node.y + nodeHeight / 2;
+    }
+
+    // Create curved path with control point
+    const midX = (arrowStartX + arrowEndX) / 2;
+    cloudData.arrow.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+
+    // Update subflow group transform
+    cloudData.subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+}
+
+/**
+ * Update edges connected to a node when it's dragged.
+ * Recalculates edge paths to maintain proper connections between nodes.
+ */
+function updateNodeEdges(node: FlowNode): void {
+    if (!mainGroup) { return; }
+    
+    // Find all edges connected to this node (as source or target)
+    const edges = mainGroup.querySelectorAll(`.edge[data-source="${node.id}"], .edge[data-target="${node.id}"]`);
+    
+    edges.forEach((edgeEl) => {
+        const edgePath = edgeEl as SVGPathElement;
+        const sourceId = edgePath.getAttribute('data-source');
+        const targetId = edgePath.getAttribute('data-target');
+        
+        if (!sourceId || !targetId) { return; }
+        
+        const sourceNode = currentNodes.find(n => n.id === sourceId);
+        const targetNode = currentNodes.find(n => n.id === targetId);
+        
+        if (!sourceNode || !targetNode) { return; }
+        
+        // Recalculate connection points (center bottom of source to center top of target)
+        const x1 = sourceNode.x + sourceNode.width / 2;
+        const y1 = sourceNode.y + sourceNode.height;
+        const x2 = targetNode.x + targetNode.width / 2;
+        const y2 = targetNode.y;
+        
+        // Update path with curved connection
+        const midY = (y1 + y2) / 2;
+        edgePath.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+    });
 }
 
 // Pre-calculate dimensions for expandable nodes (CTE/subquery) before rendering edges
@@ -634,9 +868,73 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
     }
 
+    /**
+     * Add drag handler for CTE/subquery nodes - makes all CTE/subquery nodes draggable.
+     * When dragging a node, both the node and its cloud move together, maintaining their relative offset.
+     * Connected edges are updated in real-time during the drag.
+     */
+    if (node.type === 'cte' || node.type === 'subquery') {
+        group.style.cursor = 'move';
+        group.addEventListener('mousedown', (e) => {
+            // Don't start drag if clicking on collapse button
+            const target = e.target as Element;
+            if (target.closest('.collapse-button')) {
+                return;
+            }
+            // Don't start drag if clicking on cloud container (cloud has its own drag handler)
+            if (target.closest('.cloud-container')) {
+                return;
+            }
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingNode = true;
+            state.draggingNodeId = node.id;
+            
+            // Store initial node position
+            state.dragNodeStartX = node.x;
+            state.dragNodeStartY = node.y;
+            
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            // Add visual feedback during drag
+            group.style.opacity = '0.8';
+        });
+    }
+
     // Click handler - toggle expand for CTE/subquery, select for others
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let hasDragged = false;
+    
+    group.addEventListener('mousedown', (e) => {
+        const rect = svg!.getBoundingClientRect();
+        dragStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+        dragStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+        hasDragged = false;
+    });
+    
+    group.addEventListener('mousemove', (e) => {
+        if (state.isDraggingNode || state.isDraggingCloud) {
+            const rect = svg!.getBoundingClientRect();
+            const currentX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const currentY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            const distance = Math.sqrt(Math.pow(currentX - dragStartX, 2) + Math.pow(currentY - dragStartY, 2));
+            if (distance > 5) { // 5px threshold
+                hasDragged = true;
+            }
+        }
+    });
+    
     group.addEventListener('click', (e) => {
         e.stopPropagation();
+
+        // Don't toggle if we just finished dragging (moved more than 5px)
+        if (hasDragged || state.isDraggingNode || state.isDraggingCloud) {
+            hasDragged = false;
+            return;
+        }
 
         // For CTE and subquery nodes with children, toggle expand on click
         if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
@@ -969,8 +1267,19 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
 
     // Render the floating cloud to the LEFT of the subquery node when expanded
     if (isExpanded && hasChildren && node.children) {
-        const cloudX = node.x - cloudWidth - cloudGap;
-        const cloudY = node.y - (cloudHeight - nodeHeight) / 2;
+        const defaultCloudX = node.x - cloudWidth - cloudGap;
+        const defaultCloudY = node.y - (cloudHeight - nodeHeight) / 2;
+        
+        // Get custom offset or use default
+        const offset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+        const cloudX = node.x + offset.offsetX;
+        const cloudY = node.y + offset.offsetY;
+
+        // Create cloud container group for dragging
+        const cloudGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        cloudGroup.setAttribute('class', 'cloud-container');
+        cloudGroup.setAttribute('data-node-id', node.id);
+        cloudGroup.style.cursor = 'move';
 
         // Cloud container with dashed border (matching subquery style)
         const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -984,7 +1293,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('stroke-dasharray', '6,3');
         cloud.setAttribute('filter', 'url(#shadow)');
-        group.appendChild(cloud);
+        cloudGroup.appendChild(cloud);
 
         // Cloud title (subquery alias)
         const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -995,25 +1304,50 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = node.label;
-        group.appendChild(cloudTitle);
+        cloudGroup.appendChild(cloudTitle);
+
+        // Create subflow group for internal flow
+        const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        subflowGroup.setAttribute('class', 'cloud-subflow-group');
+        subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
 
         // Render internal flow inside cloud
         renderCloudSubflow(
             node,
             node.children,
             childEdges,
-            group,
-            cloudX + cloudPadding,
-            cloudY + 30,
+            subflowGroup,
+            0, // Offset is now in transform
+            0,
             cloudWidth - cloudPadding * 2,
             cloudHeight - 30 - cloudPadding
         );
+        cloudGroup.appendChild(subflowGroup);
 
-        // Arrow from cloud to subquery node
-        const arrowStartX = cloudX + cloudWidth;
-        const arrowStartY = cloudY + cloudHeight / 2;
-        const arrowEndX = node.x;
-        const arrowEndY = node.y + nodeHeight / 2;
+        // Arrow from cloud to subquery node - dynamically positioned based on cloud location
+        // Determine which side of the node the cloud is on
+        const cloudCenterX = cloudX + cloudWidth / 2;
+        const nodeCenterX = node.x + nodeWidth / 2;
+        const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+        let arrowStartX: number;
+        let arrowStartY: number;
+        let arrowEndX: number;
+        let arrowEndY: number;
+
+        if (cloudIsOnRight) {
+            // Cloud is to the right: arrow starts from left side of cloud, points to right side of node
+            arrowStartX = cloudX;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x + nodeWidth;
+            arrowEndY = node.y + nodeHeight / 2;
+        } else {
+            // Cloud is to the left: arrow starts from right side of cloud, points to left side of node
+            arrowStartX = cloudX + cloudWidth;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x;
+            arrowEndY = node.y + nodeHeight / 2;
+        }
 
         const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         const midX = (arrowStartX + arrowEndX) / 2;
@@ -1023,7 +1357,36 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         arrowPath.setAttribute('stroke-width', '2');
         arrowPath.setAttribute('stroke-dasharray', '5,3');
         arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
-        group.appendChild(arrowPath);
+        cloudGroup.appendChild(arrowPath);
+
+        group.appendChild(cloudGroup);
+
+        // Store references for dynamic updates
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup });
+
+        /**
+         * Drag handler for cloud container - allows independent positioning of cloud.
+         * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
+         * The arrow will automatically adjust to point from the correct side of the cloud.
+         */
+        cloudGroup.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingCloud = true;
+            state.draggingCloudNodeId = node.id;
+            
+            // Get current cloud offset or default (stored relative to node position)
+            const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+            state.dragCloudStartOffsetX = currentOffset.offsetX;
+            state.dragCloudStartOffsetY = currentOffset.offsetY;
+            
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            // Add visual feedback during drag
+            cloudGroup.style.opacity = '0.8';
+        });
     }
 
     // Main subquery node (with dashed border)
@@ -1098,8 +1461,16 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
 
     // Render the floating cloud to the LEFT of the CTE node when expanded
     if (isExpanded && hasChildren && node.children) {
-        const cloudX = node.x - cloudWidth - cloudGap;
-        const cloudY = node.y - (cloudHeight - nodeHeight) / 2; // Center vertically
+        // Get custom offset or use default
+        const offset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+        const cloudX = node.x + offset.offsetX;
+        const cloudY = node.y + offset.offsetY;
+
+        // Create cloud container group for dragging
+        const cloudGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        cloudGroup.setAttribute('class', 'cloud-container');
+        cloudGroup.setAttribute('data-node-id', node.id);
+        cloudGroup.style.cursor = 'move';
 
         // Cloud container background
         const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1112,7 +1483,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloud.setAttribute('stroke', getNodeColor(node.type));
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('filter', 'url(#shadow)');
-        group.appendChild(cloud);
+        cloudGroup.appendChild(cloud);
 
         // Cloud title (CTE name without "WITH ")
         const cteName = node.label.replace('WITH ', '');
@@ -1124,25 +1495,50 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = cteName;
-        group.appendChild(cloudTitle);
+        cloudGroup.appendChild(cloudTitle);
+
+        // Create subflow group for internal flow
+        const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        subflowGroup.setAttribute('class', 'cloud-subflow-group');
+        subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
 
         // Render internal flow inside cloud
         renderCloudSubflow(
             node,
             node.children,
             childEdges,
-            group,
-            cloudX + cloudPadding,
-            cloudY + 30,
+            subflowGroup,
+            0, // Offset is now in transform
+            0,
             cloudWidth - cloudPadding * 2,
             cloudHeight - 30 - cloudPadding
         );
+        cloudGroup.appendChild(subflowGroup);
 
-        // Arrow from cloud to CTE node
-        const arrowStartX = cloudX + cloudWidth;
-        const arrowStartY = cloudY + cloudHeight / 2;
-        const arrowEndX = node.x;
-        const arrowEndY = node.y + nodeHeight / 2;
+        // Arrow from cloud to CTE node - dynamically positioned based on cloud location
+        // Determine which side of the node the cloud is on
+        const cloudCenterX = cloudX + cloudWidth / 2;
+        const nodeCenterX = node.x + nodeWidth / 2;
+        const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+        let arrowStartX: number;
+        let arrowStartY: number;
+        let arrowEndX: number;
+        let arrowEndY: number;
+
+        if (cloudIsOnRight) {
+            // Cloud is to the right: arrow starts from left side of cloud, points to right side of node
+            arrowStartX = cloudX;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x + nodeWidth;
+            arrowEndY = node.y + nodeHeight / 2;
+        } else {
+            // Cloud is to the left: arrow starts from right side of cloud, points to left side of node
+            arrowStartX = cloudX + cloudWidth;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x;
+            arrowEndY = node.y + nodeHeight / 2;
+        }
 
         const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         const midX = (arrowStartX + arrowEndX) / 2;
@@ -1152,7 +1548,36 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         arrowPath.setAttribute('stroke-width', '2');
         arrowPath.setAttribute('stroke-dasharray', '5,3');
         arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
-        group.appendChild(arrowPath);
+        cloudGroup.appendChild(arrowPath);
+
+        group.appendChild(cloudGroup);
+
+        // Store references for dynamic updates
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup });
+
+        /**
+         * Drag handler for cloud container - allows independent positioning of cloud.
+         * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
+         * The arrow will automatically adjust to point from the correct side of the cloud.
+         */
+        cloudGroup.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingCloud = true;
+            state.draggingCloudNodeId = node.id;
+            
+            // Get current cloud offset or default (stored relative to node position)
+            const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+            state.dragCloudStartOffsetX = currentOffset.offsetX;
+            state.dragCloudStartOffsetY = currentOffset.offsetY;
+            
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            // Add visual feedback during drag
+            cloudGroup.style.opacity = '0.8';
+        });
     }
 
     // Main CTE node (simple reference box)
@@ -1326,6 +1751,7 @@ function renderCloudSubflow(
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 
             // Calculate connection points (bottom of source to top of target for vertical layout)
+            // offsetX/offsetY are now 0 if using transform, or actual offsets if not
             const sourceX = offsetX + sourceNode.x + sourceNode.width / 2;
             const sourceY = offsetY + sourceNode.y + sourceNode.height;
             const targetX = offsetX + targetNode.x + targetNode.width / 2;
