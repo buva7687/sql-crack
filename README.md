@@ -48,7 +48,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Search Nodes** — Find nodes by name with `Ctrl+F` / `Cmd+F`
 - **Focus Mode** — Highlight connected nodes for better understanding
 - **Bidirectional Editor Sync** — Click in SQL editor to highlight flow nodes, click nodes to jump to SQL
-- **Double-Click to Zoom** — Double-click any node to focus on it and its immediate neighbors (hides other nodes), double-click again to restore full view
+- **Double-Click to Zoom/Expand** — Double-click standard nodes to focus on them and their immediate neighbors; double-click CTE/subquery nodes to open their cloud visualization
 - **Enhanced Tooltips** — Hover over nodes to see actual SQL fragments, line numbers, and detailed operation information
 
 ### Smart Analysis & Quality
@@ -70,12 +70,18 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | Excessive JOINs (5+) | Warning |
 | Cartesian products | Error |
 
-### CTE Management
+### CTE & Subquery Visualization
 
-- **Floating Cloud Design** — CTEs and subqueries use an elegant floating cloud visualization: nodes stay compact and fixed-size, with internal flows displayed in a floating cloud panel to the left when expanded
-- **Click to Expand/Collapse** — Single-click any CTE or subquery node to toggle expansion and view its internal operations in the floating cloud
-- **Default Collapsed** — CTEs and subqueries start collapsed by default to reduce visual clutter, expand on demand to explore their internal structure
-- **Visual Flow in Cloud** — Expanded CTEs/subqueries show their complete internal execution flow with proper node connections and layout within the floating cloud
+- **Floating Cloud Design** — CTEs and subqueries display their internal operations in an elegant floating cloud panel with full-size nodes (180x60px) matching the main canvas for complete visibility of table names and operations
+- **Double-Click to Open** — Double-click any CTE or subquery node to expand and view its internal flow in the floating cloud panel
+- **Dedicated Close Button** — Each cloud has a red X button in the top-right corner for explicit closing (double-click only opens, never closes)
+- **Independent Pan & Zoom** — Each cloud container has its own pan and zoom controls:
+  - Drag inside the cloud to pan the internal view
+  - Scroll wheel inside the cloud to zoom (0.5x to 2x range)
+  - Main canvas pan/zoom remains unaffected
+- **Draggable Cloud Positioning** — Drag the cloud container by its border to reposition it anywhere on the canvas; the connecting arrow automatically adjusts to the correct side
+- **Full Tooltips in Cloud** — Hover over any node inside the cloud to see detailed tooltips with SQL fragments, line numbers, and operation details
+- **Default Collapsed** — CTEs and subqueries start collapsed by default to reduce visual clutter; expand on demand to explore their internal structure
 
 ### Display & Export
 
@@ -127,9 +133,10 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 - **Navigate to SQL**: Click any node to jump to its definition in the editor
 - **View SQL Clauses**: Click edge connections to see JOIN conditions and WHERE clauses
 - **Navigate CTEs**: Use the breadcrumb trail at the top to navigate through nested Common Table Expressions
-- **Expand/Collapse CTEs & Subqueries**: Click any CTE or subquery node to expand and view its internal flow in a floating cloud panel, click again to collapse
-- **View Details**: Hover over nodes to see SQL fragments and line numbers
-- **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click nodes to focus on that node and its immediate neighbors
+- **Expand CTEs & Subqueries**: Double-click any CTE or subquery node to open its floating cloud panel with full-size nodes; use the X button to close
+- **Cloud Navigation**: Pan and zoom independently within cloud containers; drag clouds by their border to reposition
+- **View Details**: Hover over any node (including those inside clouds) to see SQL fragments and line numbers
+- **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click standard nodes to focus on them and their neighbors
 
 ### Keyboard Shortcuts
 
@@ -234,7 +241,10 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Query complexity insights (CTE depth, fan-out analysis, critical path length, complexity breakdown)
 - ✅ Smart quality warnings with severity levels and actionable suggestions
 - ✅ Query-level column lineage visualization (click-to-trace with full transformation path)
-- ✅ Floating cloud design for CTE and subquery visualization with improved layout and expand/collapse controls
+- ✅ Floating cloud design for CTE and subquery visualization with full-size nodes matching main canvas
+- ✅ Independent pan/zoom within cloud containers for complex subquery navigation
+- ✅ Draggable cloud positioning with dynamic arrow adjustment
+- ✅ Dedicated close button (X) for explicit cloud dismissal
 - ✅ Enhanced CTE parsing to handle various AST structures from node-sql-parser
 - 📅 Diff-aware visualization for PR reviews (Planned)
 

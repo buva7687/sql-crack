@@ -93,7 +93,17 @@ let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 // Store references to cloud and arrow elements for dynamic updates
-let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement }> = new Map();
+let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
+// Store per-cloud view state for independent pan/zoom
+interface CloudViewState {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    isDragging: boolean;
+    dragStartX: number;
+    dragStartY: number;
+}
+let cloudViewStates: Map<string, CloudViewState> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -681,8 +691,23 @@ function updateCloudAndArrow(node: FlowNode): void {
     const midX = (arrowStartX + arrowEndX) / 2;
     cloudData.arrow.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
 
-    // Update subflow group transform
-    cloudData.subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+    // Update nested SVG position (the subflowGroup inside uses internal pan/zoom transform)
+    if (cloudData.nestedSvg) {
+        cloudData.nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        cloudData.nestedSvg.setAttribute('y', String(cloudY + 30));
+    } else {
+        // Fallback for legacy: update subflow group transform directly
+        cloudData.subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+    }
+
+    // Update close button position
+    if (cloudData.closeButton) {
+        const buttonSize = 20;
+        const buttonPadding = 8;
+        const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
+        const buttonY = cloudY + buttonPadding;
+        cloudData.closeButton.setAttribute('transform', `translate(${buttonX}, ${buttonY})`);
+    }
 }
 
 /**
@@ -936,21 +961,41 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             return;
         }
 
-        // For CTE and subquery nodes with children, toggle expand on click
-        if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
-            toggleNodeCollapse(node.id);
-        } else {
-            selectNode(node.id);
-        }
+        // Single click selects the node (double-click opens cloud, X button closes)
+        selectNode(node.id);
         hideTooltip();
     });
 
-    // Double click to zoom to node
+    // Double click to zoom to node or open cloud
     group.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        // For expandable nodes, double-click also toggles (in case single click was used for something else)
+        // For CTE/subquery nodes, double-click opens the cloud (use X button to close)
         if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
-            toggleNodeCollapse(node.id);
+            if (!node.expanded) {
+                // Initialize cloud view state if not exists
+                if (!cloudViewStates.has(node.id)) {
+                    cloudViewStates.set(node.id, {
+                        scale: 1,
+                        offsetX: 0,
+                        offsetY: 0,
+                        isDragging: false,
+                        dragStartX: 0,
+                        dragStartY: 0
+                    });
+                }
+                node.expanded = true;
+                // Re-render to show cloud
+                const result: ParseResult = {
+                    nodes: currentNodes,
+                    edges: currentEdges,
+                    stats: currentStats!,
+                    hints: currentHints,
+                    sql: currentSql,
+                    columnLineage: currentColumnLineage,
+                    tableUsage: currentTableUsage
+                };
+                render(result);
+            }
         } else {
             zoomToNode(node);
         }
@@ -1306,10 +1351,35 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudTitle.textContent = node.label;
         cloudGroup.appendChild(cloudTitle);
 
-        // Create subflow group for internal flow
+        // Add close button to cloud
+        const closeButton = addCloudCloseButton(node, cloudGroup, cloudX, cloudY, cloudWidth);
+
+        // Create nested SVG for independent pan/zoom within the cloud
+        const nestedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        nestedSvg.setAttribute('y', String(cloudY + 30));
+        nestedSvg.setAttribute('width', String(cloudWidth - cloudPadding * 2));
+        nestedSvg.setAttribute('height', String(cloudHeight - 30 - cloudPadding));
+        nestedSvg.setAttribute('overflow', 'hidden');
+        nestedSvg.style.cursor = 'grab';
+
+        // Initialize cloud view state if not exists
+        if (!cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+        const cloudState = cloudViewStates.get(node.id)!;
+
+        // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        subflowGroup.setAttribute('class', 'cloud-subflow-group');
-        subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+        subflowGroup.setAttribute('class', 'cloud-subflow-group cloud-content');
+        subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
 
         // Render internal flow inside cloud
         renderCloudSubflow(
@@ -1317,12 +1387,68 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
             node.children,
             childEdges,
             subflowGroup,
-            0, // Offset is now in transform
+            0,
             0,
             cloudWidth - cloudPadding * 2,
             cloudHeight - 30 - cloudPadding
         );
-        cloudGroup.appendChild(subflowGroup);
+        nestedSvg.appendChild(subflowGroup);
+        cloudGroup.appendChild(nestedSvg);
+
+        // Pan/zoom handlers for nested SVG
+        nestedSvg.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            cloudState.isDragging = true;
+            cloudState.dragStartX = e.clientX - cloudState.offsetX;
+            cloudState.dragStartY = e.clientY - cloudState.offsetY;
+            nestedSvg.style.cursor = 'grabbing';
+        });
+
+        nestedSvg.addEventListener('mousemove', (e) => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState?.isDragging) {
+                e.stopPropagation();
+                cloudState.offsetX = e.clientX - cloudState.dragStartX;
+                cloudState.offsetY = e.clientY - cloudState.dragStartY;
+                subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+            }
+        });
+
+        nestedSvg.addEventListener('mouseup', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('mouseleave', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
+
+            // Zoom toward mouse position within the nested SVG
+            const rect = nestedSvg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            cloudState.offsetX = mouseX - (mouseX - cloudState.offsetX) * (newScale / cloudState.scale);
+            cloudState.offsetY = mouseY - (mouseY - cloudState.offsetY) * (newScale / cloudState.scale);
+            cloudState.scale = newScale;
+
+            subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+        });
 
         // Arrow from cloud to subquery node - dynamically positioned based on cloud location
         // Determine which side of the node the cloud is on
@@ -1361,29 +1487,29 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
 
         group.appendChild(cloudGroup);
 
-        // Store references for dynamic updates
-        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup });
+        // Store references for dynamic updates (including nestedSvg for pan/zoom and closeButton)
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
 
         /**
          * Drag handler for cloud container - allows independent positioning of cloud.
          * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
          * The arrow will automatically adjust to point from the correct side of the cloud.
          */
-        cloudGroup.addEventListener('mousedown', (e) => {
+        cloud.addEventListener('mousedown', (e) => {
             e.stopPropagation();
             const rect = svg!.getBoundingClientRect();
             state.isDraggingCloud = true;
             state.draggingCloudNodeId = node.id;
-            
+
             // Get current cloud offset or default (stored relative to node position)
             const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
             state.dragCloudStartOffsetX = currentOffset.offsetX;
             state.dragCloudStartOffsetY = currentOffset.offsetY;
-            
+
             // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
             state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
             state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
-            
+
             // Add visual feedback during drag
             cloudGroup.style.opacity = '0.8';
         });
@@ -1497,10 +1623,35 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudTitle.textContent = cteName;
         cloudGroup.appendChild(cloudTitle);
 
-        // Create subflow group for internal flow
+        // Add close button to cloud
+        const closeButton = addCloudCloseButton(node, cloudGroup, cloudX, cloudY, cloudWidth);
+
+        // Create nested SVG for independent pan/zoom within the cloud
+        const nestedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        nestedSvg.setAttribute('y', String(cloudY + 30));
+        nestedSvg.setAttribute('width', String(cloudWidth - cloudPadding * 2));
+        nestedSvg.setAttribute('height', String(cloudHeight - 30 - cloudPadding));
+        nestedSvg.setAttribute('overflow', 'hidden');
+        nestedSvg.style.cursor = 'grab';
+
+        // Initialize cloud view state if not exists
+        if (!cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+        const cloudState = cloudViewStates.get(node.id)!;
+
+        // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        subflowGroup.setAttribute('class', 'cloud-subflow-group');
-        subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+        subflowGroup.setAttribute('class', 'cloud-subflow-group cloud-content');
+        subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
 
         // Render internal flow inside cloud
         renderCloudSubflow(
@@ -1508,12 +1659,68 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
             node.children,
             childEdges,
             subflowGroup,
-            0, // Offset is now in transform
+            0,
             0,
             cloudWidth - cloudPadding * 2,
             cloudHeight - 30 - cloudPadding
         );
-        cloudGroup.appendChild(subflowGroup);
+        nestedSvg.appendChild(subflowGroup);
+        cloudGroup.appendChild(nestedSvg);
+
+        // Pan/zoom handlers for nested SVG
+        nestedSvg.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            cloudState.isDragging = true;
+            cloudState.dragStartX = e.clientX - cloudState.offsetX;
+            cloudState.dragStartY = e.clientY - cloudState.offsetY;
+            nestedSvg.style.cursor = 'grabbing';
+        });
+
+        nestedSvg.addEventListener('mousemove', (e) => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState?.isDragging) {
+                e.stopPropagation();
+                cloudState.offsetX = e.clientX - cloudState.dragStartX;
+                cloudState.offsetY = e.clientY - cloudState.dragStartY;
+                subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+            }
+        });
+
+        nestedSvg.addEventListener('mouseup', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('mouseleave', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
+
+            // Zoom toward mouse position within the nested SVG
+            const rect = nestedSvg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            cloudState.offsetX = mouseX - (mouseX - cloudState.offsetX) * (newScale / cloudState.scale);
+            cloudState.offsetY = mouseY - (mouseY - cloudState.offsetY) * (newScale / cloudState.scale);
+            cloudState.scale = newScale;
+
+            subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+        });
 
         // Arrow from cloud to CTE node - dynamically positioned based on cloud location
         // Determine which side of the node the cloud is on
@@ -1552,29 +1759,29 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
 
         group.appendChild(cloudGroup);
 
-        // Store references for dynamic updates
-        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup });
+        // Store references for dynamic updates (including nestedSvg for pan/zoom and closeButton)
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
 
         /**
          * Drag handler for cloud container - allows independent positioning of cloud.
          * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
          * The arrow will automatically adjust to point from the correct side of the cloud.
          */
-        cloudGroup.addEventListener('mousedown', (e) => {
+        cloud.addEventListener('mousedown', (e) => {
             e.stopPropagation();
             const rect = svg!.getBoundingClientRect();
             state.isDraggingCloud = true;
             state.draggingCloudNodeId = node.id;
-            
+
             // Get current cloud offset or default (stored relative to node position)
             const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
             state.dragCloudStartOffsetX = currentOffset.offsetX;
             state.dragCloudStartOffsetY = currentOffset.offsetY;
-            
+
             // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
             state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
             state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
-            
+
             // Add visual feedback during drag
             cloudGroup.style.opacity = '0.8';
         });
@@ -1689,18 +1896,17 @@ function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
         rankdir: 'TB', // Top to bottom for vertical flow
-        nodesep: 15,
-        ranksep: 25,
-        marginx: 10,
-        marginy: 10
+        nodesep: 20,   // Increased spacing for full-size nodes
+        ranksep: 35,   // Increased spacing for full-size nodes
+        marginx: 15,
+        marginy: 15
     });
     g.setDefaultEdgeLabel(() => ({}));
 
-    // Set default sizes for child nodes
+    // Set full-size dimensions for child nodes (matching main canvas nodes)
     for (const child of children) {
-        const labelWidth = Math.max(100, Math.min(140, child.label.length * 8 + 30));
-        child.width = labelWidth;
-        child.height = 40;
+        child.width = 180;   // Full-size like main nodes
+        child.height = 60;   // Full-size like main nodes
         g.setNode(child.id, { width: child.width, height: child.height });
     }
 
@@ -1775,45 +1981,151 @@ function renderCloudSubflow(
     for (const child of children) {
         const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         childGroup.setAttribute('class', 'cloud-subflow-node');
+        childGroup.setAttribute('data-node-id', child.id);
+        childGroup.style.cursor = 'pointer';
 
         const childX = offsetX + child.x;
         const childY = offsetY + child.y;
+        const nodeColor = getNodeColor(child.type);
 
-        // Node rectangle with full styling
+        // Node rectangle with full styling (matching main nodes)
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String(childX));
         rect.setAttribute('y', String(childY));
         rect.setAttribute('width', String(child.width));
         rect.setAttribute('height', String(child.height));
-        rect.setAttribute('rx', '8');
-        rect.setAttribute('fill', getNodeColor(child.type));
-        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
-        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('rx', '10');  // Match main nodes
+        rect.setAttribute('fill', nodeColor);
+        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+        rect.setAttribute('stroke-width', '2');  // Match main nodes
         rect.setAttribute('filter', 'url(#shadow)');
         childGroup.appendChild(rect);
 
-        // Node icon
+        // Node icon (positioned like main nodes)
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        icon.setAttribute('x', String(childX + 10));
-        icon.setAttribute('y', String(childY + child.height / 2 + 5));
+        icon.setAttribute('x', String(childX + 14));
+        icon.setAttribute('y', String(childY + 26));
         icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
-        icon.setAttribute('font-size', '12');
+        icon.setAttribute('font-size', '14');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
 
-        // Node label
+        // Node label (positioned like main nodes)
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        label.setAttribute('x', String(childX + 26));
-        label.setAttribute('y', String(childY + child.height / 2 + 4));
+        label.setAttribute('x', String(childX + 34));
+        label.setAttribute('y', String(childY + 26));
         label.setAttribute('fill', 'white');
-        label.setAttribute('font-size', '11');
-        label.setAttribute('font-weight', '500');
+        label.setAttribute('font-size', '12');
+        label.setAttribute('font-weight', '600');
         label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        label.textContent = truncate(child.label, 14);
+        label.textContent = truncate(child.label, 18);  // Increased from 14 for full-size nodes
         childGroup.appendChild(label);
+
+        // Description text (like main nodes)
+        if (child.description) {
+            const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            descText.setAttribute('x', String(childX + 14));
+            descText.setAttribute('y', String(childY + 45));
+            descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            descText.setAttribute('font-size', '10');
+            descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+            descText.textContent = truncate(child.description, 22);
+            childGroup.appendChild(descText);
+        }
+
+        // Tooltip event handlers
+        childGroup.addEventListener('mouseenter', (e) => {
+            rect.setAttribute('fill', lightenColor(nodeColor, 15));
+            showTooltip(child, e as MouseEvent);
+        });
+        childGroup.addEventListener('mousemove', (e) => {
+            updateTooltipPosition(e as MouseEvent);
+        });
+        childGroup.addEventListener('mouseleave', () => {
+            rect.setAttribute('fill', nodeColor);
+            hideTooltip();
+        });
 
         group.appendChild(childGroup);
     }
+}
+
+/**
+ * Add a close (X) button to a cloud container.
+ * When clicked, it collapses the cloud by setting node.expanded = false.
+ * Uses transform for positioning so it can be easily updated when cloud is dragged.
+ * Returns the button group for storage in cloudElements.
+ */
+function addCloudCloseButton(
+    node: FlowNode,
+    cloudGroup: SVGGElement,
+    cloudX: number,
+    cloudY: number,
+    cloudWidth: number
+): SVGGElement {
+    const buttonSize = 20;
+    const buttonPadding = 8;
+    const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
+    const buttonY = cloudY + buttonPadding;
+
+    // Button container group - use transform for easy repositioning
+    const closeButtonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    closeButtonGroup.setAttribute('class', 'cloud-close-btn');
+    closeButtonGroup.setAttribute('transform', `translate(${buttonX}, ${buttonY})`);
+    closeButtonGroup.style.cursor = 'pointer';
+
+    // Background circle (positioned at 0,0 relative to group)
+    const buttonBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    buttonBg.setAttribute('cx', String(buttonSize / 2));
+    buttonBg.setAttribute('cy', String(buttonSize / 2));
+    buttonBg.setAttribute('r', String(buttonSize / 2));
+    buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)'); // Red with transparency
+    buttonBg.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+    buttonBg.setAttribute('stroke-width', '1');
+    closeButtonGroup.appendChild(buttonBg);
+
+    // X icon using path (positioned relative to group)
+    const xIcon = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const centerX = buttonSize / 2;
+    const centerY = buttonSize / 2;
+    const offset = 5;
+    xIcon.setAttribute('d', `
+        M ${centerX - offset} ${centerY - offset} L ${centerX + offset} ${centerY + offset}
+        M ${centerX + offset} ${centerY - offset} L ${centerX - offset} ${centerY + offset}
+    `);
+    xIcon.setAttribute('stroke', 'white');
+    xIcon.setAttribute('stroke-width', '2');
+    xIcon.setAttribute('stroke-linecap', 'round');
+    xIcon.style.pointerEvents = 'none';
+    closeButtonGroup.appendChild(xIcon);
+
+    // Click handler - collapse the node (hide cloud)
+    closeButtonGroup.addEventListener('click', (e) => {
+        e.stopPropagation();
+        node.expanded = false;
+        // Re-render to hide cloud
+        const result: ParseResult = {
+            nodes: currentNodes,
+            edges: currentEdges,
+            stats: currentStats!,
+            hints: currentHints,
+            sql: currentSql,
+            columnLineage: currentColumnLineage,
+            tableUsage: currentTableUsage
+        };
+        render(result);
+    });
+
+    // Hover effects
+    closeButtonGroup.addEventListener('mouseenter', () => {
+        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.9)');
+    });
+    closeButtonGroup.addEventListener('mouseleave', () => {
+        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)');
+    });
+
+    cloudGroup.appendChild(closeButtonGroup);
+    return closeButtonGroup;
 }
 
 // Render the subflow (children and edges) inside a container node

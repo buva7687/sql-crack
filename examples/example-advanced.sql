@@ -63,6 +63,7 @@ FROM (
         COUNT(e.id) as employee_count
     FROM employees e
     JOIN departments d ON e.department_id = d.id
+    join salary s on e.name =s.name 
     GROUP BY d.name
 ) AS department_stats
 WHERE avg_salary > 50000;
