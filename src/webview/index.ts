@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseSqlBatch, ParseResult, SqlDialect, BatchParseResult } from './sqlParser';
+import { parseSqlBatch, SqlDialect, BatchParseResult } from './sqlParser';
 import {
     initRenderer,
     render,
@@ -19,7 +19,6 @@ import {
     toggleFocusMode,
     toggleSqlPreview,
     toggleColumnFlows,
-    highlightColumnSources,
     toggleFullscreen,
     isFullscreen,
     toggleTheme,
@@ -28,6 +27,20 @@ import {
     highlightNodeAtLine
 } from './renderer';
 
+import {
+    createToolbar,
+    markRefreshButtonStale,
+    clearRefreshButtonStale,
+    createBatchTabs,
+    updateBatchTabs,
+    findPinnedTab,
+    switchToTab,
+    getActiveTabId,
+    setActiveTabId,
+    ToolbarCallbacks
+} from './ui';
+
+// Global type declarations
 declare global {
     interface Window {
         initialSqlCode: string;
@@ -44,21 +57,10 @@ declare global {
     }
 }
 
-// Pinned visualization tabs
-interface PinnedTab {
-    id: string;
-    name: string;
-    sql: string;
-    dialect: SqlDialect;
-    result: BatchParseResult | null;
-}
-
 // Current state
 let currentDialect: SqlDialect = (window.defaultDialect as SqlDialect) || 'MySQL';
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
-let pinnedTabs: PinnedTab[] = [];
-let activeTabId: string | null = null;
 let isStale: boolean = false;
 
 // Initialize when DOM is ready
@@ -67,7 +69,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setupVSCodeMessageListener();
 });
 
-// Listen for messages from VS Code extension
+// ============================================================
+// VS Code Message Handling
+// ============================================================
+
 function setupVSCodeMessageListener(): void {
     window.addEventListener('message', (event) => {
         const message = event.data;
@@ -76,7 +81,7 @@ function setupVSCodeMessageListener(): void {
                 handleRefresh(message.sql, message.options);
                 break;
             case 'cursorPosition':
-                handleCursorPosition(message.line);
+                highlightNodeAtLine(message.line);
                 break;
             case 'switchToQuery':
                 handleSwitchToQuery(message.queryIndex);
@@ -92,7 +97,6 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
     window.initialSqlCode = sql;
     currentDialect = options.dialect as SqlDialect;
 
-    // Update dialect dropdown
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
@@ -102,44 +106,31 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
     clearStaleIndicator();
 }
 
-function handleCursorPosition(line: number): void {
-    // Import from renderer - highlight node at line
-    highlightNodeAtLine(line);
-}
-
 function handleSwitchToQuery(queryIndex: number): void {
     if (!batchResult || queryIndex < 0 || queryIndex >= batchResult.queries.length) {
         return;
     }
-    
-    // Only switch if it's a different query
+
     if (currentQueryIndex !== queryIndex) {
         currentQueryIndex = queryIndex;
         renderCurrentQuery();
-        updateBatchTabs();
+        updateBatchTabsUI();
     }
-    
-    // Also highlight the node at the cursor position
-    // This will be handled by the cursorPosition message that follows
 }
 
 function markAsStale(): void {
     isStale = true;
-    const refreshBtn = document.getElementById('refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.style.background = 'rgba(234, 179, 8, 0.3)';
-        refreshBtn.title = 'Query changed - click to refresh';
-    }
+    markRefreshButtonStale();
 }
 
 function clearStaleIndicator(): void {
     isStale = false;
-    const refreshBtn = document.getElementById('refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.style.background = 'transparent';
-        refreshBtn.title = 'Refresh visualization';
-    }
+    clearRefreshButtonStale();
 }
+
+// ============================================================
+// Initialization
+// ============================================================
 
 function init(): void {
     const container = document.getElementById('root');
@@ -157,8 +148,13 @@ function init(): void {
     // Initialize SVG renderer
     initRenderer(container);
 
-    // Create toolbar
-    createToolbar(container);
+    // Create toolbar with callbacks
+    createToolbar(container, createToolbarCallbacks(), {
+        currentDialect,
+        isPinnedView: window.isPinnedView || false,
+        viewLocation: window.viewLocation || 'beside',
+        persistedPinnedTabs: window.persistedPinnedTabs || []
+    });
 
     // Create batch tabs
     createBatchTabs(container);
@@ -170,676 +166,91 @@ function init(): void {
     }
 }
 
-function createToolbar(container: HTMLElement): void {
-    const toolbar = document.createElement('div');
-    toolbar.id = 'sql-crack-toolbar';
-    toolbar.style.cssText = `
-        position: absolute;
-        top: 16px;
-        left: 16px;
-        display: flex;
-        gap: 8px;
-        z-index: 100;
-    `;
-
-    // Title and dialect selector
-    const title = document.createElement('div');
-    title.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 8px 16px;
-        color: #f1f5f9;
-        font-size: 13px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    `;
-    title.innerHTML = `
-        <span>SQL Flow</span>
-        <select id="dialect-select" style="
-            background: #1e293b;
-            color: #f1f5f9;
-            border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 4px;
-            padding: 4px 8px;
-            font-size: 11px;
-            cursor: pointer;
-            outline: none;
-        ">
-            <option value="MySQL">MySQL</option>
-            <option value="PostgreSQL">PostgreSQL</option>
-            <option value="TransactSQL">SQL Server</option>
-            <option value="Snowflake">Snowflake</option>
-            <option value="BigQuery">BigQuery</option>
-            <option value="Redshift">Redshift</option>
-            <option value="Hive">Hive / Databricks</option>
-            <option value="Athena">Athena</option>
-            <option value="Trino">Trino</option>
-            <option value="MariaDB">MariaDB</option>
-            <option value="SQLite">SQLite</option>
-        </select>
-    `;
-    toolbar.appendChild(title);
-
-    // Search box
-    const searchContainer = document.createElement('div');
-    searchContainer.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 4px 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    `;
-
-    const searchIcon = document.createElement('span');
-    searchIcon.textContent = '🔍';
-    searchIcon.style.fontSize = '12px';
-    searchContainer.appendChild(searchIcon);
-
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = 'Search nodes... (Ctrl+F)';
-    searchInput.style.cssText = `
-        background: transparent;
-        border: none;
-        color: #f1f5f9;
-        font-size: 12px;
-        width: 140px;
-        outline: none;
-    `;
-    searchInput.id = 'search-input';
-    searchContainer.appendChild(searchInput);
-
-    // Search navigation buttons
-    const searchNav = document.createElement('div');
-    searchNav.style.cssText = `
-        display: flex;
-        gap: 4px;
-    `;
-
-    const prevBtn = document.createElement('button');
-    prevBtn.innerHTML = '↑';
-    prevBtn.style.cssText = `
-        background: transparent;
-        border: none;
-        color: #94a3b8;
-        cursor: pointer;
-        padding: 2px 6px;
-        font-size: 12px;
-    `;
-    prevBtn.addEventListener('click', prevSearchResult);
-    searchNav.appendChild(prevBtn);
-
-    const nextBtn = document.createElement('button');
-    nextBtn.innerHTML = '↓';
-    nextBtn.style.cssText = `
-        background: transparent;
-        border: none;
-        color: #94a3b8;
-        cursor: pointer;
-        padding: 2px 6px;
-        font-size: 12px;
-    `;
-    nextBtn.addEventListener('click', nextSearchResult);
-    searchNav.appendChild(nextBtn);
-
-    searchContainer.appendChild(searchNav);
-    toolbar.appendChild(searchContainer);
-
-    container.appendChild(toolbar);
-
-    // Action buttons (top right)
-    const actions = document.createElement('div');
-    actions.id = 'sql-crack-actions';
-    actions.style.cssText = `
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        display: flex;
-        gap: 8px;
-        z-index: 100;
-    `;
-
-    // Zoom controls
-    const zoomGroup = document.createElement('div');
-    zoomGroup.style.cssText = `
-        display: flex;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        overflow: hidden;
-    `;
-
-    const btnStyle = `
-        background: transparent;
-        border: none;
-        color: #f1f5f9;
-        padding: 8px 12px;
-        cursor: pointer;
-        font-size: 14px;
-        transition: background 0.2s;
-    `;
-
-    const zoomOutBtn = document.createElement('button');
-    zoomOutBtn.innerHTML = '−';
-    zoomOutBtn.style.cssText = btnStyle;
-    zoomOutBtn.addEventListener('click', zoomOut);
-    zoomOutBtn.addEventListener('mouseenter', () => zoomOutBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    zoomOutBtn.addEventListener('mouseleave', () => zoomOutBtn.style.background = 'transparent');
-    zoomGroup.appendChild(zoomOutBtn);
-
-    const fitBtn = document.createElement('button');
-    fitBtn.innerHTML = '⊡';
-    fitBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); border-right: 1px solid rgba(148, 163, 184, 0.2);';
-    fitBtn.addEventListener('click', resetView);
-    fitBtn.addEventListener('mouseenter', () => fitBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    fitBtn.addEventListener('mouseleave', () => fitBtn.style.background = 'transparent');
-    zoomGroup.appendChild(fitBtn);
-
-    const zoomInBtn = document.createElement('button');
-    zoomInBtn.innerHTML = '+';
-    zoomInBtn.style.cssText = btnStyle;
-    zoomInBtn.addEventListener('click', zoomIn);
-    zoomInBtn.addEventListener('mouseenter', () => zoomInBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    zoomInBtn.addEventListener('mouseleave', () => zoomInBtn.style.background = 'transparent');
-    zoomGroup.appendChild(zoomInBtn);
-
-    actions.appendChild(zoomGroup);
-
-    // Export buttons
-    const exportGroup = document.createElement('div');
-    exportGroup.style.cssText = `
-        display: flex;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        overflow: hidden;
-    `;
-
-    const copyBtn = document.createElement('button');
-    copyBtn.innerHTML = '📋';
-    copyBtn.title = 'Copy to clipboard';
-    copyBtn.style.cssText = btnStyle;
-    copyBtn.addEventListener('click', () => {
-        copyToClipboard();
-        copyBtn.innerHTML = '✓';
-        setTimeout(() => copyBtn.innerHTML = '📋', 1500);
-    });
-    copyBtn.addEventListener('mouseenter', () => copyBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    copyBtn.addEventListener('mouseleave', () => copyBtn.style.background = 'transparent');
-    exportGroup.appendChild(copyBtn);
-
-    const pngBtn = document.createElement('button');
-    pngBtn.innerHTML = 'PNG';
-    pngBtn.title = 'Export as PNG';
-    pngBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 600; border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    pngBtn.addEventListener('click', exportToPng);
-    pngBtn.addEventListener('mouseenter', () => pngBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    pngBtn.addEventListener('mouseleave', () => pngBtn.style.background = 'transparent');
-    exportGroup.appendChild(pngBtn);
-
-    const svgBtn = document.createElement('button');
-    svgBtn.innerHTML = 'SVG';
-    svgBtn.title = 'Export as SVG';
-    svgBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 600; border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    svgBtn.addEventListener('click', exportToSvg);
-    svgBtn.addEventListener('mouseenter', () => svgBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    svgBtn.addEventListener('mouseleave', () => svgBtn.style.background = 'transparent');
-    exportGroup.appendChild(svgBtn);
-
-    actions.appendChild(exportGroup);
-
-    // Feature buttons (new features)
-    const featureGroup = document.createElement('div');
-    featureGroup.style.cssText = `
-        display: flex;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        overflow: hidden;
-    `;
-
-    // Refresh button
-    const refreshBtn = document.createElement('button');
-    refreshBtn.id = 'refresh-btn';
-    refreshBtn.innerHTML = '↻';
-    refreshBtn.title = 'Refresh visualization';
-    refreshBtn.style.cssText = btnStyle + 'font-size: 16px;';
-    refreshBtn.addEventListener('click', () => {
-        // Request refresh from VS Code extension
-        if (window.vscodeApi) {
-            window.vscodeApi.postMessage({ command: 'requestRefresh' });
-        } else {
-            // Fallback: re-visualize current SQL
+function createToolbarCallbacks(): ToolbarCallbacks {
+    return {
+        onZoomIn: zoomIn,
+        onZoomOut: zoomOut,
+        onResetView: resetView,
+        onExportPng: exportToPng,
+        onExportSvg: exportToSvg,
+        onCopyToClipboard: copyToClipboard,
+        onToggleLegend: toggleLegend,
+        onToggleFocusMode: toggleFocusMode,
+        onToggleSqlPreview: toggleSqlPreview,
+        onToggleColumnFlows: toggleColumnFlows,
+        onToggleTheme: toggleTheme,
+        onToggleFullscreen: toggleFullscreen,
+        onSearchBoxReady: setSearchBox,
+        onNextSearchResult: nextSearchResult,
+        onPrevSearchResult: prevSearchResult,
+        onDialectChange: (dialect: SqlDialect) => {
+            currentDialect = dialect;
             const sql = window.initialSqlCode || '';
             if (sql) {
                 visualize(sql);
-                clearStaleIndicator();
             }
-        }
-    });
-    refreshBtn.addEventListener('mouseenter', () => {
-        if (!isStale) refreshBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-    });
-    refreshBtn.addEventListener('mouseleave', () => {
-        if (!isStale) refreshBtn.style.background = 'transparent';
-    });
-    featureGroup.appendChild(refreshBtn);
-
-    // Pin/Save tab button (only show if not already a pinned view)
-    if (!window.isPinnedView) {
-        const pinBtn = document.createElement('button');
-        pinBtn.innerHTML = '📌';
-        pinBtn.title = 'Pin visualization as new tab';
-        pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-        pinBtn.addEventListener('click', () => {
-            // Send message to extension to create pinned panel
+        },
+        onRefresh: () => {
             if (window.vscodeApi) {
-                // Get the current query's SQL (not the entire file)
-                let sqlToPin = window.initialSqlCode || '';
-                let queryName = window.fileName || 'Query';
-
-                // If we have batch results with multiple queries, pin the current one
-                if (batchResult && batchResult.queries.length > 1) {
-                    const currentQuery = batchResult.queries[currentQueryIndex];
-                    if (currentQuery && currentQuery.sql) {
-                        sqlToPin = currentQuery.sql;
-                        queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
-                    }
-                } else if (batchResult && batchResult.queries.length === 1) {
-                    // Single query - use its SQL
-                    const currentQuery = batchResult.queries[0];
-                    if (currentQuery && currentQuery.sql) {
-                        sqlToPin = currentQuery.sql;
-                    }
+                window.vscodeApi.postMessage({ command: 'requestRefresh' });
+            } else {
+                const sql = window.initialSqlCode || '';
+                if (sql) {
+                    visualize(sql);
+                    clearStaleIndicator();
                 }
-
+            }
+        },
+        onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => {
+            if (window.vscodeApi) {
+                const { sql: querySql, name: queryName } = getCurrentQuerySql();
                 window.vscodeApi.postMessage({
                     command: 'pinVisualization',
-                    sql: sqlToPin,
+                    sql: querySql,
                     dialect: currentDialect,
                     name: queryName
                 });
             }
-        });
-        pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-        pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
-        featureGroup.appendChild(pinBtn);
-
-        // View location dropdown button
-        const viewLocBtn = document.createElement('button');
-        viewLocBtn.innerHTML = '⊞';
-        viewLocBtn.title = 'Change view location';
-        viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
-
-        const viewLocDropdown = createViewLocationDropdown();
-        viewLocBtn.appendChild(viewLocDropdown);
-
-        viewLocBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const isVisible = viewLocDropdown.style.display === 'block';
-            viewLocDropdown.style.display = isVisible ? 'none' : 'block';
-        });
-
-        // Close dropdown when clicking elsewhere
-        document.addEventListener('click', () => {
-            viewLocDropdown.style.display = 'none';
-        });
-
-        viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-        viewLocBtn.addEventListener('mouseleave', () => {
-            if (viewLocDropdown.style.display !== 'block') {
-                viewLocBtn.style.background = 'transparent';
+        },
+        onChangeViewLocation: (location: string) => {
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'changeViewLocation',
+                    location
+                });
             }
-        });
-        featureGroup.appendChild(viewLocBtn);
-
-        // Pinned tabs button (show if there are persisted pins)
-        const persistedPins = window.persistedPinnedTabs || [];
-        if (persistedPins.length > 0) {
-            const pinsBtn = document.createElement('button');
-            pinsBtn.innerHTML = '📋';
-            pinsBtn.title = `Open pinned tabs (${persistedPins.length})`;
-            pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
-
-            const pinsDropdown = createPinnedTabsDropdown(persistedPins);
-            pinsBtn.appendChild(pinsDropdown);
-
-            pinsBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isVisible = pinsDropdown.style.display === 'block';
-                pinsDropdown.style.display = isVisible ? 'none' : 'block';
-            });
-
-            pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-            pinsBtn.addEventListener('mouseleave', () => {
-                if (pinsDropdown.style.display !== 'block') {
-                    pinsBtn.style.background = 'transparent';
-                }
-            });
-            featureGroup.appendChild(pinsBtn);
-        }
-    } else {
-        // For pinned views, show an indicator
-        const pinnedIndicator = document.createElement('span');
-        pinnedIndicator.innerHTML = '📌 Pinned';
-        pinnedIndicator.style.cssText = `
-            color: #94a3b8;
-            font-size: 11px;
-            padding: 4px 8px;
-            border-left: 1px solid rgba(148, 163, 184, 0.2);
-        `;
-        featureGroup.appendChild(pinnedIndicator);
-    }
-
-    // Legend button
-    const legendBtn = document.createElement('button');
-    legendBtn.innerHTML = '🎨';
-    legendBtn.title = 'Show color legend (L)';
-    legendBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    legendBtn.addEventListener('click', () => {
-        toggleLegend();
-    });
-    legendBtn.addEventListener('mouseenter', () => legendBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    legendBtn.addEventListener('mouseleave', () => legendBtn.style.background = 'transparent');
-    featureGroup.appendChild(legendBtn);
-
-    // Focus Mode button
-    let focusModeActive = false;
-    const focusBtn = document.createElement('button');
-    focusBtn.innerHTML = '👁';
-    focusBtn.title = 'Focus mode - highlight connected nodes';
-    focusBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    focusBtn.addEventListener('click', () => {
-        focusModeActive = !focusModeActive;
-        toggleFocusMode(focusModeActive);
-        focusBtn.style.background = focusModeActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-    });
-    focusBtn.addEventListener('mouseenter', () => {
-        if (!focusModeActive) focusBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-    });
-    focusBtn.addEventListener('mouseleave', () => {
-        if (!focusModeActive) focusBtn.style.background = 'transparent';
-    });
-    featureGroup.appendChild(focusBtn);
-
-    // SQL Preview button
-    const sqlBtn = document.createElement('button');
-    sqlBtn.innerHTML = '{ }';
-    sqlBtn.title = 'Show formatted SQL (S)';
-    sqlBtn.style.cssText = btnStyle + 'font-size: 11px; font-weight: 700; border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    sqlBtn.addEventListener('click', () => toggleSqlPreview());
-    sqlBtn.addEventListener('mouseenter', () => sqlBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    sqlBtn.addEventListener('mouseleave', () => sqlBtn.style.background = 'transparent');
-    featureGroup.appendChild(sqlBtn);
-
-    // Column Flow toggle button
-    let columnFlowActive = false;
-    const columnFlowBtn = document.createElement('button');
-    columnFlowBtn.innerHTML = '📊';
-    columnFlowBtn.title = 'Toggle column flow visualization (C)';
-    columnFlowBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    columnFlowBtn.addEventListener('click', () => {
-        columnFlowActive = !columnFlowActive;
-        toggleColumnFlows(columnFlowActive);
-        columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-    });
-    columnFlowBtn.addEventListener('mouseenter', () => {
-        if (!columnFlowActive) columnFlowBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-    });
-    columnFlowBtn.addEventListener('mouseleave', () => {
-        if (!columnFlowActive) columnFlowBtn.style.background = 'transparent';
-    });
-    featureGroup.appendChild(columnFlowBtn);
-
-    // Theme Toggle button
-    const themeBtn = document.createElement('button');
-    themeBtn.innerHTML = '◐';
-    themeBtn.title = 'Toggle dark/light theme (T)';
-    themeBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    themeBtn.addEventListener('click', () => {
-        toggleTheme();
-        themeBtn.innerHTML = isDarkTheme() ? '◐' : '◑';
-    });
-    themeBtn.addEventListener('mouseenter', () => themeBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    themeBtn.addEventListener('mouseleave', () => themeBtn.style.background = 'transparent');
-    featureGroup.appendChild(themeBtn);
-
-    // Fullscreen button
-    const fullscreenBtn = document.createElement('button');
-    fullscreenBtn.innerHTML = '⛶';
-    fullscreenBtn.title = 'Toggle fullscreen (F)';
-    fullscreenBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    
-    const updateFullscreenButton = () => {
-        const isFull = isFullscreen();
-        fullscreenBtn.style.background = isFull ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        },
+        onOpenPinnedTab: (pinId: string) => {
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'openPinnedTab',
+                    pinId
+                });
+            }
+        },
+        onUnpinTab: (pinId: string) => {
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'unpinTab',
+                    pinId
+                });
+            }
+        },
+        isDarkTheme,
+        isFullscreen,
+        getKeyboardShortcuts,
+        getCurrentQuerySql
     };
-    
-    fullscreenBtn.addEventListener('click', () => {
-        toggleFullscreen();
-        setTimeout(updateFullscreenButton, 50);
-    });
-    fullscreenBtn.addEventListener('mouseenter', () => {
-        if (!isFullscreen()) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-    });
-    fullscreenBtn.addEventListener('mouseleave', () => {
-        updateFullscreenButton();
-    });
-    featureGroup.appendChild(fullscreenBtn);
-    
-    // Listen for fullscreen changes to update button state
-    document.addEventListener('fullscreenchange', updateFullscreenButton);
-
-    // Keyboard shortcuts help button
-    const helpBtn = document.createElement('button');
-    helpBtn.innerHTML = '?';
-    helpBtn.title = 'Keyboard shortcuts';
-    helpBtn.style.cssText = btnStyle + 'font-weight: 700; border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    helpBtn.addEventListener('click', () => {
-        showKeyboardShortcutsHelp();
-    });
-    helpBtn.addEventListener('mouseenter', () => helpBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    helpBtn.addEventListener('mouseleave', () => helpBtn.style.background = 'transparent');
-    featureGroup.appendChild(helpBtn);
-
-    actions.appendChild(featureGroup);
-
-    container.appendChild(actions);
-
-    // Listen for theme change events to update toolbar
-    document.addEventListener('theme-change', ((e: CustomEvent) => {
-        const dark = e.detail.dark;
-        themeBtn.innerHTML = dark ? '◐' : '◑';
-        // Update toolbar styles for light theme
-        updateToolbarTheme(dark, toolbar, actions, searchContainer);
-    }) as EventListener);
-
-
-    // Dialect change handler
-    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
-    dialectSelect?.addEventListener('change', (e) => {
-        currentDialect = (e.target as HTMLSelectElement).value as SqlDialect;
-        const sql = window.initialSqlCode || '';
-        if (sql) {
-            visualize(sql);
-        }
-    });
-
-    // Setup search box
-    setSearchBox(searchInput);
 }
 
-function createBatchTabs(container: HTMLElement): void {
-    const tabsContainer = document.createElement('div');
-    tabsContainer.id = 'batch-tabs';
-    tabsContainer.style.cssText = `
-        position: absolute;
-        top: 60px;
-        left: 50%;
-        transform: translateX(-50%);
-        display: none;
-        align-items: center;
-        gap: 4px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 6px 12px;
-        z-index: 100;
-    `;
-    container.appendChild(tabsContainer);
-}
-
-function updateBatchTabs(): void {
-    const tabsContainer = document.getElementById('batch-tabs');
-    if (!tabsContainer || !batchResult) { return; }
-
-    const queryCount = batchResult.queries.length;
-
-    if (queryCount <= 1) {
-        tabsContainer.style.display = 'none';
-        return;
-    }
-
-    tabsContainer.style.display = 'flex';
-    tabsContainer.innerHTML = '';
-
-    const navBtnStyle = (enabled: boolean) => `
-        background: transparent;
-        border: none;
-        color: ${enabled ? '#f1f5f9' : '#475569'};
-        cursor: ${enabled ? 'pointer' : 'default'};
-        padding: 4px 8px;
-        font-size: 12px;
-    `;
-
-    // First button
-    const firstBtn = document.createElement('button');
-    firstBtn.innerHTML = '⏮';
-    firstBtn.title = 'First query';
-    firstBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
-    firstBtn.disabled = currentQueryIndex === 0;
-    firstBtn.addEventListener('click', () => {
-        if (currentQueryIndex > 0) {
-            currentQueryIndex = 0;
-            renderCurrentQuery();
-            updateBatchTabs();
-        }
-    });
-    tabsContainer.appendChild(firstBtn);
-
-    // Previous button
-    const prevBtn = document.createElement('button');
-    prevBtn.innerHTML = '◀';
-    prevBtn.title = 'Previous query';
-    prevBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
-    prevBtn.disabled = currentQueryIndex === 0;
-    prevBtn.addEventListener('click', () => {
-        if (currentQueryIndex > 0) {
-            currentQueryIndex--;
-            renderCurrentQuery();
-            updateBatchTabs();
-        }
-    });
-    tabsContainer.appendChild(prevBtn);
-
-    // Query tabs (show up to 7)
-    const maxTabs = 7;
-    const startIdx = Math.max(0, Math.min(currentQueryIndex - Math.floor(maxTabs / 2), queryCount - maxTabs));
-    const endIdx = Math.min(startIdx + maxTabs, queryCount);
-
-    for (let i = startIdx; i < endIdx; i++) {
-        const tab = document.createElement('button');
-        const query = batchResult.queries[i];
-        const isActive = i === currentQueryIndex;
-        const hasError = !!query.error;
-
-        tab.innerHTML = `Q${i + 1}`;
-        tab.title = truncateSql(query.sql, 100);
-        tab.style.cssText = `
-            background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-            border: 1px solid ${isActive ? '#6366f1' : hasError ? '#ef4444' : 'transparent'};
-            border-radius: 4px;
-            color: ${hasError ? '#f87171' : isActive ? '#a5b4fc' : '#94a3b8'};
-            cursor: pointer;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: ${isActive ? '600' : '400'};
-            transition: all 0.2s;
-        `;
-
-        tab.addEventListener('click', () => {
-            currentQueryIndex = i;
-            renderCurrentQuery();
-            updateBatchTabs();
-        });
-
-        tab.addEventListener('mouseenter', () => {
-            if (!isActive) {
-                tab.style.background = 'rgba(148, 163, 184, 0.1)';
-            }
-        });
-
-        tab.addEventListener('mouseleave', () => {
-            if (!isActive) {
-                tab.style.background = 'transparent';
-            }
-        });
-
-        tabsContainer.appendChild(tab);
-    }
-
-    // Next button
-    const nextBtn = document.createElement('button');
-    nextBtn.innerHTML = '▶';
-    nextBtn.title = 'Next query';
-    nextBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
-    nextBtn.disabled = currentQueryIndex >= queryCount - 1;
-    nextBtn.addEventListener('click', () => {
-        if (currentQueryIndex < queryCount - 1) {
-            currentQueryIndex++;
-            renderCurrentQuery();
-            updateBatchTabs();
-        }
-    });
-    tabsContainer.appendChild(nextBtn);
-
-    // Last button
-    const lastBtn = document.createElement('button');
-    lastBtn.innerHTML = '⏭';
-    lastBtn.title = 'Last query';
-    lastBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
-    lastBtn.disabled = currentQueryIndex >= queryCount - 1;
-    lastBtn.addEventListener('click', () => {
-        if (currentQueryIndex < queryCount - 1) {
-            currentQueryIndex = queryCount - 1;
-            renderCurrentQuery();
-            updateBatchTabs();
-        }
-    });
-    tabsContainer.appendChild(lastBtn);
-
-    // Query counter
-    const counter = document.createElement('span');
-    counter.style.cssText = `
-        color: #64748b;
-        font-size: 11px;
-        margin-left: 8px;
-        padding-left: 8px;
-        border-left: 1px solid rgba(148, 163, 184, 0.2);
-    `;
-    counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
-    tabsContainer.appendChild(counter);
-}
+// ============================================================
+// Query Visualization
+// ============================================================
 
 function visualize(sql: string): void {
     batchResult = parseSqlBatch(sql, currentDialect);
     currentQueryIndex = 0;
-    updateBatchTabs();
+    updateBatchTabsUI();
     renderCurrentQuery();
 }
 
@@ -850,525 +261,60 @@ function renderCurrentQuery(): void {
     render(query);
 }
 
-function truncateSql(sql: string, maxLen: number): string {
-    const normalized = sql.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= maxLen) { return normalized; }
-    return normalized.substring(0, maxLen - 3) + '...';
-}
-
-// Helper function to show keyboard shortcuts help modal
-function showKeyboardShortcutsHelp(): void {
-    const shortcuts = getKeyboardShortcuts();
-
-    // Create modal overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'shortcuts-modal';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.7);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-    `;
-
-    // Create modal content
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 12px;
-        padding: 24px;
-        min-width: 320px;
-        max-width: 400px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-
-    modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 16px;">Keyboard Shortcuts</h3>
-            <button id="close-shortcuts" style="
-                background: none;
-                border: none;
-                color: #94a3b8;
-                cursor: pointer;
-                font-size: 20px;
-                padding: 4px;
-            ">&times;</button>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-            ${shortcuts.map(s => `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                    <span style="color: #94a3b8; font-size: 13px;">${s.description}</span>
-                    <kbd style="
-                        background: rgba(99, 102, 241, 0.2);
-                        border: 1px solid rgba(99, 102, 241, 0.3);
-                        border-radius: 4px;
-                        padding: 4px 8px;
-                        color: #a5b4fc;
-                        font-size: 11px;
-                        font-family: monospace;
-                    ">${s.key}</kbd>
-                </div>
-            `).join('')}
-        </div>
-    `;
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // Close handlers
-    const closeModal = () => overlay.remove();
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
-    });
-    modal.querySelector('#close-shortcuts')?.addEventListener('click', closeModal);
-
-    // Close on Escape
-    const escHandler = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
-}
-
-// Helper function to update toolbar theme
-function updateToolbarTheme(dark: boolean, toolbar: HTMLElement, actions: HTMLElement, searchContainer: HTMLElement): void {
-    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
-    const textColor = dark ? '#f1f5f9' : '#1e293b';
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-
-    // Update toolbar children
-    toolbar.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
-            el.style.background = bgColor;
-            el.style.borderColor = borderColor;
+function updateBatchTabsUI(): void {
+    updateBatchTabs(batchResult, currentQueryIndex, {
+        onQuerySelect: (index: number) => {
+            currentQueryIndex = index;
+            renderCurrentQuery();
+            updateBatchTabsUI();
         }
     });
+}
 
-    // Update title color
-    const titleSpan = toolbar.querySelector('span');
-    if (titleSpan) titleSpan.style.color = textColor;
+function getCurrentQuerySql(): { sql: string; name: string } {
+    let sqlToPin = window.initialSqlCode || '';
+    let queryName = window.fileName || 'Query';
 
-    // Update search container
-    searchContainer.style.background = bgColor;
-    searchContainer.style.borderColor = borderColor;
-
-    // Update action buttons
-    actions.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
-            el.style.background = bgColor;
-            el.style.borderColor = borderColor;
+    if (batchResult && batchResult.queries.length > 1) {
+        const currentQuery = batchResult.queries[currentQueryIndex];
+        if (currentQuery && currentQuery.sql) {
+            sqlToPin = currentQuery.sql;
+            queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
         }
-    });
-
-    actions.querySelectorAll('button').forEach(btn => {
-        btn.style.color = textColor;
-    });
-}
-
-
-// ============================================================
-// FEATURE: View Location Toggle
-// ============================================================
-
-function createViewLocationDropdown(): HTMLElement {
-    const dropdown = document.createElement('div');
-    dropdown.style.cssText = `
-        display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 8px 0;
-        min-width: 180px;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    `;
-
-    const currentLocation = window.viewLocation || 'beside';
-
-    const locations = [
-        { id: 'beside', label: 'Side by Side', icon: '⫝', desc: 'Next to SQL file' },
-        { id: 'tab', label: 'New Tab', icon: '⊟', desc: 'As editor tab' },
-        { id: 'secondary-sidebar', label: 'Secondary Sidebar', icon: '⫿', desc: 'Right sidebar' }
-    ];
-
-    const header = document.createElement('div');
-    header.textContent = 'View Location';
-    header.style.cssText = `
-        padding: 4px 12px 8px;
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #64748b;
-        letter-spacing: 0.5px;
-    `;
-    dropdown.appendChild(header);
-
-    locations.forEach(loc => {
-        const item = document.createElement('div');
-        const isActive = currentLocation === loc.id;
-        item.style.cssText = `
-            padding: 8px 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: ${isActive ? '#818cf8' : '#e2e8f0'};
-            background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
-            transition: background 0.15s;
-        `;
-
-        item.innerHTML = `
-            <span style="font-size: 14px;">${loc.icon}</span>
-            <div>
-                <div style="font-size: 12px; font-weight: 500;">${loc.label}</div>
-                <div style="font-size: 10px; color: #64748b;">${loc.desc}</div>
-            </div>
-            ${isActive ? '<span style="margin-left: auto; color: #818cf8;">✓</span>' : ''}
-        `;
-
-        item.addEventListener('mouseenter', () => {
-            if (!isActive) item.style.background = 'rgba(148, 163, 184, 0.1)';
-        });
-        item.addEventListener('mouseleave', () => {
-            if (!isActive) item.style.background = 'transparent';
-        });
-
-        item.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (window.vscodeApi) {
-                window.vscodeApi.postMessage({
-                    command: 'changeViewLocation',
-                    location: loc.id
-                });
-            }
-            dropdown.style.display = 'none';
-        });
-
-        dropdown.appendChild(item);
-    });
-
-    return dropdown;
-}
-
-function createPinnedTabsDropdown(pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>): HTMLElement {
-    const dropdown = document.createElement('div');
-    dropdown.style.cssText = `
-        display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 8px 0;
-        min-width: 220px;
-        max-height: 300px;
-        overflow-y: auto;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    `;
-
-    const header = document.createElement('div');
-    header.textContent = 'Pinned Visualizations';
-    header.style.cssText = `
-        padding: 4px 12px 8px;
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #64748b;
-        letter-spacing: 0.5px;
-    `;
-    dropdown.appendChild(header);
-
-    pins.forEach(pin => {
-        const item = document.createElement('div');
-        item.style.cssText = `
-            padding: 8px 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #e2e8f0;
-            transition: background 0.15s;
-        `;
-
-        const date = new Date(pin.timestamp);
-        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        item.innerHTML = `
-            <span style="font-size: 12px;">📌</span>
-            <div style="flex: 1; overflow: hidden;">
-                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • ${timeStr}</div>
-            </div>
-        `;
-
-        // Delete button
-        const deleteBtn = document.createElement('span');
-        deleteBtn.innerHTML = '×';
-        deleteBtn.style.cssText = `
-            font-size: 16px;
-            color: #64748b;
-            padding: 0 4px;
-            cursor: pointer;
-        `;
-        deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (window.vscodeApi) {
-                window.vscodeApi.postMessage({
-                    command: 'unpinTab',
-                    pinId: pin.id
-                });
-            }
-            item.remove();
-        });
-        deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444');
-        deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = '#64748b');
-        item.appendChild(deleteBtn);
-
-        item.addEventListener('mouseenter', () => {
-            item.style.background = 'rgba(148, 163, 184, 0.1)';
-        });
-        item.addEventListener('mouseleave', () => {
-            item.style.background = 'transparent';
-        });
-
-        item.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (window.vscodeApi) {
-                window.vscodeApi.postMessage({
-                    command: 'openPinnedTab',
-                    pinId: pin.id
-                });
-            }
-            dropdown.style.display = 'none';
-        });
-
-        dropdown.appendChild(item);
-    });
-
-    if (pins.length === 0) {
-        const empty = document.createElement('div');
-        empty.textContent = 'No pinned visualizations';
-        empty.style.cssText = `
-            padding: 12px;
-            font-size: 12px;
-            color: #64748b;
-            text-align: center;
-        `;
-        dropdown.appendChild(empty);
+    } else if (batchResult && batchResult.queries.length === 1) {
+        const currentQuery = batchResult.queries[0];
+        if (currentQuery && currentQuery.sql) {
+            sqlToPin = currentQuery.sql;
+        }
     }
 
-    return dropdown;
+    return { sql: sqlToPin, name: queryName };
 }
 
 // ============================================================
-// FEATURE: Pinned Visualization Tabs (Legacy - in-panel tabs)
+// Legacy Pinned Tabs (in-panel)
 // ============================================================
 
-function pinCurrentVisualization(): void {
-    const sql = window.initialSqlCode || '';
-    if (!sql.trim()) {
-        alert('No visualization to pin');
-        return;
-    }
-
-    const tabId = 'tab-' + Date.now();
-    const tabName = window.fileName || `Query ${pinnedTabs.length + 1}`;
-
-    const pinnedTab: PinnedTab = {
-        id: tabId,
-        name: tabName.replace('.sql', ''),
-        sql: sql,
-        dialect: currentDialect,
-        result: batchResult
-    };
-
-    pinnedTabs.push(pinnedTab);
-    activeTabId = tabId;
-
-    updateTabsUI();
-}
-
-function updateTabsUI(): void {
-    let tabsContainer = document.getElementById('pinned-tabs-container');
-
-    if (!tabsContainer) {
-        tabsContainer = createTabsContainer();
-    }
-
-    // Show tabs container if there are pinned tabs
-    tabsContainer.style.display = pinnedTabs.length > 0 ? 'flex' : 'none';
-
-    // Render tabs
-    const tabsList = tabsContainer.querySelector('#tabs-list') as HTMLElement;
-    if (!tabsList) return;
-
-    tabsList.innerHTML = '';
-
-    // Add "Current" tab
-    const currentTab = createTabElement({
-        id: 'current',
-        name: 'Current',
-        sql: window.initialSqlCode || '',
-        dialect: currentDialect,
-        result: batchResult
-    }, activeTabId === null);
-    tabsList.appendChild(currentTab);
-
-    // Add pinned tabs
-    for (const tab of pinnedTabs) {
-        const tabEl = createTabElement(tab, activeTabId === tab.id);
-        tabsList.appendChild(tabEl);
-    }
-}
-
-function createTabsContainer(): HTMLElement {
-    const container = document.createElement('div');
-    container.id = 'pinned-tabs-container';
-    container.style.cssText = `
-        position: absolute;
-        top: 60px;
-        left: 16px;
-        display: none;
-        align-items: center;
-        gap: 4px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 8px;
-        padding: 4px;
-        z-index: 100;
-        max-width: calc(100% - 350px);
-        overflow-x: auto;
-    `;
-
-    const tabsList = document.createElement('div');
-    tabsList.id = 'tabs-list';
-    tabsList.style.cssText = `
-        display: flex;
-        gap: 4px;
-    `;
-    container.appendChild(tabsList);
-
-    const root = document.getElementById('root');
-    if (root) {
-        root.appendChild(container);
-    }
-
-    return container;
-}
-
-function createTabElement(tab: PinnedTab, isActive: boolean): HTMLElement {
-    const tabEl = document.createElement('div');
-    tabEl.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-        color: ${isActive ? '#f1f5f9' : '#94a3b8'};
-        transition: background 0.15s;
-        white-space: nowrap;
-    `;
-
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = tab.name;
-    nameSpan.style.maxWidth = '120px';
-    nameSpan.style.overflow = 'hidden';
-    nameSpan.style.textOverflow = 'ellipsis';
-    tabEl.appendChild(nameSpan);
-
-    // Click to switch tab
-    tabEl.addEventListener('click', () => {
-        switchToTab(tab.id === 'current' ? null : tab.id);
-    });
-
-    // Hover effect
-    tabEl.addEventListener('mouseenter', () => {
-        if (!isActive) tabEl.style.background = 'rgba(148, 163, 184, 0.1)';
-    });
-    tabEl.addEventListener('mouseleave', () => {
-        if (!isActive) tabEl.style.background = 'transparent';
-    });
-
-    // Close button for pinned tabs (not current)
-    if (tab.id !== 'current') {
-        const closeBtn = document.createElement('span');
-        closeBtn.textContent = '×';
-        closeBtn.style.cssText = `
-            font-size: 14px;
-            font-weight: 600;
-            opacity: 0.6;
-            padding: 0 2px;
-        `;
-        closeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            unpinTab(tab.id);
-        });
-        closeBtn.addEventListener('mouseenter', () => closeBtn.style.opacity = '1');
-        closeBtn.addEventListener('mouseleave', () => closeBtn.style.opacity = '0.6');
-        tabEl.appendChild(closeBtn);
-    }
-
-    return tabEl;
-}
-
-function switchToTab(tabId: string | null): void {
-    activeTabId = tabId;
+function handlePinnedTabSwitch(tabId: string | null): void {
+    setActiveTabId(tabId);
 
     if (tabId === null) {
-        // Switch to current (live) view
         const sql = window.initialSqlCode || '';
         if (sql) {
             visualize(sql);
         }
     } else {
-        // Switch to pinned tab
-        const tab = pinnedTabs.find(t => t.id === tabId);
+        const tab = findPinnedTab(tabId);
         if (tab && tab.result) {
             currentDialect = tab.dialect;
             batchResult = tab.result;
             currentQueryIndex = 0;
             renderCurrentQuery();
 
-            // Update dialect dropdown
             const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
             if (dialectSelect) {
                 dialectSelect.value = currentDialect;
             }
         }
     }
-
-    updateTabsUI();
-}
-
-function unpinTab(tabId: string): void {
-    const index = pinnedTabs.findIndex(t => t.id === tabId);
-    if (index === -1) return;
-
-    pinnedTabs.splice(index, 1);
-
-    // If we unpinned the active tab, switch to current
-    if (activeTabId === tabId) {
-        activeTabId = null;
-        const sql = window.initialSqlCode || '';
-        if (sql) {
-            visualize(sql);
-        }
-    }
-
-    updateTabsUI();
 }
