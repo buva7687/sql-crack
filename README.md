@@ -267,14 +267,32 @@ Press `F5` to launch the Extension Development Host.
 ```
 sql-crack/
 ├── src/
-│   ├── extension.ts           # Extension entry point
-│   ├── visualizationPanel.ts  # Webview panel management
+│   ├── extension.ts              # Extension entry point
+│   ├── visualizationPanel.ts     # Webview panel management
 │   └── webview/
-│       ├── index.ts           # UI & interactions
-│       ├── sqlParser.ts       # SQL parsing & analysis
-│       ├── renderer.ts        # SVG rendering & layout
-│       ├── sqlFormatter.ts    # SQL formatting
-│       └── performanceAnalyzer.ts  # Phase 3: Static performance analysis
+│       ├── index.ts              # Main entry, VS Code message handling
+│       ├── sqlParser.ts          # SQL parsing & analysis
+│       ├── renderer.ts           # SVG rendering & layout
+│       ├── sqlFormatter.ts       # SQL formatting
+│       ├── performanceAnalyzer.ts # Static performance analysis
+│       ├── constants/            # Color constants & node type info
+│       ├── types/                # TypeScript type definitions
+│       │   ├── nodes.ts          # Node & edge types
+│       │   ├── parser.ts         # Parser result types
+│       │   ├── renderer.ts       # View state types
+│       │   └── lineage.ts        # Column lineage types
+│       ├── ui/                   # UI components
+│       │   ├── toolbar.ts        # Toolbar buttons & controls
+│       │   ├── batchTabs.ts      # Multi-query navigation
+│       │   └── pinnedTabs.ts     # Pinned tab management
+│       └── renderer/             # Modular renderer components
+│           ├── state.ts          # View state management
+│           ├── navigation/       # Pan, zoom, search, selection
+│           ├── panels/           # Details, stats, hints, breadcrumb
+│           ├── edges/            # Edge rendering & SQL clause panel
+│           ├── subflows/         # Dagre layout for cloud content
+│           └── utils/            # DOM helpers, colors, icons
+├── examples/                     # Sample SQL files for testing
 ├── package.json
 ├── tsconfig.json
 └── webpack.config.js

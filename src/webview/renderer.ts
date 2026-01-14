@@ -3620,13 +3620,41 @@ function fitView(): void {
     const rect = svg.getBoundingClientRect();
     const padding = 80;
 
-    // Calculate bounds
+    // Calculate bounds including nodes and expanded cloud containers
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const node of currentNodes) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
         maxY = Math.max(maxY, node.y + node.height);
+
+        // Account for expanded cloud containers (CTE/subquery)
+        if (node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+            const cloudPadding = 15;
+            const cloudGap = 30;
+            const nodeHeight = 60;
+
+            // Calculate cloud dimensions based on children layout
+            const childEdges = node.childEdges || [];
+            const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+            const cloudWidth = layoutSize.width + cloudPadding * 2;
+            const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
+
+            // Get cloud offset (custom or default)
+            const offset = cloudOffsets.get(node.id) || {
+                offsetX: -cloudWidth - cloudGap,
+                offsetY: -(cloudHeight - nodeHeight) / 2
+            };
+
+            const cloudX = node.x + offset.offsetX;
+            const cloudY = node.y + offset.offsetY;
+
+            // Include cloud bounds
+            minX = Math.min(minX, cloudX);
+            minY = Math.min(minY, cloudY);
+            maxX = Math.max(maxX, cloudX + cloudWidth);
+            maxY = Math.max(maxY, cloudY + cloudHeight);
+        }
     }
 
     const graphWidth = maxX - minX;
