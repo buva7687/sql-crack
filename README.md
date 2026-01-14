@@ -38,7 +38,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
   
   > **Note:** This is query-level lineage analysis based on SQL parsing — it traces columns within a single query's execution flow. It does not provide object-to-object lineage tracking across your database schema or metadata catalog.
 
-- **Query Statistics** — Complexity score, table/join/filter counts, CTE depth, fan-out analysis, critical path length, and complexity breakdown with color-coded visual indicators
+- **Query Statistics** — Complexity score, table/join/filter counts, CTE depth, fan-out analysis, critical path length, complexity breakdown, and performance score (0-100) with color-coded visual indicators
 
 ### Interactive Navigation
 
@@ -60,6 +60,15 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Operation Type Badges** — See INSERT, UPDATE, DELETE, MERGE, and CREATE TABLE AS operations at a glance
 - **Advanced SQL Annotations** — Automatic detection of code quality issues: unused CTEs, dead columns, duplicate subqueries, and repeated table scans with visual warning badges
 - **Smart Quality Warnings** — Hover over warning badges to see detailed explanations with severity levels (low/medium/high) and actionable suggestions
+- **Static Performance Analysis** — Heuristic-based optimization hints that analyze query structure without database connectivity:
+  - Filter pushdown opportunities (filters that could be applied earlier)
+  - Join order optimization suggestions
+  - Repeated table scan detection
+  - Subquery to JOIN conversion opportunities
+  - Index usage hints based on query patterns
+  - Non-sargable expression detection (functions in WHERE clauses)
+  - Aggregate optimization suggestions
+  - Performance score (0-100) with issue count
 - **Anti-Pattern Detection** — Automatic detection of SQL anti-patterns:
 
 | Issue | Severity |
@@ -69,6 +78,9 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | `DELETE`/`UPDATE` without `WHERE` | Error |
 | Excessive JOINs (5+) | Warning |
 | Cartesian products | Error |
+| Non-sargable expressions | High |
+| Filter after JOIN | Medium |
+| Repeated table scans | Medium/High |
 
 ### CTE & Subquery Visualization
 
@@ -137,6 +149,8 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 - **Cloud Navigation**: Pan and zoom independently within cloud containers; drag clouds by their border to reposition
 - **View Details**: Hover over any node (including those inside clouds) to see SQL fragments and line numbers
 - **Zoom & Pan**: Use mouse wheel to zoom, drag to pan, or double-click standard nodes to focus on them and their neighbors
+- **Performance Hints**: View categorized optimization hints with filter controls for Performance, Quality, Best Practice, and Complexity categories
+- **Filter Hints**: Click category or severity buttons to filter hints by type or severity level (High/Medium/Low)
 
 ### Keyboard Shortcuts
 
@@ -170,6 +184,56 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 | Result | Green | Query output | — |
 
 **Operation Badges**: INSERT (Green), UPDATE (Amber), DELETE (Dark Red), MERGE (Violet), CREATE TABLE AS (Cyan)
+
+**Performance Warning Icons**: Filter Pushdown (⬆), Non-Sargable (🚫), Join Order (⇄), Index Suggestion (📇), Repeated Scan (🔄), Complex (🧮)
+
+## Performance Analysis Examples
+
+SQL Crack's static performance analysis detects common optimization opportunities:
+
+### Filter Pushdown
+```sql
+-- Detected: Filter after JOIN could be applied earlier
+SELECT e.name, d.dept_name
+FROM employees e
+JOIN departments d ON e.dept_id = d.id
+WHERE e.status = 'active';  -- ⬆ Suggestion: Move filter before JOIN
+```
+
+### Non-Sargable Expressions
+```sql
+-- Detected: Function on column prevents index usage
+SELECT * FROM employees
+WHERE YEAR(hire_date) = 2024;  -- 🚫 Suggestion: Use date range instead
+```
+
+### Subquery to JOIN Conversion
+```sql
+-- Detected: IN subquery could be a JOIN
+SELECT * FROM employees
+WHERE dept_id IN (SELECT id FROM departments WHERE location = 'NYC');
+-- Suggestion: Convert to INNER JOIN
+```
+
+### Repeated Table Scans
+```sql
+-- Detected: Table accessed multiple times
+SELECT e1.name,
+    (SELECT AVG(salary) FROM employees WHERE dept_id = e1.dept_id),
+    (SELECT MAX(salary) FROM employees WHERE dept_id = e1.dept_id)
+FROM employees e1;
+-- 🔄 Suggestion: Use CTE to scan once
+```
+
+### Index Suggestions
+```sql
+-- Detected: Multiple WHERE conditions
+SELECT * FROM employees
+WHERE dept_id = 5 AND status = 'active' AND salary > 50000;
+-- 📇 Suggestion: Composite index on (dept_id, status, salary)
+```
+
+See `examples/example-phase3-performance.sql` for comprehensive test cases.
 
 ## Configuration
 
@@ -209,7 +273,8 @@ sql-crack/
 │       ├── index.ts           # UI & interactions
 │       ├── sqlParser.ts       # SQL parsing & analysis
 │       ├── renderer.ts        # SVG rendering & layout
-│       └── sqlFormatter.ts    # SQL formatting
+│       ├── sqlFormatter.ts    # SQL formatting
+│       └── performanceAnalyzer.ts  # Phase 3: Static performance analysis
 ├── package.json
 ├── tsconfig.json
 └── webpack.config.js
@@ -248,12 +313,19 @@ SQL Crack follows a phased development approach focused on delivering profession
 - ✅ Enhanced CTE parsing to handle various AST structures from node-sql-parser
 - 📅 Diff-aware visualization for PR reviews (Planned)
 
-### 📅 Phase 3: Static Performance Analysis (Planned)
-- Heuristic-based optimization hints (filter pushdown, join order, repeated scans)
-- Anti-pattern detection with actionable suggestions
-- Query structure analysis for potential bottlenecks
+### ✅ Phase 3: Static Performance Analysis (COMPLETED)
+- ✅ Filter pushdown detection — Identifies WHERE conditions that could be applied earlier in query execution
+- ✅ Join order optimization hints — Suggests optimal join ordering based on heuristics (filtered tables first, CROSS JOINs last)
+- ✅ Repeated table scan detection — Identifies when the same table is accessed multiple times unnecessarily
+- ✅ Subquery to JOIN conversion — Detects IN, EXISTS, and scalar subqueries that could be rewritten as JOINs
+- ✅ Index usage hints — Suggests columns that would benefit from indexes based on WHERE, JOIN, ORDER BY, and GROUP BY patterns
+- ✅ Non-sargable expression detection — Detects functions in WHERE clauses (YEAR(), UPPER(), etc.) and LIKE patterns with leading wildcards that prevent index usage
+- ✅ Aggregate optimization hints — Identifies COUNT(DISTINCT), HAVING without aggregates, and missing WHERE filters before aggregation
+- ✅ Performance score calculation — Provides a 0-100 performance score based on detected issues
+- ✅ Categorized hints panel — Performance hints grouped by category (Performance, Quality, Best Practice, Complexity) with filter controls
+- ✅ Node decorations — Visual warning badges on nodes for performance issues (filter pushdown, non-sargable, join order, index suggestions)
 
-> **Note:** True query plan analysis and cost-based optimization require database connectivity, which is outside the scope of this local-only tool.
+> **Note:** True query plan analysis and cost-based optimization require database connectivity, which is outside the scope of this local-only tool. Phase 3 provides heuristic-based static analysis that works without database access.
 
 ### 📅 Phase 4: Workspace Awareness (Planned)
 - Cross-file lineage tracking (parse SQL files to build dependency graphs)

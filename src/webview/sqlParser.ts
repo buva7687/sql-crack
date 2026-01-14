@@ -1,5 +1,6 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
+import { analyzePerformance } from './performanceAnalyzer';
 
 export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
 
@@ -67,7 +68,7 @@ export interface FlowNode {
     visibleColumns?: string[]; // Column names to display in the node
     columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
     // For warning indicators
-    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex'; severity: 'low' | 'medium' | 'high'; message: string }>;
+    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex' | 'filter-pushdown' | 'non-sargable' | 'join-order' | 'index-suggestion'; severity: 'low' | 'medium' | 'high'; message: string }>;
     complexityLevel?: 'low' | 'medium' | 'high'; // Visual complexity indicator
     isBottleneck?: boolean; // Critical path indicator
 }
@@ -121,6 +122,9 @@ export interface QueryStats {
         aggregations: number;
         windowFunctions: number;
     };
+    // Phase 3: Performance metrics
+    performanceScore?: number;   // 0-100 performance score
+    performanceIssues?: number; // Count of detected performance issues
 }
 
 export interface OptimizationHint {
@@ -579,6 +583,38 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(nodes, edges);
+
+        // Phase 3: Static performance analysis
+        // Pass existing hints so performance analyzer can merge overlapping hints
+        // (e.g., duplicate subquery hints + repeated table scan hints)
+        if (statements[0]) {
+            const perfAnalysis = analyzePerformance(statements[0], nodes, edges, tableUsageMap, hints);
+            hints.push(...perfAnalysis.hints);
+
+            // Filter out hints that were merged into performance hints
+            // (marked with _merged flag by detectRepeatedScans)
+            const mergedCount = hints.filter(h => (h as any)._merged).length;
+            if (mergedCount > 0) {
+                hints = hints.filter(h => !(h as any)._merged);
+            }
+        }
+
+        // Calculate performance score after all hints are collected (0-100, higher is better)
+        const perfHints = hints.filter(h => h.category === 'performance');
+        if (perfHints.length > 0) {
+            const highSeverityCount = perfHints.filter(h => h.severity === 'high').length;
+            const mediumSeverityCount = perfHints.filter(h => h.severity === 'medium').length;
+            const lowSeverityCount = perfHints.filter(h => h.severity === 'low').length;
+            
+            // Start with 100 and deduct points for issues
+            let score = 100;
+            score -= highSeverityCount * 15;  // High severity issues cost 15 points
+            score -= mediumSeverityCount * 8; // Medium severity issues cost 8 points
+            score -= lowSeverityCount * 3;    // Low severity issues cost 3 points
+            
+            stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
+            stats.performanceIssues = perfHints.length;
+        }
 
         // Use dagre for layout
         layoutGraph(nodes, edges);
