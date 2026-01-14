@@ -18,6 +18,7 @@ import {
     toggleLegend,
     toggleFocusMode,
     toggleSqlPreview,
+    toggleColumnFlows,
     highlightColumnSources,
     toggleFullscreen,
     isFullscreen,
@@ -33,6 +34,10 @@ declare global {
         vscodeTheme?: string;
         defaultDialect?: string;
         fileName?: string;
+        isPinnedView?: boolean;
+        pinId?: string | null;
+        viewLocation?: string;
+        persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
         };
@@ -167,6 +172,7 @@ function init(): void {
 
 function createToolbar(container: HTMLElement): void {
     const toolbar = document.createElement('div');
+    toolbar.id = 'sql-crack-toolbar';
     toolbar.style.cssText = `
         position: absolute;
         top: 16px;
@@ -288,6 +294,7 @@ function createToolbar(container: HTMLElement): void {
 
     // Action buttons (top right)
     const actions = document.createElement('div');
+    actions.id = 'sql-crack-actions';
     actions.style.cssText = `
         position: absolute;
         top: 16px;
@@ -423,17 +430,111 @@ function createToolbar(container: HTMLElement): void {
     });
     featureGroup.appendChild(refreshBtn);
 
-    // Pin/Save tab button
-    const pinBtn = document.createElement('button');
-    pinBtn.innerHTML = '📌';
-    pinBtn.title = 'Pin current visualization (save as tab)';
-    pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
-    pinBtn.addEventListener('click', () => {
-        pinCurrentVisualization();
-    });
-    pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
-    pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
-    featureGroup.appendChild(pinBtn);
+    // Pin/Save tab button (only show if not already a pinned view)
+    if (!window.isPinnedView) {
+        const pinBtn = document.createElement('button');
+        pinBtn.innerHTML = '📌';
+        pinBtn.title = 'Pin visualization as new tab';
+        pinBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+        pinBtn.addEventListener('click', () => {
+            // Send message to extension to create pinned panel
+            if (window.vscodeApi) {
+                // Get the current query's SQL (not the entire file)
+                let sqlToPin = window.initialSqlCode || '';
+                let queryName = window.fileName || 'Query';
+
+                // If we have batch results with multiple queries, pin the current one
+                if (batchResult && batchResult.queries.length > 1) {
+                    const currentQuery = batchResult.queries[currentQueryIndex];
+                    if (currentQuery && currentQuery.sql) {
+                        sqlToPin = currentQuery.sql;
+                        queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
+                    }
+                } else if (batchResult && batchResult.queries.length === 1) {
+                    // Single query - use its SQL
+                    const currentQuery = batchResult.queries[0];
+                    if (currentQuery && currentQuery.sql) {
+                        sqlToPin = currentQuery.sql;
+                    }
+                }
+
+                window.vscodeApi.postMessage({
+                    command: 'pinVisualization',
+                    sql: sqlToPin,
+                    dialect: currentDialect,
+                    name: queryName
+                });
+            }
+        });
+        pinBtn.addEventListener('mouseenter', () => pinBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+        pinBtn.addEventListener('mouseleave', () => pinBtn.style.background = 'transparent');
+        featureGroup.appendChild(pinBtn);
+
+        // View location dropdown button
+        const viewLocBtn = document.createElement('button');
+        viewLocBtn.innerHTML = '⊞';
+        viewLocBtn.title = 'Change view location';
+        viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+
+        const viewLocDropdown = createViewLocationDropdown();
+        viewLocBtn.appendChild(viewLocDropdown);
+
+        viewLocBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = viewLocDropdown.style.display === 'block';
+            viewLocDropdown.style.display = isVisible ? 'none' : 'block';
+        });
+
+        // Close dropdown when clicking elsewhere
+        document.addEventListener('click', () => {
+            viewLocDropdown.style.display = 'none';
+        });
+
+        viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+        viewLocBtn.addEventListener('mouseleave', () => {
+            if (viewLocDropdown.style.display !== 'block') {
+                viewLocBtn.style.background = 'transparent';
+            }
+        });
+        featureGroup.appendChild(viewLocBtn);
+
+        // Pinned tabs button (show if there are persisted pins)
+        const persistedPins = window.persistedPinnedTabs || [];
+        if (persistedPins.length > 0) {
+            const pinsBtn = document.createElement('button');
+            pinsBtn.innerHTML = '📋';
+            pinsBtn.title = `Open pinned tabs (${persistedPins.length})`;
+            pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+
+            const pinsDropdown = createPinnedTabsDropdown(persistedPins);
+            pinsBtn.appendChild(pinsDropdown);
+
+            pinsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = pinsDropdown.style.display === 'block';
+                pinsDropdown.style.display = isVisible ? 'none' : 'block';
+            });
+
+            pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+            pinsBtn.addEventListener('mouseleave', () => {
+                if (pinsDropdown.style.display !== 'block') {
+                    pinsBtn.style.background = 'transparent';
+                }
+            });
+            featureGroup.appendChild(pinsBtn);
+        }
+    } else {
+        // For pinned views, show an indicator
+        const pinnedIndicator = document.createElement('span');
+        pinnedIndicator.innerHTML = '📌 Pinned';
+        pinnedIndicator.style.cssText = `
+            color: #94a3b8;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-left: 1px solid rgba(148, 163, 184, 0.2);
+        `;
+        featureGroup.appendChild(pinnedIndicator);
+    }
 
     // Legend button
     const legendBtn = document.createElement('button');
@@ -476,6 +577,25 @@ function createToolbar(container: HTMLElement): void {
     sqlBtn.addEventListener('mouseleave', () => sqlBtn.style.background = 'transparent');
     featureGroup.appendChild(sqlBtn);
 
+    // Column Flow toggle button
+    let columnFlowActive = false;
+    const columnFlowBtn = document.createElement('button');
+    columnFlowBtn.innerHTML = '📊';
+    columnFlowBtn.title = 'Toggle column flow visualization (C)';
+    columnFlowBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    columnFlowBtn.addEventListener('click', () => {
+        columnFlowActive = !columnFlowActive;
+        toggleColumnFlows(columnFlowActive);
+        columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    });
+    columnFlowBtn.addEventListener('mouseenter', () => {
+        if (!columnFlowActive) columnFlowBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+    });
+    columnFlowBtn.addEventListener('mouseleave', () => {
+        if (!columnFlowActive) columnFlowBtn.style.background = 'transparent';
+    });
+    featureGroup.appendChild(columnFlowBtn);
+
     // Theme Toggle button
     const themeBtn = document.createElement('button');
     themeBtn.innerHTML = '◐';
@@ -490,24 +610,30 @@ function createToolbar(container: HTMLElement): void {
     featureGroup.appendChild(themeBtn);
 
     // Fullscreen button
-    let fullscreenActive = false;
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.innerHTML = '⛶';
     fullscreenBtn.title = 'Toggle fullscreen (F)';
     fullscreenBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    
+    const updateFullscreenButton = () => {
+        const isFull = isFullscreen();
+        fullscreenBtn.style.background = isFull ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+    };
+    
     fullscreenBtn.addEventListener('click', () => {
-        fullscreenActive = !fullscreenActive;
-        toggleFullscreen(fullscreenActive);
-        fullscreenBtn.innerHTML = fullscreenActive ? '⛶' : '⛶';
-        fullscreenBtn.style.background = fullscreenActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        toggleFullscreen();
+        setTimeout(updateFullscreenButton, 50);
     });
     fullscreenBtn.addEventListener('mouseenter', () => {
-        if (!fullscreenActive) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+        if (!isFullscreen()) fullscreenBtn.style.background = 'rgba(148, 163, 184, 0.1)';
     });
     fullscreenBtn.addEventListener('mouseleave', () => {
-        if (!fullscreenActive) fullscreenBtn.style.background = 'transparent';
+        updateFullscreenButton();
     });
     featureGroup.appendChild(fullscreenBtn);
+    
+    // Listen for fullscreen changes to update button state
+    document.addEventListener('fullscreenchange', updateFullscreenButton);
 
     // Keyboard shortcuts help button
     const helpBtn = document.createElement('button');
@@ -849,7 +975,204 @@ function updateToolbarTheme(dark: boolean, toolbar: HTMLElement, actions: HTMLEl
 
 
 // ============================================================
-// FEATURE: Pinned Visualization Tabs
+// FEATURE: View Location Toggle
+// ============================================================
+
+function createViewLocationDropdown(): HTMLElement {
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 180px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+
+    const currentLocation = window.viewLocation || 'beside';
+
+    const locations = [
+        { id: 'beside', label: 'Side by Side', icon: '⫝', desc: 'Next to SQL file' },
+        { id: 'tab', label: 'New Tab', icon: '⊟', desc: 'As editor tab' },
+        { id: 'secondary-sidebar', label: 'Secondary Sidebar', icon: '⫿', desc: 'Right sidebar' }
+    ];
+
+    const header = document.createElement('div');
+    header.textContent = 'View Location';
+    header.style.cssText = `
+        padding: 4px 12px 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #64748b;
+        letter-spacing: 0.5px;
+    `;
+    dropdown.appendChild(header);
+
+    locations.forEach(loc => {
+        const item = document.createElement('div');
+        const isActive = currentLocation === loc.id;
+        item.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
+            transition: background 0.15s;
+        `;
+
+        item.innerHTML = `
+            <span style="font-size: 14px;">${loc.icon}</span>
+            <div>
+                <div style="font-size: 12px; font-weight: 500;">${loc.label}</div>
+                <div style="font-size: 10px; color: #64748b;">${loc.desc}</div>
+            </div>
+            ${isActive ? '<span style="margin-left: auto; color: #818cf8;">✓</span>' : ''}
+        `;
+
+        item.addEventListener('mouseenter', () => {
+            if (!isActive) item.style.background = 'rgba(148, 163, 184, 0.1)';
+        });
+        item.addEventListener('mouseleave', () => {
+            if (!isActive) item.style.background = 'transparent';
+        });
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'changeViewLocation',
+                    location: loc.id
+                });
+            }
+            dropdown.style.display = 'none';
+        });
+
+        dropdown.appendChild(item);
+    });
+
+    return dropdown;
+}
+
+function createPinnedTabsDropdown(pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>): HTMLElement {
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 220px;
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+
+    const header = document.createElement('div');
+    header.textContent = 'Pinned Visualizations';
+    header.style.cssText = `
+        padding: 4px 12px 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #64748b;
+        letter-spacing: 0.5px;
+    `;
+    dropdown.appendChild(header);
+
+    pins.forEach(pin => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #e2e8f0;
+            transition: background 0.15s;
+        `;
+
+        const date = new Date(pin.timestamp);
+        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        item.innerHTML = `
+            <span style="font-size: 12px;">📌</span>
+            <div style="flex: 1; overflow: hidden;">
+                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
+                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • ${timeStr}</div>
+            </div>
+        `;
+
+        // Delete button
+        const deleteBtn = document.createElement('span');
+        deleteBtn.innerHTML = '×';
+        deleteBtn.style.cssText = `
+            font-size: 16px;
+            color: #64748b;
+            padding: 0 4px;
+            cursor: pointer;
+        `;
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'unpinTab',
+                    pinId: pin.id
+                });
+            }
+            item.remove();
+        });
+        deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444');
+        deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = '#64748b');
+        item.appendChild(deleteBtn);
+
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(148, 163, 184, 0.1)';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = 'transparent';
+        });
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.vscodeApi) {
+                window.vscodeApi.postMessage({
+                    command: 'openPinnedTab',
+                    pinId: pin.id
+                });
+            }
+            dropdown.style.display = 'none';
+        });
+
+        dropdown.appendChild(item);
+    });
+
+    if (pins.length === 0) {
+        const empty = document.createElement('div');
+        empty.textContent = 'No pinned visualizations';
+        empty.style.cssText = `
+            padding: 12px;
+            font-size: 12px;
+            color: #64748b;
+            text-align: center;
+        `;
+        dropdown.appendChild(empty);
+    }
+
+    return dropdown;
+}
+
+// ============================================================
+// FEATURE: Pinned Visualization Tabs (Legacy - in-panel tabs)
 // ============================================================
 
 function pinCurrentVisualization(): void {

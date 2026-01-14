@@ -7,6 +7,9 @@ let lastActiveSqlDocument: vscode.TextDocument | null = null;
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
+    // Initialize VisualizationPanel with context for persistence
+    VisualizationPanel.setContext(context);
+
     // Get configuration
     const getConfig = () => vscode.workspace.getConfiguration('sqlCrack');
 
@@ -59,7 +62,8 @@ export function activate(context: vscode.ExtensionContext) {
         // Create or show visualization panel
         VisualizationPanel.createOrShow(context.extensionUri, sqlCode, {
             dialect: defaultDialect,
-            fileName: document.fileName.split('/').pop() || 'Query'
+            fileName: document.fileName.split('/').pop() || 'Query',
+            documentUri: document.uri
         });
     });
 
@@ -74,7 +78,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
-                fileName: document.fileName.split('/').pop() || 'Query'
+                fileName: document.fileName.split('/').pop() || 'Query',
+                documentUri: document.uri
             });
         } else {
             vscode.window.showWarningMessage('No SQL file to refresh. Please open a SQL file first.');
