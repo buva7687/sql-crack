@@ -43,6 +43,8 @@ export type {
 // Renderer types
 export type {
     ZoomState,
+    LayoutType,
+    FocusMode,
     ViewState,
     CloudViewState,
     CloudOffset,

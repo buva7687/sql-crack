@@ -52,6 +52,7 @@ export { generateHints, detectAdvancedIssues } from './hints';
 
 // Layout
 export { layoutGraph } from './layout';
+export { layoutGraphHorizontal, getLayoutMetrics } from './forceLayout';
 
 // Lineage
 export {

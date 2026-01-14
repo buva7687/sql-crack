@@ -4,6 +4,9 @@ import { VisualizationPanel } from './visualizationPanel';
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
+// Auto-refresh debounce timer
+let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
@@ -187,11 +190,38 @@ export function activate(context: vscode.ExtensionContext) {
         return statements;
     }
 
-    // Listen for document changes (for auto-refresh if needed)
+    // Listen for document changes with debounced auto-refresh
     let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.languageId === 'sql' && VisualizationPanel.currentPanel) {
-            // Debounce - don't auto-refresh, but mark as stale
+            const config = getConfig();
+            const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
+            const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
+
+            // Always mark as stale immediately for visual feedback
             VisualizationPanel.markAsStale();
+
+            if (autoRefreshEnabled) {
+                // Clear any existing timer (debounce)
+                if (autoRefreshTimer) {
+                    clearTimeout(autoRefreshTimer);
+                }
+
+                // Set new debounced timer
+                autoRefreshTimer = setTimeout(() => {
+                    const document = e.document;
+                    if (document && VisualizationPanel.currentPanel) {
+                        const sqlCode = document.getText();
+                        const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+
+                        VisualizationPanel.refresh(sqlCode, {
+                            dialect: defaultDialect,
+                            fileName: document.fileName.split('/').pop() || 'Query',
+                            documentUri: document.uri
+                        });
+                    }
+                    autoRefreshTimer = null;
+                }, autoRefreshDelay);
+            }
         }
     });
 
@@ -201,4 +231,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(docChangeListener);
 }
 
-export function deactivate() {}
+export function deactivate() {
+    // Clean up auto-refresh timer
+    if (autoRefreshTimer) {
+        clearTimeout(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}

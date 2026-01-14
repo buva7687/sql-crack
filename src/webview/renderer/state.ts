@@ -9,6 +9,7 @@ import {
     ColumnLineage,
     ViewState,
     CloudViewState,
+    FocusMode,
 } from '../types';
 
 // View state
@@ -43,7 +44,9 @@ export const state: ViewState = {
     showColumnFlows: false,
     selectedColumn: null,
     zoomedNodeId: null,
-    previousZoomState: null
+    previousZoomState: null,
+    layoutType: 'vertical',
+    focusMode: 'all'
 };
 
 // DOM element references
@@ -184,6 +187,7 @@ export function resetState(): void {
     state.currentSearchIndex = -1;
     state.zoomedNodeId = null;
     state.previousZoomState = null;
+    state.focusMode = 'all';
 }
 
 // Find node by ID

@@ -10,6 +10,8 @@ import {
     ViewState,
     CloudViewState,
     Severity,
+    FocusMode,
+    LayoutType,
 } from './types';
 
 // Import color utilities
@@ -17,6 +19,7 @@ import { getNodeColor } from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
+import { layoutGraphHorizontal } from './parser/forceLayout';
 
 const state: ViewState = {
     scale: 1,
@@ -49,7 +52,9 @@ const state: ViewState = {
     showColumnFlows: false,
     selectedColumn: null,
     zoomedNodeId: null,
-    previousZoomState: null
+    previousZoomState: null,
+    focusMode: 'all' as FocusMode,
+    layoutType: 'vertical' as LayoutType
 };
 
 let svg: SVGSVGElement | null = null;
@@ -555,10 +560,10 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleTheme();
         }
-        // L to toggle legend
-        if (e.key === 'l' || e.key === 'L') {
+        // H to toggle layout
+        if (e.key === 'h' || e.key === 'H') {
             e.preventDefault();
-            toggleLegend();
+            toggleLayout();
         }
         // S to show SQL preview
         if (e.key === 's' || e.key === 'S') {
@@ -569,6 +574,26 @@ function setupEventListeners(): void {
         if (e.key === 'c' || e.key === 'C') {
             e.preventDefault();
             toggleColumnFlows();
+        }
+        // Q to toggle query stats panel
+        if (e.key === 'q' || e.key === 'Q') {
+            e.preventDefault();
+            toggleStats();
+        }
+        // U for upstream focus mode
+        if (e.key === 'u' || e.key === 'U') {
+            e.preventDefault();
+            setFocusMode('upstream');
+        }
+        // D for downstream focus mode
+        if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            setFocusMode('downstream');
+        }
+        // A for all connected focus mode
+        if (e.key === 'a' || e.key === 'A') {
+            e.preventDefault();
+            setFocusMode('all');
         }
         // / to focus search (like vim)
         if (e.key === '/') {
@@ -968,7 +993,16 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
                     columnLineage: currentColumnLineage,
                     tableUsage: currentTableUsage
                 };
+                // Preserve current layout type
+                const wasHorizontal = state.layoutType === 'horizontal';
                 render(result);
+                // Re-apply horizontal layout if it was active
+                if (wasHorizontal) {
+                    // Reset to vertical first (render uses vertical positions)
+                    state.layoutType = 'vertical';
+                    // Then toggle to horizontal
+                    toggleLayout();
+                }
             }
         } else {
             zoomToNode(node);
@@ -4002,6 +4036,223 @@ export function exportToSvg(): void {
     URL.revokeObjectURL(url);
 }
 
+/**
+ * Export the current visualization to Mermaid.js flowchart format
+ * Exports as .md file with code block for VS Code Mermaid preview compatibility
+ */
+export function exportToMermaid(): void {
+    if (currentNodes.length === 0) {
+        console.warn('No nodes to export');
+        return;
+    }
+
+    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
+
+    // Wrap in markdown code block for VS Code Mermaid extension compatibility
+    const markdownContent = `# SQL Flow Diagram
+
+\`\`\`mermaid
+${mermaidCode}
+\`\`\`
+`;
+
+    // Download as .md file
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.download = `sql-flow-${Date.now()}.md`;
+    a.href = url;
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Generate Mermaid flowchart code from nodes and edges
+ */
+function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
+    const lines: string[] = ['flowchart TD'];
+
+    // Group nodes by type for subgraph organization
+    const tableNodes = nodes.filter(n => n.type === 'table');
+    const resultNodes = nodes.filter(n => n.type === 'result');
+    const otherNodes = nodes.filter(n => n.type !== 'table' && n.type !== 'result');
+
+    // Add Sources subgraph for tables
+    if (tableNodes.length > 0) {
+        lines.push('    subgraph Sources');
+        tableNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add intermediate nodes
+    otherNodes.forEach(node => {
+        lines.push(`    ${formatMermaidNode(node)}`);
+    });
+
+    // Add Results subgraph
+    if (resultNodes.length > 0) {
+        lines.push('    subgraph Results');
+        resultNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add blank line before edges
+    lines.push('');
+
+    // Add edges
+    edges.forEach(edge => {
+        const edgeLine = formatMermaidEdge(edge);
+        if (edgeLine) {
+            lines.push(`    ${edgeLine}`);
+        }
+    });
+
+    // Add styling section
+    lines.push('');
+    lines.push('    %% Node styling');
+    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
+    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
+    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
+    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
+    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
+    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
+    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
+    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
+    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
+
+    // Apply classes to nodes
+    const styleAssignments = generateStyleAssignments(nodes);
+    styleAssignments.forEach(assignment => {
+        lines.push(`    ${assignment}`);
+    });
+
+    return lines.join('\n');
+}
+
+/**
+ * Format a node for Mermaid syntax with appropriate shape based on type
+ */
+function formatMermaidNode(node: FlowNode): string {
+    const id = sanitizeMermaidId(node.id);
+    const label = escapeMermaidLabel(node.label);
+
+    // Different shapes for different node types
+    switch (node.type) {
+        case 'table':
+            // Cylinder shape for tables
+            return `${id}[("${label}")]`;
+        case 'filter':
+            // Diamond/rhombus for filters
+            return `${id}{{"${label}"}}`;
+        case 'join':
+            // Hexagon for joins
+            return `${id}{{{"${label}"}}}`;
+        case 'aggregate':
+            // Subroutine box for aggregates
+            return `${id}[["${label}"]]`;
+        case 'sort':
+            // Trapezoid for sort
+            return `${id}[/"${label}"/]`;
+        case 'result':
+            // Stadium shape for results
+            return `${id}(["${label}"])`;
+        case 'cte':
+            // Double circle for CTEs
+            return `${id}((("${label}")))`;
+        case 'union':
+            // Parallelogram for unions
+            return `${id}[/"${label}"\\]`;
+        case 'subquery':
+            // Subroutine for subqueries
+            return `${id}[["${label}"]]`;
+        case 'window':
+            // Asymmetric shape for window functions
+            return `${id}>"${label}"]`;
+        default:
+            // Default rounded rectangle
+            return `${id}("${label}")`;
+    }
+}
+
+/**
+ * Format an edge for Mermaid syntax
+ */
+function formatMermaidEdge(edge: FlowEdge): string {
+    const sourceId = sanitizeMermaidId(edge.source);
+    const targetId = sanitizeMermaidId(edge.target);
+
+    if (edge.label) {
+        const label = escapeMermaidLabel(edge.label);
+        return `${sourceId} -->|"${label}"| ${targetId}`;
+    }
+
+    return `${sourceId} --> ${targetId}`;
+}
+
+/**
+ * Sanitize node ID for Mermaid (remove special characters)
+ */
+function sanitizeMermaidId(id: string): string {
+    return id
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+}
+
+/**
+ * Escape label text for Mermaid
+ */
+function escapeMermaidLabel(label: string): string {
+    return label
+        .replace(/"/g, "'")
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, ' ')
+        .substring(0, 50);
+}
+
+/**
+ * Generate class assignments for node styling
+ */
+function generateStyleAssignments(nodes: FlowNode[]): string[] {
+    const assignments: string[] = [];
+    const typeToClass: Record<string, string> = {
+        'table': 'tableStyle',
+        'filter': 'filterStyle',
+        'join': 'joinStyle',
+        'aggregate': 'aggregateStyle',
+        'sort': 'sortStyle',
+        'result': 'resultStyle',
+        'cte': 'cteStyle',
+        'union': 'unionStyle'
+    };
+
+    // Group nodes by type
+    const nodesByType = new Map<string, string[]>();
+
+    nodes.forEach(node => {
+        const className = typeToClass[node.type] || 'defaultStyle';
+        if (!nodesByType.has(className)) {
+            nodesByType.set(className, []);
+        }
+        nodesByType.get(className)!.push(sanitizeMermaidId(node.id));
+    });
+
+    // Generate class assignments
+    nodesByType.forEach((nodeIds, className) => {
+        if (nodeIds.length > 0) {
+            assignments.push(`class ${nodeIds.join(',')} ${className}`);
+        }
+    });
+
+    return assignments;
+}
+
 export function copyToClipboard(): void {
     if (!svg) { return; }
 
@@ -4252,6 +4503,118 @@ export function toggleLegend(show?: boolean): void {
     legendPanel.style.display = state.legendVisible ? 'block' : 'none';
 }
 
+let statsVisible = true;
+
+export function toggleStats(show?: boolean): void {
+    if (!statsPanel) return;
+    statsVisible = show ?? !statsVisible;
+    statsPanel.style.display = statsVisible ? 'block' : 'none';
+}
+
+export function toggleLayout(): void {
+    if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
+        return;
+    }
+
+    // Toggle between vertical (TB) and horizontal (LR) layouts
+    const newLayout: LayoutType = state.layoutType === 'vertical' ? 'horizontal' : 'vertical';
+    state.layoutType = newLayout;
+
+    // Re-run layout with new algorithm
+    if (newLayout === 'horizontal') {
+        // Use horizontal (left-to-right) layout
+        layoutGraphHorizontal(currentNodes, currentEdges);
+    } else {
+        // Use vertical (top-to-bottom) dagre layout
+        const g = new dagre.graphlib.Graph();
+        g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 });
+        g.setDefaultEdgeLabel(() => ({}));
+
+        currentNodes.forEach(node => {
+            g.setNode(node.id, { width: node.width, height: node.height });
+        });
+
+        currentEdges.forEach(edge => {
+            g.setEdge(edge.source, edge.target);
+        });
+
+        dagre.layout(g);
+
+        currentNodes.forEach(node => {
+            const nodeWithPos = g.node(node.id);
+            if (nodeWithPos && nodeWithPos.x !== undefined && nodeWithPos.y !== undefined) {
+                node.x = nodeWithPos.x - node.width / 2;
+                node.y = nodeWithPos.y - node.height / 2;
+            }
+        });
+    }
+
+    // Update node positions in DOM
+    // Nodes use x/y attributes on rect elements, so we need to calculate delta from original position
+    currentNodes.forEach(node => {
+        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+        if (nodeGroup) {
+            const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+            if (rect) {
+                // Get original position from rect attributes
+                const origX = parseFloat(rect.getAttribute('x') || '0');
+                const origY = parseFloat(rect.getAttribute('y') || '0');
+                // Calculate delta from original to new position
+                const deltaX = node.x - origX;
+                const deltaY = node.y - origY;
+                // Apply transform as delta
+                nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+            }
+        }
+    });
+
+    // First, show all edges (reset any that were hidden)
+    const allEdges = mainGroup!.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        (edgeEl as SVGPathElement).style.display = '';
+    });
+
+    // Update edge paths - only for main edges (not column flows or other overlays)
+    const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+    edgeElements.forEach(edgeEl => {
+        const sourceId = edgeEl.getAttribute('data-source');
+        const targetId = edgeEl.getAttribute('data-target');
+        if (sourceId && targetId) {
+            const sourceNode = currentNodes.find(n => n.id === sourceId);
+            const targetNode = currentNodes.find(n => n.id === targetId);
+            if (sourceNode && targetNode) {
+                // Calculate edge path based on layout type
+                let path: string;
+                if (newLayout === 'horizontal') {
+                    // For horizontal: curved lines from right to left
+                    const sx = sourceNode.x + sourceNode.width;
+                    const sy = sourceNode.y + sourceNode.height / 2;
+                    const tx = targetNode.x;
+                    const ty = targetNode.y + targetNode.height / 2;
+                    const midX = (sx + tx) / 2;
+                    path = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+                } else {
+                    // For vertical: curved lines from bottom to top
+                    const sx = sourceNode.x + sourceNode.width / 2;
+                    const sy = sourceNode.y + sourceNode.height;
+                    const tx = targetNode.x + targetNode.width / 2;
+                    const ty = targetNode.y;
+                    const midY = (sy + ty) / 2;
+                    path = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+                }
+                edgeEl.setAttribute('d', path);
+                (edgeEl as SVGPathElement).style.display = '';
+            } else {
+                // Hide edges where source or target node not found
+                (edgeEl as SVGPathElement).style.display = 'none';
+            }
+        }
+    });
+
+    // Fit view to show all nodes
+    fitView();
+}
+
 // ============================================================
 // FEATURE: Focus Mode
 // ============================================================
@@ -4310,8 +4673,27 @@ function clearFocusMode(): void {
     });
 }
 
+export function setFocusMode(mode: FocusMode): void {
+    state.focusMode = mode;
+
+    // Re-apply focus mode if enabled and a node is selected
+    if (state.focusModeEnabled && state.selectedNodeId) {
+        applyFocusMode(state.selectedNodeId);
+    }
+
+    // Also re-apply if zoomed to a node
+    if (state.zoomedNodeId && state.selectedNodeId) {
+        // Will be handled by zoom module
+    }
+}
+
+export function getFocusMode(): FocusMode {
+    return state.focusMode;
+}
+
 function getConnectedNodes(nodeId: string): Set<string> {
     const connected = new Set<string>();
+    const mode = state.focusMode;
 
     // Find upstream nodes (sources that flow into this node)
     function findUpstream(id: string) {
@@ -4333,8 +4715,13 @@ function getConnectedNodes(nodeId: string): Set<string> {
         }
     }
 
-    findUpstream(nodeId);
-    findDownstream(nodeId);
+    // Apply based on focus mode
+    if (mode === 'upstream' || mode === 'all') {
+        findUpstream(nodeId);
+    }
+    if (mode === 'downstream' || mode === 'all') {
+        findDownstream(nodeId);
+    }
 
     return connected;
 }
@@ -5548,9 +5935,13 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'R', description: 'Reset view' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
-        { key: 'L', description: 'Toggle legend' },
+        { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column flows' },
+        { key: 'Q', description: 'Toggle query stats' },
+        { key: 'U', description: 'Focus upstream nodes' },
+        { key: 'D', description: 'Focus downstream nodes' },
+        { key: 'A', description: 'Focus all connected nodes' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];

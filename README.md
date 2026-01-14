@@ -95,6 +95,16 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Full Tooltips in Cloud** — Hover over any node inside the cloud to see detailed tooltips with SQL fragments, line numbers, and operation details
 - **Default Collapsed** — CTEs and subqueries start collapsed by default to reduce visual clutter; expand on demand to explore their internal structure
 
+### Layout & Focus
+
+- **Layout Toggle** — Switch between vertical (top-to-bottom) and horizontal (left-to-right) graph layouts with `H` key
+- **Focus Mode** — Filter node visibility based on data flow direction:
+  - `U` — Show only upstream nodes (data sources feeding into selected node)
+  - `D` — Show only downstream nodes (nodes that consume selected node's output)
+  - `A` — Show all connected nodes (both directions)
+- **Auto-Refresh** — Visualization automatically updates as you edit SQL (500ms debounce)
+- **Stale Indicator** — Visual indicator when visualization is out of sync with editor
+
 ### Display & Export
 
 - **View Location Toggle** — Choose where to display: beside editor, new tab, or secondary sidebar
@@ -103,6 +113,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Theme Support** — Dark and light themes with grid pattern background
 - **PNG Export** — High-DPI images with background
 - **SVG Export** — Vector format for scalable diagrams
+- **Mermaid Export** — Export as Mermaid.js flowchart (`.md` file with mermaid code block)
 - **Clipboard Copy** — Quick sharing via clipboard
 
 ## Supported Dialects
@@ -164,6 +175,11 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 | `C` | Toggle column lineage mode |
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
+| `Q` | Toggle query stats panel |
+| `H` | Toggle layout (vertical/horizontal) |
+| `U` | Focus upstream nodes only |
+| `D` | Focus downstream nodes only |
+| `A` | Focus all connected nodes |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
 | `?` | Show all shortcuts |
@@ -242,6 +258,8 @@ See `examples/example-phase3-performance.sql` for comprehensive test cases.
 | `sqlCrack.defaultDialect` | `MySQL` | Default SQL dialect for parsing |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, or `secondary-sidebar` |
+| `sqlCrack.autoRefresh` | `true` | Auto-refresh visualization when SQL changes |
+| `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in milliseconds (100-5000) |
 
 ## Privacy
 

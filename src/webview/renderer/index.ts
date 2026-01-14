@@ -90,7 +90,7 @@ export {
     updateHintsPanel
 } from './panels';
 
-// Edges
+    // Edges
 export {
     renderEdge,
     handleEdgeClick,
@@ -103,3 +103,9 @@ export {
     layoutSubflowNodes,
     layoutSubflowNodesVertical
 } from './subflows';
+
+// Layout switching
+export {
+    switchLayout,
+    toggleLayout
+} from './layoutSwitch';

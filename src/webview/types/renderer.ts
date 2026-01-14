@@ -8,6 +8,10 @@ export interface ZoomState {
     offsetY: number;
 }
 
+export type LayoutType = 'vertical' | 'horizontal';
+
+export type FocusMode = 'all' | 'upstream' | 'downstream';
+
 export interface ViewState {
     scale: number;
     offsetX: number;
@@ -40,6 +44,8 @@ export interface ViewState {
     selectedColumn: string | null;
     zoomedNodeId: string | null;
     previousZoomState: ZoomState | null;
+    layoutType?: LayoutType;
+    focusMode: FocusMode;
 }
 
 export interface CloudViewState {

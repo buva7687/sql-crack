@@ -1,6 +1,7 @@
 // Toolbar UI module
 
 import { SqlDialect, BatchParseResult } from '../sqlParser';
+import { FocusMode } from '../types';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -9,9 +10,12 @@ export interface ToolbarCallbacks {
     onResetView: () => void;
     onExportPng: () => void;
     onExportSvg: () => void;
+    onExportMermaid: () => void;
     onCopyToClipboard: () => void;
     onToggleLegend: () => void;
     onToggleFocusMode: (active: boolean) => void;
+    onFocusModeChange: (mode: FocusMode) => void;
+    getFocusMode: () => FocusMode;
     onToggleSqlPreview: () => void;
     onToggleColumnFlows: (active: boolean) => void;
     onToggleTheme: () => void;
@@ -25,6 +29,7 @@ export interface ToolbarCallbacks {
     onChangeViewLocation: (location: string) => void;
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
+    onToggleLayout: () => void;
     isDarkTheme: () => boolean;
     isFullscreen: () => boolean;
     getKeyboardShortcuts: () => Array<{ key: string; description: string }>;
@@ -282,6 +287,13 @@ function createExportGroup(callbacks: ToolbarCallbacks): HTMLElement {
     svgBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     exportGroup.appendChild(svgBtn);
 
+    const mermaidBtn = createButton('MMD', callbacks.onExportMermaid);
+    mermaidBtn.title = 'Export as Mermaid flowchart';
+    mermaidBtn.style.fontSize = '11px';
+    mermaidBtn.style.fontWeight = '600';
+    mermaidBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    exportGroup.appendChild(mermaidBtn);
+
     return exportGroup;
 }
 
@@ -359,6 +371,10 @@ function createFeatureGroup(
     focusBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(focusBtn);
 
+    // Focus Mode Direction selector
+    const focusModeSelector = createFocusModeSelector(callbacks);
+    featureGroup.appendChild(focusModeSelector);
+
     // SQL Preview button
     const sqlBtn = createButton('{ }', callbacks.onToggleSqlPreview);
     sqlBtn.title = 'Show formatted SQL (S)';
@@ -386,6 +402,12 @@ function createFeatureGroup(
     themeBtn.title = 'Toggle dark/light theme (T)';
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
+
+    // Layout Toggle button
+    const layoutBtn = createButton('📐', callbacks.onToggleLayout);
+    layoutBtn.title = 'Toggle layout algorithm (H)';
+    layoutBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    featureGroup.appendChild(layoutBtn);
 
     // Fullscreen button
     const fullscreenBtn = createButton('⛶', () => {
@@ -426,6 +448,142 @@ function createButton(label: string, onClick: () => void): HTMLButtonElement {
         }
     });
     return btn;
+}
+
+function createFocusModeSelector(callbacks: ToolbarCallbacks): HTMLElement {
+    const container = document.createElement('div');
+    container.style.cssText = `position: relative; display: flex; align-items: center;`;
+
+    const btn = document.createElement('button');
+    btn.id = 'focus-mode-btn';
+    btn.innerHTML = '⇄';
+    btn.title = 'Focus Mode Direction (U/D/A)';
+    btn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 180px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+
+    const modes: Array<{ id: FocusMode; label: string; icon: string; shortcut: string }> = [
+        { id: 'all', label: 'All Connected', icon: '⇄', shortcut: 'A' },
+        { id: 'upstream', label: 'Upstream Only', icon: '↑', shortcut: 'U' },
+        { id: 'downstream', label: 'Downstream Only', icon: '↓', shortcut: 'D' }
+    ];
+
+    const header = document.createElement('div');
+    header.textContent = 'Focus Direction';
+    header.style.cssText = `
+        padding: 4px 12px 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #64748b;
+        letter-spacing: 0.5px;
+    `;
+    dropdown.appendChild(header);
+
+    modes.forEach(mode => {
+        const item = document.createElement('div');
+        const isActive = callbacks.getFocusMode() === mode.id;
+        item.dataset.mode = mode.id;
+        item.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
+            transition: background 0.15s;
+        `;
+
+        item.innerHTML = `
+            <span style="font-size: 14px;">${mode.icon}</span>
+            <div style="flex: 1;">
+                <div style="font-size: 12px; font-weight: 500;">${mode.label}</div>
+            </div>
+            <kbd style="
+                background: rgba(99, 102, 241, 0.2);
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-size: 10px;
+                color: #a5b4fc;
+            ">${mode.shortcut}</kbd>
+            ${isActive ? '<span style="color: #818cf8;">✓</span>' : ''}
+        `;
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            callbacks.onFocusModeChange(mode.id);
+            dropdown.style.display = 'none';
+            btn.innerHTML = mode.icon;
+            updateFocusModeDropdown(dropdown, mode.id);
+        });
+
+        item.addEventListener('mouseenter', () => {
+            if (callbacks.getFocusMode() !== mode.id) {
+                item.style.background = 'rgba(148, 163, 184, 0.1)';
+            }
+        });
+        item.addEventListener('mouseleave', () => {
+            if (callbacks.getFocusMode() !== mode.id) {
+                item.style.background = 'transparent';
+            }
+        });
+
+        dropdown.appendChild(item);
+    });
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    });
+
+    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
+    btn.addEventListener('mouseleave', () => {
+        if (dropdown.style.display !== 'block') {
+            btn.style.background = 'transparent';
+        }
+    });
+
+    document.addEventListener('click', () => {
+        dropdown.style.display = 'none';
+    });
+
+    container.appendChild(btn);
+    container.appendChild(dropdown);
+    return container;
+}
+
+function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode): void {
+    dropdown.querySelectorAll('[data-mode]').forEach(item => {
+        const mode = item.getAttribute('data-mode') as FocusMode;
+        const isActive = mode === activeMode;
+        (item as HTMLElement).style.color = isActive ? '#818cf8' : '#e2e8f0';
+        (item as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+
+        // Update checkmark
+        const existingCheck = item.querySelector('span:last-child');
+        if (existingCheck && existingCheck.textContent === '✓') {
+            existingCheck.remove();
+        }
+        if (isActive) {
+            const check = document.createElement('span');
+            check.style.color = '#818cf8';
+            check.textContent = '✓';
+            item.appendChild(check);
+        }
+    });
 }
 
 function createViewLocationButton(callbacks: ToolbarCallbacks, currentLocation: string): HTMLElement {
