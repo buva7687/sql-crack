@@ -1,4 +1,4 @@
-import { FlowNode, FlowEdge, OptimizationHint } from './sqlParser';
+import { FlowNode, FlowEdge, OptimizationHint } from './types';
 
 export interface IndexSuggestion {
     columns: string[];

@@ -1,40 +1,22 @@
-import { FlowNode, FlowEdge, ColumnFlow, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
+// Import types from centralized type definitions
+import {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ParseResult,
+    QueryStats,
+    OptimizationHint,
+    ColumnLineage,
+    ViewState,
+    CloudViewState,
+    Severity,
+} from './types';
+
+// Import color utilities
+import { getNodeColor } from './constants';
+
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
-
-interface ViewState {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    selectedNodeId: string | null;
-    isDragging: boolean;
-    dragStartX: number;
-    dragStartY: number;
-    isDraggingNode: boolean; // True when dragging a node
-    isDraggingCloud: boolean; // True when dragging a cloud container
-    draggingNodeId: string | null; // ID of node being dragged
-    draggingCloudNodeId: string | null; // ID of node whose cloud is being dragged
-    dragNodeStartX: number; // Node's x position when drag started
-    dragNodeStartY: number; // Node's y position when drag started
-    dragCloudStartOffsetX: number; // Cloud offset X when drag started
-    dragCloudStartOffsetY: number; // Cloud offset Y when drag started
-    dragMouseStartX: number; // Mouse x position when drag started
-    dragMouseStartY: number; // Mouse y position when drag started
-    searchTerm: string;
-    searchResults: string[];
-    currentSearchIndex: number;
-    focusModeEnabled: boolean;
-    legendVisible: boolean;
-    highlightedColumnSources: string[]; // Node IDs to highlight for column flow
-    isFullscreen: boolean;
-    isDarkTheme: boolean;
-    breadcrumbPath: FlowNode[]; // Current CTE/Subquery breadcrumb path
-    showColumnLineage: boolean; // Toggle column-level lineage view
-    showColumnFlows: boolean; // Toggle column flow visualization
-    selectedColumn: string | null; // Currently selected column for highlighting
-    zoomedNodeId: string | null; // Currently zoomed node ID (for toggle behavior)
-    previousZoomState: { scale: number; offsetX: number; offsetY: number } | null; // Previous zoom state before zooming to node
-}
 
 const state: ViewState = {
     scale: 1,
@@ -94,15 +76,7 @@ let currentTableUsage: Map<string, number> = new Map();
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 // Store references to cloud and arrow elements for dynamic updates
 let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
-// Store per-cloud view state for independent pan/zoom
-interface CloudViewState {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    isDragging: boolean;
-    dragStartX: number;
-    dragStartY: number;
-}
+// Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
 let cloudViewStates: Map<string, CloudViewState> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
