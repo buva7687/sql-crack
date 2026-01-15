@@ -54,7 +54,7 @@ const state: ViewState = {
     zoomedNodeId: null,
     previousZoomState: null,
     focusMode: 'all' as FocusMode,
-    layoutType: 'vertical' as LayoutType
+    layoutType: (window.defaultLayout === 'horizontal' ? 'horizontal' : 'vertical') as LayoutType
 };
 
 let svg: SVGSVGElement | null = null;

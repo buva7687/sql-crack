@@ -45,7 +45,7 @@ export const state: ViewState = {
     selectedColumn: null,
     zoomedNodeId: null,
     previousZoomState: null,
-    layoutType: 'vertical',
+    layoutType: (window.defaultLayout === 'horizontal' ? 'horizontal' : 'vertical'),
     focusMode: 'all'
 };
 

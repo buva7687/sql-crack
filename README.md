@@ -308,6 +308,7 @@ See `examples/example-phase3-performance.sql` for comprehensive test cases.
 | `sqlCrack.defaultDialect` | `MySQL` | Default SQL dialect for parsing |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, or `secondary-sidebar` |
+| `sqlCrack.defaultLayout` | `vertical` | Default graph layout direction: `vertical` (top-to-bottom) or `horizontal` (left-to-right) |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh visualization when SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in milliseconds (100-5000) |
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Maximum number of SQL files to auto-index on workspace analysis (10-500) |

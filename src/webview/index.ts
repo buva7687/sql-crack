@@ -54,6 +54,7 @@ declare global {
         isPinnedView?: boolean;
         pinId?: string | null;
         viewLocation?: string;
+        defaultLayout?: string;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;

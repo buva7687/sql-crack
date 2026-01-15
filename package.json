@@ -120,16 +120,16 @@
         },
         "sqlCrack.defaultLayout": {
           "type": "string",
-          "default": "hierarchical",
+          "default": "vertical",
           "enum": [
-            "hierarchical",
-            "force-directed"
+            "vertical",
+            "horizontal"
           ],
           "enumDescriptions": [
-            "Hierarchical layout (top-to-bottom using dagre)",
-            "Force-directed layout (physics-based using d3-force)"
+            "Vertical layout (top-to-bottom flow)",
+            "Horizontal layout (left-to-right flow)"
           ],
-          "description": "Default graph layout algorithm"
+          "description": "Default graph layout direction"
         },
         "sqlCrack.autoRefresh": {
           "type": "boolean",
