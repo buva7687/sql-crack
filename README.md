@@ -94,6 +94,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 - **Draggable Cloud Positioning** — Drag the cloud container by its border to reposition it anywhere on the canvas; the connecting arrow automatically adjusts to the correct side
 - **Full Tooltips in Cloud** — Hover over any node inside the cloud to see detailed tooltips with SQL fragments, line numbers, and operation details
 - **Default Collapsed** — CTEs and subqueries start collapsed by default to reduce visual clutter; expand on demand to explore their internal structure
+- **Expand All Shortcut** — Press `E` to expand or collapse all CTEs and subqueries at once; clouds are automatically stacked vertically to prevent overlap
 
 ### Layout & Focus
 
@@ -180,6 +181,7 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
 | `U` | Focus upstream nodes only |
 | `D` | Focus downstream nodes only |
 | `A` | Focus all connected nodes |
+| `E` | Expand/collapse all CTEs & subqueries |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
 | `?` | Show all shortcuts |

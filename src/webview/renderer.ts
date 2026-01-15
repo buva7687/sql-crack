@@ -595,6 +595,11 @@ function setupEventListeners(): void {
             e.preventDefault();
             setFocusMode('all');
         }
+        // E to toggle expand/collapse all CTEs and subqueries
+        if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            toggleExpandAll();
+        }
         // / to focus search (like vim)
         if (e.key === '/') {
             e.preventDefault();
@@ -4928,6 +4933,110 @@ export function toggleNodeCollapse(nodeId: string): void {
     render(result);
 }
 
+/**
+ * Calculate stacked cloud offsets to prevent overlap when expanding all.
+ * Clouds are positioned vertically from top to bottom with spacing.
+ */
+function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
+    const cloudGap = 30;
+    const cloudPadding = 15;
+    const verticalSpacing = 20; // Space between stacked clouds
+
+    // Sort nodes by their Y position (top to bottom)
+    const sortedNodes = [...expandableNodes].sort((a, b) => a.y - b.y);
+
+    // Track the bottom edge of the last placed cloud
+    let nextCloudY = -Infinity;
+
+    for (const node of sortedNodes) {
+        // Calculate cloud dimensions
+        const childEdges = currentEdges.filter(e =>
+            node.children?.some(c => c.id === e.source || c.id === e.target)
+        );
+        const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
+        const cloudWidth = layoutSize.width + cloudPadding * 2;
+        const cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+
+        // Default X position: left of the node
+        const offsetX = -cloudWidth - cloudGap;
+
+        // Calculate Y position to avoid overlap
+        // Start at node's Y position, but ensure no overlap with previous clouds
+        const idealCloudY = node.y - (cloudHeight - node.height) / 2;
+        const cloudY = Math.max(idealCloudY, nextCloudY + verticalSpacing);
+        const offsetY = cloudY - node.y;
+
+        cloudOffsets.set(node.id, { offsetX, offsetY });
+
+        // Update next available Y position
+        nextCloudY = cloudY + cloudHeight;
+    }
+}
+
+/**
+ * Toggle expand/collapse all CTE and subquery nodes.
+ * When expanding, clouds are stacked vertically to prevent overlap.
+ */
+export function toggleExpandAll(): void {
+    // Find all expandable nodes (CTE/subquery with children)
+    const expandableNodes = currentNodes.filter(
+        n => (n.type === 'cte' || n.type === 'subquery') && n.collapsible && n.children && n.children.length > 0
+    );
+
+    if (expandableNodes.length === 0) return;
+
+    // Determine if we should expand or collapse (toggle based on majority state)
+    const expandedCount = expandableNodes.filter(n => n.expanded).length;
+    const shouldExpand = expandedCount < expandableNodes.length / 2;
+
+    // Set all expandable nodes to the target state
+    for (const node of expandableNodes) {
+        node.expanded = shouldExpand;
+        // Initialize cloud view state if expanding
+        if (shouldExpand && !cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+    }
+
+    // Calculate stacked cloud offsets to prevent overlap
+    if (shouldExpand) {
+        calculateStackedCloudOffsets(expandableNodes);
+    } else {
+        // Clear cloud offsets on collapse
+        for (const node of expandableNodes) {
+            cloudOffsets.delete(node.id);
+        }
+    }
+
+    // Re-render and fit view
+    const result: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage,
+        tableUsage: currentTableUsage
+    };
+
+    const wasHorizontal = state.layoutType === 'horizontal';
+    render(result);
+    if (wasHorizontal) {
+        state.layoutType = 'vertical';
+        toggleLayout();
+    }
+
+    // Fit view to show all clouds after a brief delay for render to complete
+    setTimeout(() => fitView(), 100);
+}
+
 export function getFormattedSql(): string {
     return formatSql(currentSql);
 }
@@ -5942,6 +6051,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'U', description: 'Focus upstream nodes' },
         { key: 'D', description: 'Focus downstream nodes' },
         { key: 'A', description: 'Focus all connected nodes' },
+        { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];

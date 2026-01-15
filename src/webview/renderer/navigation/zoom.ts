@@ -1,7 +1,7 @@
 // Zoom and view navigation utilities
 
 import { FlowNode, FlowEdge, FocusMode } from '../../types';
-import { state, svg, mainGroup, currentNodes, currentEdges } from '../state';
+import { state, svg, mainGroup, currentNodes, currentEdges, cloudOffsets, cloudElements } from '../state';
 import { updateTransform, clearFocusMode } from './transform';
 import { selectNode } from './selection';
 
@@ -92,6 +92,66 @@ export function fitView(): void {
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
         maxY = Math.max(maxY, node.y + node.height);
+    }
+
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+
+    // Account for panels
+    const availableWidth = rect.width - 320;
+    const availableHeight = rect.height - 100;
+
+    // Calculate scale to fit
+    const scaleX = (availableWidth - padding * 2) / graphWidth;
+    const scaleY = (availableHeight - padding * 2) / graphHeight;
+    state.scale = Math.min(scaleX, scaleY, 1.5);
+
+    // Center the graph
+    state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
+    state.offsetY = (availableHeight - graphHeight * state.scale) / 2 - minY * state.scale + 50;
+
+    // Reset zoom state tracking when fitting view
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
+
+    updateTransform();
+}
+
+/**
+ * Fit view including expanded cloud containers in bounds calculation
+ */
+export function fitViewWithClouds(): void {
+    if (!svg || currentNodes.length === 0) { return; }
+
+    const rect = svg.getBoundingClientRect();
+    const padding = 80;
+
+    // Calculate bounds including clouds
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const node of currentNodes) {
+        // Include base node
+        minX = Math.min(minX, node.x);
+        minY = Math.min(minY, node.y);
+        maxX = Math.max(maxX, node.x + node.width);
+        maxY = Math.max(maxY, node.y + node.height);
+
+        // Include expanded cloud if exists
+        if (node.expanded && cloudOffsets.has(node.id)) {
+            const offset = cloudOffsets.get(node.id)!;
+            const cloudInfo = cloudElements.get(node.id);
+            if (cloudInfo) {
+                const cloudX = node.x + offset.offsetX;
+                const cloudY = node.y + offset.offsetY;
+                const cloudWidth = parseFloat(cloudInfo.cloud.getAttribute('width') || '0');
+                const cloudHeight = parseFloat(cloudInfo.cloud.getAttribute('height') || '0');
+
+                minX = Math.min(minX, cloudX);
+                minY = Math.min(minY, cloudY);
+                maxX = Math.max(maxX, cloudX + cloudWidth);
+                maxY = Math.max(maxY, cloudY + cloudHeight);
+            }
+        }
     }
 
     const graphWidth = maxX - minX;
