@@ -57,23 +57,57 @@ export class IndexManager {
     }
 
     /**
-     * Build the full workspace index
+     * Build the full workspace index with incremental updates based on content hashes
      */
     async buildIndex(progressCallback?: ProgressCallback): Promise<WorkspaceIndex> {
         const analyses = await this.scanner.analyzeWorkspace(progressCallback);
 
-        this.index = {
+        // Initialize new index or reuse existing for incremental updates
+        const newIndex: WorkspaceIndex = {
             version: INDEX_VERSION,
             lastUpdated: Date.now(),
             fileCount: analyses.length,
             files: new Map(),
+            fileHashes: new Map(),
             definitionMap: new Map(),
             referenceMap: new Map()
         };
 
+        // Copy existing index for hash comparison if available
+        const oldHashes = this.index?.fileHashes || new Map<string, string>();
+
+        // Process files: reuse unchanged files, reprocess changed/new files
         for (const analysis of analyses) {
-            this.addFileToIndex(analysis);
+            const oldHash = oldHashes.get(analysis.filePath);
+
+            if (oldHash === analysis.contentHash && this.index?.files.has(analysis.filePath)) {
+                // File unchanged - reuse existing analysis
+                const existing = this.index.files.get(analysis.filePath)!;
+                newIndex.files.set(analysis.filePath, existing);
+                newIndex.fileHashes.set(analysis.filePath, analysis.contentHash);
+
+                // Reuse definition and reference mappings
+                for (const def of existing.definitions) {
+                    const key = def.name.toLowerCase();
+                    if (!newIndex.definitionMap.has(key)) {
+                        newIndex.definitionMap.set(key, def);
+                    }
+                }
+
+                for (const ref of existing.references) {
+                    const key = ref.tableName.toLowerCase();
+                    if (!newIndex.referenceMap.has(key)) {
+                        newIndex.referenceMap.set(key, []);
+                    }
+                    newIndex.referenceMap.get(key)!.push(ref);
+                }
+            } else {
+                // File changed or new - process it
+                this.addFileToIndex(analysis, newIndex);
+            }
         }
+
+        this.index = newIndex;
 
         // Persist to workspace state
         await this.persistIndex();
@@ -101,7 +135,7 @@ export class IndexManager {
     }
 
     /**
-     * Update a single file in the index
+     * Update a single file in the index with hash-based change detection
      */
     async updateFile(uri: vscode.Uri): Promise<void> {
         if (!this.index) {
@@ -110,9 +144,16 @@ export class IndexManager {
         }
 
         const analysis = await this.scanner.analyzeFile(uri);
+        const oldHash = this.index.fileHashes.get(uri.fsPath);
+        const oldAnalysis = this.index.files.get(uri.fsPath);
+
+        // Check if file actually changed (hash comparison)
+        if (oldHash === analysis.contentHash && oldAnalysis) {
+            // No change detected - skip update
+            return;
+        }
 
         // Remove old entries for this file
-        const oldAnalysis = this.index.files.get(uri.fsPath);
         if (oldAnalysis) {
             this.removeFileFromIndex(oldAnalysis);
         }
@@ -139,6 +180,7 @@ export class IndexManager {
         const analysis = this.index.files.get(uri.fsPath);
         if (analysis) {
             this.removeFileFromIndex(analysis);
+            this.index.fileHashes.delete(uri.fsPath);
             this.index.fileCount = this.index.files.size;
             this.index.lastUpdated = Date.now();
             await this.persistIndex();
@@ -273,31 +315,35 @@ export class IndexManager {
 
     /**
      * Add a file analysis to the index
+     * @param analysis The file analysis to add
+     * @param index Optional target index (defaults to this.index)
      */
-    private addFileToIndex(analysis: FileAnalysis): void {
-        if (!this.index) return;
+    private addFileToIndex(analysis: FileAnalysis, index?: WorkspaceIndex): void {
+        const targetIndex = index || this.index;
+        if (!targetIndex) return;
 
-        this.index.files.set(analysis.filePath, analysis);
+        targetIndex.files.set(analysis.filePath, analysis);
+        targetIndex.fileHashes.set(analysis.filePath, analysis.contentHash);
 
         // Index definitions
         for (const def of analysis.definitions) {
             const key = def.name.toLowerCase();
             // If already defined elsewhere, prefer the first definition
-            if (!this.index.definitionMap.has(key)) {
-                this.index.definitionMap.set(key, def);
+            if (!targetIndex.definitionMap.has(key)) {
+                targetIndex.definitionMap.set(key, def);
             }
         }
 
         // Index references
         for (const ref of analysis.references) {
             const key = ref.tableName.toLowerCase();
-            if (!this.index.referenceMap.has(key)) {
-                this.index.referenceMap.set(key, []);
+            if (!targetIndex.referenceMap.has(key)) {
+                targetIndex.referenceMap.set(key, []);
             }
-            this.index.referenceMap.get(key)!.push(ref);
+            targetIndex.referenceMap.get(key)!.push(ref);
         }
 
-        this.index.fileCount = this.index.files.size;
+        targetIndex.fileCount = targetIndex.files.size;
     }
 
     /**
@@ -373,11 +419,15 @@ export class IndexManager {
         }
 
         // Reconstruct Maps from arrays
+        // Handle backward compatibility: fileHashesArray may not exist in old cache
+        const fileHashesArray = cached.fileHashesArray || [];
+
         return {
             version: cached.version,
             lastUpdated: cached.lastUpdated,
             fileCount: cached.fileCount,
             files: new Map(cached.filesArray || []),
+            fileHashes: new Map(fileHashesArray),
             definitionMap: new Map(cached.definitionArray || []),
             referenceMap: new Map(cached.referenceArray || [])
         };
@@ -395,6 +445,7 @@ export class IndexManager {
             lastUpdated: this.index.lastUpdated,
             fileCount: this.index.fileCount,
             filesArray: [...this.index.files.entries()],
+            fileHashesArray: [...this.index.fileHashes.entries()],
             definitionArray: [...this.index.definitionMap.entries()],
             referenceArray: [...this.index.referenceMap.entries()]
         };

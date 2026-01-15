@@ -377,52 +377,66 @@ function getPrimaryReferenceType(types: TableReference['referenceType'][]): Tabl
 }
 
 /**
- * Layout the graph using a grid algorithm with row wrapping
- * This prevents nodes from appearing as tiny dots when all are at the same level
+ * Layout the graph using an improved hierarchical algorithm
+ * Features: dynamic spacing, centered rows, better edge flow visualization
  */
 function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
     if (nodes.length === 0) return;
 
-    // Simple hierarchical layout based on dependencies
-    const nodeMap = new Map<string, WorkspaceNode>();
-    for (const node of nodes) {
-        nodeMap.set(node.id, node);
-    }
+    // Calculate canvas dimensions (assuming standard webview size)
+    const canvasWidth = 2800;
+    const canvasHeight = 2000;
 
-    // Calculate in-degree for each node
+    // Dynamic spacing based on node count
+    const nodeCount = nodes.length;
+    const horizontalGap = nodeCount > 20 ? 60 : 80;
+    const verticalGap = nodeCount > 20 ? 80 : 100;
+    const padding = 80;
+
+    // Calculate max nodes per row based on canvas width and average node width
+    const avgNodeWidth = nodes.reduce((sum, n) => sum + n.width, 0) / nodes.length;
+    const maxNodesPerRow = Math.max(3, Math.floor((canvasWidth - padding * 2) / (avgNodeWidth + horizontalGap)));
+
+    // Build adjacency list for topological sorting
     const inDegree = new Map<string, number>();
+    const adjacency = new Map<string, string[]>();
+
     for (const node of nodes) {
         inDegree.set(node.id, 0);
+        adjacency.set(node.id, []);
     }
+
     for (const edge of edges) {
         inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
+        adjacency.get(edge.source)!.push(edge.target);
     }
 
-    // Sort nodes by in-degree (sources first)
-    const sortedNodes = [...nodes].sort((a, b) => {
-        const degA = inDegree.get(a.id) || 0;
-        const degB = inDegree.get(b.id) || 0;
-        return degA - degB;
-    });
-
-    // Assign levels
+    // Assign levels using BFS with longest path
     const levels = new Map<string, number>();
     const visited = new Set<string>();
 
     function assignLevel(nodeId: string, level: number): void {
-        if (visited.has(nodeId)) return;
+        if (visited.has(nodeId)) {
+            levels.set(nodeId, Math.max(levels.get(nodeId) || 0, level));
+            return;
+        }
         visited.add(nodeId);
-        levels.set(nodeId, Math.max(level, levels.get(nodeId) || 0));
+        levels.set(nodeId, level);
 
-        // Find outgoing edges
-        for (const edge of edges) {
-            if (edge.source === nodeId) {
-                assignLevel(edge.target, level + 1);
-            }
+        for (const targetId of adjacency.get(nodeId) || []) {
+            assignLevel(targetId, level + 1);
         }
     }
 
-    for (const node of sortedNodes) {
+    // Start from nodes with in-degree 0
+    for (const node of nodes) {
+        if ((inDegree.get(node.id) || 0) === 0) {
+            assignLevel(node.id, 0);
+        }
+    }
+
+    // Handle remaining nodes (cycles)
+    for (const node of nodes) {
         if (!visited.has(node.id)) {
             assignLevel(node.id, 0);
         }
@@ -438,13 +452,10 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         levelGroups.get(level)!.push(node);
     }
 
-    // Position nodes with row wrapping
-    const horizontalGap = 40;
-    const verticalGap = 60;
-    const maxNodesPerRow = 5; // Limit nodes per row to prevent tiny dots
-    let currentY = 50;
-
+    // Position nodes with row wrapping and centering
+    let currentY = padding;
     const sortedLevels = [...levelGroups.keys()].sort((a, b) => a - b);
+
     for (const level of sortedLevels) {
         const levelNodes = levelGroups.get(level)!;
 
@@ -456,16 +467,24 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
 
         // Position each row
         for (const rowNodes of rows) {
-            let currentX = 50;
-            const maxHeight = Math.max(...rowNodes.map(n => n.height));
+            // Calculate row width for centering
+            const rowWidth = rowNodes.reduce((sum, n) => sum + n.width, 0) + (rowNodes.length - 1) * horizontalGap;
+
+            // Center the row horizontally
+            let currentX = Math.max(padding, (canvasWidth - rowWidth) / 2);
+
+            // Find maximum height in this row for vertical alignment
+            const rowMaxHeight = Math.max(...rowNodes.map(n => n.height));
 
             for (const node of rowNodes) {
+                // Vertically center nodes of different heights within the row
+                const yOffset = (rowMaxHeight - node.height) / 2;
                 node.x = currentX;
-                node.y = currentY;
+                node.y = currentY + yOffset;
                 currentX += node.width + horizontalGap;
             }
 
-            currentY += maxHeight + verticalGap;
+            currentY += rowMaxHeight + verticalGap;
         }
     }
 }

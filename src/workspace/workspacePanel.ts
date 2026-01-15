@@ -4,7 +4,16 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { IndexManager } from './indexManager';
 import { buildDependencyGraph } from './dependencyGraph';
-import { WorkspaceDependencyGraph, GraphMode, WorkspaceNode } from './types';
+import {
+    WorkspaceDependencyGraph,
+    GraphMode,
+    WorkspaceNode,
+    SearchFilter,
+    SearchResult,
+    DetailedWorkspaceStats,
+    DefinitionDetail,
+    MissingDefinitionDetail
+} from './types';
 import { SqlDialect } from '../webview/types/parser';
 
 const AUTO_INDEX_THRESHOLD = 50;
@@ -22,6 +31,13 @@ export class WorkspacePanel {
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentMode: GraphMode = 'files';
+    private _currentSearchFilter: SearchFilter = {
+        query: '',
+        nodeTypes: undefined,
+        useRegex: false,
+        caseSensitive: false
+    };
+    private _detailedStats: DetailedWorkspaceStats | null = null;
 
     /**
      * Create or show the workspace panel
@@ -153,7 +169,7 @@ export class WorkspacePanel {
         }
 
         this._currentGraph = buildDependencyGraph(index, this._currentMode);
-        this._panel.webview.html = this.getWebviewHtml(this._currentGraph);
+        this._panel.webview.html = this.getWebviewHtml(this._currentGraph, this._currentSearchFilter);
     }
 
     /**
@@ -169,6 +185,21 @@ export class WorkspacePanel {
             case 'refresh':
                 await this.buildIndexWithProgress();
                 await this.rebuildAndRenderGraph();
+                break;
+
+            case 'search':
+                this._currentSearchFilter = message.filter as SearchFilter;
+                this._panel.webview.html = this.getWebviewHtml(this._currentGraph!, this._currentSearchFilter);
+                break;
+
+            case 'clearSearch':
+                this._currentSearchFilter = {
+                    query: '',
+                    nodeTypes: undefined,
+                    useRegex: false,
+                    caseSensitive: false
+                };
+                this._panel.webview.html = this.getWebviewHtml(this._currentGraph!, this._currentSearchFilter);
                 break;
 
             case 'openFile':
@@ -211,10 +242,13 @@ export class WorkspacePanel {
     }
 
     /**
-     * Get webview HTML with graph data
+     * Get webview HTML with graph data and search functionality
      */
-    private getWebviewHtml(graph: WorkspaceDependencyGraph): string {
+    private getWebviewHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter = { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false }): string {
         const nonce = getNonce();
+
+        // Generate detailed stats data for expandable sections
+        const detailedStats = this.generateDetailedStats(graph);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -234,32 +268,106 @@ export class WorkspacePanel {
 
         /* Toolbar */
         .toolbar {
-            display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
             background: #1e293b; border-bottom: 1px solid #334155;
+            flex-wrap: wrap;
         }
-        .toolbar-title { font-weight: 600; font-size: 14px; color: #f1f5f9; }
-        .toolbar-separator { width: 1px; height: 24px; background: #475569; }
+        .toolbar-title { font-weight: 600; font-size: 13px; color: #f1f5f9; margin-right: 8px; }
+        .toolbar-separator { width: 1px; height: 20px; background: #475569; margin: 0 4px; }
         .toolbar-btn {
-            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
-            background: #334155; border: none; border-radius: 6px;
-            color: #e2e8f0; font-size: 12px; cursor: pointer;
+            display: flex; align-items: center; gap: 4px; padding: 5px 10px;
+            background: #334155; border: none; border-radius: 5px;
+            color: #e2e8f0; font-size: 11px; cursor: pointer;
             transition: background 0.15s;
         }
         .toolbar-btn:hover { background: #475569; }
         .toolbar-btn.active { background: #6366f1; }
-        .toolbar-btn svg { width: 14px; height: 14px; }
+        .toolbar-btn svg { width: 12px; height: 12px; }
+
+        /* Search Box */
+        .search-container {
+            display: flex; align-items: center; gap: 6px; margin-left: auto;
+            background: #0f172a; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;
+        }
+        .search-input {
+            background: transparent; border: none; color: #e2e8f0;
+            font-size: 11px; width: 150px; outline: none;
+        }
+        .search-input::placeholder { color: #64748b; }
+        .search-input:focus { width: 200px; }
+        .search-filter-select {
+            background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+            font-size: 10px; padding: 3px 6px; border-radius: 4px; outline: none; cursor: pointer;
+        }
+        .search-filter-select:hover { border-color: #475569; }
+        .search-options {
+            display: flex; gap: 4px; align-items: center;
+        }
+        .search-option {
+            background: transparent; border: 1px solid #334155; color: #94a3b8;
+            font-size: 9px; padding: 2px 6px; border-radius: 3px; cursor: pointer;
+        }
+        .search-option.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+        .search-clear {
+            background: transparent; border: none; color: #64748b;
+            cursor: pointer; padding: 2px; display: none;
+        }
+        .search-clear:hover { color: #f87171; }
+        .search-clear.visible { display: block; }
 
         /* Stats Panel */
         .stats-panel {
-            display: flex; gap: 16px; padding: 8px 16px;
+            display: flex; gap: 12px; padding: 6px 12px;
             background: #1e293b; border-bottom: 1px solid #334155;
-            font-size: 12px;
+            font-size: 11px; flex-wrap: wrap;
         }
-        .stat-item { display: flex; align-items: center; gap: 6px; }
-        .stat-value { font-weight: 600; color: #f1f5f9; }
+        .stat-item {
+            display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+            background: #0f172a; border-radius: 4px; border: 1px solid #334155;
+            cursor: default;
+        }
+        .stat-item.clickable { cursor: pointer; }
+        .stat-item.clickable:hover { border-color: #475569; }
+        .stat-value { font-weight: 600; color: #f1f5f9; font-size: 12px; }
         .stat-label { color: #94a3b8; }
         .stat-warning { color: #fbbf24; }
         .stat-error { color: #f87171; }
+        .stat-expand { margin-left: 2px; color: #64748b; font-size: 9px; transition: transform 0.2s; }
+        .stat-item.expanded .stat-expand { transform: rotate(180deg); }
+
+        /* Expandable Details Panel */
+        .details-panel {
+            max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;
+            background: #0f172a; border-bottom: 1px solid #334155;
+        }
+        .details-panel.expanded { max-height: 300px; overflow-y: auto; }
+        .details-section { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+        .details-section:last-child { border-bottom: none; }
+        .details-title {
+            font-size: 11px; font-weight: 600; color: #fbbf24; margin-bottom: 6px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .details-title.error { color: #f87171; }
+        .details-list { display: flex; flex-direction: column; gap: 2px; }
+        .details-item {
+            display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+            background: #1e293b; border-radius: 3px; font-size: 10px;
+        }
+        .details-item:hover { background: #334155; }
+        .details-item-type {
+            padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;
+        }
+        .details-item-type.table { background: #10b981; color: #fff; }
+        .details-item-type.view { background: #8b5cf6; color: #fff; }
+        .details-item-path { color: #94a3b8; flex: 1; }
+        .details-item-line { color: #64748b; font-size: 9px; }
+
+        /* Search Results */
+        .search-results-info {
+            padding: 4px 12px; background: #1e293b; border-bottom: 1px solid #334155;
+            font-size: 10px; color: #94a3b8; display: none;
+        }
+        .search-results-info.visible { display: block; }
 
         /* SVG Container */
         #graph-container { flex: 1; overflow: hidden; position: relative; }
@@ -267,8 +375,9 @@ export class WorkspacePanel {
         #graph-svg:active { cursor: grabbing; }
 
         /* Node Styles */
-        .node { cursor: pointer; }
+        .node { cursor: pointer; transition: opacity 0.2s; }
         .node:hover rect { filter: brightness(1.1); }
+        .node.dimmed { opacity: 0.2; }
         .node-file rect { fill: #3b82f6; stroke: #60a5fa; stroke-width: 2; rx: 8; }
         .node-table rect { fill: #10b981; stroke: #34d399; stroke-width: 2; rx: 8; }
         .node-view rect { fill: #8b5cf6; stroke: #a78bfa; stroke-width: 2; rx: 8; }
@@ -304,6 +413,57 @@ export class WorkspacePanel {
         }
         .empty-state svg { width: 64px; height: 64px; opacity: 0.5; }
         .empty-state-title { font-size: 18px; font-weight: 600; color: #e2e8f0; }
+
+        /* Highlight */
+        .highlight { fill: #fbbf24 !important; stroke: #fbbf24 !important; }
+
+        /* Legend Popover */
+        .legend-popover {
+            position: absolute; top: 50px; right: 12px;
+            background: #1e293b; border: 1px solid #475569; border-radius: 8px;
+            padding: 12px 16px; min-width: 220px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            z-index: 100; display: none;
+        }
+        .legend-popover.visible { display: block; }
+        .legend-title {
+            font-size: 12px; font-weight: 600; color: #f1f5f9; margin-bottom: 10px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .legend-section { margin-bottom: 12px; }
+        .legend-section:last-child { margin-bottom: 0; }
+        .legend-section-title {
+            font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-bottom: 6px;
+        }
+        .legend-item {
+            display: flex; align-items: center; gap: 8px; padding: 4px 0;
+            font-size: 11px; color: #e2e8f0;
+        }
+        .legend-color {
+            width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0;
+            border: 2px solid;
+        }
+        .legend-color.node-file { background: #3b82f6; border-color: #60a5fa; }
+        .legend-color.node-table { background: #10b981; border-color: #34d399; }
+        .legend-color.node-view { background: #8b5cf6; border-color: #a78bfa; }
+        .legend-color.node-external { background: #475569; border-color: #64748b; }
+        .legend-edge {
+            width: 24px; height: 3px; border-radius: 2px; flex-shrink: 0;
+        }
+        .legend-edge.edge-select { background: #64748b; }
+        .legend-edge.edge-join { background: #a78bfa; }
+        .legend-edge.edge-insert { background: #10b981; }
+        .legend-edge.edge-update { background: #fbbf24; }
+        .legend-edge.edge-delete { background: #f87171; }
+        .legend-hint {
+            margin-top: 10px; padding-top: 10px; border-top: 1px solid #334155;
+            font-size: 10px; color: #94a3b8; line-height: 1.4;
+        }
+        .legend-hint kbd {
+            background: #0f172a; border: 1px solid #475569; border-radius: 3px;
+            padding: 1px 4px; font-family: monospace; font-size: 9px;
+        }
     </style>
 </head>
 <body>
@@ -328,6 +488,87 @@ export class WorkspacePanel {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 Refresh
             </button>
+
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-btn" id="btn-legend" title="Show color legend">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                Legend
+            </button>
+
+            <div class="search-container">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                <input type="text" class="search-input" id="search-input" placeholder="Search nodes..." value="${this.escapeHtml(searchFilter.query)}">
+                <select class="search-filter-select" id="filter-type">
+                    <option value="all">All Types</option>
+                    <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files</option>
+                    <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables</option>
+                    <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views</option>
+                    <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
+                </select>
+                <div class="search-options">
+                    <button class="search-option ${searchFilter.useRegex ? 'active' : ''}" id="btn-regex" title="Regex">.*</button>
+                    <button class="search-option ${searchFilter.caseSensitive ? 'active' : ''}" id="btn-case" title="Case Sensitive">Aa</button>
+                </div>
+                <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Legend Popover -->
+        <div class="legend-popover" id="legend-popover">
+            <div class="legend-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+                </svg>
+                Color Legend
+            </div>
+            <div class="legend-section">
+                <div class="legend-section-title">Node Types</div>
+                <div class="legend-item">
+                    <div class="legend-color node-file"></div>
+                    <span>Files (SQL documents)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color node-table"></div>
+                    <span>Tables (CREATE TABLE)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color node-view"></div>
+                    <span>Views (CREATE VIEW)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color node-external"></div>
+                    <span>External (referenced but not defined)</span>
+                </div>
+            </div>
+            <div class="legend-section">
+                <div class="legend-section-title">Edge Types (References)</div>
+                <div class="legend-item">
+                    <div class="legend-edge edge-select"></div>
+                    <span>SELECT (read from)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-edge edge-join"></div>
+                    <span>JOIN (table join)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-edge edge-insert"></div>
+                    <span>INSERT (write to)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-edge edge-update"></div>
+                    <span>UPDATE (modify)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-edge edge-delete"></div>
+                    <span>DELETE (remove)</span>
+                </div>
+            </div>
+            <div class="legend-hint">
+                <kbd>Click</kbd> node to open file • <kbd>Double-click</kbd> to visualize<br>
+                <kbd>Ctrl+F</kbd> to search • <kbd>Drag</kbd> to pan • <kbd>Scroll</kbd> to zoom
+            </div>
         </div>
 
         <div class="stats-panel">
@@ -335,9 +576,16 @@ export class WorkspacePanel {
             <div class="stat-item"><span class="stat-value">${graph.stats.totalTables}</span><span class="stat-label">tables</span></div>
             <div class="stat-item"><span class="stat-value">${graph.stats.totalViews}</span><span class="stat-label">views</span></div>
             <div class="stat-item"><span class="stat-value">${graph.stats.totalReferences}</span><span class="stat-label">references</span></div>
-            ${graph.stats.orphanedDefinitions.length > 0 ? `<div class="stat-item stat-warning"><span class="stat-value">${graph.stats.orphanedDefinitions.length}</span><span class="stat-label">orphaned</span></div>` : ''}
-            ${graph.stats.missingDefinitions.length > 0 ? `<div class="stat-item stat-error"><span class="stat-value">${graph.stats.missingDefinitions.length}</span><span class="stat-label">missing</span></div>` : ''}
+            ${graph.stats.orphanedDefinitions.length > 0 ? `<div class="stat-item clickable stat-warning" id="stat-orphaned"><span class="stat-value">${graph.stats.orphanedDefinitions.length}</span><span class="stat-label">orphaned</span><span class="stat-expand">▼</span></div>` : ''}
+            ${graph.stats.missingDefinitions.length > 0 ? `<div class="stat-item clickable stat-error" id="stat-missing"><span class="stat-value">${graph.stats.missingDefinitions.length}</span><span class="stat-label">missing</span><span class="stat-expand">▼</span></div>` : ''}
         </div>
+
+        <div class="details-panel" id="details-panel">
+            ${graph.stats.orphanedDefinitions.length > 0 ? this.renderOrphanedDetails(detailedStats.orphanedDetails) : ''}
+            ${graph.stats.missingDefinitions.length > 0 ? this.renderMissingDetails(detailedStats.missingDetails) : ''}
+        </div>
+
+        <div class="search-results-info" id="search-results"></div>
 
         <div id="graph-container">
             ${graph.nodes.length > 0 ? this.renderGraph(graph) : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><div class="empty-state-title">No dependencies found</div><div>Try switching view mode or refreshing</div></div>'}
@@ -349,6 +597,8 @@ export class WorkspacePanel {
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         const graphData = ${JSON.stringify(graph)};
+        const detailedStats = ${JSON.stringify(detailedStats)};
+        const currentFilter = ${JSON.stringify(searchFilter)};
 
         // Pan and zoom state
         let scale = 1;
@@ -357,6 +607,14 @@ export class WorkspacePanel {
         let isDragging = false;
         let dragStartX = 0;
         let dragStartY = 0;
+
+        // Search state
+        const searchInput = document.getElementById('search-input');
+        const filterType = document.getElementById('filter-type');
+        const btnRegex = document.getElementById('btn-regex');
+        const btnCase = document.getElementById('btn-case');
+        const btnClearSearch = document.getElementById('btn-clear-search');
+        const searchResults = document.getElementById('search-results');
 
         // Setup pan/zoom
         const container = document.getElementById('graph-container');
@@ -404,6 +662,124 @@ export class WorkspacePanel {
             }
         }
 
+        // Search functionality
+        function performSearch() {
+            const query = searchInput.value.trim();
+            const typeFilter = filterType.value;
+            const useRegex = btnRegex.classList.contains('active');
+            const caseSensitive = btnCase.classList.contains('active');
+
+            if (!query && typeFilter === 'all') {
+                clearSearch();
+                return;
+            }
+
+            // Build node types filter
+            let nodeTypes = undefined;
+            if (typeFilter !== 'all') {
+                nodeTypes = [typeFilter];
+            }
+
+            // Send search command to extension
+            vscode.postMessage({
+                command: 'search',
+                filter: {
+                    query,
+                    nodeTypes,
+                    useRegex,
+                    caseSensitive
+                }
+            });
+
+            // Show/hide clear button
+            if (query || typeFilter !== 'all') {
+                btnClearSearch.classList.add('visible');
+            } else {
+                btnClearSearch.classList.remove('visible');
+            }
+        }
+
+        function clearSearch() {
+            searchInput.value = '';
+            filterType.value = 'all';
+            btnRegex.classList.remove('active');
+            btnCase.classList.remove('active');
+            btnClearSearch.classList.remove('visible');
+            searchResults.classList.remove('visible');
+
+            vscode.postMessage({ command: 'clearSearch' });
+        }
+
+        // Debounced search
+        let searchTimeout;
+        function debouncedSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(performSearch, 300);
+        }
+
+        // Search event listeners
+        searchInput.addEventListener('input', debouncedSearch);
+        filterType.addEventListener('change', performSearch);
+        btnRegex.addEventListener('click', () => {
+            btnRegex.classList.toggle('active');
+            performSearch();
+        });
+        btnCase.addEventListener('click', () => {
+            btnCase.classList.toggle('active');
+            performSearch();
+        });
+        btnClearSearch.addEventListener('click', clearSearch);
+
+        // Keyboard shortcut for search (Ctrl/Cmd + F)
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+            if (e.key === 'Escape') {
+                if (document.activeElement === searchInput) {
+                    searchInput.blur();
+                    clearSearch();
+                }
+            }
+        });
+
+        // Expandable stats
+        const statOrphaned = document.getElementById('stat-orphaned');
+        const statMissing = document.getElementById('stat-missing');
+        const detailsPanel = document.getElementById('details-panel');
+
+        function toggleDetails(statItem, sectionId) {
+            const isExpanded = statItem.classList.contains('expanded');
+            statItem.classList.toggle('expanded');
+
+            // Show/hide the relevant section
+            const section = document.getElementById(sectionId);
+            if (section) {
+                if (isExpanded) {
+                    section.style.display = 'none';
+                    detailsPanel.classList.remove('expanded');
+                } else {
+                    section.style.display = 'block';
+                    detailsPanel.classList.add('expanded');
+                }
+            }
+
+            // Hide panel if no sections visible
+            const visibleSections = detailsPanel.querySelectorAll('.details-section[style="display: block"]');
+            if (visibleSections.length === 0) {
+                detailsPanel.classList.remove('expanded');
+            }
+        }
+
+        if (statOrphaned) {
+            statOrphaned.addEventListener('click', () => toggleDetails(statOrphaned, 'details-orphaned'));
+        }
+        if (statMissing) {
+            statMissing.addEventListener('click', () => toggleDetails(statMissing, 'details-missing'));
+        }
+
         // Commands
         function changeMode(mode) {
             vscode.postMessage({ command: 'changeMode', mode: mode });
@@ -425,15 +801,29 @@ export class WorkspacePanel {
             vscode.postMessage({ command: 'visualizeFile', filePath: filePath });
         }
 
-        // Add event listeners for toolbar buttons (CSP blocks inline onclick)
+        // Add event listeners for toolbar buttons
         document.getElementById('btn-files')?.addEventListener('click', () => changeMode('files'));
         document.getElementById('btn-tables')?.addEventListener('click', () => changeMode('tables'));
         document.getElementById('btn-hybrid')?.addEventListener('click', () => changeMode('hybrid'));
         document.getElementById('btn-refresh')?.addEventListener('click', () => refresh());
 
-        // Event delegation for node interactions (CSP blocks inline handlers)
+        // Legend button - toggle popover
+        const btnLegend = document.getElementById('btn-legend');
+        const legendPopover = document.getElementById('legend-popover');
+        btnLegend?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            legendPopover?.classList.toggle('visible');
+        });
+
+        // Close legend when clicking outside
+        document.addEventListener('click', (e) => {
+            if (legendPopover && !legendPopover.contains(e.target) && e.target !== btnLegend) {
+                legendPopover.classList.remove('visible');
+            }
+        });
+
+        // Event delegation for node interactions
         if (svg) {
-            // Click to open file
             svg.addEventListener('click', (e) => {
                 const node = e.target.closest('.node');
                 if (node) {
@@ -442,7 +832,6 @@ export class WorkspacePanel {
                 }
             });
 
-            // Double-click to visualize
             svg.addEventListener('dblclick', (e) => {
                 const node = e.target.closest('.node');
                 if (node) {
@@ -451,7 +840,6 @@ export class WorkspacePanel {
                 }
             });
 
-            // Mouseover for tooltip
             svg.addEventListener('mouseover', (e) => {
                 const node = e.target.closest('.node');
                 if (node) {
@@ -463,7 +851,6 @@ export class WorkspacePanel {
                 }
             });
 
-            // Mouseout to hide tooltip
             svg.addEventListener('mouseout', (e) => {
                 const node = e.target.closest('.node');
                 if (node) {
@@ -482,24 +869,163 @@ export class WorkspacePanel {
             tooltip.style.top = (e.clientY + 10) + 'px';
         }
 
-        function showNodeTooltip(e, element) {
-            const base64 = element.getAttribute('data-tooltip');
-            if (base64) {
-                const content = atob(base64);
-                showTooltip(e, content);
-            }
-        }
-
         function hideTooltip() {
             tooltip.style.display = 'none';
         }
+
+        // Handle details item clicks
+        document.querySelectorAll('.details-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const filePath = item.getAttribute('data-filepath');
+                const line = item.getAttribute('data-line');
+                if (filePath) {
+                    if (line) {
+                        openFileAtLine(filePath, parseInt(line));
+                    } else {
+                        openFile(filePath);
+                    }
+                }
+            });
+        });
     </script>
 </body>
 </html>`;
     }
 
     /**
-     * Render the graph SVG
+     * Generate detailed statistics for expandable sections
+     */
+    private generateDetailedStats(graph: WorkspaceDependencyGraph): DetailedWorkspaceStats {
+        const index = this._indexManager.getIndex();
+        if (!index) {
+            return {
+                ...graph.stats,
+                orphanedDetails: [],
+                missingDetails: []
+            };
+        }
+
+        // Generate orphaned details
+        const orphanedDetails: DefinitionDetail[] = [];
+        for (const tableName of graph.stats.orphanedDefinitions) {
+            const def = index.definitionMap.get(tableName.toLowerCase());
+            if (def) {
+                orphanedDetails.push({
+                    name: def.name,
+                    type: def.type,
+                    filePath: def.filePath,
+                    lineNumber: def.lineNumber
+                });
+            }
+        }
+
+        // Generate missing details
+        const missingDetails: MissingDefinitionDetail[] = [];
+        for (const tableName of graph.stats.missingDefinitions) {
+            const refs = index.referenceMap.get(tableName.toLowerCase()) || [];
+            const referencingFiles = [...new Set(refs.map(r => r.filePath))];
+
+            missingDetails.push({
+                tableName,
+                references: refs,
+                referenceCount: refs.length,
+                referencingFiles
+            });
+        }
+
+        return {
+            ...graph.stats,
+            orphanedDetails,
+            missingDetails
+        };
+    }
+
+    /**
+     * Render orphaned definitions details section
+     */
+    private renderOrphanedDetails(details: DefinitionDetail[]): string {
+        if (details.length === 0) return '';
+
+        const items = details.slice(0, 50).map(d => `
+            <div class="details-item" data-filepath="${this.escapeHtml(d.filePath)}" data-line="${d.lineNumber}">
+                <span class="details-item-type ${d.type}">${d.type.toUpperCase()}</span>
+                <span style="color: #e2e8f0; font-weight: 500;">${this.escapeHtml(d.name)}</span>
+                <span class="details-item-path">${this.escapeHtml(d.filePath)}</span>
+                <span class="details-item-line">:${d.lineNumber}</span>
+            </div>
+        `).join('');
+
+        return `
+            <div class="details-section" id="details-orphaned" style="display: none;">
+                <div class="details-title">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Orphaned Definitions (defined but never referenced)
+                </div>
+                <div class="details-list">
+                    ${items}
+                    ${details.length > 50 ? `<div class="details-item" style="justify-content: center; color: #64748b;">... and ${details.length - 50} more</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render missing definitions details section
+     */
+    private renderMissingDetails(details: MissingDefinitionDetail[]): string {
+        if (details.length === 0) return '';
+
+        const items = details.slice(0, 50).map(d => {
+            // Show first few references
+            const refSamples = d.references.slice(0, 3).map(r => ({
+                file: r.filePath,
+                line: r.lineNumber
+            }));
+
+            return `
+                <div class="details-item" style="flex-direction: column; align-items: stretch;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span style="color: #e2e8f0; font-weight: 500;">${this.escapeHtml(d.tableName)}</span>
+                        <span style="color: #64748b; font-size: 9px;">(${d.referenceCount} refs)</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 2px; margin-left: 18px;">
+                        ${refSamples.map(r => `
+                            <div class="details-item" data-filepath="${this.escapeHtml(r.file)}" data-line="${r.line}" style="padding: 2px 4px; font-size: 9px;">
+                                <span class="details-item-path">${this.escapeHtml(r.file)}</span>
+                                <span class="details-item-line">:${r.line}</span>
+                            </div>
+                        `).join('')}
+                        ${d.references.length > 3 ? `<span style="color: #64748b; font-size: 8px; padding-left: 6px;">+ ${d.references.length - 3} more references</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="details-section" id="details-missing" style="display: none;">
+                <div class="details-title error">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    Missing Definitions (referenced but not defined in workspace)
+                </div>
+                <div class="details-list">
+                    ${items}
+                    ${details.length > 50 ? `<div class="details-item" style="justify-content: center; color: #64748b;">... and ${details.length - 50} more</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render the graph SVG with improved edge styling
      */
     private renderGraph(graph: WorkspaceDependencyGraph): string {
         // Calculate bounds
@@ -511,29 +1037,50 @@ export class WorkspacePanel {
             maxY = Math.max(maxY, node.y + node.height);
         }
 
-        const width = Math.max(800, maxX + 100);
-        const height = Math.max(600, maxY + 100);
+        const width = Math.max(1200, maxX + 150);
+        const height = Math.max(800, maxY + 150);
 
-        // Render edges
+        // Render edges with improved curvature
         const edgesHtml = graph.edges.map(edge => {
             const source = graph.nodes.find(n => n.id === edge.source);
             const target = graph.nodes.find(n => n.id === edge.target);
             if (!source || !target) return '';
 
+            // Calculate connection points
             const x1 = source.x + source.width / 2;
             const y1 = source.y + source.height;
             const x2 = target.x + target.width / 2;
             const y2 = target.y;
 
-            const midY = (y1 + y2) / 2;
-            const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+            // Calculate vertical distance for curvature control
+            const verticalDistance = y2 - y1;
+            const curveIntensity = Math.max(verticalDistance * 0.3, 50);
+
+            // Create smooth bezier curve with better control points
+            const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
+
+            // Get edge color based on reference type
+            const edgeColors: Record<string, string> = {
+                'select': '#64748b',
+                'join': '#a78bfa',
+                'insert': '#10b981',
+                'update': '#fbbf24',
+                'delete': '#f87171',
+                'subquery': '#8b5cf6'
+            };
+            const edgeColor = edgeColors[edge.referenceType] || '#64748b';
 
             return `
                 <g class="edge edge-${edge.referenceType}"
-                   onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.join(', ')}</div>')"
+                   onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>')"
                    onmouseleave="hideTooltip()">
-                    <path d="${path}" marker-end="url(#arrowhead)"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${midY - 5}" class="edge-label" text-anchor="middle">${edge.count}</text>` : ''}
+                    <path d="${path}"
+                          fill="none"
+                          stroke="${edgeColor}"
+                          stroke-width="2"
+                          marker-end="url(#arrowhead-${edge.referenceType})"
+                          opacity="0.7"/>
+                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="#94a3b8" font-size="10">${edge.count}</text>` : ''}
                 </g>
             `;
         }).join('');
@@ -552,19 +1099,35 @@ export class WorkspacePanel {
                    transform="translate(${node.x}, ${node.y})"
                    data-filepath="${node.filePath ? this.escapeHtml(node.filePath) : ''}"
                    data-tooltip="${Buffer.from(tooltipContent).toString('base64')}">
-                    <rect width="${node.width}" height="${node.height}" filter="url(#shadow)"/>
-                    <text x="${node.width/2}" y="24" class="node-label" text-anchor="middle">${this.escapeHtml(node.label)}</text>
-                    ${sublabel ? `<text x="${node.width/2}" y="42" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
+                    <rect width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
+                    <text x="${node.width/2}" y="28" class="node-label" text-anchor="middle">${this.escapeHtml(node.label)}</text>
+                    ${sublabel ? `<text x="${node.width/2}" y="46" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
                 </g>
+            `;
+        }).join('');
+
+        // Generate arrow markers for each edge type
+        const edgeTypes = ['select', 'join', 'insert', 'update', 'delete', 'subquery'];
+        const arrowMarkers = edgeTypes.map(type => {
+            const colors: Record<string, string> = {
+                'select': '#64748b',
+                'join': '#a78bfa',
+                'insert': '#10b981',
+                'update': '#fbbf24',
+                'delete': '#f87171',
+                'subquery': '#8b5cf6'
+            };
+            return `
+                <marker id="arrowhead-${type}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="${colors[type] || '#64748b'}"/>
+                </marker>
             `;
         }).join('');
 
         return `
             <svg id="graph-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
                 <defs>
-                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
-                    </marker>
+                    ${arrowMarkers}
                     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
                         <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
                     </filter>

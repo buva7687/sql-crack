@@ -53,6 +53,7 @@ export interface FileAnalysis {
     filePath: string;
     fileName: string;
     lastModified: number;
+    contentHash: string;        // SHA-256 hash for change detection
     definitions: SchemaDefinition[];
     references: TableReference[];
     parseError?: string;
@@ -66,6 +67,7 @@ export interface WorkspaceIndex {
     lastUpdated: number;
     fileCount: number;
     files: Map<string, FileAnalysis>;
+    fileHashes: Map<string, string>;   // filePath -> contentHash for incremental parsing
     definitionMap: Map<string, SchemaDefinition>;  // tableName (lowercase) -> definition
     referenceMap: Map<string, TableReference[]>;   // tableName (lowercase) -> references
 }
@@ -78,6 +80,7 @@ export interface SerializedWorkspaceIndex {
     lastUpdated: number;
     fileCount: number;
     filesArray: [string, FileAnalysis][];
+    fileHashesArray: [string, string][];   // filePath -> contentHash pairs
     definitionArray: [string, SchemaDefinition][];
     referenceArray: [string, TableReference[]][];
 }
@@ -153,3 +156,52 @@ export interface WorkspaceAnalysisOptions {
  * Progress callback for long operations
  */
 export type ProgressCallback = (current: number, total: number, fileName: string) => void;
+
+/**
+ * Search filter options for workspace
+ */
+export interface SearchFilter {
+    query: string;                    // Search query text
+    nodeTypes?: WorkspaceNode['type'][];  // Filter by node type
+    useRegex: boolean;                // Enable regex matching
+    caseSensitive: boolean;           // Case-sensitive search
+}
+
+/**
+ * Search result with match details
+ */
+export interface SearchResult {
+    nodeId: string;
+    node: WorkspaceNode;
+    matchType: 'name' | 'filePath' | 'definition' | 'reference';
+    matchText: string;
+    matchPosition?: number;           // Character position of match
+}
+
+/**
+ * Enhanced statistics with detailed issue information
+ */
+export interface DetailedWorkspaceStats extends WorkspaceStats {
+    orphanedDetails: DefinitionDetail[];
+    missingDetails: MissingDefinitionDetail[];
+}
+
+/**
+ * Detail for an orphaned definition
+ */
+export interface DefinitionDetail {
+    name: string;
+    type: 'table' | 'view';
+    filePath: string;
+    lineNumber: number;
+}
+
+/**
+ * Detail for a missing definition
+ */
+export interface MissingDefinitionDetail {
+    tableName: string;
+    references: TableReference[];
+    referenceCount: number;
+    referencingFiles: string[];
+}

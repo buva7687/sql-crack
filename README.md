@@ -169,12 +169,36 @@ The workspace panel shows:
 - Double-click to visualize that file's SQL query
 - Hover for details on definitions and references
 - Pan by dragging, zoom with mouse wheel
+- Click **Legend** button for color-coded guide
+
+**Graph Visualization**:
+- Hierarchical layout with automatic node positioning
+- Color-coded nodes: Blue (files), Green (tables), Purple (views), Grey (external)
+- Color-coded edges: Grey (SELECT), Purple (JOIN), Green (INSERT), Yellow (UPDATE), Red (DELETE)
+- Smooth curved bezier edges with proper spacing
+- Centered layout with dynamic row wrapping
+- Row centering for optimal visual balance
+
+**Search**:
+- Search nodes by name with `Ctrl+F` / `Cmd+F`
+- Filter by node type (Files, Tables, Views, External)
+- Enable regex matching with `.*` button
+- Toggle case sensitivity with `Aa` button
+- Debounced search (300ms) for optimal performance
 
 **Statistics Panel**:
 - Total files, tables, views analyzed
 - Reference count
-- Orphaned definitions (tables defined but never referenced)
-- Missing definitions (tables referenced but not defined in workspace)
+- **Click orphaned/missing badges** to expand detailed lists:
+  - Orphaned definitions show file path and line number for each unused table/view
+  - Missing definitions show all files referencing each undefined table
+  - Click any item to navigate directly to the source
+
+**Incremental Parsing**:
+- SHA-256 content hashing for reliable change detection
+- Only reprocesses files that have actually changed
+- Persistent index survives VS Code restarts
+- Automatic updates on file save with 1-second debounce
 
 ### Interactive Features
 

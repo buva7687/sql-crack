@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { FileAnalysis, ProgressCallback } from './types';
 import { SqlDialect } from '../webview/types/parser';
 import { SchemaExtractor } from './schemaExtractor';
@@ -43,6 +44,14 @@ export class WorkspaceScanner {
     }
 
     /**
+     * Generate SHA-256 hash of file content
+     * Using Node's built-in crypto module for security and reliability
+     */
+    private generateContentHash(content: string): string {
+        return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+    }
+
+    /**
      * Analyze a single SQL file
      */
     async analyzeFile(uri: vscode.Uri): Promise<FileAnalysis> {
@@ -57,6 +66,7 @@ export class WorkspaceScanner {
                     filePath,
                     fileName,
                     lastModified: stat.mtime,
+                    contentHash: '',
                     definitions: [],
                     references: [],
                     parseError: `File too large (${Math.round(stat.size / 1024 / 1024)}MB > ${Math.round(this.maxFileSize / 1024 / 1024)}MB limit)`
@@ -67,6 +77,9 @@ export class WorkspaceScanner {
             const document = await vscode.workspace.openTextDocument(uri);
             const sql = document.getText();
 
+            // Generate content hash for change detection
+            const contentHash = this.generateContentHash(sql);
+
             // Extract definitions and references
             const definitions = this.schemaExtractor.extractDefinitions(sql, filePath, this.dialect);
             const references = this.referenceExtractor.extractReferences(sql, filePath, this.dialect);
@@ -75,6 +88,7 @@ export class WorkspaceScanner {
                 filePath,
                 fileName,
                 lastModified: stat.mtime,
+                contentHash,
                 definitions,
                 references
             };
@@ -83,6 +97,7 @@ export class WorkspaceScanner {
                 filePath,
                 fileName,
                 lastModified: Date.now(),
+                contentHash: '',
                 definitions: [],
                 references: [],
                 parseError: error instanceof Error ? error.message : 'Unknown error'
