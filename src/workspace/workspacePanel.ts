@@ -30,7 +30,7 @@ export class WorkspacePanel {
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
-    private _currentMode: GraphMode = 'files';
+    private _currentView: 'graph' | 'issues' = 'graph';
     private _currentSearchFilter: SearchFilter = {
         query: '',
         nodeTypes: undefined,
@@ -38,6 +38,7 @@ export class WorkspacePanel {
         caseSensitive: false
     };
     private _detailedStats: DetailedWorkspaceStats | null = null;
+    private _showHelp: boolean = false;
 
     /**
      * Create or show the workspace panel
@@ -168,8 +169,24 @@ export class WorkspacePanel {
             return;
         }
 
-        this._currentGraph = buildDependencyGraph(index, this._currentMode);
-        this._panel.webview.html = this.getWebviewHtml(this._currentGraph, this._currentSearchFilter);
+        this._currentGraph = buildDependencyGraph(index, 'files'); // Always use 'files' mode for now
+        this.renderCurrentView();
+    }
+
+    /**
+     * Render the current view (graph or issues)
+     */
+    private renderCurrentView(): void {
+        if (!this._currentGraph) {
+            this._panel.webview.html = this.getErrorHtml('No graph data available.');
+            return;
+        }
+
+        if (this._currentView === 'issues') {
+            this._panel.webview.html = this.getIssuesHtml();
+        } else {
+            this._panel.webview.html = this.getWebviewHtml(this._currentGraph, this._currentSearchFilter);
+        }
     }
 
     /**
@@ -177,9 +194,9 @@ export class WorkspacePanel {
      */
     private async handleMessage(message: any): Promise<void> {
         switch (message.command) {
-            case 'changeMode':
-                this._currentMode = message.mode as GraphMode;
-                await this.rebuildAndRenderGraph();
+            case 'switchView':
+                this._currentView = message.view;
+                this.renderCurrentView();
                 break;
 
             case 'refresh':
@@ -200,6 +217,15 @@ export class WorkspacePanel {
                     caseSensitive: false
                 };
                 this._panel.webview.html = this.getWebviewHtml(this._currentGraph!, this._currentSearchFilter);
+                break;
+
+            case 'toggleHelp':
+                this._showHelp = !this._showHelp;
+                this.renderCurrentView();
+                break;
+
+            case 'export':
+                await this.handleExport(message.format);
                 break;
 
             case 'openFile':
@@ -283,6 +309,53 @@ export class WorkspacePanel {
         .toolbar-btn:hover { background: #475569; }
         .toolbar-btn.active { background: #6366f1; }
         .toolbar-btn svg { width: 12px; height: 12px; }
+
+        /* Toolbar spacer */
+        .toolbar-spacer { flex: 1; }
+
+        /* Export dropdown */
+        .export-dropdown {
+            position: absolute; top: 100%; right: 0; margin-top: 4px;
+            background: #1e293b; border: 1px solid #475569; border-radius: 6px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4); z-index: 1000;
+            min-width: 180px;
+        }
+        .export-dropdown.visible { display: block; }
+        .dropdown-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+            background: transparent; border: none; color: #e2e8f0;
+            font-size: 12px; cursor: pointer; width: 100%; text-align: left;
+        }
+        .dropdown-item:hover { background: #334155; }
+        .dropdown-item:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Help popover */
+        .help-popover {
+            position: absolute; top: 50px; right: 12px;
+            background: #1e293b; border: 1px solid #475569; border-radius: 8px;
+            padding: 16px; min-width: 280px; max-width: 400px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            z-index: 100; display: none;
+        }
+        .help-popover.visible { display: block; }
+        .help-title {
+            font-size: 14px; font-weight: 600; color: #f1f5f9; margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .help-section { margin-bottom: 16px; }
+        .help-section:last-child { margin-bottom: 0; }
+        .help-section-title {
+            font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-bottom: 8px;
+        }
+        .help-item {
+            display: flex; align-items: center; gap: 8px; padding: 4px 0;
+            font-size: 12px; color: #e2e8f0;
+        }
+        .help-shortcut {
+            background: #0f172a; border: 1px solid #475569; border-radius: 3px;
+            padding: 2px 6px; font-family: monospace; font-size: 10px; color: #94a3b8;
+        }
 
         /* Search Box */
         .search-container {
@@ -377,7 +450,8 @@ export class WorkspacePanel {
         /* Node Styles */
         .node { cursor: pointer; transition: opacity 0.2s; }
         .node:hover rect { filter: brightness(1.1); }
-        .node.dimmed { opacity: 0.2; }
+        .node.highlighted rect { filter: brightness(1.3); stroke: #fbbf24; stroke-width: 3; }
+        .node.dimmed { opacity: 0.3; }
         .node-file rect { fill: #3b82f6; stroke: #60a5fa; stroke-width: 2; rx: 8; }
         .node-table rect { fill: #10b981; stroke: #34d399; stroke-width: 2; rx: 8; }
         .node-view rect { fill: #8b5cf6; stroke: #a78bfa; stroke-width: 2; rx: 8; }
@@ -471,29 +545,41 @@ export class WorkspacePanel {
         <div class="toolbar">
             <span class="toolbar-title">Workspace Dependencies</span>
             <div class="toolbar-separator"></div>
-            <button class="toolbar-btn ${this._currentMode === 'files' ? 'active' : ''}" id="btn-files">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-                Files
-            </button>
-            <button class="toolbar-btn ${this._currentMode === 'tables' ? 'active' : ''}" id="btn-tables">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-                Tables
-            </button>
-            <button class="toolbar-btn ${this._currentMode === 'hybrid' ? 'active' : ''}" id="btn-hybrid">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                Hybrid
-            </button>
-            <div class="toolbar-separator"></div>
             <button class="toolbar-btn" id="btn-refresh">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 Refresh
             </button>
 
             <div class="toolbar-separator"></div>
-            <button class="toolbar-btn" id="btn-legend" title="Show color legend">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                Legend
+            <button class="toolbar-btn" id="btn-help" title="Show help and legend">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                Help
             </button>
+
+            <div class="toolbar-separator"></div>
+            <div style="position: relative;">
+                <button class="toolbar-btn" id="btn-export">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 10px; height: 10px;"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="export-dropdown" id="export-dropdown" style="display: none;">
+                    <button class="dropdown-item" data-format="svg">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        Export as SVG
+                    </button>
+                    <button class="dropdown-item" data-format="mermaid">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        Export as Mermaid
+                    </button>
+                    <button class="dropdown-item" data-format="png" style="opacity: 0.5; cursor: not-allowed;" title="Coming soon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        Export as PNG (Soon)
+                    </button>
+                </div>
+            </div>
+
+            <div class="toolbar-spacer"></div>
 
             <div class="search-container">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -506,17 +592,112 @@ export class WorkspacePanel {
                     <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
                 </select>
                 <div class="search-options">
-                    <button class="search-option ${searchFilter.useRegex ? 'active' : ''}" id="btn-regex" title="Regex">.*</button>
+                    <button class="search-option ${searchFilter.useRegex ? 'active' : ''}" id="btn-regex" title="Regular Expression">Regex</button>
                     <button class="search-option ${searchFilter.caseSensitive ? 'active' : ''}" id="btn-case" title="Case Sensitive">Aa</button>
                 </div>
                 <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
             </div>
+
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-btn" id="btn-issues">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                Issues
+                ${graph.stats.orphanedDefinitions.length > 0 || graph.stats.missingDefinitions.length > 0 ?
+                    `<span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 8px; font-size: 9px; margin-left: 4px;">
+                        ${graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length}
+                    </span>` : ''}
+            </button>
         </div>
 
-        <!-- Legend Popover -->
-        <div class="legend-popover" id="legend-popover">
+        <!-- Help Popover -->
+        <div class="help-popover" id="help-popover">
+            <div class="help-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>
+                </svg>
+                Help & Legend
+            </div>
+            <div class="help-section">
+                <div class="help-section-title">Node Types</div>
+                <div class="help-item">
+                    <div style="width: 16px; height: 16px; background: #3b82f6; border-radius: 3px; border: 2px solid #60a5fa;"></div>
+                    <span>Files (SQL documents)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 16px; height: 16px; background: #10b981; border-radius: 3px; border: 2px solid #34d399;"></div>
+                    <span>Tables (CREATE TABLE)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 16px; height: 16px; background: #8b5cf6; border-radius: 3px; border: 2px solid #a78bfa;"></div>
+                    <span>Views (CREATE VIEW)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 16px; height: 16px; background: #475569; border-radius: 3px; border: 2px dashed #64748b;"></div>
+                    <span>External (referenced but not defined)</span>
+                </div>
+            </div>
+            <div class="help-section">
+                <div class="help-section-title">Edge Types (References)</div>
+                <div class="help-item">
+                    <div style="width: 24px; height: 3px; background: #64748b; border-radius: 2px;"></div>
+                    <span>SELECT (read from)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 24px; height: 3px; background: #a78bfa; border-radius: 2px;"></div>
+                    <span>JOIN (table join)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 24px; height: 3px; background: #10b981; border-radius: 2px;"></div>
+                    <span>INSERT (write to)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 24px; height: 3px; background: #fbbf24; border-radius: 2px;"></div>
+                    <span>UPDATE (modify)</span>
+                </div>
+                <div class="help-item">
+                    <div style="width: 24px; height: 3px; background: #f87171; border-radius: 2px;"></div>
+                    <span>DELETE (remove)</span>
+                </div>
+            </div>
+            <div class="help-section">
+                <div class="help-section-title">Keyboard Shortcuts</div>
+                <div class="help-item">
+                    <span class="help-shortcut">Ctrl+F</span>
+                    <span>Search nodes</span>
+                </div>
+                <div class="help-item">
+                    <span class="help-shortcut">Drag</span>
+                    <span>Pan the graph</span>
+                </div>
+                <div class="help-item">
+                    <span class="help-shortcut">Scroll</span>
+                    <span>Zoom in/out</span>
+                </div>
+                <div class="help-item">
+                    <span class="help-shortcut">Click</span>
+                    <span>Open file</span>
+                </div>
+                <div class="help-item">
+                    <span class="help-shortcut">Double-click</span>
+                    <span>Visualize file</span>
+                </div>
+            </div>
+            <div class="help-section" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155;">
+                <div style="font-size: 11px; color: #94a3b8; line-height: 1.5;">
+                    Click <b>Issues</b> button to see orphaned/missing definitions.<br>
+                    Use <b>Export</b> to save graphs as SVG or Mermaid.
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend Popover (old, to be removed) -->
+        <div class="legend-popover" id="legend-popover" style="display: none;">
             <div class="legend-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
@@ -781,10 +962,6 @@ export class WorkspacePanel {
         }
 
         // Commands
-        function changeMode(mode) {
-            vscode.postMessage({ command: 'changeMode', mode: mode });
-        }
-
         function refresh() {
             vscode.postMessage({ command: 'refresh' });
         }
@@ -802,24 +979,49 @@ export class WorkspacePanel {
         }
 
         // Add event listeners for toolbar buttons
-        document.getElementById('btn-files')?.addEventListener('click', () => changeMode('files'));
-        document.getElementById('btn-tables')?.addEventListener('click', () => changeMode('tables'));
-        document.getElementById('btn-hybrid')?.addEventListener('click', () => changeMode('hybrid'));
         document.getElementById('btn-refresh')?.addEventListener('click', () => refresh());
 
-        // Legend button - toggle popover
-        const btnLegend = document.getElementById('btn-legend');
-        const legendPopover = document.getElementById('legend-popover');
-        btnLegend?.addEventListener('click', (e) => {
+        // Export dropdown
+        const btnExport = document.getElementById('btn-export');
+        const exportDropdown = document.getElementById('export-dropdown');
+        btnExport?.addEventListener('click', (e) => {
             e.stopPropagation();
-            legendPopover?.classList.toggle('visible');
+            exportDropdown?.classList.toggle('visible');
         });
 
-        // Close legend when clicking outside
+        document.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const format = e.currentTarget.getAttribute('data-format');
+                if (format && !e.currentTarget.hasAttribute('disabled')) {
+                    vscode.postMessage({ command: 'export', format: format });
+                    exportDropdown?.classList.remove('visible');
+                }
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', () => {
+            exportDropdown?.classList.remove('visible');
+        });
+
+        // Help button - toggle popover
+        const btnHelp = document.getElementById('btn-help');
+        const helpPopover = document.getElementById('help-popover');
+        btnHelp?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            helpPopover?.classList.toggle('visible');
+        });
+
+        // Close help when clicking outside
         document.addEventListener('click', (e) => {
-            if (legendPopover && !legendPopover.contains(e.target) && e.target !== btnLegend) {
-                legendPopover.classList.remove('visible');
+            if (helpPopover && !helpPopover.contains(e.target) && e.target !== btnHelp) {
+                helpPopover.classList.remove('visible');
             }
+        });
+
+        // Issues button
+        document.getElementById('btn-issues')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
 
         // Event delegation for node interactions
@@ -1180,6 +1382,349 @@ export class WorkspacePanel {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    /**
+     * Handle export functionality
+     */
+    private async handleExport(format: string): Promise<void> {
+        if (!this._currentGraph) {
+            vscode.window.showErrorMessage('No graph data to export');
+            return;
+        }
+
+        if (format === 'png') {
+            // For PNG export, we'd need to use a library like sharp or canvas
+            // For now, show a message that this feature is coming soon
+            vscode.window.showInformationMessage('PNG export coming soon! Try SVG or Mermaid instead.');
+        } else if (format === 'mermaid') {
+            await this.exportAsMermaid();
+        } else if (format === 'svg') {
+            await this.exportAsSvg();
+        }
+    }
+
+    /**
+     * Export graph as Mermaid diagram
+     */
+    private async exportAsMermaid(): Promise<void> {
+        if (!this._currentGraph) return;
+
+        let mermaid = '```mermaid\ngraph TD\n';
+
+        // Add nodes
+        for (const node of this._currentGraph.nodes) {
+            const label = node.label.replace(/"/g, '\\"');
+            const shape = node.type === 'file' ? '[' : node.type === 'external' ? '((' : '[]';
+            const endShape = node.type === 'file' ? ']' : node.type === 'external' ? '))' : ']';
+            mermaid += `    ${node.id}${shape}"${label}"${endShape}\n`;
+        }
+
+        // Add edges
+        for (const edge of this._currentGraph.edges) {
+            mermaid += `    ${edge.source} --> ${edge.target}\n`;
+        }
+
+        mermaid += '```';
+
+        // Save to file
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.md'),
+            filters: {
+                'Markdown': ['md']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(mermaid));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Export graph as SVG
+     */
+    private async exportAsSvg(): Promise<void> {
+        if (!this._currentGraph) return;
+
+        const svg = this.generateSvgString(this._currentGraph);
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.svg'),
+            filters: {
+                'SVG': ['svg']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(svg));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Generate SVG string from graph
+     */
+    private generateSvgString(graph: WorkspaceDependencyGraph): string {
+        // Calculate bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const node of graph.nodes) {
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x + node.width);
+            maxY = Math.max(maxY, node.y + node.height);
+        }
+
+        const width = Math.max(1200, maxX + 150);
+        const height = Math.max(800, maxY + 150);
+
+        // Generate SVG (similar to renderGraph method but without interactivity)
+        const edgesHtml = graph.edges.map(edge => {
+            const source = graph.nodes.find(n => n.id === edge.source);
+            const target = graph.nodes.find(n => n.id === edge.target);
+            if (!source || !target) return '';
+
+            const x1 = source.x + source.width / 2;
+            const y1 = source.y + source.height;
+            const x2 = target.x + target.width / 2;
+            const y2 = target.y;
+
+            const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
+            const color = edge.referenceType === 'select' ? '#64748b' :
+                        edge.referenceType === 'join' ? '#a78bfa' :
+                        edge.referenceType === 'insert' ? '#10b981' :
+                        edge.referenceType === 'update' ? '#fbbf24' : '#f87171';
+
+            return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
+        }).join('\n');
+
+        const nodesHtml = graph.nodes.map(node => {
+            const color = node.type === 'file' ? '#3b82f6' :
+                        node.type === 'table' ? '#10b981' :
+                        node.type === 'view' ? '#8b5cf6' : '#475569';
+
+            return `    <g transform="translate(${node.x}, ${node.y})">
+        <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>
+        <text x="${node.width/2}" y="${node.height/2}" text-anchor="middle" fill="white" font-size="12" font-weight="600">${this.escapeHtml(node.label)}</text>
+    </g>`;
+        }).join('\n');
+
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+${edgesHtml}
+${nodesHtml}
+</svg>`;
+    }
+
+    /**
+     * Get Issues panel HTML
+     */
+    private getIssuesHtml(): string {
+        const nonce = getNonce();
+        const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
+        const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Workspace Issues</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html {
+            width: 100%; height: 100vh; overflow: auto;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a; color: #e2e8f0;
+        }
+        #app { width: 100%; min-height: 100%; display: flex; flex-direction: column; }
+
+        /* Toolbar */
+        .toolbar {
+            display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+            background: #1e293b; border-bottom: 1px solid #334155;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .toolbar-title { font-weight: 600; font-size: 14px; color: #f1f5f9; margin-right: 16px; }
+        .toolbar-btn {
+            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+            background: #334155; border: none; border-radius: 6px;
+            color: #e2e8f0; font-size: 12px; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .toolbar-btn:hover { background: #475569; }
+        .toolbar-btn.active { background: #6366f1; }
+        .toolbar-btn svg { width: 14px; height: 14px; }
+        .toolbar-spacer { flex: 1; }
+        .issue-badge {
+            padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+        }
+        .issue-badge.warning { background: #f59e0b; color: #fff; }
+        .issue-badge.error { background: #ef4444; color: #fff; }
+
+        /* Content */
+        .content { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; }
+
+        /* Section */
+        .section { margin-bottom: 32px; }
+        .section-header {
+            display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+            background: #1e293b; border-radius: 8px; border-left: 4px solid;
+            margin-bottom: 16px;
+        }
+        .section-header.warning { border-left-color: #f59e0b; }
+        .section-header.error { border-left-color: #ef4444; }
+        .section-title { font-size: 16px; font-weight: 600; color: #f1f5f9; }
+        .section-count {
+            padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+            background: rgba(255,255,255,0.1); color: #94a3b8;
+        }
+
+        /* List */
+        .list { display: flex; flex-direction: column; gap: 8px; }
+        .list-item {
+            display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+            background: #1e293b; border-radius: 6px; border: 1px solid #334155;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .list-item:hover { background: #334155; border-color: #475569; }
+
+        .item-type {
+            padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .item-type.table { background: #10b981; color: #fff; }
+        .item-type.view { background: #8b5cf6; color: #fff; }
+
+        .item-info { flex: 1; min-width: 0; }
+        .item-name { font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 2px; }
+        .item-path { font-size: 11px; color: #94a3b8; font-family: monospace; }
+
+        .item-line {
+            padding: 2px 6px; border-radius: 3px; font-size: 10px; font-family: monospace;
+            background: #0f172a; color: #64748b;
+        }
+
+        .empty-state {
+            text-align: center; padding: 60px 20px; color: #94a3b8;
+        }
+        .empty-state svg { width: 64px; height: 64px; margin-bottom: 16px; opacity: 0.5; }
+        .empty-state-title { font-size: 18px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="toolbar">
+            <span class="toolbar-title">Workspace Issues</span>
+            <button class="toolbar-btn" id="btn-back">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back to Graph
+            </button>
+            <div class="toolbar-spacer"></div>
+            ${totalIssues > 0 ? `<span class="issue-badge ${totalIssues > 5 ? 'error' : 'warning'}">${totalIssues} issues</span>` : '<span style="color: #10b981; font-size: 12px;">✓ All clear</span>'}
+        </div>
+
+        <div class="content">
+            ${!detailedStats || detailedStats.orphanedDetails.length === 0 ? '' : `
+            <div class="section">
+                <div class="section-header warning">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span class="section-title">Orphaned Definitions</span>
+                    <span class="section-count">${detailedStats.orphanedDetails.length}</span>
+                </div>
+                <div class="list">
+                    ${detailedStats.orphanedDetails.slice(0, 100).map(item => `
+                    <div class="list-item" data-filepath="${this.escapeHtml(item.filePath)}" data-line="${item.lineNumber}">
+                        <span class="item-type ${item.type}">${item.type}</span>
+                        <div class="item-info">
+                            <div class="item-name">${this.escapeHtml(item.name)}</div>
+                            <div class="item-path">${this.escapeHtml(item.filePath)}</div>
+                        </div>
+                        <span class="item-line">:${item.lineNumber}</span>
+                    </div>
+                    `).join('')}
+                    ${detailedStats.orphanedDetails.length > 100 ? `<div style="text-align:center; padding: 12px; color: #64748b; font-size: 12px;">... and ${detailedStats.orphanedDetails.length - 100} more</div>` : ''}
+                </div>
+            </div>
+            `}
+
+            ${!detailedStats || detailedStats.missingDetails.length === 0 ? '' : `
+            <div class="section">
+                <div class="section-header error">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    <span class="section-title">Missing Definitions</span>
+                    <span class="section-count">${detailedStats.missingDetails.length}</span>
+                </div>
+                <div class="list">
+                    ${detailedStats.missingDetails.slice(0, 100).map(item => `
+                    <div class="section" style="margin-bottom: 12px; padding: 12px; background: #0f172a; border-radius: 6px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 8px;">
+                            ${this.escapeHtml(item.tableName)}
+                            <span style="color: #64748b; font-size: 11px; margin-left: 8px;">(${item.referenceCount} references)</span>
+                        </div>
+                        <div class="list">
+                            ${item.references.slice(0, 5).map(ref => `
+                            <div class="list-item" data-filepath="${this.escapeHtml(ref.filePath)}" data-line="${ref.lineNumber}" style="padding: 8px 12px;">
+                                <div class="item-info">
+                                    <div class="item-path">${this.escapeHtml(ref.filePath)}</div>
+                                </div>
+                                <span class="item-line">:${ref.lineNumber}</span>
+                            </div>
+                            `).join('')}
+                            ${item.references.length > 5 ? `<div style="text-align:center; padding: 8px; color: #64748b; font-size: 11px;">+ ${item.references.length - 5} more references</div>` : ''}
+                        </div>
+                    </div>
+                    `).join('')}
+                    ${detailedStats.missingDetails.length > 100 ? `<div style="text-align:center; padding: 12px; color: #64748b; font-size: 12px;">... and ${detailedStats.missingDetails.length - 100} more</div>` : ''}
+                </div>
+            </div>
+            `}
+
+            ${(!detailedStats || detailedStats.orphanedDetails.length === 0 && detailedStats.missingDetails.length === 0) ? `
+            <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <div class="empty-state-title">No Issues Found</div>
+                <div>All tables and views are properly defined and referenced.</div>
+            </div>
+            ` : ''}
+        </div>
+    </div>
+
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+
+        // Back to graph
+        document.getElementById('btn-back').addEventListener('click', () => {
+            vscode.postMessage({ command: 'switchView', view: 'graph' });
+        });
+
+        // Handle list item clicks
+        document.querySelectorAll('.list-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const filePath = item.getAttribute('data-filepath');
+                const line = item.getAttribute('data-line');
+                if (filePath) {
+                    vscode.postMessage({
+                        command: 'openFileAtLine',
+                        filePath: filePath,
+                        line: parseInt(line) || 0
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>`;
     }
 
     /**
