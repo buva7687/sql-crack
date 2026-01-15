@@ -20,6 +20,11 @@
         "command": "sql-crack.visualize",
         "title": "SQL Crack: Visualize SQL Query",
         "icon": "$(graph)"
+      },
+      {
+        "command": "sql-crack.analyzeWorkspace",
+        "title": "SQL Crack: Analyze Workspace Dependencies",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
@@ -35,6 +40,19 @@
           "command": "sql-crack.visualize",
           "when": "editorLangId == sql",
           "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "sql-crack.analyzeWorkspace",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sql-crack.analyzeWorkspace",
+          "when": "workspaceFolderCount > 0"
         }
       ]
     },
@@ -124,6 +142,13 @@
           "minimum": 100,
           "maximum": 5000,
           "description": "Delay in milliseconds before auto-refresh triggers (default: 500ms)"
+        },
+        "sqlCrack.workspaceAutoIndexThreshold": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
         }
       }
     }

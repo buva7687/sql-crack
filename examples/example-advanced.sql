@@ -237,3 +237,55 @@ WHERE salary > (
     FROM employees
 )
 ORDER BY salary DESC;
+
+-- ============================================
+-- Additional DDLs for workspace dependency testing
+-- These create cross-file dependencies
+-- ============================================
+
+-- Table: Employees (for testing)
+CREATE TABLE employees (
+    employee_id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100),
+    department_id INT,
+    salary DECIMAL(10,2),
+    hire_date DATE,
+    FOREIGN KEY (department_id) REFERENCES departments(id)
+);
+
+-- Table: Departments (for testing)
+CREATE TABLE departments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    budget DECIMAL(12,2)
+);
+
+-- View: Employee summary with product data from other files
+CREATE VIEW employee_purchase_summary AS
+SELECT
+    e.employee_id,
+    e.name AS employee_name,
+    d.name AS department_name,
+    e.salary,
+    COUNT(DISTINCT o.id) AS orders_placed,
+    SUM(oi.subtotal) AS total_purchased
+FROM employees e
+LEFT JOIN departments d ON e.department_id = d.id
+LEFT JOIN users u ON e.email = u.email
+LEFT JOIN orders o ON u.id = o.user_id
+LEFT JOIN order_items oi ON o.id = oi.order_id
+GROUP BY e.employee_id, e.name, d.name, e.salary;
+
+-- View referencing views from example-schema.sql
+CREATE VIEW department_customer_overlap AS
+SELECT
+    d.name AS department,
+    pp.product_name,
+    pp.avg_rating,
+    uos.username,
+    uos.total_spent
+FROM departments d
+CROSS JOIN product_popularity pp
+INNER JOIN user_order_summary uos ON uos.total_orders > 0
+WHERE pp.avg_rating > 4.0;

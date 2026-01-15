@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { VisualizationPanel } from './visualizationPanel';
+import { WorkspacePanel } from './workspace';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -89,7 +90,20 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Command: Analyze Workspace Dependencies
+    let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async () => {
+        const config = getConfig();
+        const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+
+        await WorkspacePanel.createOrShow(
+            context.extensionUri,
+            context,
+            defaultDialect as any
+        );
+    });
+
     context.subscriptions.push(activeEditorListener);
+    context.subscriptions.push(workspaceCommand);
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {

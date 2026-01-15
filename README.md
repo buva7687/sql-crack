@@ -152,6 +152,30 @@ Then install the generated `.vsix` file via **Extensions → ••• → Insta
    - Press `Cmd+Shift+V` (Mac) / `Ctrl+Shift+V` (Windows/Linux)
    - Right-click → **"SQL Crack: Visualize SQL Query"**
 
+### Workspace Analysis
+
+Analyze cross-file dependencies across your entire SQL project:
+
+1. **From Explorer**: Right-click any folder → **"SQL Crack: Analyze Workspace Dependencies"**
+2. **From Command Palette**: Press `Cmd/Ctrl + Shift + P` → **"SQL Crack: Analyze Workspace Dependencies"**
+
+The workspace panel shows:
+- **Files Mode**: File-to-file dependencies (which files reference tables defined in other files)
+- **Tables Mode**: Table and view relationships across the workspace
+- **Hybrid Mode**: Combined view with files and prominent tables
+
+**Interactions**:
+- Click any file/table node to open it in the editor
+- Double-click to visualize that file's SQL query
+- Hover for details on definitions and references
+- Pan by dragging, zoom with mouse wheel
+
+**Statistics Panel**:
+- Total files, tables, views analyzed
+- Reference count
+- Orphaned definitions (tables defined but never referenced)
+- Missing definitions (tables referenced but not defined in workspace)
+
 ### Interactive Features
 
 - **Navigate to SQL**: Click any node to jump to its definition in the editor
@@ -262,6 +286,7 @@ See `examples/example-phase3-performance.sql` for comprehensive test cases.
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, or `secondary-sidebar` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh visualization when SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in milliseconds (100-5000) |
+| `sqlCrack.workspaceAutoIndexThreshold` | `50` | Maximum number of SQL files to auto-index on workspace analysis (10-500) |
 
 ## Privacy
 
@@ -288,7 +313,16 @@ Press `F5` to launch the Extension Development Host.
 sql-crack/
 ├── src/
 │   ├── extension.ts              # Extension entry point
-│   ├── visualizationPanel.ts     # Webview panel management
+│   ├── visualizationPanel.ts     # Single-query webview panel
+│   ├── workspace/                # Workspace analysis module (Phase 4)
+│   │   ├── types.ts              # Workspace type definitions
+│   │   ├── schemaExtractor.ts    # CREATE TABLE/VIEW extraction
+│   │   ├── referenceExtractor.ts # Table reference extraction
+│   │   ├── scanner.ts            # SQL file scanner
+│   │   ├── indexManager.ts       # Index management & persistence
+│   │   ├── dependencyGraph.ts    # Dependency graph builder
+│   │   ├── workspacePanel.ts     # Workspace webview panel
+│   │   └── index.ts              # Module exports
 │   └── webview/
 │       ├── index.ts              # Main entry, VS Code message handling
 │       ├── sqlParser.ts          # SQL parsing & analysis
@@ -365,10 +399,21 @@ SQL Crack follows a phased development approach focused on delivering profession
 
 > **Note:** True query plan analysis and cost-based optimization require database connectivity, which is outside the scope of this local-only tool. Phase 3 provides heuristic-based static analysis that works without database access.
 
-### 📅 Phase 4: Workspace Awareness (Planned)
-- Cross-file lineage tracking (parse SQL files to build dependency graphs)
-- dbt integration (parse `ref()`, `source()` macros and YAML configs)
-- Workspace-wide table/view dependency visualization
+### ✅ Phase 4: Workspace Awareness (COMPLETED)
+- ✅ Cross-file lineage tracking — Parse all SQL files in workspace to build dependency graphs
+- ✅ Schema extraction — AST-based extraction of CREATE TABLE/VIEW definitions with column details
+- ✅ Reference extraction — Track all table references across SELECT, INSERT, UPDATE, DELETE, and JOIN operations
+- ✅ Dependency graph visualization — Interactive webview with 3 visualization modes:
+  - **Files Mode**: Show file-to-file dependencies based on shared table references
+  - **Tables Mode**: Show table/view relationships across the workspace
+  - **Hybrid Mode**: Combined view with files and highly-referenced tables
+- ✅ Workspace statistics — Total files, tables, views, references, orphaned definitions, and missing definitions
+- ✅ Persistent index — Incremental indexing with automatic updates on file changes
+- ✅ Interactive exploration — Click to open file, double-click to visualize, hover for details
+- ✅ Pan and zoom — Navigate large workspace graphs with intuitive controls
+- ✅ Auto-index threshold — Configurable threshold for large workspaces (default: 50 files)
+- ✅ Explorer integration — Right-click folder to analyze workspace dependencies
+- 📅 dbt integration — Parse `ref()`, `source()` macros and YAML configs (Planned)
 
 ## Contributing
 

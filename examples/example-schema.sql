@@ -89,3 +89,49 @@ CREATE TABLE payment_methods (
     is_default BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- ============================================
+-- VIEWS - Cross-file dependency examples
+-- ============================================
+
+-- View: User order summary combining users, orders, order_items
+CREATE VIEW user_order_summary AS
+SELECT
+    u.id AS user_id,
+    u.username,
+    u.email,
+    COUNT(DISTINCT o.id) AS total_orders,
+    SUM(oi.subtotal) AS total_spent,
+    AVG(oi.unit_price) AS avg_item_price
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+LEFT JOIN order_items oi ON o.id = oi.order_id
+GROUP BY u.id, u.username, u.email;
+
+-- View: Product popularity based on reviews and orders
+CREATE VIEW product_popularity AS
+SELECT
+    p.id AS product_id,
+    p.name AS product_name,
+    c.name AS category_name,
+    COUNT(DISTINCT r.id) AS review_count,
+    AVG(r.rating) AS avg_rating,
+    SUM(oi.quantity) AS total_sold
+FROM products p
+LEFT JOIN categories c ON p.category_id = c.id
+LEFT JOIN reviews r ON p.id = r.product_id
+LEFT JOIN order_items oi ON p.id = oi.product_id
+GROUP BY p.id, p.name, c.name;
+
+-- View: Active shopping carts with product details
+CREATE VIEW active_carts AS
+SELECT
+    sc.id AS cart_id,
+    u.username,
+    p.name AS product_name,
+    sc.quantity,
+    p.price,
+    (sc.quantity * p.price) AS line_total
+FROM shopping_cart sc
+INNER JOIN users u ON sc.user_id = u.id
+INNER JOIN products p ON sc.product_id = p.id;
