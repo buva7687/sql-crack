@@ -378,71 +378,82 @@ function getPrimaryReferenceType(types: TableReference['referenceType'][]): Tabl
 
 /**
  * Layout the graph using an improved hierarchical algorithm
- * Features: dynamic spacing, centered rows, better edge flow visualization
+ * Features:
+ * - Longest path level assignment
+ * - Barycenter heuristic for edge crossing minimization
+ * - Better spacing for large graphs
  */
 function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
     if (nodes.length === 0) return;
 
-    // Calculate canvas dimensions (assuming standard webview size)
-    const canvasWidth = 2800;
-    const canvasHeight = 2000;
+    // Calculate canvas dimensions
+    const canvasWidth = 3200;
 
-    // Dynamic spacing based on node count
+    // Dynamic spacing based on node count - more space for fewer nodes
     const nodeCount = nodes.length;
-    const horizontalGap = nodeCount > 20 ? 60 : 80;
-    const verticalGap = nodeCount > 20 ? 80 : 100;
-    const padding = 80;
+    const horizontalGap = nodeCount > 25 ? 40 : nodeCount > 15 ? 60 : 80;
+    const verticalGap = nodeCount > 25 ? 100 : nodeCount > 15 ? 120 : 140;
+    const padding = 60;
 
-    // Calculate max nodes per row based on canvas width and average node width
-    const avgNodeWidth = nodes.reduce((sum, n) => sum + n.width, 0) / nodes.length;
-    const maxNodesPerRow = Math.max(3, Math.floor((canvasWidth - padding * 2) / (avgNodeWidth + horizontalGap)));
-
-    // Build adjacency list for topological sorting
-    const inDegree = new Map<string, number>();
-    const adjacency = new Map<string, string[]>();
+    // Build adjacency lists (both directions)
+    const outEdges = new Map<string, string[]>();
+    const inEdges = new Map<string, string[]>();
+    const nodeMap = new Map<string, WorkspaceNode>();
 
     for (const node of nodes) {
-        inDegree.set(node.id, 0);
-        adjacency.set(node.id, []);
+        outEdges.set(node.id, []);
+        inEdges.set(node.id, []);
+        nodeMap.set(node.id, node);
     }
 
     for (const edge of edges) {
-        inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
-        adjacency.get(edge.source)!.push(edge.target);
+        outEdges.get(edge.source)?.push(edge.target);
+        inEdges.get(edge.target)?.push(edge.source);
     }
 
-    // Assign levels using BFS with longest path
+    // ========== Level Assignment (Longest Path) ==========
     const levels = new Map<string, number>();
-    const visited = new Set<string>();
 
-    function assignLevel(nodeId: string, level: number): void {
-        if (visited.has(nodeId)) {
-            levels.set(nodeId, Math.max(levels.get(nodeId) || 0, level));
-            return;
+    // Find roots (nodes with no incoming edges)
+    const roots: string[] = [];
+    for (const node of nodes) {
+        if ((inEdges.get(node.id)?.length || 0) === 0) {
+            roots.push(node.id);
         }
+    }
+
+    // If no roots found (cyclic graph), use all nodes as potential starts
+    if (roots.length === 0) {
+        nodes.forEach(n => roots.push(n.id));
+    }
+
+    // Assign levels using longest path from roots
+    function longestPathFrom(nodeId: string, currentLevel: number, visited: Set<string>): void {
+        if (visited.has(nodeId)) return;
+
+        const existingLevel = levels.get(nodeId) ?? -1;
+        if (currentLevel <= existingLevel) return;
+
+        levels.set(nodeId, currentLevel);
         visited.add(nodeId);
-        levels.set(nodeId, level);
 
-        for (const targetId of adjacency.get(nodeId) || []) {
-            assignLevel(targetId, level + 1);
+        for (const targetId of outEdges.get(nodeId) || []) {
+            longestPathFrom(targetId, currentLevel + 1, new Set(visited));
         }
     }
 
-    // Start from nodes with in-degree 0
+    for (const rootId of roots) {
+        longestPathFrom(rootId, 0, new Set());
+    }
+
+    // Handle any unassigned nodes
     for (const node of nodes) {
-        if ((inDegree.get(node.id) || 0) === 0) {
-            assignLevel(node.id, 0);
+        if (!levels.has(node.id)) {
+            levels.set(node.id, 0);
         }
     }
 
-    // Handle remaining nodes (cycles)
-    for (const node of nodes) {
-        if (!visited.has(node.id)) {
-            assignLevel(node.id, 0);
-        }
-    }
-
-    // Group nodes by level
+    // ========== Group Nodes by Level ==========
     const levelGroups = new Map<number, WorkspaceNode[]>();
     for (const node of nodes) {
         const level = levels.get(node.id) || 0;
@@ -452,14 +463,77 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         levelGroups.get(level)!.push(node);
     }
 
-    // Position nodes with row wrapping and centering
-    let currentY = padding;
     const sortedLevels = [...levelGroups.keys()].sort((a, b) => a - b);
+
+    // ========== Edge Crossing Minimization (Barycenter) ==========
+    // Run multiple iterations to reduce edge crossings
+    for (let iteration = 0; iteration < 4; iteration++) {
+        // Sweep down (using positions of previous level)
+        for (let i = 1; i < sortedLevels.length; i++) {
+            const level = sortedLevels[i];
+            const levelNodes = levelGroups.get(level)!;
+
+            // Calculate barycenter for each node based on connected nodes in previous level
+            const barycenters: { node: WorkspaceNode; value: number }[] = [];
+
+            for (const node of levelNodes) {
+                const prevLevelConnections = (inEdges.get(node.id) || [])
+                    .map(id => nodeMap.get(id))
+                    .filter(n => n && levels.get(n.id) === sortedLevels[i - 1]);
+
+                if (prevLevelConnections.length > 0) {
+                    const prevLevel = levelGroups.get(sortedLevels[i - 1])!;
+                    const positions = prevLevelConnections.map(n => prevLevel.indexOf(n!));
+                    const avgPos = positions.reduce((a, b) => a + b, 0) / positions.length;
+                    barycenters.push({ node, value: avgPos });
+                } else {
+                    barycenters.push({ node, value: levelNodes.indexOf(node) });
+                }
+            }
+
+            // Sort by barycenter
+            barycenters.sort((a, b) => a.value - b.value);
+            levelGroups.set(level, barycenters.map(b => b.node));
+        }
+
+        // Sweep up (using positions of next level)
+        for (let i = sortedLevels.length - 2; i >= 0; i--) {
+            const level = sortedLevels[i];
+            const levelNodes = levelGroups.get(level)!;
+
+            const barycenters: { node: WorkspaceNode; value: number }[] = [];
+
+            for (const node of levelNodes) {
+                const nextLevelConnections = (outEdges.get(node.id) || [])
+                    .map(id => nodeMap.get(id))
+                    .filter(n => n && levels.get(n.id) === sortedLevels[i + 1]);
+
+                if (nextLevelConnections.length > 0) {
+                    const nextLevel = levelGroups.get(sortedLevels[i + 1])!;
+                    const positions = nextLevelConnections.map(n => nextLevel.indexOf(n!));
+                    const avgPos = positions.reduce((a, b) => a + b, 0) / positions.length;
+                    barycenters.push({ node, value: avgPos });
+                } else {
+                    barycenters.push({ node, value: levelNodes.indexOf(node) });
+                }
+            }
+
+            barycenters.sort((a, b) => a.value - b.value);
+            levelGroups.set(level, barycenters.map(b => b.node));
+        }
+    }
+
+    // ========== Position Nodes ==========
+    // Calculate max nodes per row
+    const avgNodeWidth = nodes.reduce((sum, n) => sum + n.width, 0) / nodes.length;
+    const maxNodesPerRow = Math.max(4, Math.floor((canvasWidth - padding * 2) / (avgNodeWidth + horizontalGap)));
+
+    let currentY = padding;
 
     for (const level of sortedLevels) {
         const levelNodes = levelGroups.get(level)!;
 
-        // Split level nodes into rows
+        // Split level nodes into rows if too many
         const rows: WorkspaceNode[][] = [];
         for (let i = 0; i < levelNodes.length; i += maxNodesPerRow) {
             rows.push(levelNodes.slice(i, i + maxNodesPerRow));
@@ -473,11 +547,11 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
             // Center the row horizontally
             let currentX = Math.max(padding, (canvasWidth - rowWidth) / 2);
 
-            // Find maximum height in this row for vertical alignment
+            // Find maximum height in this row
             const rowMaxHeight = Math.max(...rowNodes.map(n => n.height));
 
             for (const node of rowNodes) {
-                // Vertically center nodes of different heights within the row
+                // Vertically center nodes
                 const yOffset = (rowMaxHeight - node.height) / 2;
                 node.x = currentX;
                 node.y = currentY + yOffset;

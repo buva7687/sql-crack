@@ -11,6 +11,39 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 
+// SQL reserved words that should never be treated as table names
+const SQL_RESERVED_WORDS = new Set([
+    // DML/DDL keywords
+    'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'truncate',
+    'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null', 'like', 'between',
+    'join', 'inner', 'outer', 'left', 'right', 'full', 'cross', 'on', 'using',
+    'group', 'by', 'having', 'order', 'asc', 'desc', 'limit', 'offset',
+    'union', 'intersect', 'except', 'all', 'distinct', 'as',
+    'case', 'when', 'then', 'else', 'end', 'if', 'exists',
+    'values', 'set', 'into', 'table', 'view', 'index', 'database', 'schema',
+    'primary', 'foreign', 'key', 'references', 'constraint', 'unique', 'check',
+    'default', 'auto_increment', 'identity', 'serial',
+    // Data types
+    'int', 'integer', 'bigint', 'smallint', 'tinyint', 'float', 'double', 'decimal',
+    'numeric', 'real', 'char', 'varchar', 'text', 'blob', 'clob', 'date', 'time',
+    'datetime', 'timestamp', 'boolean', 'bool', 'binary', 'varbinary', 'json', 'xml',
+    // Functions (common ones that might be mistaken for tables)
+    'count', 'sum', 'avg', 'min', 'max', 'coalesce', 'nullif', 'cast', 'convert',
+    'concat', 'substring', 'length', 'trim', 'upper', 'lower', 'replace',
+    'now', 'current_date', 'current_time', 'current_timestamp', 'getdate',
+    'year', 'month', 'day', 'hour', 'minute', 'second', 'dateadd', 'datediff',
+    'row_number', 'rank', 'dense_rank', 'ntile', 'lead', 'lag', 'first_value', 'last_value',
+    // Other common keywords
+    'true', 'false', 'unknown', 'query', 'result', 'data', 'temp', 'temporary',
+    'with', 'recursive', 'over', 'partition', 'rows', 'range', 'unbounded', 'preceding', 'following',
+    'rollup', 'cube', 'grouping', 'sets', 'fetch', 'next', 'only', 'percent',
+    'top', 'dual', 'sysdate', 'rownum', 'rowid', 'level', 'connect', 'start',
+    // Transaction keywords
+    'begin', 'commit', 'rollback', 'transaction', 'savepoint',
+    // Permissions
+    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger'
+]);
+
 /**
  * Extracts table references from SQL queries (SELECT, INSERT, UPDATE, DELETE)
  */
@@ -23,6 +56,13 @@ export class ReferenceExtractor {
         this.parser = new Parser();
         this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
         this.columnExtractor = new ColumnExtractor(options);
+    }
+
+    /**
+     * Check if a name is a SQL reserved word
+     */
+    private isReservedWord(name: string): boolean {
+        return SQL_RESERVED_WORDS.has(name.toLowerCase());
     }
 
     /**
@@ -843,11 +883,26 @@ export class ReferenceExtractor {
     }
 
     /**
-     * Remove duplicate references
+     * Remove duplicate references and filter out SQL reserved words
      */
     private deduplicateReferences(references: TableReference[]): TableReference[] {
         const seen = new Set<string>();
         return references.filter(ref => {
+            // Filter out SQL reserved words that shouldn't be table names
+            if (this.isReservedWord(ref.tableName)) {
+                return false;
+            }
+
+            // Filter out single-character or empty names
+            if (!ref.tableName || ref.tableName.length < 2) {
+                return false;
+            }
+
+            // Filter out names that are purely numeric
+            if (/^\d+$/.test(ref.tableName)) {
+                return false;
+            }
+
             const key = `${ref.tableName.toLowerCase()}|${ref.referenceType}|${ref.lineNumber}`;
             if (seen.has(key)) return false;
             seen.add(key);

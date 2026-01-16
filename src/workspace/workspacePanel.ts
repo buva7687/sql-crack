@@ -16,6 +16,19 @@ import {
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
 
+// Lineage modules
+import { LineageBuilder } from './lineage/lineageBuilder';
+import { LineageGraph, LineageNode, LineagePath } from './lineage/types';
+import { FlowAnalyzer, FlowResult } from './lineage/flowAnalyzer';
+import { ImpactAnalyzer, ImpactReport } from './lineage/impactAnalyzer';
+import { ColumnLineageTracker } from './lineage/columnLineage';
+
+// UI modules
+import { TableExplorer } from './ui/tableExplorer';
+import { LineageView } from './ui/lineageView';
+import { ImpactView } from './ui/impactView';
+import { ViewMode } from './ui/types';
+
 const AUTO_INDEX_THRESHOLD = 50;
 
 /**
@@ -30,7 +43,7 @@ export class WorkspacePanel {
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
-    private _currentView: 'graph' | 'issues' = 'graph';
+    private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
     private _currentSearchFilter: SearchFilter = {
         query: '',
         nodeTypes: undefined,
@@ -39,6 +52,21 @@ export class WorkspacePanel {
     };
     private _detailedStats: DetailedWorkspaceStats | null = null;
     private _showHelp: boolean = false;
+
+    // Lineage state
+    private _lineageGraph: LineageGraph | null = null;
+    private _lineageBuilder: LineageBuilder | null = null;
+    private _flowAnalyzer: FlowAnalyzer | null = null;
+    private _impactAnalyzer: ImpactAnalyzer | null = null;
+    private _columnLineageTracker: ColumnLineageTracker | null = null;
+    private _selectedLineageNode: LineageNode | null = null;
+    private _currentImpactReport: ImpactReport | null = null;
+    private _currentFlowResult: FlowResult | null = null;
+
+    // UI generators
+    private _tableExplorer: TableExplorer = new TableExplorer();
+    private _lineageView: LineageView = new LineageView();
+    private _impactView: ImpactView = new ImpactView();
 
     /**
      * Create or show the workspace panel
@@ -264,7 +292,336 @@ export class WorkspacePanel {
                     vscode.window.showErrorMessage(`Could not visualize file: ${message.filePath}`);
                 }
                 break;
+
+            // ========== Lineage Commands ==========
+            // Note: View switching is handled in webview JS - don't re-render the entire page
+            case 'switchToLineageView':
+                this._currentView = 'lineage';
+                await this.buildLineageGraph();
+                // Don't call renderCurrentView() - causes flickering
+                break;
+
+            case 'switchToTableExplorer':
+                this._currentView = 'tableExplorer';
+                await this.buildLineageGraph();
+                // Don't call renderCurrentView() - causes flickering
+                break;
+
+            case 'switchToImpactView':
+                this._currentView = 'impact';
+                await this.buildLineageGraph();
+                // Don't call renderCurrentView() - causes flickering
+                break;
+
+            case 'getLineage':
+                await this.handleGetLineage(message.nodeId, message.direction, message.depth);
+                break;
+
+            case 'analyzeImpact':
+                await this.handleAnalyzeImpact(
+                    message.type,
+                    message.name,
+                    message.tableName,
+                    message.changeType
+                );
+                break;
+
+            case 'exploreTable':
+                await this.handleExploreTable(message.tableName);
+                break;
+
+            case 'getColumnLineage':
+                await this.handleGetColumnLineage(message.tableName, message.columnName);
+                break;
+
+            case 'selectLineageNode':
+                this.handleSelectLineageNode(message.nodeId);
+                break;
+
+            case 'getUpstream':
+                await this.handleGetUpstream(message.nodeId, message.depth);
+                break;
+
+            case 'getDownstream':
+                await this.handleGetDownstream(message.nodeId, message.depth);
+                break;
         }
+    }
+
+    // ========== Lineage Methods ==========
+
+    /**
+     * Build lineage graph from workspace index
+     */
+    private async buildLineageGraph(): Promise<void> {
+        if (this._lineageGraph) return; // Already built
+
+        const index = this._indexManager.getIndex();
+        if (!index) return;
+
+        this._lineageBuilder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+        this._lineageGraph = this._lineageBuilder.buildFromIndex(index);
+        this._flowAnalyzer = new FlowAnalyzer(this._lineageGraph);
+        this._impactAnalyzer = new ImpactAnalyzer(this._lineageGraph, this._flowAnalyzer);
+        this._columnLineageTracker = new ColumnLineageTracker(this._lineageGraph);
+    }
+
+    /**
+     * Handle get lineage request
+     */
+    private async handleGetLineage(
+        nodeId: string,
+        direction: 'upstream' | 'downstream' | 'both',
+        depth: number
+    ): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._flowAnalyzer || !this._lineageGraph) return;
+
+        let result: FlowResult | null = null;
+
+        if (direction === 'upstream' || direction === 'both') {
+            result = this._flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
+        }
+        if (direction === 'downstream' || direction === 'both') {
+            const downstream = this._flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+            if (result) {
+                result.nodes = [...result.nodes, ...downstream.nodes];
+                result.edges = [...result.edges, ...downstream.edges];
+            } else {
+                result = downstream;
+            }
+        }
+
+        this._currentFlowResult = result;
+
+        // Send result to webview
+        this._panel.webview.postMessage({
+            command: 'lineageResult',
+            data: {
+                nodeId,
+                direction,
+                result: result ? {
+                    nodes: result.nodes.map(n => ({
+                        id: n.id,
+                        name: n.name,
+                        type: n.type,
+                        filePath: n.filePath,
+                        lineNumber: n.lineNumber
+                    })),
+                    depth: result.depth,
+                    pathCount: result.paths.length
+                } : null
+            }
+        });
+    }
+
+    /**
+     * Handle impact analysis request
+     */
+    private async handleAnalyzeImpact(
+        type: 'table' | 'column',
+        name: string,
+        tableName?: string,
+        changeType: 'modify' | 'rename' | 'drop' = 'modify'
+    ): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._impactAnalyzer) return;
+
+        let report: ImpactReport;
+        if (type === 'table') {
+            report = this._impactAnalyzer.analyzeTableChange(name, changeType);
+        } else {
+            report = this._impactAnalyzer.analyzeColumnChange(tableName!, name, changeType);
+        }
+
+        this._currentImpactReport = report;
+
+        // Send result to webview
+        this._panel.webview.postMessage({
+            command: 'impactResult',
+            data: {
+                report: {
+                    changeType: report.changeType,
+                    target: report.target,
+                    severity: report.severity,
+                    summary: report.summary,
+                    directImpacts: report.directImpacts.map(i => ({
+                        name: i.node.name,
+                        type: i.node.type,
+                        reason: i.reason,
+                        severity: i.severity,
+                        filePath: i.filePath,
+                        lineNumber: i.lineNumber
+                    })),
+                    transitiveImpacts: report.transitiveImpacts.map(i => ({
+                        name: i.node.name,
+                        type: i.node.type,
+                        reason: i.reason,
+                        severity: i.severity,
+                        filePath: i.filePath,
+                        lineNumber: i.lineNumber
+                    })),
+                    suggestions: report.suggestions
+                },
+                html: this._impactView.generateImpactReport(report)
+            }
+        });
+    }
+
+    /**
+     * Handle explore table request
+     */
+    private async handleExploreTable(tableName: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) return;
+
+        const nodeId = `table:${tableName.toLowerCase()}`;
+        const node = this._lineageGraph.nodes.get(nodeId);
+
+        if (!node) {
+            this._panel.webview.postMessage({
+                command: 'tableExplorerResult',
+                data: { error: `Table "${tableName}" not found in lineage graph` }
+            });
+            return;
+        }
+
+        this._selectedLineageNode = node;
+
+        const html = this._tableExplorer.generateTableView({
+            table: node,
+            graph: this._lineageGraph
+        });
+
+        this._panel.webview.postMessage({
+            command: 'tableExplorerResult',
+            data: {
+                table: {
+                    id: node.id,
+                    name: node.name,
+                    type: node.type,
+                    filePath: node.filePath,
+                    lineNumber: node.lineNumber
+                },
+                html
+            }
+        });
+    }
+
+    /**
+     * Handle column lineage request
+     */
+    private async handleGetColumnLineage(tableName: string, columnName: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._columnLineageTracker || !this._lineageGraph) return;
+
+        const lineage = this._columnLineageTracker.getFullColumnLineage(
+            this._lineageGraph,
+            tableName,
+            columnName
+        );
+
+        const html = this._lineageView.generateColumnLineageView(lineage);
+
+        this._panel.webview.postMessage({
+            command: 'columnLineageResult',
+            data: {
+                tableName,
+                columnName,
+                upstream: lineage.upstream.map(p => ({
+                    depth: p.depth,
+                    nodeCount: p.nodes.length
+                })),
+                downstream: lineage.downstream.map(p => ({
+                    depth: p.depth,
+                    nodeCount: p.nodes.length
+                })),
+                html
+            }
+        });
+    }
+
+    /**
+     * Handle node selection in lineage view
+     */
+    private handleSelectLineageNode(nodeId: string): void {
+        if (!this._lineageGraph) return;
+
+        const node = this._lineageGraph.nodes.get(nodeId);
+        if (node) {
+            this._selectedLineageNode = node;
+        }
+    }
+
+    /**
+     * Handle get upstream request
+     */
+    private async handleGetUpstream(nodeId: string, depth: number = -1): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._flowAnalyzer) return;
+
+        const result = this._flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
+        this._currentFlowResult = result;
+
+        this._panel.webview.postMessage({
+            command: 'upstreamResult',
+            data: {
+                nodeId,
+                nodes: result.nodes.map(n => ({
+                    id: n.id,
+                    name: n.name,
+                    type: n.type,
+                    filePath: n.filePath
+                })),
+                depth: result.depth
+            }
+        });
+    }
+
+    /**
+     * Handle get downstream request
+     */
+    private async handleGetDownstream(nodeId: string, depth: number = -1): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._flowAnalyzer) return;
+
+        const result = this._flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+        this._currentFlowResult = result;
+
+        this._panel.webview.postMessage({
+            command: 'downstreamResult',
+            data: {
+                nodeId,
+                nodes: result.nodes.map(n => ({
+                    id: n.id,
+                    name: n.name,
+                    type: n.type,
+                    filePath: n.filePath
+                })),
+                depth: result.depth
+            }
+        });
+    }
+
+    /**
+     * Get lineage stats for display
+     */
+    private getLineageStats(): { tables: number; views: number; columns: number; edges: number } | null {
+        if (!this._lineageGraph) return null;
+
+        let tables = 0, views = 0, columns = 0;
+        for (const node of this._lineageGraph.nodes.values()) {
+            if (node.type === 'table') tables++;
+            else if (node.type === 'view') views++;
+            else if (node.type === 'column') columns++;
+        }
+
+        return {
+            tables,
+            views,
+            columns,
+            edges: this._lineageGraph.edges.length
+        };
     }
 
     /**
@@ -379,6 +736,95 @@ export class WorkspacePanel {
         }
         .search-clear:hover { color: var(--error-light); background: rgba(239, 68, 68, 0.1); }
         .search-clear.visible { display: flex; }
+
+        /* ========== View Mode Tabs ========== */
+        .view-tabs {
+            display: flex; align-items: center; gap: 2px;
+            background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);
+        }
+        .view-tab {
+            padding: 6px 12px; border: none; background: transparent;
+            color: var(--text-muted); font-size: 12px; font-weight: 500;
+            border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .view-tab:hover { color: var(--text-secondary); background: var(--bg-tertiary); }
+        .view-tab.active {
+            background: var(--accent); color: white;
+        }
+        .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
+
+        /* ========== Context Menu ========== */
+        .context-menu {
+            position: fixed; z-index: 1000;
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 4px 0;
+            min-width: 180px; box-shadow: var(--shadow-lg);
+            display: none;
+        }
+        .context-menu.visible { display: block; }
+        .context-menu-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 14px; cursor: pointer; font-size: 12px;
+            color: var(--text-secondary); transition: all 0.1s;
+        }
+        .context-menu-item:hover {
+            background: var(--accent); color: white;
+        }
+        .context-menu-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+        .context-menu-divider {
+            height: 1px; background: var(--border-subtle); margin: 4px 0;
+        }
+        .context-menu-item.disabled {
+            opacity: 0.5; pointer-events: none;
+        }
+
+        /* ========== Lineage Panel ========== */
+        .lineage-panel {
+            position: fixed;
+            top: 120px; /* Below header + stats + issue banner */
+            left: 0;
+            right: 280px; /* Account for sidebar */
+            bottom: 0;
+            background: var(--bg-primary);
+            overflow: auto;
+            padding: 20px;
+            display: none;
+            z-index: 50;
+        }
+        .lineage-panel.visible { display: block; }
+        .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
+        .lineage-content { max-width: 1000px; margin: 0 auto; }
+        .sidebar.collapsed ~ .lineage-panel { right: 0; }
+
+        /* Lineage panel header with back button */
+        .lineage-header {
+            display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
+            padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle);
+        }
+        .lineage-back-btn {
+            display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+            background: var(--bg-tertiary); border: none; border-radius: var(--radius-md);
+            color: var(--text-secondary); cursor: pointer; font-size: 13px;
+        }
+        .lineage-back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .lineage-back-btn svg { width: 16px; height: 16px; }
+
+        /* Lineage node cards */
+        .lineage-node-card {
+            background: var(--bg-secondary); padding: 12px 16px; border-radius: var(--radius-md);
+            margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
+            border: 1px solid var(--border-subtle);
+        }
+        .lineage-node-card:hover { background: var(--bg-tertiary); border-color: var(--accent); }
+        .lineage-node-card .node-name { font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+        .lineage-node-card .node-meta { font-size: 11px; color: var(--text-muted); }
+
+        /* Empty state */
+        .lineage-empty {
+            text-align: center; padding: 60px 20px; color: var(--text-muted);
+        }
+        .lineage-empty svg { width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5; }
 
         /* ========== Stats Bar ========== */
         .stats-bar {
@@ -608,6 +1054,36 @@ export class WorkspacePanel {
                 <span class="header-icon">📊</span>
                 <h1 class="header-title">Workspace Dependencies</h1>
             </div>
+
+            <!-- View Mode Tabs -->
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="graph" title="Dependency Graph">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
+                        <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
+                    </svg>
+                    Graph
+                </button>
+                <button class="view-tab" data-view="lineage" title="Data Lineage">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h4l3 9 4-18 3 9h4"/>
+                    </svg>
+                    Lineage
+                </button>
+                <button class="view-tab" data-view="tableExplorer" title="Table Explorer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                    </svg>
+                    Tables
+                </button>
+                <button class="view-tab" data-view="impact" title="Impact Analysis">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                    </svg>
+                    Impact
+                </button>
+            </div>
+
             <div class="header-right">
                 <div class="search-box">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
@@ -863,6 +1339,59 @@ export class WorkspacePanel {
         </div>
 
         <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu">
+            <div class="context-menu-item" data-action="showUpstream">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 19V5M5 12l7-7 7 7"/>
+                </svg>
+                Show Upstream
+            </div>
+            <div class="context-menu-item" data-action="showDownstream">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+                Show Downstream
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="analyzeImpact">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                </svg>
+                Analyze Impact
+            </div>
+            <div class="context-menu-item" data-action="exploreTable">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                </svg>
+                Explore Table
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="openFile">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Open File
+            </div>
+        </div>
+
+        <!-- Lineage Panel (overlays graph) -->
+        <div id="lineage-panel" class="lineage-panel">
+            <div class="lineage-header">
+                <button class="lineage-back-btn" id="lineage-back-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    Back to Graph
+                </button>
+                <h2 id="lineage-title">Data Lineage</h2>
+            </div>
+            <div class="lineage-content" id="lineage-content">
+                <!-- Dynamic lineage content will be inserted here -->
+            </div>
+        </div>
     </div>
 
     <script nonce="${nonce}">
@@ -1071,6 +1600,231 @@ export class WorkspacePanel {
             });
         });
 
+        // ========== View Mode Tabs ==========
+        let currentViewMode = 'graph';
+        const viewTabs = document.querySelectorAll('.view-tab');
+        const lineagePanel = document.getElementById('lineage-panel');
+        const lineageContent = document.getElementById('lineage-content');
+        const lineageTitle = document.getElementById('lineage-title');
+        const lineageBackBtn = document.getElementById('lineage-back-btn');
+        const graphArea = document.querySelector('.graph-area');
+
+        const viewTitles = {
+            lineage: 'Data Lineage',
+            tableExplorer: 'Table Explorer',
+            impact: 'Impact Analysis'
+        };
+
+        const viewEmptyStates = {
+            lineage: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 9 4-18 3 9h4"/></svg><p>Select a table from the graph to view its data lineage,<br>or right-click a node and choose "Show Upstream" or "Show Downstream".</p></div>',
+            tableExplorer: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg><p>Right-click on a table node and select "Explore Table"<br>to view its columns and dependencies.</p></div>',
+            impact: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><p>Right-click on a table and select "Analyze Impact"<br>to see what would be affected by changes.</p></div>'
+        };
+
+        function switchToView(view) {
+            if (view === currentViewMode) return;
+
+            // Update tab active state
+            viewTabs.forEach(t => {
+                if (t.getAttribute('data-view') === view) {
+                    t.classList.add('active');
+                } else {
+                    t.classList.remove('active');
+                }
+            });
+            currentViewMode = view;
+
+            // Handle view switching
+            if (view === 'graph') {
+                lineagePanel?.classList.remove('visible');
+                if (graphArea) graphArea.style.display = '';
+            } else {
+                // Show lineage panel with appropriate content
+                if (graphArea) graphArea.style.display = 'none';
+                lineagePanel?.classList.add('visible');
+
+                // Set title
+                if (lineageTitle) {
+                    lineageTitle.textContent = viewTitles[view] || 'Data Lineage';
+                }
+
+                // Set empty state content
+                if (lineageContent) {
+                    lineageContent.innerHTML = viewEmptyStates[view] || '';
+                }
+
+                // Notify extension
+                if (view === 'lineage') {
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (view === 'tableExplorer') {
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (view === 'impact') {
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+            }
+        }
+
+        viewTabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const view = tab.getAttribute('data-view');
+                switchToView(view);
+            });
+        });
+
+        // Back button handler
+        lineageBackBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            switchToView('graph');
+        });
+
+        // ========== Context Menu ==========
+        const contextMenu = document.getElementById('context-menu');
+        let contextMenuTarget = null;
+
+        function showContextMenu(e, nodeData) {
+            e.preventDefault();
+            contextMenuTarget = nodeData;
+
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
+            contextMenu.classList.add('visible');
+
+            // Enable/disable items based on node type
+            const exploreItem = contextMenu.querySelector('[data-action="exploreTable"]');
+            if (exploreItem) {
+                if (nodeData.type === 'file') {
+                    exploreItem.classList.add('disabled');
+                } else {
+                    exploreItem.classList.remove('disabled');
+                }
+            }
+        }
+
+        function hideContextMenu() {
+            contextMenu?.classList.remove('visible');
+            contextMenuTarget = null;
+        }
+
+        // Hide context menu on click, but not on context menu items or view tabs
+        document.addEventListener('click', (e) => {
+            // Don't hide if clicking inside context menu
+            if (e.target.closest('.context-menu')) return;
+            // Don't hide if clicking view tabs
+            if (e.target.closest('.view-tabs')) return;
+            hideContextMenu();
+        });
+
+        document.addEventListener('contextmenu', (e) => {
+            if (!e.target.closest('.node')) {
+                hideContextMenu();
+            }
+        });
+
+        // Context menu item handlers
+        contextMenu?.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent the document click handler from firing
+                if (!contextMenuTarget || item.classList.contains('disabled')) return;
+
+                const action = item.getAttribute('data-action');
+                const nodeName = contextMenuTarget.label || contextMenuTarget.id;
+
+                switch (action) {
+                    case 'showUpstream':
+                        switchToView('lineage');
+                        if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
+                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading upstream dependencies...</p></div>';
+                        vscode.postMessage({
+                            command: 'getUpstream',
+                            nodeId: 'table:' + nodeName.toLowerCase(),
+                            depth: 5
+                        });
+                        break;
+                    case 'showDownstream':
+                        switchToView('lineage');
+                        if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
+                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading downstream dependencies...</p></div>';
+                        vscode.postMessage({
+                            command: 'getDownstream',
+                            nodeId: 'table:' + nodeName.toLowerCase(),
+                            depth: 5
+                        });
+                        break;
+                    case 'analyzeImpact':
+                        switchToView('impact');
+                        if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
+                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Analyzing impact...</p></div>';
+                        vscode.postMessage({
+                            command: 'analyzeImpact',
+                            type: contextMenuTarget.type === 'file' ? 'table' : 'table',
+                            name: nodeName,
+                            changeType: 'modify'
+                        });
+                        break;
+                    case 'exploreTable':
+                        switchToView('tableExplorer');
+                        if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
+                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading table details...</p></div>';
+                        vscode.postMessage({
+                            command: 'exploreTable',
+                            tableName: nodeName
+                        });
+                        break;
+                    case 'openFile':
+                        if (contextMenuTarget.filePath) {
+                            openFile(contextMenuTarget.filePath);
+                        }
+                        break;
+                }
+                hideContextMenu();
+            });
+        });
+
+        // ========== Message Handling from Extension ==========
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.command) {
+                case 'lineageResult':
+                case 'upstreamResult':
+                case 'downstreamResult':
+                    if (lineageContent && message.data) {
+                        const nodes = message.data.nodes || message.data.result?.nodes || [];
+                        let html = '<h2>' + (message.command === 'upstreamResult' ? 'Upstream' : message.command === 'downstreamResult' ? 'Downstream' : 'Lineage') + ' Analysis</h2>';
+                        html += '<p style="color: var(--text-muted); margin-bottom: 16px;">Found ' + nodes.length + ' related nodes</p>';
+                        html += '<div style="display: grid; gap: 8px;">';
+                        nodes.forEach(n => {
+                            html += '<div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;" onclick="vscode.postMessage({command:\\'openFileAtLine\\', filePath:\\'' + (n.filePath || '').replace(/'/g, "\\'") + '\\', line: ' + (n.lineNumber || 0) + '})">';
+                            html += '<div style="font-weight: 600; color: var(--text-primary);">' + n.name + '</div>';
+                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + n.type + (n.filePath ? ' • ' + n.filePath.split('/').pop() : '') + '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                        lineageContent.innerHTML = html;
+                    }
+                    break;
+                case 'impactResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                    }
+                    break;
+                case 'tableExplorerResult':
+                    if (lineageContent) {
+                        if (message.data?.error) {
+                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + message.data.error + '</div>';
+                        } else if (message.data?.html) {
+                            lineageContent.innerHTML = message.data.html;
+                        }
+                    }
+                    break;
+                case 'columnLineageResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                    }
+                    break;
+            }
+        });
+
         // ========== Issue Item Clicks ==========
         document.querySelectorAll('.issue-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -1114,6 +1868,24 @@ export class WorkspacePanel {
             svg.addEventListener('mouseout', (e) => {
                 const node = e.target.closest('.node');
                 if (node) hideTooltip();
+            });
+
+            // Right-click context menu
+            svg.addEventListener('contextmenu', (e) => {
+                const node = e.target.closest('.node');
+                if (node) {
+                    const nodeId = node.getAttribute('data-id');
+                    const nodeLabel = node.getAttribute('data-label') || nodeId;
+                    const nodeType = node.getAttribute('data-type') || 'file';
+                    const filePath = node.getAttribute('data-filepath');
+
+                    showContextMenu(e, {
+                        id: nodeId,
+                        label: nodeLabel,
+                        type: nodeType,
+                        filePath: filePath
+                    });
+                }
             });
         }
 

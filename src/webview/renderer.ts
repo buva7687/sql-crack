@@ -3855,14 +3855,30 @@ export function resetView(): void {
 }
 
 // Search functionality
+// Debounce timer for search
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
+
 export function setSearchBox(input: HTMLInputElement): void {
     searchBox = input;
     input.addEventListener('input', () => {
-        performSearch(input.value);
+        // Clear any existing debounce timer
+        if (searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+
+        // Immediately highlight matches without zooming (for visual feedback)
+        highlightMatches(input.value);
+
+        // Debounce the zoom/navigation to first result
+        searchDebounceTimer = setTimeout(() => {
+            navigateToFirstResult();
+        }, SEARCH_DEBOUNCE_DELAY);
     });
 }
 
-function performSearch(term: string): void {
+// Highlight matching nodes without navigating (immediate feedback)
+function highlightMatches(term: string): void {
     state.searchTerm = term.toLowerCase();
     state.searchResults = [];
     state.currentSearchIndex = -1;
@@ -3880,7 +3896,7 @@ function performSearch(term: string): void {
 
     if (!term) { return; }
 
-    // Find matching nodes
+    // Find and highlight matching nodes
     allNodes?.forEach(g => {
         const label = g.getAttribute('data-label') || '';
         const id = g.getAttribute('data-id') || '';
@@ -3894,11 +3910,18 @@ function performSearch(term: string): void {
             }
         }
     });
+}
 
-    // Navigate to first result
+// Navigate to first result after debounce delay
+function navigateToFirstResult(): void {
     if (state.searchResults.length > 0) {
         navigateSearch(0);
     }
+}
+
+function performSearch(term: string): void {
+    highlightMatches(term);
+    navigateToFirstResult();
 }
 
 function navigateSearch(delta: number): void {
