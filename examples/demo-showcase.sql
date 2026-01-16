@@ -5,6 +5,13 @@
 -- This comprehensive demo file showcases ALL features of the SQL Crack extension
 -- in a realistic e-commerce analytics scenario.
 --
+-- RELATED FILES:
+--   - schema-ecommerce.sql: Database schema definitions
+--   - basic-*.sql: Individual SQL feature examples
+--   - lineage-*.sql: Column lineage and data pipeline examples
+--   - quality-*.sql: Performance hints and code warnings
+--   - analytics-*.sql: Business analytics queries
+--
 -- SCENARIO: Analyzing customer behavior, order patterns, and product performance
 -- for a multi-region e-commerce platform.
 --
@@ -491,7 +498,17 @@ WHERE o.order_date >= CURRENT_DATE
 --    - Press 'E' to expand/collapse all CTEs
 --
 -- 7. Demonstrate workspace analysis:
---    - Create additional SQL files referencing these tables
---    - Use "Analyze Workspace Dependencies" to show cross-file relationships
+--    - Use all files in examples/ folder
+--    - Right-click → "Analyze Workspace Dependencies"
+--    - Show cross-file relationships with schema-ecommerce.sql
+--    - Use Lineage tab to trace upstream/downstream
+--
+-- 8. For specific feature demos, use:
+--    - basic-joins.sql: All JOIN types
+--    - basic-ctes.sql: CTE patterns and recursion
+--    - basic-window-functions.sql: Window function examples
+--    - lineage-column-tracking.sql: Column lineage tracing
+--    - quality-performance-hints.sql: Performance anti-patterns
+--    - quality-code-warnings.sql: Code quality issues
 --
 -- ============================================================

@@ -339,11 +339,11 @@ export class WorkspacePanel {
                 break;
 
             case 'getUpstream':
-                await this.handleGetUpstream(message.nodeId, message.depth);
+                await this.handleGetUpstream(message.nodeId, message.depth, message.nodeType, message.filePath);
                 break;
 
             case 'getDownstream':
-                await this.handleGetDownstream(message.nodeId, message.depth);
+                await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
                 break;
         }
     }
@@ -556,24 +556,52 @@ export class WorkspacePanel {
     /**
      * Handle get upstream request
      */
-    private async handleGetUpstream(nodeId: string, depth: number = -1): Promise<void> {
+    private async handleGetUpstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
         await this.buildLineageGraph();
         if (!this._flowAnalyzer) return;
 
-        const result = this._flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
-        this._currentFlowResult = result;
+        // For file nodes, get all tables defined in the file and aggregate their upstream
+        let nodeIds: string[] = [];
+        if (nodeType === 'file' && filePath) {
+            const index = this._indexManager.getIndex();
+            if (index) {
+                const fileAnalysis = index.files.get(filePath);
+                if (fileAnalysis) {
+                    nodeIds = fileAnalysis.definitions.map(def => `${def.type}:${def.name.toLowerCase()}`);
+                }
+            }
+        } else if (nodeId) {
+            nodeIds = [nodeId];
+        }
+
+        if (nodeIds.length === 0) {
+            this._panel.webview.postMessage({
+                command: 'upstreamResult',
+                data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
+            });
+            return;
+        }
+
+        // Aggregate results from all nodes
+        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
+        let maxDepth = 0;
+
+        for (const nid of nodeIds) {
+            const result = this._flowAnalyzer.getUpstream(nid, { maxDepth: depth });
+            for (const n of result.nodes) {
+                if (!allNodes.has(n.id)) {
+                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
+                }
+            }
+            maxDepth = Math.max(maxDepth, result.depth);
+        }
 
         this._panel.webview.postMessage({
             command: 'upstreamResult',
             data: {
-                nodeId,
-                nodes: result.nodes.map(n => ({
-                    id: n.id,
-                    name: n.name,
-                    type: n.type,
-                    filePath: n.filePath
-                })),
-                depth: result.depth
+                nodeId: nodeId || filePath,
+                nodes: Array.from(allNodes.values()),
+                depth: maxDepth
             }
         });
     }
@@ -581,24 +609,52 @@ export class WorkspacePanel {
     /**
      * Handle get downstream request
      */
-    private async handleGetDownstream(nodeId: string, depth: number = -1): Promise<void> {
+    private async handleGetDownstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
         await this.buildLineageGraph();
         if (!this._flowAnalyzer) return;
 
-        const result = this._flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
-        this._currentFlowResult = result;
+        // For file nodes, get all tables defined in the file and aggregate their downstream
+        let nodeIds: string[] = [];
+        if (nodeType === 'file' && filePath) {
+            const index = this._indexManager.getIndex();
+            if (index) {
+                const fileAnalysis = index.files.get(filePath);
+                if (fileAnalysis) {
+                    nodeIds = fileAnalysis.definitions.map(def => `${def.type}:${def.name.toLowerCase()}`);
+                }
+            }
+        } else if (nodeId) {
+            nodeIds = [nodeId];
+        }
+
+        if (nodeIds.length === 0) {
+            this._panel.webview.postMessage({
+                command: 'downstreamResult',
+                data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
+            });
+            return;
+        }
+
+        // Aggregate results from all nodes
+        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
+        let maxDepth = 0;
+
+        for (const nid of nodeIds) {
+            const result = this._flowAnalyzer.getDownstream(nid, { maxDepth: depth });
+            for (const n of result.nodes) {
+                if (!allNodes.has(n.id)) {
+                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
+                }
+            }
+            maxDepth = Math.max(maxDepth, result.depth);
+        }
 
         this._panel.webview.postMessage({
             command: 'downstreamResult',
             data: {
-                nodeId,
-                nodes: result.nodes.map(n => ({
-                    id: n.id,
-                    name: n.name,
-                    type: n.type,
-                    filePath: n.filePath
-                })),
-                depth: result.depth
+                nodeId: nodeId || filePath,
+                nodes: Array.from(allNodes.values()),
+                depth: maxDepth
             }
         });
     }
@@ -781,10 +837,10 @@ export class WorkspacePanel {
 
         /* ========== Lineage Panel ========== */
         .lineage-panel {
-            position: fixed;
-            top: 120px; /* Below header + stats + issue banner */
+            position: absolute;
+            top: 0;
             left: 0;
-            right: 280px; /* Account for sidebar */
+            right: 0;
             bottom: 0;
             background: var(--bg-primary);
             overflow: auto;
@@ -792,6 +848,12 @@ export class WorkspacePanel {
             display: none;
             z-index: 50;
         }
+        .graph-area-container {
+            position: relative;
+            flex: 1;
+            overflow: hidden;
+        }
+        .lineage-panel.visible { display: block; }
         .lineage-panel.visible { display: block; }
         .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
         .lineage-content { max-width: 1000px; margin: 0 auto; }
@@ -1156,18 +1218,19 @@ export class WorkspacePanel {
         <!-- Main Layout -->
         <div class="main-layout">
             <!-- Graph Area -->
-            <div class="graph-area">
-                <div id="graph-container" style="width: 100%; height: 100%;">
-                    ${graph.nodes.length > 0 ? this.renderGraph(graph) : `
-                    <div class="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
-                        </svg>
-                        <div class="empty-state-title">No dependencies found</div>
-                        <div>Try refreshing or check your SQL files</div>
+            <div class="graph-area-container">
+                <div class="graph-area">
+                    <div id="graph-container" style="width: 100%; height: 100%;">
+                        ${graph.nodes.length > 0 ? this.renderGraph(graph) : `
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                            </svg>
+                            <div class="empty-state-title">No dependencies found</div>
+                            <div>Try refreshing or check your SQL files</div>
+                        </div>
+                        `}
                     </div>
-                    `}
-                </div>
 
                 <!-- Zoom Toolbar -->
                 <div class="zoom-toolbar">
@@ -1336,7 +1399,24 @@ export class WorkspacePanel {
                     </div>
                 </div>
             </aside>
+
+            <!-- Lineage Panel (overlays graph) -->
+            <div id="lineage-panel" class="lineage-panel">
+                <div class="lineage-header">
+                    <button class="lineage-back-btn" id="lineage-back-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Back to Graph
+                    </button>
+                    <h2 id="lineage-title">Data Lineage</h2>
+                </div>
+                <div class="lineage-content" id="lineage-content">
+                    <!-- Dynamic lineage content will be inserted here -->
+                </div>
+            </div>
         </div>
+        <!-- End graph-area-container -->
 
         <div id="tooltip" class="tooltip" style="display: none;"></div>
 
@@ -1374,22 +1454,6 @@ export class WorkspacePanel {
                     <polyline points="14 2 14 8 20 8"/>
                 </svg>
                 Open File
-            </div>
-        </div>
-
-        <!-- Lineage Panel (overlays graph) -->
-        <div id="lineage-panel" class="lineage-panel">
-            <div class="lineage-header">
-                <button class="lineage-back-btn" id="lineage-back-btn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 12H5M12 19l-7-7 7-7"/>
-                    </svg>
-                    Back to Graph
-                </button>
-                <h2 id="lineage-title">Data Lineage</h2>
-            </div>
-            <div class="lineage-content" id="lineage-content">
-                <!-- Dynamic lineage content will be inserted here -->
             </div>
         </div>
     </div>
@@ -1616,7 +1680,7 @@ export class WorkspacePanel {
         };
 
         const viewEmptyStates = {
-            lineage: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 9 4-18 3 9h4"/></svg><p>Select a table from the graph to view its data lineage,<br>or right-click a node and choose "Show Upstream" or "Show Downstream".</p></div>',
+            lineage: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 9 4-18 3 9h4"/></svg><p>Right-click a node in the graph and choose<br>"Show Upstream" or "Show Downstream" to view data lineage.</p></div>',
             tableExplorer: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg><p>Right-click on a table node and select "Explore Table"<br>to view its columns and dependencies.</p></div>',
             impact: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><p>Right-click on a table and select "Analyze Impact"<br>to see what would be affected by changes.</p></div>'
         };
@@ -1735,21 +1799,43 @@ export class WorkspacePanel {
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading upstream dependencies...</p></div>';
-                        vscode.postMessage({
-                            command: 'getUpstream',
-                            nodeId: 'table:' + nodeName.toLowerCase(),
-                            depth: 5
-                        });
+                        // For file nodes, pass filePath; for table/view nodes, construct proper nodeId
+                        if (contextMenuTarget.type === 'file') {
+                            vscode.postMessage({
+                                command: 'getUpstream',
+                                nodeType: 'file',
+                                filePath: contextMenuTarget.filePath,
+                                depth: 5
+                            });
+                        } else {
+                            const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
+                            vscode.postMessage({
+                                command: 'getUpstream',
+                                nodeId: nodeType + ':' + nodeName.toLowerCase(),
+                                depth: 5
+                            });
+                        }
                         break;
                     case 'showDownstream':
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading downstream dependencies...</p></div>';
-                        vscode.postMessage({
-                            command: 'getDownstream',
-                            nodeId: 'table:' + nodeName.toLowerCase(),
-                            depth: 5
-                        });
+                        // For file nodes, pass filePath; for table/view nodes, construct proper nodeId
+                        if (contextMenuTarget.type === 'file') {
+                            vscode.postMessage({
+                                command: 'getDownstream',
+                                nodeType: 'file',
+                                filePath: contextMenuTarget.filePath,
+                                depth: 5
+                            });
+                        } else {
+                            const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
+                            vscode.postMessage({
+                                command: 'getDownstream',
+                                nodeId: nodeType + ':' + nodeName.toLowerCase(),
+                                depth: 5
+                            });
+                        }
                         break;
                     case 'analyzeImpact':
                         switchToView('impact');
@@ -2026,6 +2112,9 @@ export class WorkspacePanel {
             return `
                 <g class="node ${typeClass}"
                    transform="translate(${node.x}, ${node.y})"
+                   data-id="${this.escapeHtml(node.id)}"
+                   data-label="${this.escapeHtml(node.label)}"
+                   data-type="${node.type}"
                    data-filepath="${node.filePath ? this.escapeHtml(node.filePath) : ''}"
                    data-tooltip="${Buffer.from(tooltipContent).toString('base64')}">
                     <rect width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>

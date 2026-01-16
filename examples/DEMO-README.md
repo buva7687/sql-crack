@@ -2,265 +2,221 @@
 
 This directory contains comprehensive demo files showcasing all features of the SQL Crack extension.
 
-## 📁 Files Overview
+## Files Overview
 
-### Main Demo File
-**`demo-showcase.sql`** - Complete feature showcase (9 queries)
-- **Recommended for:** Product demos, tutorials, feature walkthroughs
-- **Dialect:** PostgreSQL / Snowflake
-- **Queries:** 9 comprehensive analytical queries
-- **Features demonstrated:** ALL extension features
+### Schema
+| File | Description |
+|------|-------------|
+| `schema-ecommerce.sql` | Complete e-commerce database schema (customers, products, orders, inventory) |
 
-### Schema Definition Files
-**`customer-schema.sql`** - Customer domain tables and views
-- Tables: `customers`, `customer_segments`, `customer_feedback`, `customer_support`
-- Views: `customer_segments`
+### Basic SQL Features
+| File | Description |
+|------|-------------|
+| `basic-joins.sql` | All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS, self-joins) - 12 examples |
+| `basic-aggregates.sql` | GROUP BY, HAVING, aggregate functions - 10 examples |
+| `basic-ctes.sql` | Common Table Expressions including recursive CTEs - 9 examples |
+| `basic-subqueries.sql` | Scalar, IN, EXISTS, correlated subqueries - 12 examples |
+| `basic-window-functions.sql` | ROW_NUMBER, RANK, LAG, LEAD, running totals - 11 examples |
+| `basic-case-expressions.sql` | Simple and nested CASE statements - 11 examples |
+| `basic-set-operations.sql` | UNION, INTERSECT, EXCEPT operations - 10 examples |
 
-**`product-schema.sql`** - Product domain tables and views
-- Tables: `products`, `inventory`, `reviews`, `suppliers`, `product_suppliers`
-- Views: `product_categories` (recursive CTE)
+### Column Lineage & Data Flow
+| File | Description |
+|------|-------------|
+| `lineage-column-tracking.sql` | Column transformation types (passthrough, renamed, aggregated, calculated) - 10 examples |
+| `lineage-data-pipeline.sql` | Multi-stage VIEW pipeline for workspace lineage and impact analysis |
 
-**`order-schema.sql`** - Order domain tables and views
-- Tables: `orders`, `order_items`, `order_status_history`, `order_returns`, `daily_sales_summary`
-- Views: `order_analytics`, `regional_performance`
+### Write Operations
+| File | Description |
+|------|-------------|
+| `dml-write-operations.sql` | INSERT, UPDATE, DELETE, MERGE operations - 17 examples |
 
-### Analytics Query Files
-**`customer-analytics.sql`** - Customer-focused analytical queries (4 queries)
-- Customer lifetime value by region
-- Customer retention/cohort analysis
-- High-value customer identification (RFM analysis)
-- Customer feedback and NPS analysis
+### Quality & Performance
+| File | Description |
+|------|-------------|
+| `quality-performance-hints.sql` | Performance anti-patterns (filter pushdown, non-sargable, etc.) - 20 examples |
+| `quality-code-warnings.sql` | Code quality issues (unused CTEs, dead columns, etc.) - 14 examples |
 
-**`order-analytics.sql`** - Order-focused analytical queries (4 queries)
-- Daily order trends with week-over-week comparison
-- Product sales performance ranking
-- Order fulfillment analysis
-- Cross-selling opportunity analysis
+### Analytics
+| File | Description |
+|------|-------------|
+| `analytics-customer.sql` | Customer lifetime value, cohorts, RFM analysis - 4 queries |
+| `analytics-orders.sql` | Order trends, fulfillment, cross-selling - 4 queries |
 
----
-
-## 🎯 Feature Coverage Matrix
-
-| Feature | demo-showcase.sql | customer-analytics.sql | order-analytics.sql |
-|---------|------------------|----------------------|-------------------|
-| **Phase 1: Interactive Navigation** |
-| Click-to-jump navigation | ✅ | ✅ | ✅ |
-| Edge condition display | ✅ | ✅ | ✅ |
-| Breadcrumb navigation | ✅ | ✅ | ✅ |
-| Enhanced tooltips | ✅ | ✅ | ✅ |
-| Read vs Write badges | ✅ | ✅ | ✅ |
-| **Phase 2: Developer Productivity** |
-| Unused CTE warnings | ✅ | ✅ | ✅ |
-| Dead column detection | ✅ | ✅ | ✅ |
-| Duplicate subquery detection | ✅ | ✅ | ✅ |
-| Repeated table scan warnings | ✅ | ✅ | ✅ |
-| Query complexity insights | ✅ | ✅ | ✅ |
-| Column lineage tracing | ✅ | ✅ | ✅ |
-| CTE cloud expansion | ✅ | ✅ | ✅ |
-| Independent cloud pan/zoom | ✅ | ✅ | ✅ |
-| **Phase 3: Performance Analysis** |
-| Filter pushdown detection | ✅ | ✅ | ✅ |
-| Non-sargable expressions | ✅ | ✅ | ✅ |
-| Index suggestions | ✅ | ✅ | ✅ |
-| Subquery to JOIN hints | ✅ | ✅ | ✅ |
-| Performance score (0-100) | ✅ | ✅ | ✅ |
-| **Additional Features** |
-| Multi-query support (tabs) | ✅ (9 queries) | ✅ (4 queries) | ✅ (4 queries) |
-| Operation type badges | ✅ | ✅ | ✅ |
-| Complex JOINs with Venn diagrams | ✅ | ✅ | ✅ |
-| Window functions | ✅ | ✅ | ✅ |
-| CASE statements | ✅ | ✅ | ✅ |
-| UNION queries | ✅ | ✅ | ✅ |
-| HAVING clauses | ✅ | ✅ | ✅ |
-| Correlated subqueries | ✅ | ✅ | ✅ |
-| EXISTS subqueries | ✅ | ✅ | ✅ |
-| **Phase 4: Workspace Analysis** |
-| Cross-file dependencies | ✅ | ✅ | ✅ |
-| Table/view relationships | ✅ | ✅ | ✅ |
-| Schema definitions | ✅ | ✅ | ✅ |
-| Reference tracking | ✅ | ✅ | ✅ |
+### Demo
+| File | Description |
+|------|-------------|
+| `demo-showcase.sql` | **Comprehensive feature showcase** - 9 queries covering ALL features |
 
 ---
 
-## 🎬 Demo Script Suggestions
+## Feature Coverage Matrix
 
-### Quick Feature Overview (5 minutes)
+| Feature | demo-showcase | basic-* | lineage-* | quality-* | analytics-* |
+|---------|:-------------:|:-------:|:---------:|:---------:|:-----------:|
+| **Visualization** |
+| Click-to-jump navigation | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Edge condition display | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Breadcrumb navigation | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CTE cloud expansion | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **SQL Features** |
+| JOINs (all types) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CTEs | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Window functions | ✅ | ✅ | ✅ | - | ✅ |
+| Subqueries | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CASE statements | ✅ | ✅ | ✅ | ✅ | ✅ |
+| UNION/Set operations | ✅ | ✅ | - | - | - |
+| **Quality Analysis** |
+| Unused CTE warnings | ✅ | - | - | ✅ | - |
+| Dead column detection | ✅ | - | - | ✅ | - |
+| Duplicate subqueries | - | - | - | ✅ | - |
+| Repeated table scans | ✅ | - | - | ✅ | - |
+| **Performance Hints** |
+| Filter pushdown | ✅ | - | - | ✅ | - |
+| Non-sargable expressions | ✅ | - | - | ✅ | - |
+| Index suggestions | ✅ | - | - | ✅ | - |
+| **Column Lineage** |
+| Passthrough columns | ✅ | - | ✅ | - | - |
+| Renamed columns | ✅ | - | ✅ | - | - |
+| Aggregated columns | ✅ | - | ✅ | - | - |
+| Calculated columns | ✅ | - | ✅ | - | - |
+| **Write Operations** |
+| INSERT | ✅ | - | - | - | - |
+| UPDATE | ✅ | - | - | - | - |
+| DELETE | ✅ | - | - | ✅ | - |
+| MERGE | - | - | - | - | - |
+| **Workspace Analysis** |
+| Cross-file dependencies | ✅ | - | ✅ | - | ✅ |
+| Impact analysis | - | - | ✅ | - | - |
+
+---
+
+## Quick Start Guide
+
+### For Product Demos (5-10 minutes)
 1. Open `demo-showcase.sql`
 2. Click "Visualize SQL" button
-3. Show multi-query tabs (Q1-Q9)
-4. Navigate through Query 1:
+3. Navigate through queries using Q1-Q9 tabs
+4. Demonstrate key features:
    - Double-click CTEs to expand clouds
    - Click nodes to jump to SQL
    - Click edges to see JOIN conditions
-   - Use breadcrumb to navigate back
+   - Press 'Q' for query stats panel
+   - Press 'C' for column lineage mode
 
-### Performance Analysis Demo (3 minutes)
-1. Navigate to Query 2 (Product Performance)
-2. Point out warning icons:
-   - 🔄 Repeated table scans (3 subqueries)
-   - ⬆ Filter pushdown opportunity
-   - 📇 Index suggestions on WHERE clauses
-3. Press 'Q' to toggle query stats panel
-4. Show performance score and complexity breakdown
+### For Feature Testing
+| Feature | File to Use |
+|---------|-------------|
+| CTE expansion | `basic-ctes.sql` or `demo-showcase.sql` Q1 |
+| Performance hints | `quality-performance-hints.sql` |
+| Code warnings | `quality-code-warnings.sql` |
+| Column lineage | `lineage-column-tracking.sql` |
+| Window functions | `basic-window-functions.sql` |
+| Complex JOINs | `basic-joins.sql` |
+| Workspace lineage | `lineage-data-pipeline.sql` + `schema-ecommerce.sql` |
 
-### Quality & Annotations Demo (3 minutes)
-1. Navigate to Query 1 (Customer Lifecycle)
-2. Show unused CTE warning badge
-3. Point out dead columns in SELECT
-4. Press 'C' to enable column lineage mode
-5. Click an output column to trace its transformation
-
-### Write Operations Demo (2 minutes)
-1. Navigate to Query 7 (UPDATE) - show red WRITE badge
-2. Navigate to Query 8 (DELETE) - show red DELETE badge
-3. Navigate to Query 9 (INSERT) - show green INSERT badge
-4. Show operation type badges
-
-### Workspace Analysis Demo (5 minutes)
-1. Right-click examples folder → "Analyze Workspace Dependencies"
-2. Show file-to-file dependency graph
-3. Switch to Tables mode to see table relationships
-4. Click any file/table to open it
-5. Double-click to visualize its SQL
-6. Show statistics panel with orphaned/missing definitions
-
-### Interactive Features Demo (3 minutes)
-1. Press 'H' to switch layout (vertical ↔ horizontal)
-2. Press 'E' to expand/collapse all CTEs
-3. Press 'L' to toggle legend
-4. Use mouse wheel to zoom in/out
-5. Drag canvas to pan around
-6. Press 'F' for focus mode (upstream/downstream)
+### For Workspace Analysis Demo
+1. Open the `examples/` folder in VS Code
+2. Right-click → "Analyze Workspace Dependencies"
+3. View file-to-file and table-to-table relationships
+4. Click nodes to navigate to definitions
+5. Use Lineage/Tables/Impact tabs
 
 ---
 
-## 📊 Query-by-Query Breakdown
+## Demo Script: Complete Walkthrough
 
-### demo-showcase.sql
+### 1. Basic Visualization (2 min)
+```
+Open: demo-showcase.sql
+Action: Visualize Query 1
+Show: Node clicking, edge tooltips, zoom/pan
+```
 
-**Query 1: Customer Lifecycle Analysis** (Lines 27-120)
-- CTEs: 4 (customer_journey, customer_segments, regional_metrics, high_value_customers)
-- Features: Unused CTE warning, dead columns, window functions, CASE statements
-- Demo: CTE expansion, column lineage, breadcrumbs
+### 2. CTE Clouds (2 min)
+```
+Action: Double-click any CTE node
+Show: Cloud expansion, independent pan/zoom
+Action: Use breadcrumbs to navigate back
+```
 
-**Query 2: Product Performance** (Lines 126-165)
-- Features: Repeated table scans (🔄), filter pushdown (⬆), index suggestions (📇)
-- Demo: Performance hints, subquery to JOIN conversion
+### 3. Performance Analysis (3 min)
+```
+Open: quality-performance-hints.sql
+Show: Warning icons (🔄 ⬆ 📇 🚫)
+Action: Press 'Q' for stats panel
+Show: Performance score, complexity breakdown
+```
 
-**Query 3: Revenue Trend** (Lines 171-228)
-- Features: Window functions with running totals, year-over-year calculations
-- Demo: Complex expressions, aggregations
+### 4. Column Lineage (2 min)
+```
+Open: lineage-column-tracking.sql
+Action: Press 'C' to enable column mode
+Action: Click any output column
+Show: Transformation path highlighting
+```
 
-**Query 4: Product Recommendations** (Lines 234-268)
-- Features: Self-joins, EXISTS subqueries, correlated subqueries
-- Demo: Complex JOIN visualization
+### 5. Write Operations (1 min)
+```
+Open: demo-showcase.sql Q7, Q8, Q9
+Show: Red WRITE badge (UPDATE/DELETE)
+Show: Green INSERT badge
+```
 
-**Query 5: Inventory Optimization** (Lines 274-330)
-- Features: UNION queries, unused CTE, HAVING clause
-- Demo: Query complexity, union visualization
-
-**Query 6: Churn Risk Analysis** (Lines 336-380)
-- Features: Complex aggregations, HAVING clause, multiple CASE statements
-- Demo: Quality analysis, metrics
-
-**Query 7: Update High-Value Customers** (Lines 386-406)
-- Features: UPDATE with JOIN, WRITE operation badge (red)
-- Demo: Write operation visualization
-
-**Query 8: Delete Stale Data** (Lines 412-422)
-- Features: DELETE with subquery, proper WHERE clause
-- Demo: DELETE operation badge (red)
-
-**Query 9: Insert Daily Summary** (Lines 428-456)
-- Features: INSERT ... SELECT, subquery in SELECT list
-- Demo: INSERT operation badge (green)
-
-### customer-analytics.sql
-
-**Query 1: Customer LTV by Region**
-- Features: GROUP BY with ROLLUP-style aggregation, COALESCE
-
-**Query 2: Customer Retention/Cohort Analysis**
-- Features: Cohort analysis, retention matrix calculation
-
-**Query 3: High-Value Customer (RFM)**
-- Features: RFM segmentation, complex CASE logic
-
-**Query 4: Customer Feedback & NPS**
-- Features: NPS calculation, window functions
-
-### order-analytics.sql
-
-**Query 1: Daily Trends with WoW Comparison**
-- Features: LAG window function, week-over-week growth
-
-**Query 2: Product Sales Ranking**
-- Features: RANK() function, profitability analysis
-
-**Query 3: Order Fulfillment**
-- Features: Aging analysis, performance metrics
-
-**Query 4: Cross-Selling Analysis**
-- Features: Self-join for product pairs, confidence calculation
+### 6. Workspace Analysis (3 min)
+```
+Action: Right-click examples folder → Analyze Dependencies
+Show: Graph view with file/table nodes
+Action: Click to navigate, double-click to visualize
+Show: Lineage tab for upstream/downstream
+```
 
 ---
 
-## 🔧 How to Use
+## Keyboard Shortcuts
 
-### For Product Demos
-1. Use `demo-showcase.sql` - it has everything in one file
-2. Start with Query 1 to show basic features
-3. Move to Query 2 for performance analysis
-4. Show Queries 7-9 for write operations
-5. Use workspace analysis to show cross-file dependencies
-
-### For Testing Specific Features
-- **CTE expansion:** Query 1 (demo-showcase.sql)
-- **Performance hints:** Query 2 (demo-showcase.sql)
-- **Column lineage:** Query 1 (demo-showcase.sql)
-- **Window functions:** Query 3 (demo-showcase.sql)
-- **UNION queries:** Query 5 (demo-showcase.sql)
-- **Workspace analysis:** Use all schema files + analytics files
-
-### For Tutorial Videos
-1. **Introduction:** demo-showcase.sql Query 1
-2. **Performance Analysis:** demo-showcase.sql Query 2
-3. **Quality Analysis:** demo-showcase.sql Query 1
-4. **Workspace Demo:** All schema files + analytics files
-5. **Advanced Features:** customer-analytics.sql or order-analytics.sql
+| Key | Action |
+|-----|--------|
+| `Q` | Toggle query stats panel |
+| `C` | Toggle column lineage mode |
+| `L` | Toggle legend |
+| `H` | Switch layout (vertical/horizontal) |
+| `E` | Expand/collapse all CTEs |
+| `F` | Toggle fullscreen |
+| `U` | Focus upstream nodes |
+| `D` | Focus downstream nodes |
+| `A` | Focus all connected nodes |
+| `T` | Toggle theme |
+| `?` | Show all shortcuts |
 
 ---
 
-## 💡 Tips for Demo Recording
+## File Dependencies
 
-1. **Set dialect to PostgreSQL or Snowflake** before visualizing
-2. **Use keyboard shortcuts** for smoother demo flow:
-   - `Q` - Toggle query stats
-   - `C` - Toggle column lineage
-   - `L` - Toggle legend
-   - `H` - Switch layout
-   - `E` - Expand/collapse CTEs
+```
+schema-ecommerce.sql
+    └── Referenced by:
+        ├── demo-showcase.sql
+        ├── analytics-customer.sql
+        ├── analytics-orders.sql
+        └── lineage-data-pipeline.sql
 
-3. **Highlight features as you go:**
-   - Point out warning badges (⚠️, 🔄, ⬆, 📇, 🚫)
-   - Mention node colors (blue=READ, red=WRITE, purple=CTE)
-   - Show edge colors (grey=SELECT, purple=JOIN, etc.)
-
-4. **Use focus mode** (`F`) to highlight related nodes
-5. **Double-click CTEs** to show cloud expansion
-6. **Click edges** to show SQL clauses panel
+lineage-data-pipeline.sql
+    └── Contains multi-stage VIEW pipeline:
+        raw_* → cleaned_* → aggregated_* → analytics_* → executive_*
+```
 
 ---
 
-## 🐛 Known Issues / Notes
+## Notes
 
-- Some queries use `DATE_DIFF()` function - ensure your dialect supports it
-- Recursive CTE in `product-schema.sql` requires PostgreSQL or Snowflake
-- Window function syntax varies by dialect - files use standard SQL
-- Performance hints are heuristic-based and may not apply to all dialects
+- **Dialect**: Files use PostgreSQL/Snowflake syntax (compatible with most dialects)
+- **Date functions**: Some queries use `DATE_DIFF()`, `DATE_TRUNC()` - adjust for your dialect
+- **Recursive CTEs**: `schema-ecommerce.sql` has recursive CTE for product categories
+- **Performance hints**: Heuristic-based, may vary by dialect and database
 
 ---
 
-## 📝 License
+## License
 
 These demo files are part of the SQL Crack extension and follow the same MIT license.
