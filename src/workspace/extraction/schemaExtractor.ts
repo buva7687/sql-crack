@@ -1,27 +1,38 @@
 // Schema Extractor - Parse CREATE TABLE/VIEW statements
 
 import { Parser } from 'node-sql-parser';
-import { SchemaDefinition, ColumnDefinition, ForeignKeyRef } from './types';
-import { SqlDialect } from '../webview/types/parser';
+import {
+    SchemaDefinition,
+    ColumnInfo,
+    ForeignKeyRef,
+    SqlDialect,
+    ExtractionOptions,
+    DEFAULT_EXTRACTION_OPTIONS
+} from './types';
 
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
  */
 export class SchemaExtractor {
     private parser: Parser;
+    private options: ExtractionOptions;
 
-    constructor() {
+    constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
+        this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**
      * Extract all CREATE TABLE/VIEW definitions from SQL
      */
-    extractDefinitions(sql: string, filePath: string, dialect: SqlDialect = 'MySQL'): SchemaDefinition[] {
+    extractDefinitions(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect = this.options.dialect
+    ): SchemaDefinition[] {
         const definitions: SchemaDefinition[] = [];
 
         try {
-            // Map dialect to parser database option
             const dbDialect = this.mapDialect(dialect);
             const ast = this.parser.astify(sql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
@@ -80,40 +91,23 @@ export class SchemaExtractor {
     private isCreateView(stmt: any): boolean {
         if (!stmt || !stmt.type) return false;
         const type = stmt.type.toLowerCase();
-        return type === 'create' && (stmt.keyword?.toLowerCase() === 'view' || stmt.keyword?.toLowerCase() === 'materialized view');
+        return type === 'create' && (
+            stmt.keyword?.toLowerCase() === 'view' ||
+            stmt.keyword?.toLowerCase() === 'materialized view'
+        );
     }
 
     /**
      * Parse CREATE TABLE statement
      */
-    private parseCreateTable(stmt: any, filePath: string, originalSql: string): SchemaDefinition | null {
+    private parseCreateTable(
+        stmt: any,
+        filePath: string,
+        originalSql: string
+    ): SchemaDefinition | null {
         try {
-            // Extract table name - handle various AST structures
-            let tableName = 'unknown';
-            let schema: string | undefined;
-
-            if (stmt.table) {
-                if (Array.isArray(stmt.table) && stmt.table.length > 0) {
-                    tableName = stmt.table[0].table || stmt.table[0].name || 'unknown';
-                    schema = stmt.table[0].db || stmt.table[0].schema;
-                } else if (typeof stmt.table === 'object') {
-                    tableName = stmt.table.table || stmt.table.name || 'unknown';
-                    schema = stmt.table.db || stmt.table.schema;
-                } else if (typeof stmt.table === 'string') {
-                    tableName = stmt.table;
-                }
-            }
-
-            // Extract columns
-            const columns: ColumnDefinition[] = [];
-            const createDefinitions = stmt.create_definitions || stmt.columns || [];
-
-            for (const colDef of createDefinitions) {
-                if (colDef.resource === 'column' || colDef.column) {
-                    const column = this.parseColumnDefinition(colDef);
-                    if (column) columns.push(column);
-                }
-            }
+            const { name: tableName, schema } = this.extractTableName(stmt);
+            const columns = this.extractColumns(stmt);
 
             return {
                 type: 'table',
@@ -132,42 +126,14 @@ export class SchemaExtractor {
     /**
      * Parse CREATE VIEW statement
      */
-    private parseCreateView(stmt: any, filePath: string, originalSql: string): SchemaDefinition | null {
+    private parseCreateView(
+        stmt: any,
+        filePath: string,
+        originalSql: string
+    ): SchemaDefinition | null {
         try {
-            // Extract view name
-            let viewName = 'unknown';
-            let schema: string | undefined;
-
-            if (stmt.table) {
-                if (Array.isArray(stmt.table) && stmt.table.length > 0) {
-                    viewName = stmt.table[0].table || stmt.table[0].name || 'unknown';
-                    schema = stmt.table[0].db || stmt.table[0].schema;
-                } else if (typeof stmt.table === 'object') {
-                    viewName = stmt.table.table || stmt.table.name || 'unknown';
-                    schema = stmt.table.db || stmt.table.schema;
-                } else if (typeof stmt.table === 'string') {
-                    viewName = stmt.table;
-                }
-            }
-
-            // Views typically don't have explicit column definitions
-            // They inherit from the SELECT statement
-            const columns: ColumnDefinition[] = [];
-
-            // Try to extract column names if specified
-            if (stmt.columns && Array.isArray(stmt.columns)) {
-                for (const col of stmt.columns) {
-                    const colName = typeof col === 'string' ? col : col.column || col.name;
-                    if (colName) {
-                        columns.push({
-                            name: colName,
-                            dataType: 'derived',
-                            nullable: true,
-                            primaryKey: false
-                        });
-                    }
-                }
-            }
+            const { name: viewName, schema } = this.extractTableName(stmt);
+            const columns = this.extractViewColumns(stmt);
 
             return {
                 type: 'view',
@@ -177,6 +143,7 @@ export class SchemaExtractor {
                 filePath,
                 lineNumber: this.findLineNumber(originalSql, viewName, 'view'),
                 sql: this.extractStatementSql(originalSql, viewName, 'view')
+                // Note: sourceQuery will be populated by lineage builder
             };
         } catch (error) {
             return null;
@@ -184,9 +151,73 @@ export class SchemaExtractor {
     }
 
     /**
+     * Extract table/view name from AST
+     */
+    private extractTableName(stmt: any): { name: string; schema?: string } {
+        let name = 'unknown';
+        let schema: string | undefined;
+
+        if (stmt.table) {
+            if (Array.isArray(stmt.table) && stmt.table.length > 0) {
+                name = stmt.table[0].table || stmt.table[0].name || 'unknown';
+                schema = stmt.table[0].db || stmt.table[0].schema;
+            } else if (typeof stmt.table === 'object') {
+                name = stmt.table.table || stmt.table.name || 'unknown';
+                schema = stmt.table.db || stmt.table.schema;
+            } else if (typeof stmt.table === 'string') {
+                name = stmt.table;
+            }
+        }
+
+        return { name, schema };
+    }
+
+    /**
+     * Extract columns from CREATE TABLE statement
+     */
+    private extractColumns(stmt: any): ColumnInfo[] {
+        const columns: ColumnInfo[] = [];
+        const createDefinitions = stmt.create_definitions || stmt.columns || [];
+
+        for (const colDef of createDefinitions) {
+            if (colDef.resource === 'column' || colDef.column) {
+                const column = this.parseColumnDefinition(colDef);
+                if (column) columns.push(column);
+            }
+        }
+
+        return columns;
+    }
+
+    /**
+     * Extract columns from CREATE VIEW statement
+     */
+    private extractViewColumns(stmt: any): ColumnInfo[] {
+        const columns: ColumnInfo[] = [];
+
+        // Views may have explicit column list
+        if (stmt.columns && Array.isArray(stmt.columns)) {
+            for (const col of stmt.columns) {
+                const colName = typeof col === 'string' ? col : col.column || col.name;
+                if (colName) {
+                    columns.push({
+                        name: colName,
+                        dataType: 'derived',
+                        nullable: true,
+                        primaryKey: false,
+                        isComputed: true  // View columns are derived
+                    });
+                }
+            }
+        }
+
+        return columns;
+    }
+
+    /**
      * Parse column definition from AST
      */
-    private parseColumnDefinition(colDef: any): ColumnDefinition | null {
+    private parseColumnDefinition(colDef: any): ColumnInfo | null {
         try {
             // Get column name
             let name: string;
@@ -207,7 +238,6 @@ export class SchemaExtractor {
                     dataType = colDef.definition;
                 } else if (colDef.definition.dataType) {
                     dataType = colDef.definition.dataType;
-                    // Add length/precision if present
                     if (colDef.definition.length) {
                         dataType += `(${colDef.definition.length})`;
                     }
@@ -222,7 +252,8 @@ export class SchemaExtractor {
             }
 
             // Check primary key
-            const primaryKey = colDef.primary_key === true || colDef.constraint?.type === 'primary key';
+            const primaryKey = colDef.primary_key === true ||
+                colDef.constraint?.type === 'primary key';
 
             // Extract foreign key if present
             let foreignKey: ForeignKeyRef | undefined;
@@ -239,7 +270,8 @@ export class SchemaExtractor {
                 dataType,
                 nullable,
                 primaryKey,
-                foreignKey
+                foreignKey,
+                isComputed: false
             };
         } catch (error) {
             return null;
@@ -260,7 +292,7 @@ export class SchemaExtractor {
                 type: 'table',
                 name: match[2],
                 schema: match[1],
-                columns: [], // Regex can't reliably extract columns
+                columns: [],
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
                 sql: this.extractStatementFromIndex(sql, match.index)
@@ -290,7 +322,10 @@ export class SchemaExtractor {
     private findLineNumber(sql: string, identifier: string, type: 'table' | 'view'): number {
         const lines = sql.split('\n');
         const keyword = type === 'table' ? 'TABLE' : 'VIEW';
-        const regex = new RegExp(`CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}`, 'i');
+        const regex = new RegExp(
+            `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}`,
+            'i'
+        );
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -333,7 +368,6 @@ export class SchemaExtractor {
      * Extract statement starting from character index
      */
     private extractStatementFromIndex(sql: string, startIndex: number): string {
-        // Find the end of statement (semicolon or next CREATE)
         let end = sql.indexOf(';', startIndex);
         const nextCreate = sql.indexOf('CREATE', startIndex + 1);
 

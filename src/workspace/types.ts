@@ -1,63 +1,29 @@
 // Workspace SQL Analysis Types
 
-// Re-export SqlDialect for convenience
-export type { SqlDialect } from '../webview/types/parser';
+// Import types from extraction module for use in this file
+import type {
+    SqlDialect as SqlDialectType,
+    ColumnDefinition as ColumnDefinitionType,
+    ColumnInfo as ColumnInfoType,
+    ForeignKeyRef as ForeignKeyRefType,
+    SchemaDefinition as SchemaDefinitionType,
+    TableReference as TableReferenceType,
+    FileAnalysis as FileAnalysisType,
+    ReferenceType as ReferenceTypeValue
+} from './extraction';
 
-/**
- * Column definition extracted from CREATE TABLE
- */
-export interface ColumnDefinition {
-    name: string;
-    dataType: string;
-    nullable: boolean;
-    primaryKey: boolean;
-    foreignKey?: ForeignKeyRef;
-}
+// Re-export types from extraction module for backward compatibility
+export type SqlDialect = SqlDialectType;
+export type ColumnDefinition = ColumnDefinitionType;
+export type ColumnInfo = ColumnInfoType;
+export type ForeignKeyRef = ForeignKeyRefType;
+export type SchemaDefinition = SchemaDefinitionType;
+export type TableReference = TableReferenceType;
+export type FileAnalysis = FileAnalysisType;
+export type ReferenceType = ReferenceTypeValue;
 
-/**
- * Foreign key reference
- */
-export interface ForeignKeyRef {
-    referencedTable: string;
-    referencedColumn: string;
-}
-
-/**
- * Schema definition from CREATE TABLE/VIEW statements
- */
-export interface SchemaDefinition {
-    type: 'table' | 'view';
-    name: string;
-    schema?: string;           // Database schema (e.g., dbo, public)
-    columns: ColumnDefinition[];
-    filePath: string;
-    lineNumber: number;
-    sql: string;               // Original SQL statement
-}
-
-/**
- * Table reference extracted from queries
- */
-export interface TableReference {
-    tableName: string;
-    referenceType: 'select' | 'insert' | 'update' | 'delete' | 'join' | 'subquery';
-    filePath: string;
-    lineNumber: number;
-    context: string;           // Surrounding SQL context (e.g., "FROM", "JOIN")
-}
-
-/**
- * Analysis result for a single SQL file
- */
-export interface FileAnalysis {
-    filePath: string;
-    fileName: string;
-    lastModified: number;
-    contentHash: string;        // SHA-256 hash for change detection
-    definitions: SchemaDefinition[];
-    references: TableReference[];
-    parseError?: string;
-}
+// Re-export utility functions
+export { toColumnDefinition, toColumnInfo } from './extraction';
 
 /**
  * Workspace index containing all analyzed files

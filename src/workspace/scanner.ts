@@ -3,10 +3,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { FileAnalysis, ProgressCallback } from './types';
-import { SqlDialect } from '../webview/types/parser';
-import { SchemaExtractor } from './schemaExtractor';
-import { ReferenceExtractor } from './referenceExtractor';
+import { ProgressCallback } from './types';
+import {
+    FileAnalysis,
+    SqlDialect,
+    SchemaExtractor,
+    ReferenceExtractor
+} from './extraction';
 
 /**
  * Scans workspace for SQL files and analyzes them

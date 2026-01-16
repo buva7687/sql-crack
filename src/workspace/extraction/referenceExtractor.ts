@@ -1,23 +1,35 @@
 // Reference Extractor - Extract table references from SQL queries
 
 import { Parser } from 'node-sql-parser';
-import { TableReference } from './types';
-import { SqlDialect } from '../webview/types/parser';
+import {
+    TableReference,
+    ReferenceType,
+    SqlDialect,
+    AliasMap,
+    ExtractionOptions,
+    DEFAULT_EXTRACTION_OPTIONS
+} from './types';
 
 /**
  * Extracts table references from SQL queries (SELECT, INSERT, UPDATE, DELETE)
  */
 export class ReferenceExtractor {
     private parser: Parser;
+    private options: ExtractionOptions;
 
-    constructor() {
+    constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
+        this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**
      * Extract all table references from SQL
      */
-    extractReferences(sql: string, filePath: string, dialect: SqlDialect = 'MySQL'): TableReference[] {
+    extractReferences(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect = this.options.dialect
+    ): TableReference[] {
         const references: TableReference[] = [];
 
         try {
@@ -27,15 +39,26 @@ export class ReferenceExtractor {
 
             for (const stmt of statements) {
                 if (!stmt) continue;
-                this.extractFromStatement(stmt, filePath, sql, references);
+                const aliasMap = this.createAliasMap();
+                this.extractFromStatement(stmt, filePath, sql, references, aliasMap, 0);
             }
         } catch (error) {
             // Fallback to regex extraction
             references.push(...this.extractWithRegex(sql, filePath));
         }
 
-        // Deduplicate references (same table, same type, same line)
         return this.deduplicateReferences(references);
+    }
+
+    /**
+     * Create empty alias tracking map
+     */
+    private createAliasMap(): AliasMap {
+        return {
+            tables: new Map(),
+            cteNames: new Set(),
+            columns: new Map()
+        };
     }
 
     /**
@@ -65,29 +88,39 @@ export class ReferenceExtractor {
         stmt: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         if (!stmt || !stmt.type) return;
+        if (depth > this.options.maxSubqueryDepth) return;
 
         const stmtType = stmt.type.toLowerCase();
 
         switch (stmtType) {
             case 'select':
-                this.extractFromSelect(stmt, filePath, sql, references);
+                this.extractFromSelect(stmt, filePath, sql, references, aliasMap, depth);
                 break;
             case 'insert':
-                this.extractFromInsert(stmt, filePath, sql, references);
+                this.extractFromInsert(stmt, filePath, sql, references, aliasMap, depth);
                 break;
             case 'update':
-                this.extractFromUpdate(stmt, filePath, sql, references);
+                this.extractFromUpdate(stmt, filePath, sql, references, aliasMap, depth);
                 break;
             case 'delete':
-                this.extractFromDelete(stmt, filePath, sql, references);
+                this.extractFromDelete(stmt, filePath, sql, references, aliasMap, depth);
                 break;
             case 'create':
                 // Extract references from CREATE VIEW AS SELECT
                 if (stmt.select || stmt.query) {
-                    this.extractFromStatement(stmt.select || stmt.query, filePath, sql, references);
+                    this.extractFromStatement(
+                        stmt.select || stmt.query,
+                        filePath,
+                        sql,
+                        references,
+                        aliasMap,
+                        depth + 1
+                    );
                 }
                 break;
         }
@@ -100,20 +133,33 @@ export class ReferenceExtractor {
         stmt: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
-        // Process CTEs first
+        // Process CTEs first - add to alias map to exclude from references
         if (stmt.with) {
-            const cteNames = new Set<string>();
             for (const cte of stmt.with) {
-                // Track CTE names to exclude from references
                 const cteName = cte.name?.value || cte.name;
-                if (cteName) cteNames.add(cteName.toLowerCase());
+                if (cteName) {
+                    aliasMap.cteNames.add(cteName.toLowerCase());
+                }
 
                 // Extract references from CTE definition
-                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast || cte.definition?.ast || cte.definition;
+                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
+                    cte.definition?.ast || cte.definition;
                 if (cteStmt) {
-                    this.extractFromStatement(cteStmt, filePath, sql, references);
+                    // Create new alias map for CTE scope
+                    const cteAliasMap = this.createAliasMap();
+                    cteAliasMap.cteNames = new Set(aliasMap.cteNames);
+                    this.extractFromStatement(
+                        cteStmt,
+                        filePath,
+                        sql,
+                        references,
+                        cteAliasMap,
+                        depth + 1
+                    );
                 }
             }
         }
@@ -122,33 +168,41 @@ export class ReferenceExtractor {
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
             for (const item of fromItems) {
-                this.extractFromItem(item, filePath, sql, references, 'select');
+                this.extractFromItem(
+                    item,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    'select',
+                    depth
+                );
             }
         }
 
         // Subqueries in SELECT columns
         if (stmt.columns) {
-            this.extractFromColumns(stmt.columns, filePath, sql, references);
+            this.extractFromColumns(stmt.columns, filePath, sql, references, aliasMap, depth);
         }
 
         // WHERE clause (may contain subqueries)
         if (stmt.where) {
-            this.extractFromExpression(stmt.where, filePath, sql, references);
+            this.extractFromExpression(stmt.where, filePath, sql, references, aliasMap, depth);
         }
 
         // HAVING clause
         if (stmt.having) {
-            this.extractFromExpression(stmt.having, filePath, sql, references);
+            this.extractFromExpression(stmt.having, filePath, sql, references, aliasMap, depth);
         }
 
         // UNION/INTERSECT/EXCEPT
         if (stmt._next) {
-            this.extractFromStatement(stmt._next, filePath, sql, references);
+            this.extractFromStatement(stmt._next, filePath, sql, references, aliasMap, depth);
         }
 
-        // Set operations (union, intersect, except)
+        // Set operations
         if (stmt.set_op) {
-            this.extractFromStatement(stmt.set_op, filePath, sql, references);
+            this.extractFromStatement(stmt.set_op, filePath, sql, references, aliasMap, depth);
         }
     }
 
@@ -159,21 +213,17 @@ export class ReferenceExtractor {
         stmt: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         // Target table
         if (stmt.table) {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
-                const tableName = this.getTableName(t);
-                if (tableName) {
-                    references.push({
-                        tableName,
-                        referenceType: 'insert',
-                        filePath,
-                        lineNumber: this.findTableLine(sql, tableName),
-                        context: 'INSERT INTO'
-                    });
+                const ref = this.createTableReference(t, filePath, sql, 'insert', 'INSERT INTO');
+                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+                    references.push(ref);
                 }
             }
         }
@@ -181,13 +231,15 @@ export class ReferenceExtractor {
         // SELECT subquery for INSERT...SELECT
         if (stmt.values) {
             if (stmt.values.type === 'select' || stmt.values.ast) {
-                this.extractFromStatement(stmt.values.ast || stmt.values, filePath, sql, references);
+                this.extractFromStatement(
+                    stmt.values.ast || stmt.values,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    depth + 1
+                );
             }
-        }
-
-        // ON DUPLICATE KEY UPDATE (MySQL)
-        if (stmt.on_duplicate_key_update) {
-            // This doesn't add new table references
         }
     }
 
@@ -198,21 +250,21 @@ export class ReferenceExtractor {
         stmt: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         // Target table
         if (stmt.table) {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
-                const tableName = this.getTableName(t);
-                if (tableName) {
-                    references.push({
-                        tableName,
-                        referenceType: 'update',
-                        filePath,
-                        lineNumber: this.findTableLine(sql, tableName),
-                        context: 'UPDATE'
-                    });
+                const ref = this.createTableReference(t, filePath, sql, 'update', 'UPDATE');
+                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+                    references.push(ref);
+                    // Track alias if present
+                    if (t.as) {
+                        aliasMap.tables.set(t.as.toLowerCase(), { tableName: ref.tableName });
+                    }
                 }
             }
         }
@@ -221,13 +273,21 @@ export class ReferenceExtractor {
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
             for (const item of fromItems) {
-                this.extractFromItem(item, filePath, sql, references, 'select');
+                this.extractFromItem(
+                    item,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    'select',
+                    depth
+                );
             }
         }
 
         // WHERE clause
         if (stmt.where) {
-            this.extractFromExpression(stmt.where, filePath, sql, references);
+            this.extractFromExpression(stmt.where, filePath, sql, references, aliasMap, depth);
         }
     }
 
@@ -238,22 +298,18 @@ export class ReferenceExtractor {
         stmt: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         // Target table
         const tableSource = stmt.from || stmt.table;
         if (tableSource) {
             const tables = Array.isArray(tableSource) ? tableSource : [tableSource];
             for (const t of tables) {
-                const tableName = this.getTableName(t);
-                if (tableName) {
-                    references.push({
-                        tableName,
-                        referenceType: 'delete',
-                        filePath,
-                        lineNumber: this.findTableLine(sql, tableName),
-                        context: 'DELETE FROM'
-                    });
+                const ref = this.createTableReference(t, filePath, sql, 'delete', 'DELETE FROM');
+                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+                    references.push(ref);
                 }
             }
         }
@@ -262,13 +318,21 @@ export class ReferenceExtractor {
         if (stmt.using) {
             const usingItems = Array.isArray(stmt.using) ? stmt.using : [stmt.using];
             for (const item of usingItems) {
-                this.extractFromItem(item, filePath, sql, references, 'select');
+                this.extractFromItem(
+                    item,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    'select',
+                    depth
+                );
             }
         }
 
         // WHERE clause
         if (stmt.where) {
-            this.extractFromExpression(stmt.where, filePath, sql, references);
+            this.extractFromExpression(stmt.where, filePath, sql, references, aliasMap, depth);
         }
     }
 
@@ -280,35 +344,73 @@ export class ReferenceExtractor {
         filePath: string,
         sql: string,
         references: TableReference[],
-        defaultType: TableReference['referenceType']
+        aliasMap: AliasMap,
+        defaultType: ReferenceType,
+        depth: number
     ): void {
         if (!item) return;
 
         // Determine reference type (join or select)
-        const refType: TableReference['referenceType'] = item.join ? 'join' : defaultType;
+        const refType: ReferenceType = item.join ? 'join' : defaultType;
+        const context = item.join ? `${item.join.toUpperCase()} JOIN` : 'FROM';
 
         // Direct table reference
-        const tableName = this.getTableName(item);
-        if (tableName && tableName !== 'unknown') {
-            references.push({
-                tableName,
-                referenceType: refType,
-                filePath,
-                lineNumber: this.findTableLine(sql, tableName),
-                context: item.join ? `${item.join.toUpperCase()} JOIN` : 'FROM'
-            });
+        const ref = this.createTableReference(item, filePath, sql, refType, context);
+        if (ref && ref.tableName !== 'unknown') {
+            // Skip if it's a CTE name
+            if (!aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+                references.push(ref);
+            }
+
+            // Track alias
+            if (item.as) {
+                aliasMap.tables.set(item.as.toLowerCase(), { tableName: ref.tableName });
+            }
         }
 
         // Subquery
         if (item.expr?.type === 'select' || item.expr?.ast) {
             const subStmt = item.expr?.ast || item.expr;
-            this.extractFromStatement(subStmt, filePath, sql, references);
+            const subAliasMap = this.createAliasMap();
+            subAliasMap.cteNames = new Set(aliasMap.cteNames);
+            this.extractFromStatement(
+                subStmt,
+                filePath,
+                sql,
+                references,
+                subAliasMap,
+                depth + 1
+            );
         }
 
         // JOIN condition may contain subqueries
         if (item.on) {
-            this.extractFromExpression(item.on, filePath, sql, references);
+            this.extractFromExpression(item.on, filePath, sql, references, aliasMap, depth);
         }
+    }
+
+    /**
+     * Create a TableReference from AST item
+     */
+    private createTableReference(
+        item: any,
+        filePath: string,
+        sql: string,
+        refType: ReferenceType,
+        context: string
+    ): TableReference | null {
+        const tableName = this.getTableName(item);
+        if (!tableName) return null;
+
+        return {
+            tableName,
+            alias: item.as || undefined,
+            schema: item.db || item.schema || undefined,
+            referenceType: refType,
+            filePath,
+            lineNumber: this.findTableLine(sql, tableName),
+            context
+        };
     }
 
     /**
@@ -318,7 +420,9 @@ export class ReferenceExtractor {
         columns: any[],
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         if (!Array.isArray(columns)) return;
 
@@ -327,12 +431,19 @@ export class ReferenceExtractor {
 
             // Scalar subquery in column
             if (col.expr?.type === 'select') {
-                this.extractFromStatement(col.expr, filePath, sql, references);
+                this.extractFromStatement(
+                    col.expr,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    depth + 1
+                );
             }
 
             // Expression with subquery
             if (col.expr) {
-                this.extractFromExpression(col.expr, filePath, sql, references);
+                this.extractFromExpression(col.expr, filePath, sql, references, aliasMap, depth);
             }
         }
     }
@@ -344,47 +455,50 @@ export class ReferenceExtractor {
         expr: any,
         filePath: string,
         sql: string,
-        references: TableReference[]
+        references: TableReference[],
+        aliasMap: AliasMap,
+        depth: number
     ): void {
         if (!expr) return;
+        if (depth > this.options.maxSubqueryDepth) return;
 
         // Subquery in expression
         if (expr.type === 'select') {
-            this.extractFromStatement(expr, filePath, sql, references);
+            this.extractFromStatement(expr, filePath, sql, references, aliasMap, depth + 1);
             return;
         }
 
         // EXISTS, IN, ANY, ALL with subquery
         if (expr.right?.type === 'select') {
-            this.extractFromStatement(expr.right, filePath, sql, references);
+            this.extractFromStatement(expr.right, filePath, sql, references, aliasMap, depth + 1);
         }
         if (expr.left?.type === 'select') {
-            this.extractFromStatement(expr.left, filePath, sql, references);
+            this.extractFromStatement(expr.left, filePath, sql, references, aliasMap, depth + 1);
         }
 
         // Scalar subquery
         if (expr.ast?.type === 'select') {
-            this.extractFromStatement(expr.ast, filePath, sql, references);
+            this.extractFromStatement(expr.ast, filePath, sql, references, aliasMap, depth + 1);
         }
 
         // Nested expression in parentheses
         if (expr.expr?.type === 'select') {
-            this.extractFromStatement(expr.expr, filePath, sql, references);
+            this.extractFromStatement(expr.expr, filePath, sql, references, aliasMap, depth + 1);
         }
 
         // Recursive for AND/OR/binary expressions
         if (expr.left && typeof expr.left === 'object') {
-            this.extractFromExpression(expr.left, filePath, sql, references);
+            this.extractFromExpression(expr.left, filePath, sql, references, aliasMap, depth);
         }
         if (expr.right && typeof expr.right === 'object') {
-            this.extractFromExpression(expr.right, filePath, sql, references);
+            this.extractFromExpression(expr.right, filePath, sql, references, aliasMap, depth);
         }
 
-        // CASE expression
+        // CASE expression args
         if (expr.args) {
             for (const arg of expr.args) {
                 if (arg && typeof arg === 'object') {
-                    this.extractFromExpression(arg, filePath, sql, references);
+                    this.extractFromExpression(arg, filePath, sql, references, aliasMap, depth);
                 }
             }
         }
@@ -397,7 +511,6 @@ export class ReferenceExtractor {
         if (!item) return null;
         if (typeof item === 'string') return item;
 
-        // Try various AST structures
         if (item.table) {
             if (typeof item.table === 'string') return item.table;
             if (item.table.table) return item.table.table;
@@ -405,9 +518,6 @@ export class ReferenceExtractor {
         }
 
         if (item.name) return item.name;
-
-        // Don't return alias as table name
-        // if (item.as) return item.as;
 
         return null;
     }
@@ -447,6 +557,8 @@ export class ReferenceExtractor {
         while ((match = fromRegex.exec(sql)) !== null) {
             references.push({
                 tableName: match[2],
+                alias: match[3],
+                schema: match[1],
                 referenceType: 'select',
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
@@ -455,10 +567,12 @@ export class ReferenceExtractor {
         }
 
         // JOIN pattern
-        const joinRegex = /\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\s*JOIN\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
+        const joinRegex = /\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\s*JOIN\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?(?:\s+(?:AS\s+)?(\w+))?/gi;
         while ((match = joinRegex.exec(sql)) !== null) {
             references.push({
                 tableName: match[2],
+                alias: match[3],
+                schema: match[1],
                 referenceType: 'join',
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
@@ -471,6 +585,7 @@ export class ReferenceExtractor {
         while ((match = insertRegex.exec(sql)) !== null) {
             references.push({
                 tableName: match[2],
+                schema: match[1],
                 referenceType: 'insert',
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
@@ -483,6 +598,7 @@ export class ReferenceExtractor {
         while ((match = updateRegex.exec(sql)) !== null) {
             references.push({
                 tableName: match[2],
+                schema: match[1],
                 referenceType: 'update',
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
@@ -495,6 +611,7 @@ export class ReferenceExtractor {
         while ((match = deleteRegex.exec(sql)) !== null) {
             references.push({
                 tableName: match[2],
+                schema: match[1],
                 referenceType: 'delete',
                 filePath,
                 lineNumber: this.getLineNumberAtIndex(sql, match.index),
