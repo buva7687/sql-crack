@@ -9,6 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS
 } from './types';
+import { ColumnExtractor } from './columnExtractor';
 
 /**
  * Extracts table references from SQL queries (SELECT, INSERT, UPDATE, DELETE)
@@ -16,10 +17,12 @@ import {
 export class ReferenceExtractor {
     private parser: Parser;
     private options: ExtractionOptions;
+    private columnExtractor: ColumnExtractor;
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
         this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
+        this.columnExtractor = new ColumnExtractor(options);
     }
 
     /**
@@ -175,7 +178,8 @@ export class ReferenceExtractor {
                     references,
                     aliasMap,
                     'select',
-                    depth
+                    depth,
+                    stmt
                 );
             }
         }
@@ -346,7 +350,8 @@ export class ReferenceExtractor {
         references: TableReference[],
         aliasMap: AliasMap,
         defaultType: ReferenceType,
-        depth: number
+        depth: number,
+        parentStmt?: any
     ): void {
         if (!item) return;
 
@@ -359,6 +364,11 @@ export class ReferenceExtractor {
         if (ref && ref.tableName !== 'unknown') {
             // Skip if it's a CTE name
             if (!aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+                // Extract columns if enabled and parent statement is provided
+                if (this.options.extractColumns && parentStmt) {
+                    ref.columns = this.extractColumnsFromTable(item, parentStmt, aliasMap);
+                }
+
                 references.push(ref);
             }
 
@@ -627,6 +637,209 @@ export class ReferenceExtractor {
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
         return sql.substring(0, charIndex).split('\n').length;
+    }
+
+    /**
+     * Extract columns used from a specific table in a statement
+     */
+    private extractColumnsFromTable(
+        tableItem: any,
+        stmt: any,
+        aliasMap: AliasMap
+    ): any[] {
+        if (!stmt || !this.options.extractColumns) {
+            return [];
+        }
+
+        const tableName = this.getTableNameFromItem(tableItem);
+        const tableAlias = tableItem.as;
+        const columns: any[] = [];
+
+        // Build alias map from the statement
+        const tableAliases = this.columnExtractor.buildAliasMap(stmt);
+
+        // Add this table's alias
+        if (tableAlias && tableName) {
+            tableAliases.set(tableAlias, tableName);
+        }
+
+        // Extract columns from SELECT clause
+        if (stmt.columns) {
+            for (const col of stmt.columns) {
+                const usedCols = this.extractColumnsFromExpression(col.expr, tableAliases, 'select');
+                for (const usedCol of usedCols) {
+                    if (this.isColumnFromTable(usedCol, tableName, tableAlias, tableAliases)) {
+                        columns.push(usedCol);
+                    }
+                }
+            }
+        }
+
+        // Extract columns from WHERE clause
+        if (stmt.where) {
+            const whereCols = this.extractColumnsFromExpression(stmt.where, tableAliases, 'where');
+            for (const col of whereCols) {
+                if (this.isColumnFromTable(col, tableName, tableAlias, tableAliases)) {
+                    columns.push(col);
+                }
+            }
+        }
+
+        // Extract columns from JOIN conditions
+        if (stmt.join) {
+            for (const join of stmt.join) {
+                if (join.on) {
+                    const joinCols = this.extractColumnsFromExpression(join.on, tableAliases, 'join');
+                    for (const col of joinCols) {
+                        if (this.isColumnFromTable(col, tableName, tableAlias, tableAliases)) {
+                            columns.push(col);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract columns from GROUP BY
+        if (stmt.groupby) {
+            const groupCols = this.columnExtractor.extractUsedColumns(stmt, 'group');
+            for (const col of groupCols) {
+                if (this.isColumnFromTable(col, tableName, tableAlias, tableAliases)) {
+                    columns.push(col);
+                }
+            }
+        }
+
+        // Extract columns from HAVING
+        if (stmt.having) {
+            const havingCols = this.columnExtractor.extractUsedColumns({ having: stmt.having }, 'having');
+            for (const col of havingCols) {
+                if (this.isColumnFromTable(col, tableName, tableAlias, tableAliases)) {
+                    columns.push(col);
+                }
+            }
+        }
+
+        // Extract columns from ORDER BY
+        if (stmt.orderby) {
+            const orderCols = this.columnExtractor.extractUsedColumns({ orderby: stmt.orderby }, 'order');
+            for (const col of orderCols) {
+                if (this.isColumnFromTable(col, tableName, tableAlias, tableAliases)) {
+                    columns.push(col);
+                }
+            }
+        }
+
+        // Deduplicate columns
+        return this.deduplicateColumns(columns);
+    }
+
+    /**
+     * Extract columns from an expression
+     */
+    private extractColumnsFromExpression(
+        expr: any,
+        tableAliases: Map<string, string>,
+        context: string
+    ): any[] {
+        if (!expr) return [];
+
+        const columns: any[] = [];
+
+        if (expr.type === 'column_ref') {
+            const columnName = expr.column || expr.value;
+            if (columnName) {
+                columns.push({
+                    columnName,
+                    tableName: expr.table ? this.getTableNameFromItem(expr.table) : undefined,
+                    tableAlias: expr.table?.alias || expr.table,
+                    usedIn: context,
+                    lineNumber: 0
+                });
+            }
+        } else if (expr.type === 'binary_expr') {
+            columns.push(...this.extractColumnsFromExpression(expr.left, tableAliases, context));
+            columns.push(...this.extractColumnsFromExpression(expr.right, tableAliases, context));
+        } else if (expr.type === 'function' || expr.type === 'aggr_func') {
+            if (expr.args && expr.args.expr) {
+                const args = Array.isArray(expr.args.expr) ? expr.args.expr : [expr.args.expr];
+                for (const arg of args) {
+                    columns.push(...this.extractColumnsFromExpression(arg, tableAliases, context));
+                }
+            }
+        }
+
+        return columns;
+    }
+
+    /**
+     * Check if a column reference belongs to a specific table
+     */
+    private isColumnFromTable(
+        col: any,
+        tableName: string | undefined,
+        tableAlias: string | undefined,
+        tableAliases: Map<string, string>
+    ): boolean {
+        if (!tableName) return true; // If no table specified, include all columns
+
+        // Check if column explicitly references this table
+        if (col.tableName === tableName) {
+            return true;
+        }
+
+        // Check if column references this table's alias
+        if (col.tableAlias === tableAlias) {
+            return true;
+        }
+
+        // Check if column's table name resolves to this table via alias
+        if (col.tableName && tableAliases.has(col.tableName)) {
+            const resolved = tableAliases.get(col.tableName);
+            if (resolved === tableName) {
+                return true;
+            }
+        }
+
+        // If column has no table qualifier, it might belong to this table
+        if (!col.tableName && !col.tableAlias) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Get table name from AST item
+     */
+    private getTableNameFromItem(item: any): string | undefined {
+        if (!item) return undefined;
+
+        if (item.table) {
+            return this.getTableNameFromItem(item.table);
+        }
+
+        if (item.value) {
+            return item.value;
+        }
+
+        if (typeof item === 'string') {
+            return item;
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Deduplicate columns by name and context
+     */
+    private deduplicateColumns(columns: any[]): any[] {
+        const seen = new Set<string>();
+        return columns.filter(col => {
+            const key = `${col.columnName}|${col.usedIn}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     }
 
     /**

@@ -43,3 +43,5 @@ export { toColumnDefinition, toColumnInfo } from './types';
 // Extractors
 export { SchemaExtractor } from './schemaExtractor';
 export { ReferenceExtractor } from './referenceExtractor';
+export { ColumnExtractor } from './columnExtractor';
+export { TransformExtractor } from './transformExtractor';

@@ -1318,6 +1318,30 @@ export class WorkspacePanel {
             content += '</ul>';
         }
 
+        // NEW: Show column information for references
+        if (node.references && node.references.length > 0) {
+            content += '<div class="tooltip-content" style="margin-top:8px;">References:</div><ul class="tooltip-list">';
+
+            for (const ref of node.references.slice(0, 5)) {
+                content += `<li><strong>${this.escapeHtml(ref.tableName)}</strong> (${ref.referenceType})`;
+
+                // Show columns if available
+                if (ref.columns && ref.columns.length > 0) {
+                    const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
+                    const moreCount = ref.columns.length - 8;
+                    content += `<br><span style="font-size:9px;color:#94a3b8;">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                }
+
+                content += '</li>';
+            }
+
+            if (node.references.length > 5) {
+                content += `<li>...and ${node.references.length - 5} more tables</li>`;
+            }
+
+            content += '</ul>';
+        }
+
         if (node.type === 'external') {
             content += '<div class="tooltip-content" style="color:#fbbf24;">Not defined in workspace</div>';
         }
