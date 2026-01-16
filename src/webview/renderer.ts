@@ -91,6 +91,10 @@ export function initRenderer(container: HTMLElement): void {
     svg.setAttribute('height', '100%');
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.zIndex = '1';
 
     // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
