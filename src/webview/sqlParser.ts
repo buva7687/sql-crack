@@ -1,189 +1,41 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
+import { analyzePerformance } from './performanceAnalyzer';
 
-export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
+// Import types from centralized type definitions
+import {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ColumnInfo,
+    ColumnLineage,
+    QueryStats,
+    OptimizationHint,
+    ParseResult,
+    BatchParseResult,
+    SqlDialect,
+    NodeType,
+} from './types';
 
-export interface FlowNode {
-    id: string;
-    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window' | 'case';
-    label: string;
-    description?: string;
-    details?: string[];
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    // Line numbers in SQL for editor sync
-    startLine?: number;
-    endLine?: number;
-    // Join type for differentiated styling
-    joinType?: string;
-    // Table category for visual distinction
-    tableCategory?: 'physical' | 'derived' | 'cte_reference';
-    // Access mode for read/write differentiation
-    accessMode?: 'read' | 'write' | 'derived';
-    // Operation type for write operations
-    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
-    // For nested visualizations (CTEs, subqueries)
-    children?: FlowNode[];
-    childEdges?: FlowEdge[];
-    expanded?: boolean;
-    collapsible?: boolean; // Can this node be collapsed?
-    parentId?: string; // Parent CTE/Subquery ID for breadcrumb navigation
-    depth?: number; // Depth in CTE hierarchy (0 = root, 1 = first level CTE, etc.)
-    // For window functions - detailed breakdown
-    windowDetails?: {
-        functions: Array<{
-            name: string;
-            partitionBy?: string[];
-            orderBy?: string[];
-            frame?: string;
-        }>;
-    };
-    // For aggregate nodes - function details
-    aggregateDetails?: {
-        functions: Array<{
-            name: string;
-            expression: string;
-            alias?: string;
-        }>;
-        groupBy?: string[];
-        having?: string;
-    };
-    // For CASE nodes - case details
-    caseDetails?: {
-        cases: Array<{
-            conditions: Array<{
-                when: string;
-                then: string;
-            }>;
-            elseValue?: string;
-            alias?: string;
-        }>;
-    };
-    // For SELECT nodes - column details with source tracking
-    columns?: ColumnInfo[];
-    // For visual column lineage
-    visibleColumns?: string[]; // Column names to display in the node
-    columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
-    // For warning indicators
-    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex'; severity: 'low' | 'medium' | 'high'; message: string }>;
-    complexityLevel?: 'low' | 'medium' | 'high'; // Visual complexity indicator
-    isBottleneck?: boolean; // Critical path indicator
-}
+// Import color constants
+import { getNodeColor } from './constants';
 
-export interface FlowEdge {
-    id: string;
-    source: string;
-    target: string;
-    label?: string;
-    sqlClause?: string; // The actual SQL clause (JOIN condition, WHERE clause, etc.)
-    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow'; // Type of SQL clause
-    startLine?: number; // Starting line of the clause in the SQL
-    endLine?: number;   // Ending line of the clause in the SQL
-}
-
-// Column-level lineage connection
-export interface ColumnFlow {
-    id: string;
-    sourceNodeId: string;
-    targetNodeId: string;
-    sourceColumn: string;
-    targetColumn: string;
-    transformationType: 'passthrough' | 'renamed' | 'aggregated' | 'calculated';
-}
-
-export interface QueryStats {
-    tables: number;
-    joins: number;
-    subqueries: number;
-    ctes: number;
-    aggregations: number;
-    windowFunctions: number;
-    unions: number;
-    conditions: number;
-    complexity: 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
-    complexityScore: number;
-    // Enhanced metrics
-    maxCteDepth?: number;        // Maximum nesting depth of CTEs
-    maxFanOut?: number;          // Maximum number of outgoing edges from a single node
-    criticalPathLength?: number; // Length of the longest execution path
-    complexityBreakdown?: {      // Breakdown of complexity score
-        joins: number;
-        subqueries: number;
-        ctes: number;
-        aggregations: number;
-        windowFunctions: number;
-    };
-}
-
-export interface OptimizationHint {
-    type: 'warning' | 'info' | 'error';
-    message: string;
-    suggestion?: string;
-    category?: 'performance' | 'quality' | 'best-practice' | 'complexity';
-    nodeId?: string; // Related node ID for targeted warnings
-    severity?: 'low' | 'medium' | 'high';
-}
-
-// Column lineage tracking
-export interface ColumnInfo {
-    name: string;           // Column name or alias
-    expression: string;     // Full expression
-    sourceTable?: string;   // Source table name if direct column
-    sourceColumn?: string;  // Source column name if direct column
-    isAggregate?: boolean;  // Is this an aggregate function?
-    isWindowFunc?: boolean; // Is this a window function?
-    transformationType?: 'passthrough' | 'renamed' | 'aggregated' | 'calculated'; // Type of transformation
-    sourceNodeId?: string;  // ID of the source node (table/CTE)
-}
-
-export interface ColumnLineage {
-    outputColumn: string;
-    sources: Array<{
-        table: string;
-        column: string;
-        nodeId: string;
-    }>;
-}
-
-export interface ParseResult {
-    nodes: FlowNode[];
-    edges: FlowEdge[];
-    stats: QueryStats;
-    hints: OptimizationHint[];
-    sql: string;
-    columnLineage: ColumnLineage[];
-    columnFlows?: ColumnFlow[]; // Column-level lineage connections
-    tableUsage: Map<string, number>; // Table name -> usage count
-    error?: string;
-}
-
-export interface BatchParseResult {
-    queries: ParseResult[];
-    totalStats: QueryStats;
-    queryLineRanges?: Array<{ startLine: number; endLine: number }>; // Line ranges for each query (1-indexed)
-}
-
-const NODE_COLORS: Record<FlowNode['type'], string> = {
-    table: '#3b82f6',      // blue
-    filter: '#8b5cf6',     // purple
-    join: '#ec4899',       // pink
-    aggregate: '#f59e0b',  // amber
-    sort: '#10b981',       // green
-    limit: '#06b6d4',      // cyan
-    select: '#6366f1',     // indigo
-    result: '#22c55e',     // green
-    cte: '#a855f7',        // purple
-    union: '#f97316',      // orange
-    subquery: '#14b8a6',   // teal
-    window: '#d946ef',     // fuchsia
-    case: '#eab308',       // yellow
+// Re-export types for backward compatibility
+export type {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ColumnInfo,
+    ColumnLineage,
+    QueryStats,
+    OptimizationHint,
+    ParseResult,
+    BatchParseResult,
+    SqlDialect,
 };
 
-export function getNodeColor(type: FlowNode['type']): string {
-    return NODE_COLORS[type] || '#6366f1';
-}
+// Re-export getNodeColor for backward compatibility
+export { getNodeColor };
 
 // Stats tracking during parsing
 let stats: QueryStats;
@@ -574,6 +426,38 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(nodes, edges);
 
+        // Phase 3: Static performance analysis
+        // Pass existing hints so performance analyzer can merge overlapping hints
+        // (e.g., duplicate subquery hints + repeated table scan hints)
+        if (statements[0]) {
+            const perfAnalysis = analyzePerformance(statements[0], nodes, edges, tableUsageMap, hints);
+            hints.push(...perfAnalysis.hints);
+
+            // Filter out hints that were merged into performance hints
+            // (marked with _merged flag by detectRepeatedScans)
+            const mergedCount = hints.filter(h => (h as any)._merged).length;
+            if (mergedCount > 0) {
+                hints = hints.filter(h => !(h as any)._merged);
+            }
+        }
+
+        // Calculate performance score after all hints are collected (0-100, higher is better)
+        const perfHints = hints.filter(h => h.category === 'performance');
+        if (perfHints.length > 0) {
+            const highSeverityCount = perfHints.filter(h => h.severity === 'high').length;
+            const mediumSeverityCount = perfHints.filter(h => h.severity === 'medium').length;
+            const lowSeverityCount = perfHints.filter(h => h.severity === 'low').length;
+            
+            // Start with 100 and deduct points for issues
+            let score = 100;
+            score -= highSeverityCount * 15;  // High severity issues cost 15 points
+            score -= mediumSeverityCount * 8; // Medium severity issues cost 8 points
+            score -= lowSeverityCount * 3;    // Low severity issues cost 3 points
+            
+            stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
+            stats.performanceIssues = perfHints.length;
+        }
+
         // Use dagre for layout
         layoutGraph(nodes, edges);
 
@@ -583,7 +467,13 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Extract column lineage
         const columnLineage = extractColumnLineage(statements[0], nodes);
 
-        return { nodes, edges, stats, hints, sql, columnLineage, tableUsage: tableUsageMap };
+        // Generate column flows for visualization
+        const columnFlows = generateColumnFlows(statements[0], nodes, edges);
+
+        // Calculate column positions on nodes
+        calculateColumnPositions(nodes);
+
+        return { nodes, edges, stats, hints, sql, columnLineage, columnFlows, tableUsage: tableUsageMap };
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Parse error';
         return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
@@ -989,6 +879,15 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) return;
 
+        // Skip dead column detection for top-level SELECT nodes (final query output)
+        // A SELECT with no parentId is a top-level query - all its columns are output columns
+        // Dead column detection should only apply to intermediate SELECTs (CTEs/subqueries)
+        // where columns might be selected but not used downstream
+        if (!selectNode.parentId) {
+            // This is a top-level SELECT - all columns are valid output, skip dead column detection
+            return;
+        }
+
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
         const normalizedSql = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
         const sqlLower = normalizedSql.toLowerCase();
@@ -1340,10 +1239,27 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const cteChildren: FlowNode[] = [];
             const cteChildEdges: FlowEdge[] = [];
 
-            if (cte.stmt) {
+            // CTE statement can be in different locations depending on parser output
+            // Handle various AST structures from node-sql-parser
+            let cteStmt = null;
+            if (cte.stmt?.ast) {
+                cteStmt = cte.stmt.ast;
+            } else if (cte.stmt?.type === 'select' || cte.stmt?.from) {
+                cteStmt = cte.stmt;
+            } else if (cte.ast) {
+                cteStmt = cte.ast;
+            } else if (cte.expr?.ast) {
+                cteStmt = cte.expr.ast;
+            } else if (cte.definition?.ast) {
+                cteStmt = cte.definition.ast;
+            } else if (cte.definition) {
+                cteStmt = cte.definition;
+            }
+
+            if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
                 // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
-                parseCteOrSubqueryInternals(cte.stmt, cteChildren, cteChildEdges, cteId, 0);
+                parseCteOrSubqueryInternals(cteStmt, cteChildren, cteChildEdges, cteId, 0);
             }
 
             // Calculate container size based on children
@@ -1356,8 +1272,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 label: `WITH ${cteName}`,
                 description: 'Common Table Expression',
                 children: cteChildren.length > 0 ? cteChildren : undefined,
-                childEdges: cteChildEdges.length > 0 ? cteChildEdges : undefined,
-                expanded: true,
+                childEdges: cteChildren.length > 0 ? cteChildEdges : undefined, // Keep empty array if children exist
+                expanded: false, // Start collapsed, expand on click to show subflow
+                collapsible: cteChildren.length > 0, // Only collapsible if has children
                 depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
@@ -1804,7 +1721,8 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
             description: hasChildren ? `Derived table with ${subChildren.length} operations` : 'Derived table',
             children: hasChildren ? subChildren : undefined,
             childEdges: subChildEdges.length > 0 ? subChildEdges : undefined,
-            expanded: true, // Always expanded for data source subqueries
+            expanded: false, // Start collapsed, expand on click to show subflow
+            collapsible: hasChildren, // Only collapsible if has children
             tableCategory: 'derived',
             depth: 0, // Subquery depth
             x: 0, y: 0, width: containerWidth, height: containerHeight
@@ -2251,7 +2169,12 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 
     // Add GROUP BY if present
-    if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+    // groupby can be an array or an object with columns property
+    const hasGroupBy = stmt.groupby && (
+        (Array.isArray(stmt.groupby) && stmt.groupby.length > 0) ||
+        (stmt.groupby.columns && Array.isArray(stmt.groupby.columns) && stmt.groupby.columns.length > 0)
+    );
+    if (hasGroupBy) {
         const groupId = genId('child_group');
         nodes.push({
             id: groupId,
@@ -2269,7 +2192,12 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 
     // Add ORDER BY if present
-    if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
+    // orderby can be an array or an object with columns property
+    const hasOrderBy = stmt.orderby && (
+        (Array.isArray(stmt.orderby) && stmt.orderby.length > 0) ||
+        (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
+    );
+    if (hasOrderBy) {
         const sortId = genId('child_sort');
         nodes.push({
             id: sortId,
@@ -2487,5 +2415,367 @@ function extractSourcesFromExpr(
                 extractSourcesFromExpr(caseArg.result, sources, tableAliasMap, tableNodes);
             }
         }
+    }
+}
+
+// ============================================================
+// REDESIGNED: Column-Level Lineage Visualization
+// Now builds FULL lineage paths from source tables to output
+// ============================================================
+
+/**
+ * Generate column flows with full lineage paths from source to output
+ */
+function generateColumnFlows(
+    stmt: any,
+    nodes: FlowNode[],
+    edges: FlowEdge[]
+): ColumnFlow[] {
+    const columnFlows: ColumnFlow[] = [];
+    if (!stmt || stmt.type?.toLowerCase() !== 'select') {
+        return columnFlows;
+    }
+
+    // Build node map for quick lookup
+    const nodeMap = new Map<string, FlowNode>();
+    nodes.forEach(node => nodeMap.set(node.id, node));
+
+    // Build edge map: target -> sources (for tracing backwards)
+    const incomingEdges = new Map<string, string[]>();
+    edges.forEach(edge => {
+        if (!incomingEdges.has(edge.target)) {
+            incomingEdges.set(edge.target, []);
+        }
+        incomingEdges.get(edge.target)!.push(edge.source);
+    });
+
+    // Find SELECT nodes (output nodes)
+    const selectNodes = nodes.filter(n => n.type === 'select');
+    if (selectNodes.length === 0) return columnFlows;
+
+    // Process each SELECT node's output columns
+    for (const selectNode of selectNodes) {
+        if (!selectNode.columns || selectNode.columns.length === 0) continue;
+
+        for (const outputCol of selectNode.columns) {
+            // Build full lineage path for this output column
+            const lineagePath = buildColumnLineagePath(
+                outputCol,
+                selectNode,
+                nodeMap,
+                incomingEdges
+            );
+
+            if (lineagePath.length > 0) {
+                const flowId = `lineage_${selectNode.id}_${outputCol.name}`;
+                columnFlows.push({
+                    id: flowId,
+                    outputColumn: outputCol.name,
+                    outputNodeId: selectNode.id,
+                    lineagePath
+                });
+            }
+        }
+    }
+
+    return columnFlows;
+}
+
+/**
+ * Build complete lineage path from source table to output column
+ */
+function buildColumnLineagePath(
+    column: ColumnInfo,
+    currentNode: FlowNode,
+    nodeMap: Map<string, FlowNode>,
+    incomingEdges: Map<string, string[]>,
+    visited: Set<string> = new Set()
+): ColumnFlow['lineagePath'] {
+    const path: ColumnFlow['lineagePath'] = [];
+
+    // Prevent infinite loops
+    if (visited.has(currentNode.id)) return path;
+    visited.add(currentNode.id);
+
+    // Determine transformation at current node
+    const transformation = getTransformationType(column, currentNode);
+
+    // Add current node to path
+    path.push({
+        nodeId: currentNode.id,
+        nodeName: currentNode.label,
+        nodeType: currentNode.type,
+        columnName: column.name,
+        transformation,
+        expression: column.expression !== column.name ? column.expression : undefined
+    });
+
+    // If this is a table node, we've reached the source
+    if (currentNode.type === 'table') {
+        // Mark as source
+        path[path.length - 1].transformation = 'source';
+        return path;
+    }
+
+    // Trace back through incoming edges
+    const incoming = incomingEdges.get(currentNode.id) || [];
+
+    for (const sourceNodeId of incoming) {
+        const sourceNode = nodeMap.get(sourceNodeId);
+        if (!sourceNode) continue;
+
+        // Find matching source column
+        const sourceColumn = findSourceColumn(column, sourceNode, currentNode);
+
+        if (sourceColumn) {
+            // Recursively trace this source
+            const sourcePath = buildColumnLineagePath(
+                sourceColumn,
+                sourceNode,
+                nodeMap,
+                incomingEdges,
+                new Set(visited)
+            );
+
+            if (sourcePath.length > 0) {
+                // Prepend source path (source comes before current)
+                return [...sourcePath, ...path];
+            }
+        }
+    }
+
+    // If we couldn't trace further and column has explicit source info
+    if (column.sourceTable && column.sourceColumn) {
+        // Try to find the source table node
+        for (const node of nodeMap.values()) {
+            if (node.type === 'table' &&
+                (node.label.toLowerCase() === column.sourceTable.toLowerCase() ||
+                 node.label.toLowerCase().includes(column.sourceTable.toLowerCase()))) {
+                path.unshift({
+                    nodeId: node.id,
+                    nodeName: node.label,
+                    nodeType: 'table',
+                    columnName: column.sourceColumn,
+                    transformation: 'source'
+                });
+                break;
+            }
+        }
+    }
+
+    return path;
+}
+
+/**
+ * Find the source column in a source node that maps to the target column
+ */
+function findSourceColumn(
+    targetColumn: ColumnInfo,
+    sourceNode: FlowNode,
+    targetNode: FlowNode
+): ColumnInfo | null {
+    // If target column has explicit source info, use it
+    if (targetColumn.sourceColumn && targetColumn.sourceTable) {
+        if (sourceNode.label.toLowerCase().includes(targetColumn.sourceTable.toLowerCase())) {
+            return {
+                name: targetColumn.sourceColumn,
+                expression: targetColumn.sourceColumn,
+                sourceTable: targetColumn.sourceTable
+            };
+        }
+    }
+
+    // For aggregate nodes, extract column from expression
+    if (sourceNode.type === 'aggregate' && sourceNode.aggregateDetails) {
+        for (const aggFunc of sourceNode.aggregateDetails.functions) {
+            const outputName = aggFunc.alias || aggFunc.name;
+            if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
+                targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+                return {
+                    name: outputName,
+                    expression: aggFunc.expression,
+                    isAggregate: true
+                };
+            }
+        }
+    }
+
+    // For window nodes, check window functions
+    if (sourceNode.type === 'window' && sourceNode.windowDetails) {
+        for (const winFunc of sourceNode.windowDetails.functions) {
+            if (winFunc.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+                return {
+                    name: winFunc.name,
+                    expression: `${winFunc.name}() OVER (...)`,
+                    isWindowFunc: true
+                };
+            }
+        }
+    }
+
+    // Check source node columns
+    if (sourceNode.columns) {
+        for (const sourceCol of sourceNode.columns) {
+            // Direct name match
+            if (sourceCol.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+                return sourceCol;
+            }
+            // Source column match
+            if (sourceCol.name.toLowerCase() === targetColumn.sourceColumn?.toLowerCase()) {
+                return sourceCol;
+            }
+            // Expression match
+            if (targetColumn.expression?.toLowerCase().includes(sourceCol.name.toLowerCase())) {
+                return sourceCol;
+            }
+        }
+    }
+
+    // For JOIN nodes, check if the column could pass through
+    if (sourceNode.type === 'join') {
+        return {
+            name: targetColumn.sourceColumn || targetColumn.name,
+            expression: targetColumn.sourceColumn || targetColumn.name,
+            sourceTable: targetColumn.sourceTable
+        };
+    }
+
+    // Default: assume passthrough with same name
+    return {
+        name: targetColumn.sourceColumn || targetColumn.name,
+        expression: targetColumn.sourceColumn || targetColumn.name
+    };
+}
+
+/**
+ * Determine the transformation type at a node
+ */
+function getTransformationType(
+    column: ColumnInfo,
+    node: FlowNode
+): ColumnFlow['lineagePath'][0]['transformation'] {
+    // Source tables
+    if (node.type === 'table') {
+        return 'source';
+    }
+
+    // Aggregations
+    if (column.isAggregate || node.type === 'aggregate') {
+        return 'aggregated';
+    }
+
+    // Window functions
+    if (column.isWindowFunc || node.type === 'window') {
+        return 'calculated';
+    }
+
+    // JOINs
+    if (node.type === 'join') {
+        return 'joined';
+    }
+
+    // Renamed columns
+    if (column.sourceColumn &&
+        column.name.toLowerCase() !== column.sourceColumn.toLowerCase()) {
+        return 'renamed';
+    }
+
+    // Calculated expressions
+    if (column.expression &&
+        column.expression !== column.name &&
+        !column.expression.match(/^[\w.]+$/)) {
+        return 'calculated';
+    }
+
+    return 'passthrough';
+}
+
+/**
+ * Calculate column positions on nodes for visual rendering
+ * Positions are stored as RELATIVE offsets from the node's origin (node.x, node.y)
+ * The renderer will add node.x/node.y to get absolute coordinates
+ */
+function calculateColumnPositions(nodes: FlowNode[]): void {
+    for (const node of nodes) {
+        if (!node.columns || node.columns.length === 0) {
+            continue;
+        }
+
+        const positions = new Map<string, { x: number; y: number }>();
+        const visibleColumns: string[] = [];
+
+        // Calculate positions based on node type (relative to node origin)
+        switch (node.type) {
+            case 'table':
+                // Position columns vertically along the right edge
+                const spacing = 18;
+
+                node.columns.forEach((col, index) => {
+                    if (index < 10) { // Limit visible columns
+                        visibleColumns.push(col.name);
+                        positions.set(col.name, {
+                            x: node.width,  // Right edge (relative)
+                            y: 20 + index * spacing  // Offset from top (relative)
+                        });
+                    }
+                });
+                break;
+
+            case 'select':
+                // Position columns horizontally at the bottom
+                const hSpacing = 80;
+
+                node.columns.forEach((col, index) => {
+                    if (index < 8) { // Limit visible columns
+                        visibleColumns.push(col.name);
+                        positions.set(col.name, {
+                            x: 10 + (index % 4) * hSpacing,  // Offset from left (relative)
+                            y: node.height + Math.floor(index / 4) * 15  // Bottom edge (relative)
+                        });
+                    }
+                });
+                break;
+
+            case 'aggregate':
+                // Position at output point (center bottom)
+                if (node.aggregateDetails) {
+                    node.aggregateDetails.functions.forEach((func, index) => {
+                        const colName = func.alias || func.name;
+                        visibleColumns.push(colName);
+                        positions.set(colName, {
+                            x: node.width / 2,  // Center (relative)
+                            y: node.height + (index * 15)  // Below node (relative)
+                        });
+                    });
+                }
+                break;
+
+            case 'window':
+                // Position at output point
+                if (node.windowDetails) {
+                    node.windowDetails.functions.forEach((func, index) => {
+                        visibleColumns.push(func.name);
+                        positions.set(func.name, {
+                            x: node.width / 2,  // Center (relative)
+                            y: node.height + (index * 15)  // Below node (relative)
+                        });
+                    });
+                }
+                break;
+
+            default:
+                // For other node types, position at center bottom
+                node.columns.slice(0, 5).forEach((col, index) => {
+                    visibleColumns.push(col.name);
+                    positions.set(col.name, {
+                        x: node.width / 2,  // Center (relative)
+                        y: node.height + (index * 12)  // Below node (relative)
+                    });
+                });
+                break;
+        }
+
+        node.columnPositions = positions;
+        node.visibleColumns = visibleColumns;
     }
 }

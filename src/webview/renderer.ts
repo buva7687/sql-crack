@@ -1,26 +1,25 @@
-import { FlowNode, FlowEdge, ColumnFlow, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
-import { formatSql, highlightSql } from './sqlFormatter';
+// Import types from centralized type definitions
+import {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ParseResult,
+    QueryStats,
+    OptimizationHint,
+    ColumnLineage,
+    ViewState,
+    CloudViewState,
+    Severity,
+    FocusMode,
+    LayoutType,
+} from './types';
 
-interface ViewState {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    selectedNodeId: string | null;
-    isDragging: boolean;
-    dragStartX: number;
-    dragStartY: number;
-    searchTerm: string;
-    searchResults: string[];
-    currentSearchIndex: number;
-    focusModeEnabled: boolean;
-    legendVisible: boolean;
-    highlightedColumnSources: string[]; // Node IDs to highlight for column flow
-    isFullscreen: boolean;
-    isDarkTheme: boolean;
-    breadcrumbPath: FlowNode[]; // Current CTE/Subquery breadcrumb path
-    showColumnLineage: boolean; // Toggle column-level lineage view
-    selectedColumn: string | null; // Currently selected column for highlighting
-}
+// Import color utilities
+import { getNodeColor } from './constants';
+
+import { formatSql, highlightSql } from './sqlFormatter';
+import dagre from 'dagre';
+import { layoutGraphHorizontal } from './parser/forceLayout';
 
 const state: ViewState = {
     scale: 1,
@@ -30,6 +29,16 @@ const state: ViewState = {
     isDragging: false,
     dragStartX: 0,
     dragStartY: 0,
+    isDraggingNode: false,
+    isDraggingCloud: false,
+    draggingNodeId: null,
+    draggingCloudNodeId: null,
+    dragNodeStartX: 0,
+    dragNodeStartY: 0,
+    dragCloudStartOffsetX: 0,
+    dragCloudStartOffsetY: 0,
+    dragMouseStartX: 0,
+    dragMouseStartY: 0,
     searchTerm: '',
     searchResults: [],
     currentSearchIndex: -1,
@@ -40,7 +49,12 @@ const state: ViewState = {
     isDarkTheme: true,
     breadcrumbPath: [],
     showColumnLineage: false,
-    selectedColumn: null
+    showColumnFlows: false,
+    selectedColumn: null,
+    zoomedNodeId: null,
+    previousZoomState: null,
+    focusMode: 'all' as FocusMode,
+    layoutType: (window.defaultLayout === 'horizontal' ? 'horizontal' : 'vertical') as LayoutType
 };
 
 let svg: SVGSVGElement | null = null;
@@ -63,6 +77,12 @@ let currentHints: OptimizationHint[] = [];
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
+// Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
+let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
+// Store references to cloud and arrow elements for dynamic updates
+let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
+// Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
+let cloudViewStates: Map<string, CloudViewState> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -71,6 +91,10 @@ export function initRenderer(container: HTMLElement): void {
     svg.setAttribute('height', '100%');
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.zIndex = '1';
 
     // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -328,9 +352,17 @@ export function initRenderer(container: HTMLElement): void {
 function setupEventListeners(): void {
     if (!svg) { return; }
 
-    // Pan
+    // Pan (only if not dragging a node/cloud)
     svg.addEventListener('mousedown', (e) => {
-        if (e.target === svg || (e.target as Element).tagName === 'svg') {
+        // Check if clicking on a draggable node or cloud
+        const target = e.target as Element;
+        const cloudGroup = target.closest('.cloud-container');
+        const nodeGroup = target.closest('.node[data-id]');
+        if (cloudGroup || nodeGroup) {
+            // Node/cloud dragging will be handled by node-specific handlers
+            return;
+        }
+        if (e.target === svg || target.tagName === 'svg') {
             state.isDragging = true;
             state.dragStartX = e.clientX - state.offsetX;
             state.dragStartY = e.clientY - state.offsetY;
@@ -338,8 +370,59 @@ function setupEventListeners(): void {
         }
     });
 
+    /**
+     * Handle mouse movement for dragging operations:
+     * - Cloud dragging: Updates cloud offset independently, keeping node position fixed
+     * - Node dragging: Moves node and updates cloud/arrow positions relative to node
+     * - Panning: Moves the entire view when dragging on empty space
+     */
     svg.addEventListener('mousemove', (e) => {
-        if (state.isDragging) {
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            // Handle cloud container dragging - update cloud offset independently
+            // The cloud can be moved anywhere while the node stays in place
+            const rect = svg!.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            const node = currentNodes.find(n => n.id === state.draggingCloudNodeId);
+            if (node) {
+                // Calculate new cloud offset relative to node position
+                const deltaX = mouseX - state.dragMouseStartX;
+                const deltaY = mouseY - state.dragMouseStartY;
+                
+                const newOffsetX = state.dragCloudStartOffsetX + deltaX;
+                const newOffsetY = state.dragCloudStartOffsetY + deltaY;
+                
+                // Update cloud offset (stored relative to node position)
+                cloudOffsets.set(node.id, { offsetX: newOffsetX, offsetY: newOffsetY });
+                
+                // Update cloud and arrow positions (arrow will adjust based on cloud location)
+                updateCloudAndArrow(node);
+            }
+        } else if (state.isDraggingNode && state.draggingNodeId) {
+            // Handle node dragging - move node, cloud follows with relative offset
+            // When dragging a CTE/subquery node, the cloud maintains its offset relative to the node
+            const rect = svg!.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            const deltaX = mouseX - state.dragMouseStartX;
+            const deltaY = mouseY - state.dragMouseStartY;
+            
+            const node = currentNodes.find(n => n.id === state.draggingNodeId);
+            if (node) {
+                // Update node position
+                node.x = state.dragNodeStartX + deltaX;
+                node.y = state.dragNodeStartY + deltaY;
+                
+                // Update cloud and arrow positions (maintains relative offset)
+                updateCloudAndArrow(node);
+                
+                // Also update edges connected to this node
+                updateNodeEdges(node);
+            }
+        } else if (state.isDragging) {
+            // Handle panning - move the entire view when dragging on empty space
             state.offsetX = e.clientX - state.dragStartX;
             state.offsetY = e.clientY - state.dragStartY;
             updateTransform();
@@ -347,12 +430,52 @@ function setupEventListeners(): void {
     });
 
     svg.addEventListener('mouseup', () => {
+        // Restore cloud opacity if dragging cloud
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
+            if (cloudGroup) {
+                cloudGroup.style.opacity = '1';
+            }
+        }
+        
+        // Restore node opacity if dragging node
+        if (state.isDraggingNode && state.draggingNodeId) {
+            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
+            if (nodeGroup) {
+                nodeGroup.style.opacity = '1';
+            }
+        }
+        
         state.isDragging = false;
+        state.isDraggingNode = false;
+        state.isDraggingCloud = false;
+        state.draggingNodeId = null;
+        state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
     });
 
     svg.addEventListener('mouseleave', () => {
+        // Restore cloud opacity if dragging cloud
+        if (state.isDraggingCloud && state.draggingCloudNodeId) {
+            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
+            if (cloudGroup) {
+                cloudGroup.style.opacity = '1';
+            }
+        }
+        
+        // Restore node opacity if dragging node
+        if (state.isDraggingNode && state.draggingNodeId) {
+            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
+            if (nodeGroup) {
+                nodeGroup.style.opacity = '1';
+            }
+        }
+        
         state.isDragging = false;
+        state.isDraggingNode = false;
+        state.isDraggingCloud = false;
+        state.draggingNodeId = null;
+        state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
     });
 
@@ -441,15 +564,50 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleTheme();
         }
-        // L to toggle legend
-        if (e.key === 'l' || e.key === 'L') {
+        // H to toggle layout
+        if (e.key === 'h' || e.key === 'H') {
             e.preventDefault();
-            toggleLegend();
+            toggleLayout();
         }
         // S to show SQL preview
         if (e.key === 's' || e.key === 'S') {
             e.preventDefault();
             toggleSqlPreview();
+        }
+        // C to toggle column flows
+        if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            toggleColumnFlows();
+        }
+        // Q to toggle query stats panel
+        if (e.key === 'q' || e.key === 'Q') {
+            e.preventDefault();
+            toggleStats();
+        }
+        // O to toggle optimization hints panel
+        if (e.key === 'o' || e.key === 'O') {
+            e.preventDefault();
+            toggleHints();
+        }
+        // U for upstream focus mode
+        if (e.key === 'u' || e.key === 'U') {
+            e.preventDefault();
+            setFocusMode('upstream');
+        }
+        // D for downstream focus mode
+        if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            setFocusMode('downstream');
+        }
+        // A for all connected focus mode
+        if (e.key === 'a' || e.key === 'A') {
+            e.preventDefault();
+            setFocusMode('all');
+        }
+        // E to toggle expand/collapse all CTEs and subqueries
+        if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            toggleExpandAll();
         }
         // / to focus search (like vim)
         if (e.key === '/') {
@@ -473,6 +631,148 @@ function updateTransform(): void {
     }
 }
 
+/**
+ * Update cloud container and arrow positions when node or cloud is dragged.
+ * Arrow positioning is dynamic: if cloud is to the right of node, arrow starts from left side of cloud.
+ * If cloud is to the left of node, arrow starts from right side of cloud.
+ */
+function updateCloudAndArrow(node: FlowNode): void {
+    const cloudData = cloudElements.get(node.id);
+    if (!cloudData || !node.children || node.children.length === 0) {
+        return;
+    }
+
+    const isExpanded = !node.collapsible || (node as any).expanded !== false;
+    if (!isExpanded) {
+        return;
+    }
+
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30;
+    const cloudPadding = 15;
+
+    // Get or calculate cloud dimensions
+    const childEdges = node.childEdges || [];
+    const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+    const cloudWidth = layoutSize.width + cloudPadding * 2;
+    const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
+
+    // Get custom offset or use default (to the left)
+    // If no offset exists, initialize it with default position
+    if (!cloudOffsets.has(node.id)) {
+        cloudOffsets.set(node.id, { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 });
+    }
+    const offset = cloudOffsets.get(node.id)!;
+    const cloudX = node.x + offset.offsetX;
+    const cloudY = node.y + offset.offsetY;
+
+    // Update cloud container position
+    cloudData.cloud.setAttribute('x', String(cloudX));
+    cloudData.cloud.setAttribute('y', String(cloudY));
+
+    // Update cloud title position
+    cloudData.title.setAttribute('x', String(cloudX + cloudWidth / 2));
+    cloudData.title.setAttribute('y', String(cloudY + 20));
+
+    // Determine which side of the node the cloud is on
+    const cloudCenterX = cloudX + cloudWidth / 2;
+    const nodeCenterX = node.x + nodeWidth / 2;
+    const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+    // Update arrow path - arrow starts from the side of cloud closest to the node
+    let arrowStartX: number;
+    let arrowStartY: number;
+    let arrowEndX: number;
+    let arrowEndY: number;
+
+    if (cloudIsOnRight) {
+        // Cloud is to the right of node: arrow starts from left side of cloud, points to right side of node
+        arrowStartX = cloudX; // Left side of cloud
+        arrowStartY = cloudY + cloudHeight / 2;
+        arrowEndX = node.x + nodeWidth; // Right side of node
+        arrowEndY = node.y + nodeHeight / 2;
+    } else {
+        // Cloud is to the left of node: arrow starts from right side of cloud, points to left side of node
+        arrowStartX = cloudX + cloudWidth; // Right side of cloud
+        arrowStartY = cloudY + cloudHeight / 2;
+        arrowEndX = node.x; // Left side of node
+        arrowEndY = node.y + nodeHeight / 2;
+    }
+
+    // Create curved path with control point
+    const midX = (arrowStartX + arrowEndX) / 2;
+    cloudData.arrow.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+
+    // Update nested SVG position (the subflowGroup inside uses internal pan/zoom transform)
+    if (cloudData.nestedSvg) {
+        cloudData.nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        cloudData.nestedSvg.setAttribute('y', String(cloudY + 30));
+    } else {
+        // Fallback for legacy: update subflow group transform directly
+        cloudData.subflowGroup.setAttribute('transform', `translate(${cloudX + cloudPadding}, ${cloudY + 30})`);
+    }
+
+    // Update close button position
+    if (cloudData.closeButton) {
+        const buttonSize = 20;
+        const buttonPadding = 8;
+        const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
+        const buttonY = cloudY + buttonPadding;
+        cloudData.closeButton.setAttribute('transform', `translate(${buttonX}, ${buttonY})`);
+    }
+}
+
+/**
+ * Update edges connected to a node when it's dragged.
+ * Recalculates edge paths to maintain proper connections between nodes.
+ */
+function updateNodeEdges(node: FlowNode): void {
+    if (!mainGroup) { return; }
+    
+    // Find all edges connected to this node (as source or target)
+    const edges = mainGroup.querySelectorAll(`.edge[data-source="${node.id}"], .edge[data-target="${node.id}"]`);
+    
+    edges.forEach((edgeEl) => {
+        const edgePath = edgeEl as SVGPathElement;
+        const sourceId = edgePath.getAttribute('data-source');
+        const targetId = edgePath.getAttribute('data-target');
+        
+        if (!sourceId || !targetId) { return; }
+        
+        const sourceNode = currentNodes.find(n => n.id === sourceId);
+        const targetNode = currentNodes.find(n => n.id === targetId);
+        
+        if (!sourceNode || !targetNode) { return; }
+        
+        // Recalculate connection points (center bottom of source to center top of target)
+        const x1 = sourceNode.x + sourceNode.width / 2;
+        const y1 = sourceNode.y + sourceNode.height;
+        const x2 = targetNode.x + targetNode.width / 2;
+        const y2 = targetNode.y;
+        
+        // Update path with curved connection
+        const midY = (y1 + y2) / 2;
+        edgePath.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+    });
+}
+
+// Pre-calculate dimensions for expandable nodes (CTE/subquery) before rendering edges
+// With floating cloud design, CTE/subquery nodes stay fixed size - cloud is separate
+function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
+    for (const node of nodes) {
+        if (node.type === 'cte' && node.children && node.children.length > 0) {
+            // CTE nodes stay fixed size - cloud is rendered separately
+            node.width = 180;
+            node.height = 60;
+        } else if (node.type === 'subquery' && node.children && node.children.length > 0) {
+            // Subquery nodes also use fixed size with floating cloud
+            node.width = 180;
+            node.height = 60;
+        }
+    }
+}
+
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
@@ -486,6 +786,10 @@ export function render(result: ParseResult): void {
 
     // Reset highlight state
     state.highlightedColumnSources = [];
+    
+    // Reset zoom state when rendering new query
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
 
     // Clear previous content
     mainGroup.innerHTML = '';
@@ -504,6 +808,13 @@ export function render(result: ParseResult): void {
         return;
     }
 
+    // Store column flows
+    currentColumnFlows = result.columnFlows || [];
+
+    // Pre-calculate dimensions for expandable nodes (CTE/subquery) before rendering
+    // This ensures edges are drawn correctly
+    preCalculateExpandableDimensions(result.nodes);
+
     // Render edges first (behind nodes)
     const edgesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     edgesGroup.setAttribute('class', 'edges');
@@ -511,6 +822,11 @@ export function render(result: ParseResult): void {
         renderEdge(edge, edgesGroup);
     }
     mainGroup.appendChild(edgesGroup);
+
+    // Show column lineage panel if enabled
+    if (state.showColumnFlows) {
+        showColumnLineagePanel();
+    }
 
     // Render nodes
     const nodesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -590,17 +906,121 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
     }
 
-    // Click to select
+    /**
+     * Add drag handler for CTE/subquery nodes - makes all CTE/subquery nodes draggable.
+     * When dragging a node, both the node and its cloud move together, maintaining their relative offset.
+     * Connected edges are updated in real-time during the drag.
+     */
+    if (node.type === 'cte' || node.type === 'subquery') {
+        group.style.cursor = 'move';
+        group.addEventListener('mousedown', (e) => {
+            // Don't start drag if clicking on collapse button
+            const target = e.target as Element;
+            if (target.closest('.collapse-button')) {
+                return;
+            }
+            // Don't start drag if clicking on cloud container (cloud has its own drag handler)
+            if (target.closest('.cloud-container')) {
+                return;
+            }
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingNode = true;
+            state.draggingNodeId = node.id;
+            
+            // Store initial node position
+            state.dragNodeStartX = node.x;
+            state.dragNodeStartY = node.y;
+            
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            
+            // Add visual feedback during drag
+            group.style.opacity = '0.8';
+        });
+    }
+
+    // Click handler - toggle expand for CTE/subquery, select for others
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let hasDragged = false;
+    
+    group.addEventListener('mousedown', (e) => {
+        const rect = svg!.getBoundingClientRect();
+        dragStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+        dragStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+        hasDragged = false;
+    });
+    
+    group.addEventListener('mousemove', (e) => {
+        if (state.isDraggingNode || state.isDraggingCloud) {
+            const rect = svg!.getBoundingClientRect();
+            const currentX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            const currentY = (e.clientY - rect.top - state.offsetY) / state.scale;
+            const distance = Math.sqrt(Math.pow(currentX - dragStartX, 2) + Math.pow(currentY - dragStartY, 2));
+            if (distance > 5) { // 5px threshold
+                hasDragged = true;
+            }
+        }
+    });
+    
     group.addEventListener('click', (e) => {
         e.stopPropagation();
+
+        // Don't toggle if we just finished dragging (moved more than 5px)
+        if (hasDragged || state.isDraggingNode || state.isDraggingCloud) {
+            hasDragged = false;
+            return;
+        }
+
+        // Single click selects the node (double-click opens cloud, X button closes)
         selectNode(node.id);
         hideTooltip();
     });
 
-    // Double click to zoom to node
+    // Double click to zoom to node or open cloud
     group.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        zoomToNode(node);
+        // For CTE/subquery nodes, double-click opens the cloud (use X button to close)
+        if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
+            if (!node.expanded) {
+                // Initialize cloud view state if not exists
+                if (!cloudViewStates.has(node.id)) {
+                    cloudViewStates.set(node.id, {
+                        scale: 1,
+                        offsetX: 0,
+                        offsetY: 0,
+                        isDragging: false,
+                        dragStartX: 0,
+                        dragStartY: 0
+                    });
+                }
+                node.expanded = true;
+                // Re-render to show cloud
+                const result: ParseResult = {
+                    nodes: currentNodes,
+                    edges: currentEdges,
+                    stats: currentStats!,
+                    hints: currentHints,
+                    sql: currentSql,
+                    columnLineage: currentColumnLineage,
+                    tableUsage: currentTableUsage
+                };
+                // Preserve current layout type
+                const wasHorizontal = state.layoutType === 'horizontal';
+                render(result);
+                // Re-apply horizontal layout if it was active
+                if (wasHorizontal) {
+                    // Reset to vertical first (render uses vertical positions)
+                    state.layoutType = 'vertical';
+                    // Then toggle to horizontal
+                    toggleLayout();
+                }
+            }
+        } else {
+            zoomToNode(node);
+        }
     });
 
     // Add collapse button for CTEs and subqueries with children
@@ -893,143 +1313,519 @@ function renderContainerNode(node: FlowNode, group: SVGGElement): void {
 }
 
 function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
-    const padding = 6;
-    const headerHeight = 28;
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30;
+    const cloudPadding = 15;
 
-    // Outer container with dashed border effect
-    const outerRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    outerRect.setAttribute('x', String(node.x));
-    outerRect.setAttribute('y', String(node.y));
-    outerRect.setAttribute('width', String(node.width));
-    outerRect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 55));
-    outerRect.setAttribute('rx', '8');
-    outerRect.setAttribute('fill', '#1e293b');
-    outerRect.setAttribute('stroke', getNodeColor(node.type));
-    outerRect.setAttribute('stroke-width', '2');
-    outerRect.setAttribute('stroke-dasharray', '6,3');
-    outerRect.setAttribute('filter', 'url(#shadow)');
-    outerRect.setAttribute('class', 'node-rect');
-    group.appendChild(outerRect);
+    // Subquery node stays fixed size
+    node.width = nodeWidth;
+    node.height = nodeHeight;
 
-    // Header with solid background
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x + 2));
-    header.setAttribute('y', String(node.y + 2));
-    header.setAttribute('width', String(node.width - 4));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '6');
-    header.setAttribute('fill', getNodeColor(node.type));
-    group.appendChild(header);
-
-    // Subquery icon and label
-    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    iconText.setAttribute('x', String(node.x + 10));
-    iconText.setAttribute('y', String(node.y + 20));
-    iconText.setAttribute('fill', 'white');
-    iconText.setAttribute('font-size', '11');
-    iconText.textContent = '⊂';
-    group.appendChild(iconText);
-
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String(node.x + 24));
-    label.setAttribute('y', String(node.y + 20));
-    label.setAttribute('fill', 'white');
-    label.setAttribute('font-size', '11');
-    label.setAttribute('font-weight', '600');
-    label.setAttribute('font-family', 'monospace');
-    label.textContent = truncate(node.label, 20);
-    group.appendChild(label);
-
-    // Render children (internal operations)
+    // Layout children for cloud if expanded
+    let cloudWidth = 160;
+    let cloudHeight = 150;
+    const childEdges = node.childEdges || []; // Handle undefined childEdges
     if (isExpanded && hasChildren && node.children) {
-        let yOffset = node.y + headerHeight + 8;
-
-        for (const child of node.children) {
-            // Small operation badge
-            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            badge.setAttribute('x', String(node.x + padding + 4));
-            badge.setAttribute('y', String(yOffset));
-            badge.setAttribute('width', String(node.width - padding * 2 - 8));
-            badge.setAttribute('height', '20');
-            badge.setAttribute('rx', '4');
-            badge.setAttribute('fill', getNodeColor(child.type));
-            badge.setAttribute('opacity', '0.85');
-            group.appendChild(badge);
-
-            // Operation icon
-            const opIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            opIcon.setAttribute('x', String(node.x + padding + 10));
-            opIcon.setAttribute('y', String(yOffset + 14));
-            opIcon.setAttribute('fill', 'white');
-            opIcon.setAttribute('font-size', '9');
-            opIcon.textContent = getNodeIcon(child.type);
-            group.appendChild(opIcon);
-
-            // Operation label
-            const opLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            opLabel.setAttribute('x', String(node.x + padding + 24));
-            opLabel.setAttribute('y', String(yOffset + 14));
-            opLabel.setAttribute('fill', 'white');
-            opLabel.setAttribute('font-size', '9');
-            opLabel.setAttribute('font-weight', '500');
-            opLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            opLabel.textContent = truncate(child.label, 18);
-            group.appendChild(opLabel);
-
-            yOffset += 24;
-        }
-    } else if (!hasChildren) {
-        // Show "Derived Table" text when no internal details
-        const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        descText.setAttribute('x', String(node.x + node.width / 2));
-        descText.setAttribute('y', String(node.y + 44));
-        descText.setAttribute('text-anchor', 'middle');
-        descText.setAttribute('fill', '#64748b');
-        descText.setAttribute('font-size', '10');
-        descText.textContent = 'Derived Table';
-        group.appendChild(descText);
+        const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+        cloudWidth = layoutSize.width + cloudPadding * 2;
+        cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
     }
-}
 
-function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
-    const padding = 8;
-    const headerHeight = 36;
+    // Render the floating cloud to the LEFT of the subquery node when expanded
+    if (isExpanded && hasChildren && node.children) {
+        const defaultCloudX = node.x - cloudWidth - cloudGap;
+        const defaultCloudY = node.y - (cloudHeight - nodeHeight) / 2;
+        
+        // Get custom offset or use default
+        const offset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+        const cloudX = node.x + offset.offsetX;
+        const cloudY = node.y + offset.offsetY;
 
-    // Container background
+        // Create cloud container group for dragging
+        const cloudGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        cloudGroup.setAttribute('class', 'cloud-container');
+        cloudGroup.setAttribute('data-node-id', node.id);
+        cloudGroup.style.cursor = 'move';
+
+        // Cloud container with dashed border (matching subquery style)
+        const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        cloud.setAttribute('x', String(cloudX));
+        cloud.setAttribute('y', String(cloudY));
+        cloud.setAttribute('width', String(cloudWidth));
+        cloud.setAttribute('height', String(cloudHeight));
+        cloud.setAttribute('rx', '16');
+        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('stroke-width', '2');
+        cloud.setAttribute('stroke-dasharray', '6,3');
+        cloud.setAttribute('filter', 'url(#shadow)');
+        cloudGroup.appendChild(cloud);
+
+        // Cloud title (subquery alias)
+        const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
+        cloudTitle.setAttribute('y', String(cloudY + 20));
+        cloudTitle.setAttribute('text-anchor', 'middle');
+        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('font-size', '11');
+        cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        cloudTitle.textContent = node.label;
+        cloudGroup.appendChild(cloudTitle);
+
+        // Add close button to cloud
+        const closeButton = addCloudCloseButton(node, cloudGroup, cloudX, cloudY, cloudWidth);
+
+        // Create nested SVG for independent pan/zoom within the cloud
+        const nestedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        nestedSvg.setAttribute('y', String(cloudY + 30));
+        nestedSvg.setAttribute('width', String(cloudWidth - cloudPadding * 2));
+        nestedSvg.setAttribute('height', String(cloudHeight - 30 - cloudPadding));
+        nestedSvg.setAttribute('overflow', 'hidden');
+        nestedSvg.style.cursor = 'grab';
+
+        // Initialize cloud view state if not exists
+        if (!cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+        const cloudState = cloudViewStates.get(node.id)!;
+
+        // Create content group with transform for pan/zoom
+        const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        subflowGroup.setAttribute('class', 'cloud-subflow-group cloud-content');
+        subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+
+        // Render internal flow inside cloud
+        renderCloudSubflow(
+            node,
+            node.children,
+            childEdges,
+            subflowGroup,
+            0,
+            0,
+            cloudWidth - cloudPadding * 2,
+            cloudHeight - 30 - cloudPadding
+        );
+        nestedSvg.appendChild(subflowGroup);
+        cloudGroup.appendChild(nestedSvg);
+
+        // Pan/zoom handlers for nested SVG
+        nestedSvg.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            cloudState.isDragging = true;
+            cloudState.dragStartX = e.clientX - cloudState.offsetX;
+            cloudState.dragStartY = e.clientY - cloudState.offsetY;
+            nestedSvg.style.cursor = 'grabbing';
+        });
+
+        nestedSvg.addEventListener('mousemove', (e) => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState?.isDragging) {
+                e.stopPropagation();
+                cloudState.offsetX = e.clientX - cloudState.dragStartX;
+                cloudState.offsetY = e.clientY - cloudState.dragStartY;
+                subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+            }
+        });
+
+        nestedSvg.addEventListener('mouseup', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('mouseleave', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
+
+            // Zoom toward mouse position within the nested SVG
+            const rect = nestedSvg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            cloudState.offsetX = mouseX - (mouseX - cloudState.offsetX) * (newScale / cloudState.scale);
+            cloudState.offsetY = mouseY - (mouseY - cloudState.offsetY) * (newScale / cloudState.scale);
+            cloudState.scale = newScale;
+
+            subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+        });
+
+        // Arrow from cloud to subquery node - dynamically positioned based on cloud location
+        // Determine which side of the node the cloud is on
+        const cloudCenterX = cloudX + cloudWidth / 2;
+        const nodeCenterX = node.x + nodeWidth / 2;
+        const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+        let arrowStartX: number;
+        let arrowStartY: number;
+        let arrowEndX: number;
+        let arrowEndY: number;
+
+        if (cloudIsOnRight) {
+            // Cloud is to the right: arrow starts from left side of cloud, points to right side of node
+            arrowStartX = cloudX;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x + nodeWidth;
+            arrowEndY = node.y + nodeHeight / 2;
+        } else {
+            // Cloud is to the left: arrow starts from right side of cloud, points to left side of node
+            arrowStartX = cloudX + cloudWidth;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x;
+            arrowEndY = node.y + nodeHeight / 2;
+        }
+
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (arrowStartX + arrowEndX) / 2;
+        arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+        arrowPath.setAttribute('fill', 'none');
+        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke-width', '2');
+        arrowPath.setAttribute('stroke-dasharray', '5,3');
+        arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
+        cloudGroup.appendChild(arrowPath);
+
+        group.appendChild(cloudGroup);
+
+        // Store references for dynamic updates (including nestedSvg for pan/zoom and closeButton)
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
+
+        /**
+         * Drag handler for cloud container - allows independent positioning of cloud.
+         * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
+         * The arrow will automatically adjust to point from the correct side of the cloud.
+         */
+        cloud.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingCloud = true;
+            state.draggingCloudNodeId = node.id;
+
+            // Get current cloud offset or default (stored relative to node position)
+            const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+            state.dragCloudStartOffsetX = currentOffset.offsetX;
+            state.dragCloudStartOffsetY = currentOffset.offsetY;
+
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+
+            // Add visual feedback during drag
+            cloudGroup.style.opacity = '0.8';
+        });
+    }
+
+    // Main subquery node (with dashed border)
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
-    rect.setAttribute('width', String(node.width));
-    rect.setAttribute('height', String(isExpanded && hasChildren ? node.height : 50));
+    rect.setAttribute('width', String(nodeWidth));
+    rect.setAttribute('height', String(nodeHeight));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', '#1e293b');
+    rect.setAttribute('stroke', getNodeColor(node.type));
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('stroke-dasharray', '6,3');
+    rect.setAttribute('filter', 'url(#shadow)');
+    rect.setAttribute('class', 'node-rect');
+    group.appendChild(rect);
+
+    // Subquery icon
+    const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('x', String(node.x + 12));
+    iconText.setAttribute('y', String(node.y + 26));
+    iconText.setAttribute('fill', getNodeColor(node.type));
+    iconText.setAttribute('font-size', '14');
+    iconText.textContent = '⊂';
+    group.appendChild(iconText);
+
+    // Label
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + 30));
+    label.setAttribute('y', String(node.y + 26));
+    label.setAttribute('fill', 'white');
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('font-family', 'monospace');
+    label.textContent = truncate(node.label, 14);
+    group.appendChild(label);
+
+    // Description
+    const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    descText.setAttribute('x', String(node.x + 12));
+    descText.setAttribute('y', String(node.y + 45));
+    descText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+    descText.setAttribute('font-size', '10');
+    descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    if (hasChildren && node.children) {
+        descText.textContent = isExpanded ? 'Click to collapse' : `${node.children.length} operations`;
+    } else {
+        descText.textContent = 'Derived Table';
+    }
+    group.appendChild(descText);
+}
+
+function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, hasChildren: boolean | undefined): void {
+    const nodeWidth = 180;
+    const nodeHeight = 60;
+    const cloudGap = 30; // Gap between cloud and CTE node
+    const cloudPadding = 15;
+
+    // CTE node stays fixed size - it's just a reference/output node
+    node.width = nodeWidth;
+    node.height = nodeHeight;
+
+    // Layout children for cloud if expanded
+    let cloudWidth = 160;
+    let cloudHeight = 150;
+    const childEdges = node.childEdges || []; // Handle undefined childEdges
+    if (isExpanded && hasChildren && node.children) {
+        const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+        cloudWidth = layoutSize.width + cloudPadding * 2;
+        cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+    }
+
+    // Render the floating cloud to the LEFT of the CTE node when expanded
+    if (isExpanded && hasChildren && node.children) {
+        // Get custom offset or use default
+        const offset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+        const cloudX = node.x + offset.offsetX;
+        const cloudY = node.y + offset.offsetY;
+
+        // Create cloud container group for dragging
+        const cloudGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        cloudGroup.setAttribute('class', 'cloud-container');
+        cloudGroup.setAttribute('data-node-id', node.id);
+        cloudGroup.style.cursor = 'move';
+
+        // Cloud container background
+        const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        cloud.setAttribute('x', String(cloudX));
+        cloud.setAttribute('y', String(cloudY));
+        cloud.setAttribute('width', String(cloudWidth));
+        cloud.setAttribute('height', String(cloudHeight));
+        cloud.setAttribute('rx', '16');
+        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('stroke-width', '2');
+        cloud.setAttribute('filter', 'url(#shadow)');
+        cloudGroup.appendChild(cloud);
+
+        // Cloud title (CTE name without "WITH ")
+        const cteName = node.label.replace('WITH ', '');
+        const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
+        cloudTitle.setAttribute('y', String(cloudY + 20));
+        cloudTitle.setAttribute('text-anchor', 'middle');
+        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('font-size', '11');
+        cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        cloudTitle.textContent = cteName;
+        cloudGroup.appendChild(cloudTitle);
+
+        // Add close button to cloud
+        const closeButton = addCloudCloseButton(node, cloudGroup, cloudX, cloudY, cloudWidth);
+
+        // Create nested SVG for independent pan/zoom within the cloud
+        const nestedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
+        nestedSvg.setAttribute('y', String(cloudY + 30));
+        nestedSvg.setAttribute('width', String(cloudWidth - cloudPadding * 2));
+        nestedSvg.setAttribute('height', String(cloudHeight - 30 - cloudPadding));
+        nestedSvg.setAttribute('overflow', 'hidden');
+        nestedSvg.style.cursor = 'grab';
+
+        // Initialize cloud view state if not exists
+        if (!cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+        const cloudState = cloudViewStates.get(node.id)!;
+
+        // Create content group with transform for pan/zoom
+        const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        subflowGroup.setAttribute('class', 'cloud-subflow-group cloud-content');
+        subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+
+        // Render internal flow inside cloud
+        renderCloudSubflow(
+            node,
+            node.children,
+            childEdges,
+            subflowGroup,
+            0,
+            0,
+            cloudWidth - cloudPadding * 2,
+            cloudHeight - 30 - cloudPadding
+        );
+        nestedSvg.appendChild(subflowGroup);
+        cloudGroup.appendChild(nestedSvg);
+
+        // Pan/zoom handlers for nested SVG
+        nestedSvg.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            cloudState.isDragging = true;
+            cloudState.dragStartX = e.clientX - cloudState.offsetX;
+            cloudState.dragStartY = e.clientY - cloudState.offsetY;
+            nestedSvg.style.cursor = 'grabbing';
+        });
+
+        nestedSvg.addEventListener('mousemove', (e) => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState?.isDragging) {
+                e.stopPropagation();
+                cloudState.offsetX = e.clientX - cloudState.dragStartX;
+                cloudState.offsetY = e.clientY - cloudState.dragStartY;
+                subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+            }
+        });
+
+        nestedSvg.addEventListener('mouseup', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('mouseleave', () => {
+            const cloudState = cloudViewStates.get(node.id);
+            if (cloudState) {
+                cloudState.isDragging = false;
+            }
+            nestedSvg.style.cursor = 'grab';
+        });
+
+        nestedSvg.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cloudState = cloudViewStates.get(node.id)!;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
+
+            // Zoom toward mouse position within the nested SVG
+            const rect = nestedSvg.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            cloudState.offsetX = mouseX - (mouseX - cloudState.offsetX) * (newScale / cloudState.scale);
+            cloudState.offsetY = mouseY - (mouseY - cloudState.offsetY) * (newScale / cloudState.scale);
+            cloudState.scale = newScale;
+
+            subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
+        });
+
+        // Arrow from cloud to CTE node - dynamically positioned based on cloud location
+        // Determine which side of the node the cloud is on
+        const cloudCenterX = cloudX + cloudWidth / 2;
+        const nodeCenterX = node.x + nodeWidth / 2;
+        const cloudIsOnRight = cloudCenterX > nodeCenterX;
+
+        let arrowStartX: number;
+        let arrowStartY: number;
+        let arrowEndX: number;
+        let arrowEndY: number;
+
+        if (cloudIsOnRight) {
+            // Cloud is to the right: arrow starts from left side of cloud, points to right side of node
+            arrowStartX = cloudX;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x + nodeWidth;
+            arrowEndY = node.y + nodeHeight / 2;
+        } else {
+            // Cloud is to the left: arrow starts from right side of cloud, points to left side of node
+            arrowStartX = cloudX + cloudWidth;
+            arrowStartY = cloudY + cloudHeight / 2;
+            arrowEndX = node.x;
+            arrowEndY = node.y + nodeHeight / 2;
+        }
+
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (arrowStartX + arrowEndX) / 2;
+        arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+        arrowPath.setAttribute('fill', 'none');
+        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke-width', '2');
+        arrowPath.setAttribute('stroke-dasharray', '5,3');
+        arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
+        cloudGroup.appendChild(arrowPath);
+
+        group.appendChild(cloudGroup);
+
+        // Store references for dynamic updates (including nestedSvg for pan/zoom and closeButton)
+        cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
+
+        /**
+         * Drag handler for cloud container - allows independent positioning of cloud.
+         * When dragging the cloud, only the cloud offset is updated, keeping the node position fixed.
+         * The arrow will automatically adjust to point from the correct side of the cloud.
+         */
+        cloud.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            const rect = svg!.getBoundingClientRect();
+            state.isDraggingCloud = true;
+            state.draggingCloudNodeId = node.id;
+
+            // Get current cloud offset or default (stored relative to node position)
+            const currentOffset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
+            state.dragCloudStartOffsetX = currentOffset.offsetX;
+            state.dragCloudStartOffsetY = currentOffset.offsetY;
+
+            // Store initial mouse position (in SVG coordinates, accounting for pan/zoom)
+            state.dragMouseStartX = (e.clientX - rect.left - state.offsetX) / state.scale;
+            state.dragMouseStartY = (e.clientY - rect.top - state.offsetY) / state.scale;
+
+            // Add visual feedback during drag
+            cloudGroup.style.opacity = '0.8';
+        });
+    }
+
+    // Main CTE node (simple reference box)
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(nodeWidth));
+    rect.setAttribute('height', String(nodeHeight));
     rect.setAttribute('rx', '10');
     rect.setAttribute('fill', getNodeColor(node.type));
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
-    // Header bar
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x));
-    header.setAttribute('y', String(node.y));
-    header.setAttribute('width', String(node.width));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
-    group.appendChild(header);
-
-    const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    headerClip.setAttribute('x', String(node.x));
-    headerClip.setAttribute('y', String(node.y + headerHeight - 10));
-    headerClip.setAttribute('width', String(node.width));
-    headerClip.setAttribute('height', '10');
-    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
-    group.appendChild(headerClip);
-
     // Icon
     const icon = getNodeIcon(node.type);
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    iconText.setAttribute('x', String(node.x + 12));
-    iconText.setAttribute('y', String(node.y + 24));
+    iconText.setAttribute('x', String(node.x + 14));
+    iconText.setAttribute('y', String(node.y + 26));
     iconText.setAttribute('fill', 'rgba(255,255,255,0.9)');
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
@@ -1037,68 +1833,436 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
 
     // Label
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String(node.x + 32));
-    label.setAttribute('y', String(node.y + 24));
+    label.setAttribute('x', String(node.x + 34));
+    label.setAttribute('y', String(node.y + 26));
     label.setAttribute('fill', 'white');
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-    label.textContent = truncate(node.label, 18);
+    label.textContent = truncate(node.label, 16);
     group.appendChild(label);
 
-    // Render children if expanded
-    if (isExpanded && hasChildren && node.children) {
-        const childrenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        childrenGroup.setAttribute('class', 'children-group');
+    // Description or child count
+    const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    descText.setAttribute('x', String(node.x + 14));
+    descText.setAttribute('y', String(node.y + 45));
+    descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+    descText.setAttribute('font-size', '10');
+    descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    if (hasChildren && node.children) {
+        descText.textContent = isExpanded ? 'Click to collapse' : `${node.children.length} operations`;
+    } else {
+        descText.textContent = 'Common Table Expression';
+    }
+    group.appendChild(descText);
+}
 
-        // Inner content area
-        const innerBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        innerBg.setAttribute('x', String(node.x + padding));
-        innerBg.setAttribute('y', String(node.y + headerHeight + 4));
-        innerBg.setAttribute('width', String(node.width - padding * 2));
-        innerBg.setAttribute('height', String(node.height - headerHeight - padding - 4));
-        innerBg.setAttribute('rx', '6');
-        innerBg.setAttribute('fill', 'rgba(0,0,0,0.15)');
-        childrenGroup.appendChild(innerBg);
+// Layout children nodes using dagre for subflow visualization
+function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
+    if (children.length === 0) {
+        return { width: 200, height: 100 };
+    }
 
-        // Render child nodes as mini pills
-        let yOffset = node.y + headerHeight + 12;
-        for (const child of node.children) {
-            const childPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            childPill.setAttribute('x', String(node.x + padding + 6));
-            childPill.setAttribute('y', String(yOffset));
-            childPill.setAttribute('width', String(node.width - padding * 2 - 12));
-            childPill.setAttribute('height', '24');
-            childPill.setAttribute('rx', '4');
-            childPill.setAttribute('fill', getNodeColor(child.type));
-            childPill.setAttribute('opacity', '0.9');
-            childrenGroup.appendChild(childPill);
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+        rankdir: 'LR', // Left to right for horizontal flow inside container
+        nodesep: 30,
+        ranksep: 40,
+        marginx: 20,
+        marginy: 20
+    });
+    g.setDefaultEdgeLabel(() => ({}));
 
-            // Child icon
-            const childIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            childIcon.setAttribute('x', String(node.x + padding + 12));
-            childIcon.setAttribute('y', String(yOffset + 16));
-            childIcon.setAttribute('fill', 'rgba(255,255,255,0.9)');
-            childIcon.setAttribute('font-size', '10');
-            childIcon.textContent = getNodeIcon(child.type);
-            childrenGroup.appendChild(childIcon);
+    // Set default sizes for child nodes
+    for (const child of children) {
+        // Set appropriate width based on label length
+        const labelWidth = Math.max(80, child.label.length * 7 + 30);
+        child.width = labelWidth;
+        child.height = 36;
+        g.setNode(child.id, { width: child.width, height: child.height });
+    }
 
-            // Child label
-            const childLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            childLabel.setAttribute('x', String(node.x + padding + 26));
-            childLabel.setAttribute('y', String(yOffset + 16));
-            childLabel.setAttribute('fill', 'white');
-            childLabel.setAttribute('font-size', '10');
-            childLabel.setAttribute('font-weight', '500');
-            childLabel.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            childLabel.textContent = truncate(child.label, 16);
-            childrenGroup.appendChild(childLabel);
+    // Add edges
+    for (const edge of edges) {
+        g.setEdge(edge.source, edge.target);
+    }
 
-            yOffset += 30;
+    // Run layout
+    dagre.layout(g);
+
+    // Apply positions (relative to container)
+    let maxX = 0;
+    let maxY = 0;
+    for (const child of children) {
+        const layoutNode = g.node(child.id);
+        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
+            child.x = layoutNode.x - child.width / 2;
+            child.y = layoutNode.y - child.height / 2;
+            maxX = Math.max(maxX, child.x + child.width);
+            maxY = Math.max(maxY, child.y + child.height);
+        }
+    }
+
+    return {
+        width: maxX + 20, // Add padding
+        height: maxY + 20
+    };
+}
+
+// Layout children nodes VERTICALLY (top to bottom) for cloud visualization
+function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
+    if (children.length === 0) {
+        return { width: 120, height: 100 };
+    }
+
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+        rankdir: 'TB', // Top to bottom for vertical flow
+        nodesep: 20,   // Increased spacing for full-size nodes
+        ranksep: 35,   // Increased spacing for full-size nodes
+        marginx: 15,
+        marginy: 15
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Set full-size dimensions for child nodes (matching main canvas nodes)
+    for (const child of children) {
+        child.width = 180;   // Full-size like main nodes
+        child.height = 60;   // Full-size like main nodes
+        g.setNode(child.id, { width: child.width, height: child.height });
+    }
+
+    // Add edges
+    for (const edge of edges) {
+        g.setEdge(edge.source, edge.target);
+    }
+
+    // Run layout
+    dagre.layout(g);
+
+    // Apply positions
+    let maxX = 0;
+    let maxY = 0;
+    for (const child of children) {
+        const layoutNode = g.node(child.id);
+        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
+            child.x = layoutNode.x - child.width / 2;
+            child.y = layoutNode.y - child.height / 2;
+            maxX = Math.max(maxX, child.x + child.width);
+            maxY = Math.max(maxY, child.y + child.height);
+        }
+    }
+
+    return {
+        width: maxX + 10,
+        height: maxY + 10
+    };
+}
+
+// Render internal flow inside the floating cloud container
+function renderCloudSubflow(
+    parentNode: FlowNode,
+    children: FlowNode[],
+    childEdges: FlowEdge[],
+    group: SVGGElement,
+    offsetX: number,
+    offsetY: number,
+    containerWidth: number,
+    containerHeight: number
+): void {
+    // Draw child edges first (behind nodes)
+    for (const edge of childEdges) {
+        const sourceNode = children.find(n => n.id === edge.source);
+        const targetNode = children.find(n => n.id === edge.target);
+
+        if (sourceNode && targetNode) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+            // Calculate connection points (bottom of source to top of target for vertical layout)
+            // offsetX/offsetY are now 0 if using transform, or actual offsets if not
+            const sourceX = offsetX + sourceNode.x + sourceNode.width / 2;
+            const sourceY = offsetY + sourceNode.y + sourceNode.height;
+            const targetX = offsetX + targetNode.x + targetNode.width / 2;
+            const targetY = offsetY + targetNode.y;
+
+            // Create curved path
+            const midY = (sourceY + targetY) / 2;
+            const d = `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`;
+
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.4)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+
+            group.appendChild(path);
+        }
+    }
+
+    // Draw child nodes with full styling (like main flow nodes)
+    for (const child of children) {
+        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        childGroup.setAttribute('class', 'cloud-subflow-node');
+        childGroup.setAttribute('data-node-id', child.id);
+        childGroup.style.cursor = 'pointer';
+
+        const childX = offsetX + child.x;
+        const childY = offsetY + child.y;
+        const nodeColor = getNodeColor(child.type);
+
+        // Node rectangle with full styling (matching main nodes)
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String(childX));
+        rect.setAttribute('y', String(childY));
+        rect.setAttribute('width', String(child.width));
+        rect.setAttribute('height', String(child.height));
+        rect.setAttribute('rx', '10');  // Match main nodes
+        rect.setAttribute('fill', nodeColor);
+        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+        rect.setAttribute('stroke-width', '2');  // Match main nodes
+        rect.setAttribute('filter', 'url(#shadow)');
+        childGroup.appendChild(rect);
+
+        // Node icon (positioned like main nodes)
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        icon.setAttribute('x', String(childX + 14));
+        icon.setAttribute('y', String(childY + 26));
+        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('font-size', '14');
+        icon.textContent = getNodeIcon(child.type);
+        childGroup.appendChild(icon);
+
+        // Node label (positioned like main nodes)
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', String(childX + 34));
+        label.setAttribute('y', String(childY + 26));
+        label.setAttribute('fill', 'white');
+        label.setAttribute('font-size', '12');
+        label.setAttribute('font-weight', '600');
+        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        label.textContent = truncate(child.label, 18);  // Increased from 14 for full-size nodes
+        childGroup.appendChild(label);
+
+        // Description text (like main nodes)
+        if (child.description) {
+            const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            descText.setAttribute('x', String(childX + 14));
+            descText.setAttribute('y', String(childY + 45));
+            descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            descText.setAttribute('font-size', '10');
+            descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+            descText.textContent = truncate(child.description, 22);
+            childGroup.appendChild(descText);
         }
 
-        group.appendChild(childrenGroup);
+        // Tooltip event handlers
+        childGroup.addEventListener('mouseenter', (e) => {
+            rect.setAttribute('fill', lightenColor(nodeColor, 15));
+            showTooltip(child, e as MouseEvent);
+        });
+        childGroup.addEventListener('mousemove', (e) => {
+            updateTooltipPosition(e as MouseEvent);
+        });
+        childGroup.addEventListener('mouseleave', () => {
+            rect.setAttribute('fill', nodeColor);
+            hideTooltip();
+        });
+
+        group.appendChild(childGroup);
     }
+}
+
+/**
+ * Add a close (X) button to a cloud container.
+ * When clicked, it collapses the cloud by setting node.expanded = false.
+ * Uses transform for positioning so it can be easily updated when cloud is dragged.
+ * Returns the button group for storage in cloudElements.
+ */
+function addCloudCloseButton(
+    node: FlowNode,
+    cloudGroup: SVGGElement,
+    cloudX: number,
+    cloudY: number,
+    cloudWidth: number
+): SVGGElement {
+    const buttonSize = 20;
+    const buttonPadding = 8;
+    const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
+    const buttonY = cloudY + buttonPadding;
+
+    // Button container group - use transform for easy repositioning
+    const closeButtonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    closeButtonGroup.setAttribute('class', 'cloud-close-btn');
+    closeButtonGroup.setAttribute('transform', `translate(${buttonX}, ${buttonY})`);
+    closeButtonGroup.style.cursor = 'pointer';
+
+    // Background circle (positioned at 0,0 relative to group)
+    const buttonBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    buttonBg.setAttribute('cx', String(buttonSize / 2));
+    buttonBg.setAttribute('cy', String(buttonSize / 2));
+    buttonBg.setAttribute('r', String(buttonSize / 2));
+    buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)'); // Red with transparency
+    buttonBg.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+    buttonBg.setAttribute('stroke-width', '1');
+    closeButtonGroup.appendChild(buttonBg);
+
+    // X icon using path (positioned relative to group)
+    const xIcon = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const centerX = buttonSize / 2;
+    const centerY = buttonSize / 2;
+    const offset = 5;
+    xIcon.setAttribute('d', `
+        M ${centerX - offset} ${centerY - offset} L ${centerX + offset} ${centerY + offset}
+        M ${centerX + offset} ${centerY - offset} L ${centerX - offset} ${centerY + offset}
+    `);
+    xIcon.setAttribute('stroke', 'white');
+    xIcon.setAttribute('stroke-width', '2');
+    xIcon.setAttribute('stroke-linecap', 'round');
+    xIcon.style.pointerEvents = 'none';
+    closeButtonGroup.appendChild(xIcon);
+
+    // Click handler - collapse the node (hide cloud)
+    closeButtonGroup.addEventListener('click', (e) => {
+        e.stopPropagation();
+        node.expanded = false;
+        // Re-render to hide cloud
+        const result: ParseResult = {
+            nodes: currentNodes,
+            edges: currentEdges,
+            stats: currentStats!,
+            hints: currentHints,
+            sql: currentSql,
+            columnLineage: currentColumnLineage,
+            tableUsage: currentTableUsage
+        };
+        render(result);
+    });
+
+    // Hover effects
+    closeButtonGroup.addEventListener('mouseenter', () => {
+        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.9)');
+    });
+    closeButtonGroup.addEventListener('mouseleave', () => {
+        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)');
+    });
+
+    cloudGroup.appendChild(closeButtonGroup);
+    return closeButtonGroup;
+}
+
+// Render the subflow (children and edges) inside a container node
+function renderSubflow(
+    parentNode: FlowNode,
+    children: FlowNode[],
+    childEdges: FlowEdge[],
+    group: SVGGElement,
+    offsetX: number,
+    offsetY: number,
+    containerWidth: number,
+    containerHeight: number
+): void {
+    // Create a clipping path for the subflow area
+    const clipId = `clip-${parentNode.id}`;
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+    clipPath.setAttribute('id', clipId);
+    const clipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    clipRect.setAttribute('x', String(offsetX));
+    clipRect.setAttribute('y', String(offsetY));
+    clipRect.setAttribute('width', String(containerWidth));
+    clipRect.setAttribute('height', String(containerHeight));
+    clipRect.setAttribute('rx', '6');
+    clipPath.appendChild(clipRect);
+    defs.appendChild(clipPath);
+    group.appendChild(defs);
+
+    // Create subflow group with clipping
+    const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    subflowGroup.setAttribute('class', 'subflow-group');
+    subflowGroup.setAttribute('clip-path', `url(#${clipId})`);
+
+    // Background for subflow area
+    const subflowBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    subflowBg.setAttribute('x', String(offsetX));
+    subflowBg.setAttribute('y', String(offsetY));
+    subflowBg.setAttribute('width', String(containerWidth));
+    subflowBg.setAttribute('height', String(containerHeight));
+    subflowBg.setAttribute('rx', '6');
+    subflowBg.setAttribute('fill', 'rgba(0, 0, 0, 0.2)');
+    subflowGroup.appendChild(subflowBg);
+
+    // Draw child edges first (behind nodes)
+    for (const edge of childEdges) {
+        const sourceNode = children.find(n => n.id === edge.source);
+        const targetNode = children.find(n => n.id === edge.target);
+
+        if (sourceNode && targetNode) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+            // Calculate connection points
+            const sourceX = offsetX + sourceNode.x + sourceNode.width;
+            const sourceY = offsetY + sourceNode.y + sourceNode.height / 2;
+            const targetX = offsetX + targetNode.x;
+            const targetY = offsetY + targetNode.y + targetNode.height / 2;
+
+            // Create curved path
+            const midX = (sourceX + targetX) / 2;
+            const d = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
+
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+
+            subflowGroup.appendChild(path);
+        }
+    }
+
+    // Draw child nodes
+    for (const child of children) {
+        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        childGroup.setAttribute('class', 'subflow-node');
+
+        const childX = offsetX + child.x;
+        const childY = offsetY + child.y;
+
+        // Node rectangle
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String(childX));
+        rect.setAttribute('y', String(childY));
+        rect.setAttribute('width', String(child.width));
+        rect.setAttribute('height', String(child.height));
+        rect.setAttribute('rx', '6');
+        rect.setAttribute('fill', getNodeColor(child.type));
+        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
+        rect.setAttribute('stroke-width', '1');
+        childGroup.appendChild(rect);
+
+        // Node icon
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        icon.setAttribute('x', String(childX + 8));
+        icon.setAttribute('y', String(childY + child.height / 2 + 4));
+        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('font-size', '11');
+        icon.textContent = getNodeIcon(child.type);
+        childGroup.appendChild(icon);
+
+        // Node label
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', String(childX + 22));
+        label.setAttribute('y', String(childY + child.height / 2 + 4));
+        label.setAttribute('fill', 'white');
+        label.setAttribute('font-size', '10');
+        label.setAttribute('font-weight', '500');
+        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        label.textContent = truncate(child.label, 14);
+        childGroup.appendChild(label);
+
+        subflowGroup.appendChild(childGroup);
+    }
+
+    group.appendChild(subflowGroup);
 }
 
 function renderWindowNode(node: FlowNode, group: SVGGElement): void {
@@ -2132,6 +3296,25 @@ function updateStatsPanel(): void {
                 ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
             </div>
         ` : ''}
+        ${(currentStats.performanceScore !== undefined || currentStats.performanceIssues !== undefined) ? `
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Performance</div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                    ${currentStats.performanceScore !== undefined ? `
+                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
+                            <div style="color: ${currentStats.performanceScore >= 80 ? '#22c55e' : currentStats.performanceScore >= 60 ? '#eab308' : '#ef4444'}; font-weight: 600; font-size: 14px;">${currentStats.performanceScore}</div>
+                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Score</div>
+                        </div>
+                    ` : ''}
+                    ${currentStats.performanceIssues !== undefined ? `
+                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
+                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.performanceIssues}</div>
+                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Issues</div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        ` : ''}
         ${(currentStats.maxCteDepth !== undefined || currentStats.maxFanOut !== undefined || currentStats.criticalPathLength !== undefined || currentStats.complexityBreakdown) ? `
             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid ${borderColor};">
                 <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Complexity Insights</div>
@@ -2214,6 +3397,36 @@ function updateHintsPanel(): void {
         'info': { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: 'ℹ' }
     };
 
+    // Group hints by category
+    const hintsByCategory: Record<string, OptimizationHint[]> = {
+        'performance': [],
+        'quality': [],
+        'best-practice': [],
+        'complexity': [],
+        'other': []
+    };
+
+    currentHints.forEach(hint => {
+        const category = hint.category || 'other';
+        if (hintsByCategory[category]) {
+            hintsByCategory[category].push(hint);
+        } else {
+            hintsByCategory['other'].push(hint);
+        }
+    });
+
+    // Count hints by category
+    const perfCount = hintsByCategory['performance'].length;
+    const qualityCount = hintsByCategory['quality'].length;
+    const bestPracticeCount = hintsByCategory['best-practice'].length;
+    const complexityCount = hintsByCategory['complexity'].length;
+    const otherCount = hintsByCategory['other'].length;
+
+    // Count by severity
+    const highCount = currentHints.filter(h => h.severity === 'high').length;
+    const mediumCount = currentHints.filter(h => h.severity === 'medium').length;
+    const lowCount = currentHints.filter(h => h.severity === 'low').length;
+
     hintsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
             <span style="font-weight: 600; color: #f1f5f9;">Optimization Hints</span>
@@ -2225,28 +3438,228 @@ function updateHintsPanel(): void {
                 font-size: 10px;
             ">${currentHints.length}</span>
         </div>
-        ${currentHints.map(hint => {
-        const style = hintColors[hint.type] || hintColors.info;
-        return `
-                <div style="
-                    background: ${style.bg};
-                    border-left: 3px solid ${style.border};
-                    padding: 8px 12px;
-                    margin-bottom: 8px;
-                    border-radius: 0 4px 4px 0;
-                ">
-                    <div style="color: #f1f5f9; font-size: 12px; margin-bottom: 4px;">
-                        ${style.icon} ${hint.message}
-                    </div>
-                    ${hint.suggestion ? `
-                        <div style="color: #94a3b8; font-size: 11px;">
-                            ${hint.suggestion}
+        
+        <!-- Category Filters -->
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+            ${perfCount > 0 ? `
+                <button class="hint-filter-btn" data-category="performance" style="
+                    background: rgba(59, 130, 246, 0.2);
+                    color: #60a5fa;
+                    border: 1px solid rgba(59, 130, 246, 0.3);
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    cursor: pointer;
+                ">Performance (${perfCount})</button>
+            ` : ''}
+            ${qualityCount > 0 ? `
+                <button class="hint-filter-btn" data-category="quality" style="
+                    background: rgba(245, 158, 11, 0.2);
+                    color: #fbbf24;
+                    border: 1px solid rgba(245, 158, 11, 0.3);
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    cursor: pointer;
+                ">Quality (${qualityCount})</button>
+            ` : ''}
+            ${bestPracticeCount > 0 ? `
+                <button class="hint-filter-btn" data-category="best-practice" style="
+                    background: rgba(34, 197, 94, 0.2);
+                    color: #4ade80;
+                    border: 1px solid rgba(34, 197, 94, 0.3);
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    cursor: pointer;
+                ">Best Practice (${bestPracticeCount})</button>
+            ` : ''}
+            ${complexityCount > 0 ? `
+                <button class="hint-filter-btn" data-category="complexity" style="
+                    background: rgba(139, 92, 246, 0.2);
+                    color: #a78bfa;
+                    border: 1px solid rgba(139, 92, 246, 0.3);
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    cursor: pointer;
+                ">Complexity (${complexityCount})</button>
+            ` : ''}
+        </div>
+
+        <!-- Severity Filters -->
+        ${(highCount > 0 || mediumCount > 0 || lowCount > 0) ? `
+            <div style="display: flex; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+                ${highCount > 0 ? `
+                    <button class="hint-severity-btn" data-severity="high" style="
+                        background: rgba(239, 68, 68, 0.2);
+                        color: #f87171;
+                        border: 1px solid rgba(239, 68, 68, 0.3);
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        cursor: pointer;
+                    ">High (${highCount})</button>
+                ` : ''}
+                ${mediumCount > 0 ? `
+                    <button class="hint-severity-btn" data-severity="medium" style="
+                        background: rgba(245, 158, 11, 0.2);
+                        color: #fbbf24;
+                        border: 1px solid rgba(245, 158, 11, 0.3);
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        cursor: pointer;
+                    ">Medium (${mediumCount})</button>
+                ` : ''}
+                ${lowCount > 0 ? `
+                    <button class="hint-severity-btn" data-severity="low" style="
+                        background: rgba(148, 163, 184, 0.2);
+                        color: #cbd5e1;
+                        border: 1px solid rgba(148, 163, 184, 0.3);
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        cursor: pointer;
+                    ">Low (${lowCount})</button>
+                ` : ''}
+            </div>
+        ` : ''}
+
+        <!-- Hints List -->
+        <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
+            ${Object.entries(hintsByCategory).map(([category, hints]) => {
+                if (hints.length === 0) return '';
+                
+                const categoryLabels: Record<string, string> = {
+                    'performance': '⚡ Performance',
+                    'quality': '🔍 Quality',
+                    'best-practice': '✨ Best Practice',
+                    'complexity': '📊 Complexity',
+                    'other': '📝 Other'
+                };
+                
+                return `
+                    <div class="hint-category" data-category="${category}" style="margin-bottom: 12px;">
+                        <div style="font-size: 10px; color: #94a3b8; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+                            ${categoryLabels[category] || category} (${hints.length})
                         </div>
-                    ` : ''}
-                </div>
-            `;
-    }).join('')}
+                        ${hints.map(hint => {
+                            const style = hintColors[hint.type] || hintColors.info;
+                            const severityBadge = hint.severity ? `
+                                <span style="
+                                    background: ${hint.severity === 'high' ? 'rgba(239, 68, 68, 0.2)' : hint.severity === 'medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
+                                    color: ${hint.severity === 'high' ? '#f87171' : hint.severity === 'medium' ? '#fbbf24' : '#cbd5e1'};
+                                    padding: 2px 6px;
+                                    border-radius: 4px;
+                                    font-size: 9px;
+                                    margin-left: 6px;
+                                    text-transform: uppercase;
+                                ">${hint.severity}</span>
+                            ` : '';
+                            
+                            return `
+                                <div class="hint-item" data-category="${hint.category || 'other'}" data-severity="${hint.severity || ''}" style="
+                                    background: ${style.bg};
+                                    border-left: 3px solid ${style.border};
+                                    padding: 8px 12px;
+                                    margin-bottom: 8px;
+                                    border-radius: 0 4px 4px 0;
+                                ">
+                                    <div style="color: #f1f5f9; font-size: 12px; margin-bottom: 4px; display: flex; align-items: center;">
+                                        ${style.icon} ${hint.message}${severityBadge}
+                                    </div>
+                                    ${hint.suggestion ? `
+                                        <div style="color: #94a3b8; font-size: 11px;">
+                                            ${hint.suggestion}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }).join('')}
+        </div>
     `;
+
+    // Add filter button event listeners
+    const filterButtons = hintsPanel.querySelectorAll('.hint-filter-btn');
+    const severityButtons = hintsPanel.querySelectorAll('.hint-severity-btn');
+    const hintItems = hintsPanel.querySelectorAll('.hint-item');
+    const categoryGroups = hintsPanel.querySelectorAll('.hint-category');
+
+    let activeCategory: string | null = null;
+    let activeSeverity: string | null = null;
+
+    filterButtons.forEach(btn => {
+        const btnEl = btn as HTMLElement;
+        btnEl.addEventListener('click', () => {
+            const category = btnEl.getAttribute('data-category');
+            if (activeCategory === category) {
+                activeCategory = null;
+                btnEl.style.opacity = '1';
+            } else {
+                activeCategory = category;
+                filterButtons.forEach(b => {
+                    (b as HTMLElement).style.opacity = '0.5';
+                });
+                btnEl.style.opacity = '1';
+            }
+            applyFilters();
+        });
+    });
+
+    severityButtons.forEach(btn => {
+        const btnEl = btn as HTMLElement;
+        btnEl.addEventListener('click', () => {
+            const severity = btnEl.getAttribute('data-severity');
+            if (activeSeverity === severity) {
+                activeSeverity = null;
+                btnEl.style.opacity = '1';
+            } else {
+                activeSeverity = severity;
+                severityButtons.forEach(b => {
+                    (b as HTMLElement).style.opacity = '0.5';
+                });
+                btnEl.style.opacity = '1';
+            }
+            applyFilters();
+        });
+    });
+
+    function applyFilters() {
+        hintItems.forEach(item => {
+            const itemEl = item as HTMLElement;
+            const itemCategory = itemEl.getAttribute('data-category') || 'other';
+            const itemSeverity = itemEl.getAttribute('data-severity') || '';
+            
+            const categoryMatch = !activeCategory || itemCategory === activeCategory;
+            const severityMatch = !activeSeverity || itemSeverity === activeSeverity;
+            
+            if (categoryMatch && severityMatch) {
+                itemEl.style.display = '';
+            } else {
+                itemEl.style.display = 'none';
+            }
+        });
+
+        // Hide/show category groups
+        categoryGroups.forEach(group => {
+            const groupEl = group as HTMLElement;
+            const category = groupEl.getAttribute('data-category');
+            const visibleItems = Array.from(groupEl.querySelectorAll('.hint-item')).filter(item => {
+                const itemEl = item as HTMLElement;
+                return itemEl.style.display !== 'none';
+            });
+            
+            if (visibleItems.length === 0) {
+                groupEl.style.display = 'none';
+            } else {
+                groupEl.style.display = '';
+            }
+        });
+    }
 }
 
 function fitView(): void {
@@ -2255,13 +3668,41 @@ function fitView(): void {
     const rect = svg.getBoundingClientRect();
     const padding = 80;
 
-    // Calculate bounds
+    // Calculate bounds including nodes and expanded cloud containers
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const node of currentNodes) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
         maxY = Math.max(maxY, node.y + node.height);
+
+        // Account for expanded cloud containers (CTE/subquery)
+        if (node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+            const cloudPadding = 15;
+            const cloudGap = 30;
+            const nodeHeight = 60;
+
+            // Calculate cloud dimensions based on children layout
+            const childEdges = node.childEdges || [];
+            const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+            const cloudWidth = layoutSize.width + cloudPadding * 2;
+            const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
+
+            // Get cloud offset (custom or default)
+            const offset = cloudOffsets.get(node.id) || {
+                offsetX: -cloudWidth - cloudGap,
+                offsetY: -(cloudHeight - nodeHeight) / 2
+            };
+
+            const cloudX = node.x + offset.offsetX;
+            const cloudY = node.y + offset.offsetY;
+
+            // Include cloud bounds
+            minX = Math.min(minX, cloudX);
+            minY = Math.min(minY, cloudY);
+            maxX = Math.max(maxX, cloudX + cloudWidth);
+            maxY = Math.max(maxY, cloudY + cloudHeight);
+        }
     }
 
     const graphWidth = maxX - minX;
@@ -2280,22 +3721,126 @@ function fitView(): void {
     state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
     state.offsetY = (availableHeight - graphHeight * state.scale) / 2 - minY * state.scale + 50;
 
+    // Reset zoom state tracking when fitting view
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
+
     updateTransform();
 }
 
 function zoomToNode(node: FlowNode): void {
-    if (!svg) { return; }
+    if (!svg || !mainGroup) { return; }
 
+    // Simple toggle behavior: if already zoomed to any node, restore to fit view
+    if (state.zoomedNodeId !== null) {
+        // Show all nodes and edges again
+        const allNodes = mainGroup.querySelectorAll('.node');
+        allNodes.forEach(nodeEl => {
+            (nodeEl as SVGGElement).style.display = '';
+            (nodeEl as SVGGElement).style.opacity = '1';
+        });
+        const allEdges = mainGroup.querySelectorAll('.edge');
+        allEdges.forEach(edgeEl => {
+            (edgeEl as SVGPathElement).style.display = '';
+            (edgeEl as SVGPathElement).style.opacity = '1';
+        });
+        
+        // Clear focus mode and restore to fit view (default state)
+        clearFocusMode();
+        state.focusModeEnabled = false;
+        fitView();
+        return;
+    }
+
+    // Save current state before zooming (only if not already saved)
+    // This preserves the original fit view state so we can restore to it later
+    if (!state.previousZoomState) {
+        state.previousZoomState = {
+            scale: state.scale,
+            offsetX: state.offsetX,
+            offsetY: state.offsetY
+        };
+    }
+
+    // Select the node first
+    selectNode(node.id);
+
+    // Get only immediate neighbors (1 hop away) for context, not all connected nodes
+    const immediateNeighbors = new Set<string>();
+    immediateNeighbors.add(node.id);
+    
+    // Find immediate upstream and downstream nodes (direct connections only)
+    for (const edge of currentEdges) {
+        if (edge.target === node.id) {
+            immediateNeighbors.add(edge.source);
+        }
+        if (edge.source === node.id) {
+            immediateNeighbors.add(edge.target);
+        }
+    }
+
+    // Hide all nodes and edges that are not the clicked node or its immediate neighbors
+    const allNodes = mainGroup.querySelectorAll('.node');
+    allNodes.forEach(nodeEl => {
+        const id = nodeEl.getAttribute('data-id');
+        if (id && !immediateNeighbors.has(id)) {
+            (nodeEl as SVGGElement).style.display = 'none';
+        } else {
+            (nodeEl as SVGGElement).style.display = '';
+            (nodeEl as SVGGElement).style.opacity = '1';
+        }
+    });
+
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        const source = edgeEl.getAttribute('data-source');
+        const target = edgeEl.getAttribute('data-target');
+        if (source && target && immediateNeighbors.has(source) && immediateNeighbors.has(target)) {
+            (edgeEl as SVGPathElement).style.display = '';
+            (edgeEl as SVGPathElement).style.opacity = '1';
+        } else {
+            (edgeEl as SVGPathElement).style.display = 'none';
+        }
+    });
+
+    // Calculate bounds of visible nodes (the clicked node and its immediate neighbors)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const visibleNodes = currentNodes.filter(n => immediateNeighbors.has(n.id));
+    for (const n of visibleNodes) {
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + n.width);
+        maxY = Math.max(maxY, n.y + n.height);
+    }
+
+    // If only one node, use its bounds with some padding
+    if (visibleNodes.length === 1) {
+        const padding = 100;
+        minX = node.x - padding;
+        minY = node.y - padding;
+        maxX = node.x + node.width + padding;
+        maxY = node.y + node.height + padding;
+    }
+
+    // Calculate zoom to fit the visible nodes in the viewport
     const rect = svg.getBoundingClientRect();
-    const targetScale = 1.5;
+    const availableWidth = rect.width - 320; // Account for panels
+    const availableHeight = rect.height - 100;
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+    
+    const scaleX = (availableWidth * 0.8) / graphWidth; // Use 80% of available space
+    const scaleY = (availableHeight * 0.8) / graphHeight;
+    const targetScale = Math.min(scaleX, scaleY, 5.0); // Cap at 5x zoom
 
-    // Center the node
-    const centerX = node.x + node.width / 2;
-    const centerY = node.y + node.height / 2;
+    // Center the visible nodes
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
 
     state.scale = targetScale;
-    state.offsetX = rect.width / 2 - centerX * state.scale - 140; // Offset for panels
-    state.offsetY = rect.height / 2 - centerY * state.scale;
+    state.offsetX = availableWidth / 2 - centerX * state.scale + 50;
+    state.offsetY = availableHeight / 2 - centerY * state.scale + 50;
+    state.zoomedNodeId = node.id;
 
     updateTransform();
 }
@@ -2315,14 +3860,30 @@ export function resetView(): void {
 }
 
 // Search functionality
+// Debounce timer for search
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
+
 export function setSearchBox(input: HTMLInputElement): void {
     searchBox = input;
     input.addEventListener('input', () => {
-        performSearch(input.value);
+        // Clear any existing debounce timer
+        if (searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+
+        // Immediately highlight matches without zooming (for visual feedback)
+        highlightMatches(input.value);
+
+        // Debounce the zoom/navigation to first result
+        searchDebounceTimer = setTimeout(() => {
+            navigateToFirstResult();
+        }, SEARCH_DEBOUNCE_DELAY);
     });
 }
 
-function performSearch(term: string): void {
+// Highlight matching nodes without navigating (immediate feedback)
+function highlightMatches(term: string): void {
     state.searchTerm = term.toLowerCase();
     state.searchResults = [];
     state.currentSearchIndex = -1;
@@ -2340,7 +3901,7 @@ function performSearch(term: string): void {
 
     if (!term) { return; }
 
-    // Find matching nodes
+    // Find and highlight matching nodes
     allNodes?.forEach(g => {
         const label = g.getAttribute('data-label') || '';
         const id = g.getAttribute('data-id') || '';
@@ -2354,11 +3915,18 @@ function performSearch(term: string): void {
             }
         }
     });
+}
 
-    // Navigate to first result
+// Navigate to first result after debounce delay
+function navigateToFirstResult(): void {
     if (state.searchResults.length > 0) {
         navigateSearch(0);
     }
+}
+
+function performSearch(term: string): void {
+    highlightMatches(term);
+    navigateToFirstResult();
 }
 
 function navigateSearch(delta: number): void {
@@ -2505,6 +4073,223 @@ export function exportToSvg(): void {
     URL.revokeObjectURL(url);
 }
 
+/**
+ * Export the current visualization to Mermaid.js flowchart format
+ * Exports as .md file with code block for VS Code Mermaid preview compatibility
+ */
+export function exportToMermaid(): void {
+    if (currentNodes.length === 0) {
+        console.warn('No nodes to export');
+        return;
+    }
+
+    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
+
+    // Wrap in markdown code block for VS Code Mermaid extension compatibility
+    const markdownContent = `# SQL Flow Diagram
+
+\`\`\`mermaid
+${mermaidCode}
+\`\`\`
+`;
+
+    // Download as .md file
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.download = `sql-flow-${Date.now()}.md`;
+    a.href = url;
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Generate Mermaid flowchart code from nodes and edges
+ */
+function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
+    const lines: string[] = ['flowchart TD'];
+
+    // Group nodes by type for subgraph organization
+    const tableNodes = nodes.filter(n => n.type === 'table');
+    const resultNodes = nodes.filter(n => n.type === 'result');
+    const otherNodes = nodes.filter(n => n.type !== 'table' && n.type !== 'result');
+
+    // Add Sources subgraph for tables
+    if (tableNodes.length > 0) {
+        lines.push('    subgraph Sources');
+        tableNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add intermediate nodes
+    otherNodes.forEach(node => {
+        lines.push(`    ${formatMermaidNode(node)}`);
+    });
+
+    // Add Results subgraph
+    if (resultNodes.length > 0) {
+        lines.push('    subgraph Results');
+        resultNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add blank line before edges
+    lines.push('');
+
+    // Add edges
+    edges.forEach(edge => {
+        const edgeLine = formatMermaidEdge(edge);
+        if (edgeLine) {
+            lines.push(`    ${edgeLine}`);
+        }
+    });
+
+    // Add styling section
+    lines.push('');
+    lines.push('    %% Node styling');
+    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
+    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
+    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
+    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
+    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
+    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
+    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
+    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
+    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
+
+    // Apply classes to nodes
+    const styleAssignments = generateStyleAssignments(nodes);
+    styleAssignments.forEach(assignment => {
+        lines.push(`    ${assignment}`);
+    });
+
+    return lines.join('\n');
+}
+
+/**
+ * Format a node for Mermaid syntax with appropriate shape based on type
+ */
+function formatMermaidNode(node: FlowNode): string {
+    const id = sanitizeMermaidId(node.id);
+    const label = escapeMermaidLabel(node.label);
+
+    // Different shapes for different node types
+    switch (node.type) {
+        case 'table':
+            // Cylinder shape for tables
+            return `${id}[("${label}")]`;
+        case 'filter':
+            // Diamond/rhombus for filters
+            return `${id}{{"${label}"}}`;
+        case 'join':
+            // Hexagon for joins
+            return `${id}{{{"${label}"}}}`;
+        case 'aggregate':
+            // Subroutine box for aggregates
+            return `${id}[["${label}"]]`;
+        case 'sort':
+            // Trapezoid for sort
+            return `${id}[/"${label}"/]`;
+        case 'result':
+            // Stadium shape for results
+            return `${id}(["${label}"])`;
+        case 'cte':
+            // Double circle for CTEs
+            return `${id}((("${label}")))`;
+        case 'union':
+            // Parallelogram for unions
+            return `${id}[/"${label}"\\]`;
+        case 'subquery':
+            // Subroutine for subqueries
+            return `${id}[["${label}"]]`;
+        case 'window':
+            // Asymmetric shape for window functions
+            return `${id}>"${label}"]`;
+        default:
+            // Default rounded rectangle
+            return `${id}("${label}")`;
+    }
+}
+
+/**
+ * Format an edge for Mermaid syntax
+ */
+function formatMermaidEdge(edge: FlowEdge): string {
+    const sourceId = sanitizeMermaidId(edge.source);
+    const targetId = sanitizeMermaidId(edge.target);
+
+    if (edge.label) {
+        const label = escapeMermaidLabel(edge.label);
+        return `${sourceId} -->|"${label}"| ${targetId}`;
+    }
+
+    return `${sourceId} --> ${targetId}`;
+}
+
+/**
+ * Sanitize node ID for Mermaid (remove special characters)
+ */
+function sanitizeMermaidId(id: string): string {
+    return id
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+}
+
+/**
+ * Escape label text for Mermaid
+ */
+function escapeMermaidLabel(label: string): string {
+    return label
+        .replace(/"/g, "'")
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, ' ')
+        .substring(0, 50);
+}
+
+/**
+ * Generate class assignments for node styling
+ */
+function generateStyleAssignments(nodes: FlowNode[]): string[] {
+    const assignments: string[] = [];
+    const typeToClass: Record<string, string> = {
+        'table': 'tableStyle',
+        'filter': 'filterStyle',
+        'join': 'joinStyle',
+        'aggregate': 'aggregateStyle',
+        'sort': 'sortStyle',
+        'result': 'resultStyle',
+        'cte': 'cteStyle',
+        'union': 'unionStyle'
+    };
+
+    // Group nodes by type
+    const nodesByType = new Map<string, string[]>();
+
+    nodes.forEach(node => {
+        const className = typeToClass[node.type] || 'defaultStyle';
+        if (!nodesByType.has(className)) {
+            nodesByType.set(className, []);
+        }
+        nodesByType.get(className)!.push(sanitizeMermaidId(node.id));
+    });
+
+    // Generate class assignments
+    nodesByType.forEach((nodeIds, className) => {
+        if (nodeIds.length > 0) {
+            assignments.push(`class ${nodeIds.join(',')} ${className}`);
+        }
+    });
+
+    return assignments;
+}
+
 export function copyToClipboard(): void {
     if (!svg) { return; }
 
@@ -2600,7 +4385,11 @@ function getWarningIcon(warningType: string): string {
         'expensive': '⚠',
         'fan-out': '📊',
         'repeated-scan': '🔄',
-        'complex': '🧮'
+        'complex': '🧮',
+        'filter-pushdown': '⬆',
+        'non-sargable': '🚫',
+        'join-order': '⇄',
+        'index-suggestion': '📇'
     };
     return icons[warningType] || '⚠';
 }
@@ -2711,6 +4500,33 @@ function updateLegendPanel(): void {
                 </div>
             </div>
         </div>
+        ${state.showColumnFlows ? `
+            <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
+                <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #10b981; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Source Table</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #3b82f6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Renamed/Alias</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #f59e0b; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Aggregated</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #8b5cf6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Calculated</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: #ec4899; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
+                        <div style="color: #e2e8f0; font-size: 10px;">Joined</div>
+                    </div>
+                </div>
+            </div>
+        ` : ''}
     `;
 
     legendPanel.querySelector('#close-legend')?.addEventListener('click', () => {
@@ -2722,6 +4538,126 @@ export function toggleLegend(show?: boolean): void {
     if (!legendPanel) return;
     state.legendVisible = show ?? !state.legendVisible;
     legendPanel.style.display = state.legendVisible ? 'block' : 'none';
+}
+
+let statsVisible = true;
+
+export function toggleStats(show?: boolean): void {
+    if (!statsPanel) return;
+    statsVisible = show ?? !statsVisible;
+    statsPanel.style.display = statsVisible ? 'block' : 'none';
+}
+
+let hintsVisible = true;
+
+export function toggleHints(show?: boolean): void {
+    if (!hintsPanel) return;
+    hintsVisible = show ?? !hintsVisible;
+    hintsPanel.style.display = hintsVisible ? 'block' : 'none';
+}
+
+export function toggleLayout(): void {
+    if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
+        return;
+    }
+
+    // Toggle between vertical (TB) and horizontal (LR) layouts
+    const newLayout: LayoutType = state.layoutType === 'vertical' ? 'horizontal' : 'vertical';
+    state.layoutType = newLayout;
+
+    // Re-run layout with new algorithm
+    if (newLayout === 'horizontal') {
+        // Use horizontal (left-to-right) layout
+        layoutGraphHorizontal(currentNodes, currentEdges);
+    } else {
+        // Use vertical (top-to-bottom) dagre layout
+        const g = new dagre.graphlib.Graph();
+        g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 });
+        g.setDefaultEdgeLabel(() => ({}));
+
+        currentNodes.forEach(node => {
+            g.setNode(node.id, { width: node.width, height: node.height });
+        });
+
+        currentEdges.forEach(edge => {
+            g.setEdge(edge.source, edge.target);
+        });
+
+        dagre.layout(g);
+
+        currentNodes.forEach(node => {
+            const nodeWithPos = g.node(node.id);
+            if (nodeWithPos && nodeWithPos.x !== undefined && nodeWithPos.y !== undefined) {
+                node.x = nodeWithPos.x - node.width / 2;
+                node.y = nodeWithPos.y - node.height / 2;
+            }
+        });
+    }
+
+    // Update node positions in DOM
+    // Nodes use x/y attributes on rect elements, so we need to calculate delta from original position
+    currentNodes.forEach(node => {
+        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+        if (nodeGroup) {
+            const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+            if (rect) {
+                // Get original position from rect attributes
+                const origX = parseFloat(rect.getAttribute('x') || '0');
+                const origY = parseFloat(rect.getAttribute('y') || '0');
+                // Calculate delta from original to new position
+                const deltaX = node.x - origX;
+                const deltaY = node.y - origY;
+                // Apply transform as delta
+                nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+            }
+        }
+    });
+
+    // First, show all edges (reset any that were hidden)
+    const allEdges = mainGroup!.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        (edgeEl as SVGPathElement).style.display = '';
+    });
+
+    // Update edge paths - only for main edges (not column flows or other overlays)
+    const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+    edgeElements.forEach(edgeEl => {
+        const sourceId = edgeEl.getAttribute('data-source');
+        const targetId = edgeEl.getAttribute('data-target');
+        if (sourceId && targetId) {
+            const sourceNode = currentNodes.find(n => n.id === sourceId);
+            const targetNode = currentNodes.find(n => n.id === targetId);
+            if (sourceNode && targetNode) {
+                // Calculate edge path based on layout type
+                let path: string;
+                if (newLayout === 'horizontal') {
+                    // For horizontal: curved lines from right to left
+                    const sx = sourceNode.x + sourceNode.width;
+                    const sy = sourceNode.y + sourceNode.height / 2;
+                    const tx = targetNode.x;
+                    const ty = targetNode.y + targetNode.height / 2;
+                    const midX = (sx + tx) / 2;
+                    path = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+                } else {
+                    // For vertical: curved lines from bottom to top
+                    const sx = sourceNode.x + sourceNode.width / 2;
+                    const sy = sourceNode.y + sourceNode.height;
+                    const tx = targetNode.x + targetNode.width / 2;
+                    const ty = targetNode.y;
+                    const midY = (sy + ty) / 2;
+                    path = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+                }
+                edgeEl.setAttribute('d', path);
+                (edgeEl as SVGPathElement).style.display = '';
+            } else {
+                // Hide edges where source or target node not found
+                (edgeEl as SVGPathElement).style.display = 'none';
+            }
+        }
+    });
+
+    // Fit view to show all nodes
+    fitView();
 }
 
 // ============================================================
@@ -2782,8 +4718,27 @@ function clearFocusMode(): void {
     });
 }
 
+export function setFocusMode(mode: FocusMode): void {
+    state.focusMode = mode;
+
+    // Re-apply focus mode if enabled and a node is selected
+    if (state.focusModeEnabled && state.selectedNodeId) {
+        applyFocusMode(state.selectedNodeId);
+    }
+
+    // Also re-apply if zoomed to a node
+    if (state.zoomedNodeId && state.selectedNodeId) {
+        // Will be handled by zoom module
+    }
+}
+
+export function getFocusMode(): FocusMode {
+    return state.focusMode;
+}
+
 function getConnectedNodes(nodeId: string): Set<string> {
     const connected = new Set<string>();
+    const mode = state.focusMode;
 
     // Find upstream nodes (sources that flow into this node)
     function findUpstream(id: string) {
@@ -2805,8 +4760,13 @@ function getConnectedNodes(nodeId: string): Set<string> {
         }
     }
 
-    findUpstream(nodeId);
-    findDownstream(nodeId);
+    // Apply based on focus mode
+    if (mode === 'upstream' || mode === 'all') {
+        findUpstream(nodeId);
+    }
+    if (mode === 'downstream' || mode === 'all') {
+        findDownstream(nodeId);
+    }
 
     return connected;
 }
@@ -3011,6 +4971,110 @@ export function toggleNodeCollapse(nodeId: string): void {
         tableUsage: currentTableUsage
     };
     render(result);
+}
+
+/**
+ * Calculate stacked cloud offsets to prevent overlap when expanding all.
+ * Clouds are positioned vertically from top to bottom with spacing.
+ */
+function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
+    const cloudGap = 30;
+    const cloudPadding = 15;
+    const verticalSpacing = 20; // Space between stacked clouds
+
+    // Sort nodes by their Y position (top to bottom)
+    const sortedNodes = [...expandableNodes].sort((a, b) => a.y - b.y);
+
+    // Track the bottom edge of the last placed cloud
+    let nextCloudY = -Infinity;
+
+    for (const node of sortedNodes) {
+        // Calculate cloud dimensions
+        const childEdges = currentEdges.filter(e =>
+            node.children?.some(c => c.id === e.source || c.id === e.target)
+        );
+        const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
+        const cloudWidth = layoutSize.width + cloudPadding * 2;
+        const cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+
+        // Default X position: left of the node
+        const offsetX = -cloudWidth - cloudGap;
+
+        // Calculate Y position to avoid overlap
+        // Start at node's Y position, but ensure no overlap with previous clouds
+        const idealCloudY = node.y - (cloudHeight - node.height) / 2;
+        const cloudY = Math.max(idealCloudY, nextCloudY + verticalSpacing);
+        const offsetY = cloudY - node.y;
+
+        cloudOffsets.set(node.id, { offsetX, offsetY });
+
+        // Update next available Y position
+        nextCloudY = cloudY + cloudHeight;
+    }
+}
+
+/**
+ * Toggle expand/collapse all CTE and subquery nodes.
+ * When expanding, clouds are stacked vertically to prevent overlap.
+ */
+export function toggleExpandAll(): void {
+    // Find all expandable nodes (CTE/subquery with children)
+    const expandableNodes = currentNodes.filter(
+        n => (n.type === 'cte' || n.type === 'subquery') && n.collapsible && n.children && n.children.length > 0
+    );
+
+    if (expandableNodes.length === 0) return;
+
+    // Determine if we should expand or collapse (toggle based on majority state)
+    const expandedCount = expandableNodes.filter(n => n.expanded).length;
+    const shouldExpand = expandedCount < expandableNodes.length / 2;
+
+    // Set all expandable nodes to the target state
+    for (const node of expandableNodes) {
+        node.expanded = shouldExpand;
+        // Initialize cloud view state if expanding
+        if (shouldExpand && !cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+    }
+
+    // Calculate stacked cloud offsets to prevent overlap
+    if (shouldExpand) {
+        calculateStackedCloudOffsets(expandableNodes);
+    } else {
+        // Clear cloud offsets on collapse
+        for (const node of expandableNodes) {
+            cloudOffsets.delete(node.id);
+        }
+    }
+
+    // Re-render and fit view
+    const result: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage,
+        tableUsage: currentTableUsage
+    };
+
+    const wasHorizontal = state.layoutType === 'horizontal';
+    render(result);
+    if (wasHorizontal) {
+        state.layoutType = 'vertical';
+        toggleLayout();
+    }
+
+    // Fit view to show all clouds after a brief delay for render to complete
+    setTimeout(() => fitView(), 100);
 }
 
 export function getFormattedSql(): string {
@@ -3402,7 +5466,7 @@ function applyTheme(dark: boolean): void {
     
     // Re-render all nodes to update colors for theme
     if (currentNodes.length > 0) {
-        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, tableUsage: currentTableUsage });
+        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, columnFlows: currentColumnFlows, tableUsage: currentTableUsage });
     }
 }
 
@@ -3574,6 +5638,391 @@ function hideTooltip(): void {
 }
 
 // ============================================================
+// REDESIGNED: Column-Level Lineage Visualization
+// Click-based approach with full lineage paths
+// ============================================================
+
+let selectedColumnLineage: ColumnFlow | null = null;
+let columnLineagePanel: HTMLElement | null = null;
+
+/**
+ * Toggle column lineage mode
+ */
+export function toggleColumnFlows(show?: boolean): void {
+    state.showColumnFlows = show !== undefined ? show : !state.showColumnFlows;
+
+    if (state.showColumnFlows) {
+        showColumnLineagePanel();
+    } else {
+        hideColumnLineagePanel();
+        clearLineageHighlights();
+    }
+
+    // Update legend
+    updateLegendPanel();
+}
+
+/**
+ * Show the column lineage selection panel
+ */
+function showColumnLineagePanel(): void {
+    if (!currentColumnFlows || currentColumnFlows.length === 0) {
+        return;
+    }
+
+    // Remove existing panel
+    hideColumnLineagePanel();
+
+    // Create panel
+    columnLineagePanel = document.createElement('div');
+    columnLineagePanel.id = 'column-lineage-panel';
+    columnLineagePanel.style.cssText = `
+        position: fixed;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        border-radius: 12px;
+        padding: 16px;
+        max-height: 70vh;
+        overflow-y: auto;
+        z-index: 1000;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        min-width: 220px;
+        max-width: 280px;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `
+        font-weight: 600;
+        font-size: 13px;
+        color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    `;
+    header.innerHTML = `
+        <span>Column Lineage</span>
+        <span style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+    `;
+    columnLineagePanel.appendChild(header);
+
+    // List output columns
+    const columnList = document.createElement('div');
+    columnList.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+    for (const flow of currentColumnFlows) {
+        const columnItem = createColumnItem(flow);
+        columnList.appendChild(columnItem);
+    }
+
+    columnLineagePanel.appendChild(columnList);
+    document.body.appendChild(columnLineagePanel);
+}
+
+/**
+ * Create a clickable column item
+ */
+function createColumnItem(flow: ColumnFlow): HTMLElement {
+    const item = document.createElement('div');
+    item.style.cssText = `
+        padding: 10px 12px;
+        background: ${state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)'};
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 2px solid transparent;
+    `;
+
+    // Get first and last step for summary
+    const firstStep = flow.lineagePath[0];
+    const lastStep = flow.lineagePath[flow.lineagePath.length - 1];
+
+    // Determine overall transformation type
+    const hasAggregation = flow.lineagePath.some(s => s.transformation === 'aggregated');
+    const hasCalculation = flow.lineagePath.some(s => s.transformation === 'calculated');
+    const hasRename = flow.lineagePath.some(s => s.transformation === 'renamed');
+
+    let badge = '';
+    let badgeColor = '#10b981';
+    if (hasAggregation) {
+        badge = 'AGG';
+        badgeColor = '#f59e0b';
+    } else if (hasCalculation) {
+        badge = 'CALC';
+        badgeColor = '#8b5cf6';
+    } else if (hasRename) {
+        badge = 'ALIAS';
+        badgeColor = '#3b82f6';
+    }
+
+    item.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="font-weight: 600; font-size: 12px; color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};">
+                ${escapeHtml(flow.outputColumn)}
+            </span>
+            ${badge ? `<span style="
+                background: ${badgeColor};
+                color: white;
+                font-size: 9px;
+                font-weight: 600;
+                padding: 2px 5px;
+                border-radius: 3px;
+            ">${badge}</span>` : ''}
+        </div>
+        <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
+            ${firstStep ? escapeHtml(firstStep.nodeName) + '.' + escapeHtml(firstStep.columnName) : 'Unknown source'}
+        </div>
+    `;
+
+    // Hover effect
+    item.addEventListener('mouseenter', () => {
+        item.style.background = state.isDarkTheme ? 'rgba(71, 85, 105, 0.7)' : 'rgba(226, 232, 240, 0.9)';
+    });
+
+    item.addEventListener('mouseleave', () => {
+        if (selectedColumnLineage?.id !== flow.id) {
+            item.style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+            item.style.borderColor = 'transparent';
+        }
+    });
+
+    // Click to show lineage
+    item.addEventListener('click', () => {
+        // Update selection state
+        selectedColumnLineage = flow;
+
+        // Update all items styling
+        const allItems = columnLineagePanel?.querySelectorAll('div[style*="cursor: pointer"]');
+        allItems?.forEach((el) => {
+            (el as HTMLElement).style.borderColor = 'transparent';
+            (el as HTMLElement).style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+        });
+
+        // Highlight selected
+        item.style.borderColor = '#6366f1';
+        item.style.background = state.isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+
+        // Show lineage path and highlight nodes
+        showLineagePath(flow);
+        highlightLineageNodes(flow);
+    });
+
+    return item;
+}
+
+/**
+ * Hide the column lineage panel
+ */
+function hideColumnLineagePanel(): void {
+    if (columnLineagePanel) {
+        columnLineagePanel.remove();
+        columnLineagePanel = null;
+    }
+    selectedColumnLineage = null;
+}
+
+/**
+ * Show the lineage path in the details panel
+ */
+function showLineagePath(flow: ColumnFlow): void {
+    if (!detailsPanel) return;
+
+    const transformationColors: Record<string, string> = {
+        source: '#10b981',
+        passthrough: '#64748b',
+        renamed: '#3b82f6',
+        aggregated: '#f59e0b',
+        calculated: '#8b5cf6',
+        joined: '#ec4899'
+    };
+
+    const transformationLabels: Record<string, string> = {
+        source: 'Source',
+        passthrough: 'Pass',
+        renamed: 'Renamed',
+        aggregated: 'Aggregated',
+        calculated: 'Calculated',
+        joined: 'Joined'
+    };
+
+    // Build path visualization
+    let pathHtml = '';
+    for (let i = 0; i < flow.lineagePath.length; i++) {
+        const step = flow.lineagePath[i];
+        const isFirst = i === 0;
+        const isLast = i === flow.lineagePath.length - 1;
+
+        pathHtml += `
+            <div style="display: flex; align-items: flex-start; gap: 10px; ${!isLast ? 'margin-bottom: 4px;' : ''}">
+                <div style="
+                    width: 8px;
+                    min-width: 8px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                ">
+                    <div style="
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        background: ${transformationColors[step.transformation] || '#64748b'};
+                        ${isFirst ? 'box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);' : ''}
+                        ${isLast ? 'box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);' : ''}
+                    "></div>
+                    ${!isLast ? `<div style="width: 2px; height: 28px; background: ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.3)' : 'rgba(0, 0, 0, 0.1)'};"></div>` : ''}
+                </div>
+                <div style="flex: 1; padding-bottom: ${!isLast ? '8px' : '0'};">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                        <span style="
+                            font-weight: 600;
+                            font-size: 11px;
+                            color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};
+                        ">${escapeHtml(step.columnName)}</span>
+                        <span style="
+                            font-size: 9px;
+                            padding: 1px 4px;
+                            border-radius: 3px;
+                            background: ${transformationColors[step.transformation] || '#64748b'};
+                            color: white;
+                        ">${transformationLabels[step.transformation] || step.transformation}</span>
+                    </div>
+                    <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
+                        ${escapeHtml(step.nodeName)}
+                        ${step.expression ? `<br><code style="font-size: 9px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">${escapeHtml(step.expression)}</code>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    detailsPanel.innerHTML = `
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};">
+            Column Lineage
+        </div>
+        <div style="
+            background: ${state.isDarkTheme ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)'};
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+        ">
+            <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 4px;">Output Column</div>
+            <div style="font-weight: 600; font-size: 14px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">
+                ${escapeHtml(flow.outputColumn)}
+            </div>
+        </div>
+        <div style="font-size: 11px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 10px;">
+            Transformation Path (${flow.lineagePath.length} steps)
+        </div>
+        <div style="padding-left: 4px;">
+            ${pathHtml}
+        </div>
+    `;
+
+    detailsPanel.style.transform = 'translate(0, -50%)';
+}
+
+/**
+ * Highlight nodes in the lineage path
+ */
+function highlightLineageNodes(flow: ColumnFlow): void {
+    if (!mainGroup) return;
+
+    // Reset all nodes to dimmed state
+    const allNodes = mainGroup.querySelectorAll('.node-group');
+    allNodes.forEach((node) => {
+        (node as SVGElement).style.opacity = '0.3';
+    });
+
+    // Reset all edges to dimmed state
+    const allEdges = mainGroup.querySelectorAll('.edge-path, .edge-arrow');
+    allEdges.forEach((edge) => {
+        (edge as SVGElement).style.opacity = '0.15';
+    });
+
+    // Get node IDs in the lineage path
+    const lineageNodeIds = new Set(flow.lineagePath.map(s => s.nodeId));
+
+    // Highlight nodes in the path
+    for (const step of flow.lineagePath) {
+        const nodeGroup = mainGroup.querySelector(`[data-node-id="${step.nodeId}"]`);
+        if (nodeGroup) {
+            (nodeGroup as SVGElement).style.opacity = '1';
+
+            // Add glow effect
+            const rect = nodeGroup.querySelector('rect');
+            if (rect) {
+                rect.setAttribute('stroke', '#6366f1');
+                rect.setAttribute('stroke-width', '3');
+            }
+        }
+    }
+
+    // Highlight edges between lineage nodes
+    const allEdgePaths = mainGroup.querySelectorAll('.edge-path');
+    allEdgePaths.forEach((edgePath) => {
+        const edge = edgePath as SVGElement;
+        const sourceId = edge.getAttribute('data-source');
+        const targetId = edge.getAttribute('data-target');
+
+        if (sourceId && targetId && lineageNodeIds.has(sourceId) && lineageNodeIds.has(targetId)) {
+            edge.style.opacity = '1';
+            edge.setAttribute('stroke', '#6366f1');
+            edge.setAttribute('stroke-width', '3');
+
+            // Also highlight the arrow
+            const arrow = mainGroup?.querySelector(`.edge-arrow[data-source="${sourceId}"][data-target="${targetId}"]`);
+            if (arrow) {
+                (arrow as SVGElement).style.opacity = '1';
+            }
+        }
+    });
+}
+
+/**
+ * Clear all lineage highlights
+ */
+function clearLineageHighlights(): void {
+    if (!mainGroup) return;
+
+    // Reset all nodes
+    const allNodes = mainGroup.querySelectorAll('.node-group');
+    allNodes.forEach((node) => {
+        (node as SVGElement).style.opacity = '1';
+
+        const rect = node.querySelector('rect');
+        if (rect) {
+            rect.removeAttribute('stroke');
+            rect.removeAttribute('stroke-width');
+        }
+    });
+
+    // Reset all edges
+    const allEdges = mainGroup.querySelectorAll('.edge-path');
+    allEdges.forEach((edge) => {
+        const edgeEl = edge as SVGElement;
+        edgeEl.style.opacity = '1';
+        edgeEl.setAttribute('stroke', state.isDarkTheme ? '#64748b' : '#94a3b8');
+        edgeEl.setAttribute('stroke-width', '1.5');
+    });
+
+    const allArrows = mainGroup.querySelectorAll('.edge-arrow');
+    allArrows.forEach((arrow) => {
+        (arrow as SVGElement).style.opacity = '1';
+    });
+
+    // Hide details panel
+    if (detailsPanel) {
+        detailsPanel.style.transform = 'translate(100%, -50%)';
+    }
+}
+
+// ============================================================
 // FEATURE: Collapsible Nodes
 // ============================================================
 
@@ -3635,9 +6084,15 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'R', description: 'Reset view' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
-        { key: 'L', description: 'Toggle legend' },
+        { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
         { key: 'S', description: 'Toggle SQL preview' },
-        { key: 'D', description: 'Compare queries (diff)' },
+        { key: 'C', description: 'Toggle column flows' },
+        { key: 'Q', description: 'Toggle query stats' },
+        { key: 'O', description: 'Toggle optimization hints' },
+        { key: 'U', description: 'Focus upstream nodes' },
+        { key: 'D', description: 'Focus downstream nodes' },
+        { key: 'A', description: 'Focus all connected nodes' },
+        { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];

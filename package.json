@@ -20,6 +20,11 @@
         "command": "sql-crack.visualize",
         "title": "SQL Crack: Visualize SQL Query",
         "icon": "$(graph)"
+      },
+      {
+        "command": "sql-crack.analyzeWorkspace",
+        "title": "SQL Crack: Analyze Workspace Dependencies",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
@@ -35,6 +40,19 @@
           "command": "sql-crack.visualize",
           "when": "editorLangId == sql",
           "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "sql-crack.analyzeWorkspace",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sql-crack.analyzeWorkspace",
+          "when": "workspaceFolderCount > 0"
         }
       ]
     },
@@ -52,7 +70,19 @@
         "sqlCrack.defaultDialect": {
           "type": "string",
           "default": "MySQL",
-          "enum": ["MySQL", "PostgreSQL", "TransactSQL", "Snowflake", "BigQuery", "Redshift", "Hive", "Athena", "Trino", "MariaDB", "SQLite"],
+          "enum": [
+            "MySQL",
+            "PostgreSQL",
+            "TransactSQL",
+            "Snowflake",
+            "BigQuery",
+            "Redshift",
+            "Hive",
+            "Athena",
+            "Trino",
+            "MariaDB",
+            "SQLite"
+          ],
           "enumDescriptions": [
             "MySQL dialect",
             "PostgreSQL dialect",
@@ -76,13 +106,49 @@
         "sqlCrack.viewLocation": {
           "type": "string",
           "default": "beside",
-          "enum": ["beside", "tab", "secondary-sidebar"],
+          "enum": [
+            "beside",
+            "tab",
+            "secondary-sidebar"
+          ],
           "enumDescriptions": [
             "Opens beside the SQL file (like Markdown preview)",
             "Opens as a new tab in the editor area",
             "Opens in the secondary side bar (right side)"
           ],
           "description": "Where to display the SQL visualization panel"
+        },
+        "sqlCrack.defaultLayout": {
+          "type": "string",
+          "default": "vertical",
+          "enum": [
+            "vertical",
+            "horizontal"
+          ],
+          "enumDescriptions": [
+            "Vertical layout (top-to-bottom flow)",
+            "Horizontal layout (left-to-right flow)"
+          ],
+          "description": "Default graph layout direction"
+        },
+        "sqlCrack.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh visualization when SQL file changes (with debounce)"
+        },
+        "sqlCrack.autoRefreshDelay": {
+          "type": "number",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "Delay in milliseconds before auto-refresh triggers (default: 500ms)"
+        },
+        "sqlCrack.workspaceAutoIndexThreshold": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
         }
       }
     }
@@ -108,7 +174,9 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/dagre": "^0.7.53",
+    "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
     "node-sql-parser": "^5.3.1"
   }

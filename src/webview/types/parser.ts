@@ -1,0 +1,75 @@
+// Parser result and statistics type definitions
+
+import { FlowNode, FlowEdge } from './nodes';
+import { ColumnLineage, ColumnFlow } from './lineage';
+
+export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
+
+export type ComplexityLevel = 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
+
+export type HintType = 'warning' | 'info' | 'error';
+
+export type HintCategory = 'performance' | 'quality' | 'best-practice' | 'complexity';
+
+export type HintSeverity = 'low' | 'medium' | 'high';
+
+export interface ComplexityBreakdown {
+    joins: number;
+    subqueries: number;
+    ctes: number;
+    aggregations: number;
+    windowFunctions: number;
+}
+
+export interface QueryStats {
+    tables: number;
+    joins: number;
+    subqueries: number;
+    ctes: number;
+    aggregations: number;
+    windowFunctions: number;
+    unions: number;
+    conditions: number;
+    complexity: ComplexityLevel;
+    complexityScore: number;
+    // Enhanced metrics
+    maxCteDepth?: number;
+    maxFanOut?: number;
+    criticalPathLength?: number;
+    complexityBreakdown?: ComplexityBreakdown;
+    // Performance metrics
+    performanceScore?: number;
+    performanceIssues?: number;
+}
+
+export interface OptimizationHint {
+    type: HintType;
+    message: string;
+    suggestion?: string;
+    category?: HintCategory;
+    nodeId?: string;
+    severity?: HintSeverity;
+}
+
+export interface QueryLineRange {
+    startLine: number;
+    endLine: number;
+}
+
+export interface ParseResult {
+    nodes: FlowNode[];
+    edges: FlowEdge[];
+    stats: QueryStats;
+    hints: OptimizationHint[];
+    sql: string;
+    columnLineage: ColumnLineage[];
+    columnFlows?: ColumnFlow[];
+    tableUsage: Map<string, number>;
+    error?: string;
+}
+
+export interface BatchParseResult {
+    queries: ParseResult[];
+    totalStats: QueryStats;
+    queryLineRanges?: QueryLineRange[];
+}
