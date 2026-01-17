@@ -600,11 +600,36 @@ export class ReferenceExtractor {
      */
     private extractWithRegex(sql: string, filePath: string): TableReference[] {
         const references: TableReference[] = [];
+        const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
+
+        const isFunctionFrom = (matchIndex: number): boolean => {
+            const lineStart = sql.lastIndexOf('\n', matchIndex) + 1;
+            const lineEnd = sql.indexOf('\n', matchIndex);
+            const end = lineEnd === -1 ? sql.length : lineEnd;
+            const line = sql.slice(lineStart, end);
+            const fromPos = matchIndex - lineStart;
+            const lowerLine = line.toLowerCase();
+
+            for (const fn of functionFromKeywords) {
+                const fnIndex = lowerLine.lastIndexOf(fn, fromPos);
+                if (fnIndex === -1) continue;
+                const parenIndex = lowerLine.indexOf('(', fnIndex + fn.length);
+                if (parenIndex === -1 || parenIndex > fromPos) continue;
+                const closeParenIndex = lowerLine.indexOf(')', parenIndex + 1);
+                if (closeParenIndex !== -1 && closeParenIndex < fromPos) continue;
+                return true;
+            }
+
+            return false;
+        };
 
         // FROM table pattern
         const fromRegex = /\bFROM\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?(?:\s+(?:AS\s+)?(\w+))?/gi;
         let match;
         while ((match = fromRegex.exec(sql)) !== null) {
+            if (isFunctionFrom(match.index)) {
+                continue;
+            }
             references.push({
                 tableName: match[2],
                 alias: match[3],

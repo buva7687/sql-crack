@@ -33,27 +33,54 @@ export class TableExplorer {
             `;
         }
 
+        // Count connections for each table
+        const flowAnalyzer = new FlowAnalyzer(graph);
+        const tablesWithCounts = tables.map(table => {
+            const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 10, excludeExternal: true });
+            const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 10, excludeExternal: true });
+            return {
+                table,
+                upstreamCount: upstream.nodes.length,
+                downstreamCount: downstream.nodes.length
+            };
+        });
+
+        // Sort by total connections (most connected first)
+        tablesWithCounts.sort((a, b) => {
+            const totalA = a.upstreamCount + a.downstreamCount;
+            const totalB = b.upstreamCount + b.downstreamCount;
+            if (totalB !== totalA) return totalB - totalA;
+            return a.table.name.localeCompare(b.table.name);
+        });
+
         let html = `
             <div class="table-list-view">
                 <div class="table-list-header">
-                    <h3>Workspace Tables (${tables.length})</h3>
-                    <p class="hint">Click a table to explore its structure and dependencies</p>
+                    <h3>All Tables & Views (${tables.length})</h3>
+                    <p class="hint">📋 Complete catalog of tables and views defined in your workspace</p>
+                    <p class="hint" style="margin-top: 4px; font-size: 11px; color: var(--text-dim);">
+                        Click any table to explore its columns, data sources (upstream), and consumers (downstream)
+                    </p>
                 </div>
                 <div class="table-list-grid">
         `;
 
-        for (const table of tables) {
+        for (const { table, upstreamCount, downstreamCount } of tablesWithCounts) {
             const typeIcon = this.getTypeIcon(table.type);
             const fileName = table.filePath ? table.filePath.split('/').pop() || '' : '';
+            const totalConnections = upstreamCount + downstreamCount;
+            const hasConnections = totalConnections > 0;
 
             html += `
-                <div class="table-list-item" data-action="explore-table" data-node-id="${this.escapeHtml(table.id)}" data-table="${this.escapeHtml(table.name)}">
+                <div class="table-list-item ${!hasConnections ? 'no-connections' : ''}" data-action="explore-table" data-node-id="${this.escapeHtml(table.id)}" data-table="${this.escapeHtml(table.name)}">
                     <div class="table-list-icon">${typeIcon}</div>
                     <div class="table-list-info">
                         <span class="table-list-name">${this.escapeHtml(table.name)}</span>
                         <span class="table-list-meta">
                             <span class="table-list-type">${table.type}</span>
                             ${fileName ? `<span class="table-list-file">${this.escapeHtml(fileName)}</span>` : ''}
+                            ${upstreamCount > 0 ? `<span class="table-list-count" title="${upstreamCount} data sources">↑${upstreamCount}</span>` : ''}
+                            ${downstreamCount > 0 ? `<span class="table-list-count" title="${downstreamCount} data consumers">↓${downstreamCount}</span>` : ''}
                         </span>
                     </div>
                 </div>
@@ -100,16 +127,16 @@ export class TableExplorer {
             html += this.generateColumnList([table.columnInfo]);
         }
 
-        // Add upstream panel
+        // Add upstream panel - get all nodes including external in single call
         const flowAnalyzer = new FlowAnalyzer(graph);
-        const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 2 });
+        const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 10, excludeExternal: false });
 
         if (upstream.nodes.length > 0) {
             html += this.generateFlowPanel('upstream', upstream);
         }
 
-        // Add downstream panel
-        const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 2 });
+        // Add downstream panel - get all nodes including external in single call
+        const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 10, excludeExternal: false });
 
         if (downstream.nodes.length > 0) {
             html += this.generateFlowPanel('downstream', downstream);
@@ -149,49 +176,91 @@ export class TableExplorer {
     }
 
     /**
-     * Generate upstream/downstream panels
-     */
-    generateFlowPanels(table: LineageNode, flowAnalyzer: FlowAnalyzer): string {
-        let html = '<div class="flow-panels">';
-
-        const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 2 });
-        if (upstream.nodes.length > 0) {
-            html += this.generateFlowPanel('upstream', upstream);
-        }
-
-        const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 2 });
-        if (downstream.nodes.length > 0) {
-            html += this.generateFlowPanel('downstream', downstream);
-        }
-
-        html += '</div>';
-        return html;
-    }
-
-    /**
-     * Generate a single flow panel
+     * Generate a single flow panel with deduplicated and organized nodes
      */
     private generateFlowPanel(direction: 'upstream' | 'downstream', flow: any): string {
         const title = direction === 'upstream' ? 'Data Sources' : 'Data Consumers';
         const icon = direction === 'upstream' ? '⬆️' : '⬇️';
 
-        let html = `
-            <div class="flow-panel flow-${direction}">
-                <h3>${icon} ${title} (${flow.nodes.length})</h3>
-                <div class="flow-list">
-        `;
+        // Deduplicate nodes by ID and separate internal vs external
+        const internalNodes: LineageNode[] = [];
+        const externalSet = new Set<string>();
+        const seenIds = new Set<string>();
 
         for (const node of flow.nodes) {
+            if (seenIds.has(node.id)) continue;
+            seenIds.add(node.id);
+
+            if (node.type === 'external') {
+                externalSet.add(node.name.toLowerCase());
+            } else {
+                internalNodes.push(node);
+            }
+        }
+
+        // Sort internal nodes by type then name
+        internalNodes.sort((a, b) => {
+            if (a.type !== b.type) return a.type.localeCompare(b.type);
+            return a.name.localeCompare(b.name);
+        });
+
+        const internalCount = internalNodes.length;
+        const externalCount = externalSet.size;
+        const totalCount = internalCount + externalCount;
+
+        let html = `
+            <div class="flow-panel flow-${direction}">
+                <h3>${icon} ${title} (${totalCount})</h3>
+        `;
+
+        // Show internal tables/views first
+        if (internalNodes.length > 0) {
             html += `
-                <div class="flow-item">
-                    <span class="flow-node-type">${node.type}</span>
-                    <span class="flow-node-name">${this.escapeHtml(node.name)}</span>
+                <div class="flow-section">
+                    <div class="flow-section-title">📊 Defined in workspace (${internalCount})</div>
+                    <div class="flow-list">
+            `;
+            for (const node of internalNodes) {
+                const typeLabel = node.type === 'table' ? 'table' : node.type === 'view' ? 'view' : node.type;
+                html += `
+                    <div class="flow-item flow-item-internal" data-action="explore-table" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
+                        <span class="flow-node-icon">${this.getTypeIcon(node.type)}</span>
+                        <span class="flow-node-name">${this.escapeHtml(node.name)}</span>
+                        <span class="flow-node-type">${typeLabel}</span>
+                        ${node.filePath ? `<span class="flow-node-file" title="${this.escapeHtml(node.filePath)}">${this.escapeHtml(node.filePath.split('/').pop() || '')}</span>` : ''}
+                    </div>
+                `;
+            }
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        // Show external references if any
+        if (externalSet.size > 0) {
+            const externalList = Array.from(externalSet).sort();
+            html += `
+                <div class="flow-section">
+                    <div class="flow-section-title">🌐 External (not defined in workspace) (${externalSet.size})</div>
+                    <div class="flow-list">
+            `;
+            for (const name of externalList) {
+                html += `
+                    <div class="flow-item flow-item-external">
+                        <span class="flow-node-icon">🌐</span>
+                        <span class="flow-node-name">${this.escapeHtml(name)}</span>
+                        <span class="flow-node-type external">external</span>
+                    </div>
+                `;
+            }
+            html += `
+                    </div>
                 </div>
             `;
         }
 
         html += `
-                </div>
             </div>
         `;
 

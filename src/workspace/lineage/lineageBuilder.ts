@@ -7,6 +7,7 @@ import {
     TableReference
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
+import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import {
     LineageNode,
     LineageEdge,
@@ -34,14 +35,26 @@ export class LineageBuilder implements LineageGraph {
         this.edges = [];
 
         // Add all table/view definitions as nodes
-        for (const def of index.definitionMap.values()) {
-            this.addDefinitionNode(def);
+        const seenNodes = new Set<string>();
+        for (const defs of index.definitionMap.values()) {
+            for (const def of defs) {
+                const tableKey = getQualifiedKey(def.name, def.schema);
+                const nodeId = this.getTableNodeId(def.type, tableKey);
+                if (seenNodes.has(nodeId)) continue;
+                seenNodes.add(nodeId);
+                this.addDefinitionNode(def);
+            }
         }
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
-            for (const def of index.definitionMap.values()) {
-                this.addColumnNodes(def.name, def.columns);
+            for (const defs of index.definitionMap.values()) {
+                for (const def of defs) {
+                    const tableKey = getQualifiedKey(def.name, def.schema);
+                    const nodeId = this.getTableNodeId(def.type, tableKey);
+                    if (!this.nodes.has(nodeId)) continue;
+                    this.addColumnNodes(tableKey, def.columns, def.type);
+                }
             }
         }
 
@@ -57,13 +70,14 @@ export class LineageBuilder implements LineageGraph {
      * Add table/view definition as node
      */
     addDefinitionNode(def: SchemaDefinition): LineageNode {
-        const nodeId = this.getTableNodeId(def.type, def.name);
+        const tableKey = getQualifiedKey(def.name, def.schema);
+        const nodeId = this.getTableNodeId(def.type, tableKey);
         const schemaPrefix = def.schema ? `${def.schema}.` : '';
 
         const node: LineageNode = {
             id: nodeId,
             type: def.type,
-            name: def.name,
+            name: getDisplayName(def.name, def.schema),
             filePath: def.filePath,
             lineNumber: def.lineNumber,
             metadata: {
@@ -80,12 +94,12 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Add column nodes for a table
      */
-    addColumnNodes(tableName: string, columns: ColumnInfo[]): void {
-        const tableNode = this.nodes.get(this.getTableNodeId('table', tableName));
+    addColumnNodes(tableKey: string, columns: ColumnInfo[], nodeType: 'table' | 'view'): void {
+        const tableNode = this.nodes.get(this.getTableNodeId(nodeType, tableKey));
         if (!tableNode) return;
 
         for (const column of columns) {
-            const columnId = this.getColumnNodeId(tableName, column.name);
+            const columnId = this.getColumnNodeId(tableKey, column.name);
             const columnNode: LineageNode = {
                 id: columnId,
                 type: 'column',
@@ -128,26 +142,35 @@ export class LineageBuilder implements LineageGraph {
         const outputTables: Set<string> = new Set();
 
         for (const ref of analysis.references) {
-            const tableName = ref.tableName.toLowerCase();
+            const tableKey = getQualifiedKey(ref.tableName, ref.schema);
 
             // SELECT and JOIN references are data sources (inputs)
             if (ref.referenceType === 'select' || ref.referenceType === 'join' || ref.referenceType === 'subquery') {
-                inputTables.add(tableName);
+                inputTables.add(tableKey);
             }
 
             // INSERT, UPDATE, DELETE targets are data destinations (outputs)
             if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
-                outputTables.add(tableName);
+                outputTables.add(tableKey);
             }
         }
 
         // Also treat definitions in this file as potential outputs
-        // (e.g., CREATE TABLE AS SELECT, CREATE VIEW AS SELECT)
+        // Only for views (always have SELECT) or CTAS (CREATE TABLE ... AS SELECT)
         for (const def of analysis.definitions) {
-            const tableName = def.name.toLowerCase();
-            // If there are input tables, this definition is likely created from them
-            if (inputTables.size > 0) {
-                outputTables.add(tableName);
+            const tableKey = getQualifiedKey(def.name, def.schema);
+
+            // Views always derive from a SELECT query
+            if (def.type === 'view' && inputTables.size > 0) {
+                outputTables.add(tableKey);
+            }
+            // For tables, only treat as output if it's a CTAS (has AS SELECT in SQL)
+            else if (def.type === 'table' && def.sql && inputTables.size > 0) {
+                // Check for CTAS pattern: CREATE TABLE ... AS SELECT or AS (SELECT
+                const ctasPattern = /\bAS\s+(?:SELECT|\()/i;
+                if (ctasPattern.test(def.sql)) {
+                    outputTables.add(tableKey);
+                }
             }
         }
 
@@ -158,40 +181,40 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // Create edges: each input flows into each output
-        for (const sourceTableName of inputTables) {
-            const sourceNodeId = this.getTableNodeId('table', sourceTableName);
-            let sourceNode = this.nodes.get(sourceNodeId);
+        for (const sourceTableKey of inputTables) {
+            const sourceNodeId = this.resolveTableNodeId(sourceTableKey);
+            let sourceNode = sourceNodeId ? this.nodes.get(sourceNodeId) : undefined;
 
             // Create external source node if needed
             if (!sourceNode && this.options.includeExternal) {
-                sourceNode = this.addExternalNode(sourceTableName);
+                sourceNode = this.addExternalNode(sourceTableKey);
             }
 
             if (!sourceNode) continue;
 
-            for (const targetTableName of outputTables) {
-                const targetNodeId = this.getTableNodeId('table', targetTableName);
-                let targetNode = this.nodes.get(targetNodeId);
+            for (const targetTableKey of outputTables) {
+                const targetNodeId = this.resolveTableNodeId(targetTableKey);
+                let targetNode = targetNodeId ? this.nodes.get(targetNodeId) : undefined;
 
                 // Create external target node if needed
                 if (!targetNode && this.options.includeExternal) {
-                    targetNode = this.addExternalNode(targetTableName);
+                    targetNode = this.addExternalNode(targetTableKey);
                 }
 
                 if (!targetNode) continue;
 
                 // Don't create self-referential edges
-                if (sourceNodeId === targetNodeId) continue;
+                if (sourceNode.id === targetNode.id) continue;
 
                 // Create edge from source to target
-                const edgeId = `${sourceNodeId}->${targetNodeId}`;
+                const edgeId = `${sourceNode.id}->${targetNode.id}`;
                 const existingEdge = this.edges.find(e => e.id === edgeId);
 
                 if (!existingEdge) {
                     this.edges.push({
                         id: edgeId,
-                        sourceId: sourceNodeId,
-                        targetId: targetNodeId,
+                        sourceId: sourceNode.id,
+                        targetId: targetNode.id,
                         type: 'direct',
                         metadata: {
                             filePath,
@@ -224,13 +247,15 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Resolve external references (tables not defined in workspace)
      */
-    addExternalNode(tableName: string): LineageNode {
-        const nodeId = this.getTableNodeId('external', tableName);
+    addExternalNode(tableKey: string): LineageNode {
+        const normalizedKey = getQualifiedKey(tableKey);
+        const parsed = parseQualifiedKey(normalizedKey);
+        const nodeId = this.getTableNodeId('external', normalizedKey);
 
         const node: LineageNode = {
             id: nodeId,
             type: 'external',
-            name: tableName,
+            name: getDisplayName(parsed.name, parsed.schema),
             metadata: {
                 isExternal: true
             }
@@ -336,14 +361,32 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Generate unique table node ID
      */
-    private getTableNodeId(type: string, name: string): string {
-        return `${type}:${name.toLowerCase()}`;
+    private getTableNodeId(type: string, tableKey: string): string {
+        return `${type}:${tableKey}`;
     }
 
     /**
      * Generate unique column node ID
      */
-    private getColumnNodeId(tableName: string, columnName: string): string {
-        return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+    private getColumnNodeId(tableKey: string, columnName: string): string {
+        return `column:${tableKey}.${columnName.toLowerCase()}`;
+    }
+
+    private resolveTableNodeId(tableKey: string): string | null {
+        const directId = this.getTableNodeId('table', tableKey);
+        if (this.nodes.has(directId)) {
+            return directId;
+        }
+
+        const parsed = parseQualifiedKey(tableKey);
+        if (parsed.schema) {
+            const fallbackKey = getQualifiedKey(parsed.name);
+            const fallbackId = this.getTableNodeId('table', fallbackKey);
+            if (this.nodes.has(fallbackId)) {
+                return fallbackId;
+            }
+        }
+
+        return null;
     }
 }

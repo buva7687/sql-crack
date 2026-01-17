@@ -49,8 +49,8 @@ export class LineageView {
         const leafNodes: { node: LineageNode; upstreamCount: number }[] = [];
 
         nodes.forEach(node => {
-            const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10 });
-            const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10 });
+            const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
+            const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
 
             if (upstream.nodes.length === 0) {
                 rootNodes.push({ node, downstreamCount: downstream.nodes.length });

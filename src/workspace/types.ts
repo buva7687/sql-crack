@@ -34,8 +34,8 @@ export interface WorkspaceIndex {
     fileCount: number;
     files: Map<string, FileAnalysis>;
     fileHashes: Map<string, string>;   // filePath -> contentHash for incremental parsing
-    definitionMap: Map<string, SchemaDefinition>;  // tableName (lowercase) -> definition
-    referenceMap: Map<string, TableReference[]>;   // tableName (lowercase) -> references
+    definitionMap: Map<string, SchemaDefinition[]>;  // qualifiedName (lowercase) -> definitions
+    referenceMap: Map<string, TableReference[]>;     // qualifiedName (lowercase) -> references
 }
 
 /**
@@ -47,7 +47,7 @@ export interface SerializedWorkspaceIndex {
     fileCount: number;
     filesArray: [string, FileAnalysis][];
     fileHashesArray: [string, string][];   // filePath -> contentHash pairs
-    definitionArray: [string, SchemaDefinition][];
+    definitionArray: [string, SchemaDefinition[]][];
     referenceArray: [string, TableReference[]][];
 }
 

@@ -15,6 +15,7 @@ import {
     MissingDefinitionDetail
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
+import { getDisplayName } from './identifiers';
 
 // Lineage modules
 import { LineageBuilder } from './lineage/lineageBuilder';
@@ -197,7 +198,7 @@ export class WorkspacePanel {
             return;
         }
 
-        this._currentGraph = buildDependencyGraph(index, 'files'); // Always use 'files' mode for now
+        this._currentGraph = buildDependencyGraph(index, 'tables'); // Table-first graph by default
         this.renderCurrentView();
     }
 
@@ -920,7 +921,112 @@ export class WorkspacePanel {
         .table-list-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
         .table-list-type { background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
         .table-list-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .table-list-count {
+            font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-sm);
+            background: var(--accent); color: white; min-width: 20px; text-align: center;
+        }
+        .table-list-item.no-connections { opacity: 0.7; }
+        .table-list-item.no-connections:hover { opacity: 1; }
         .table-list-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+
+        /* ========== Table Explorer Detail View ========== */
+        .table-explorer { padding: 16px; }
+        .explorer-header {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 20px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .explorer-header h2 {
+            font-size: 20px; font-weight: 600; color: var(--text-primary); margin: 0;
+        }
+        .flow-panel {
+            margin-top: 24px; padding: 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .flow-panel h3 {
+            font-size: 16px; font-weight: 600; color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .flow-section {
+            margin-bottom: 16px;
+        }
+        .flow-section:last-child { margin-bottom: 0; }
+        .flow-section-title {
+            font-size: 12px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            margin-bottom: 8px; padding-bottom: 4px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .flow-list {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .flow-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+            background: var(--bg-tertiary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); transition: all 0.15s;
+        }
+        .flow-item-internal {
+            cursor: pointer;
+        }
+        .flow-item-internal:hover {
+            background: var(--bg-hover); border-color: var(--accent);
+        }
+        .flow-item-external {
+            opacity: 0.8;
+        }
+        .flow-node-icon { font-size: 16px; flex-shrink: 0; }
+        .flow-node-name {
+            flex: 1; font-weight: 500; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .flow-node-type {
+            font-size: 11px; color: var(--text-muted);
+            background: var(--bg-secondary); padding: 2px 6px;
+            border-radius: var(--radius-sm); flex-shrink: 0;
+        }
+        .flow-node-type.external {
+            background: rgba(71, 85, 105, 0.3); color: var(--text-dim);
+        }
+        .flow-node-file {
+            font-size: 10px; color: var(--text-dim);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            max-width: 120px;
+        }
+        .column-list {
+            margin-top: 20px; padding: 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .column-list h3 {
+            font-size: 16px; font-weight: 600; color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .columns-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+        }
+        .column-item {
+            display: flex; flex-direction: column; gap: 4px; padding: 8px 12px;
+            background: var(--bg-tertiary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+        .column-name {
+            font-weight: 500; color: var(--text-primary); font-size: 13px;
+        }
+        .column-type {
+            font-size: 11px; color: var(--text-muted); font-family: monospace;
+        }
+        .badge-primary, .badge-not-null {
+            font-size: 9px; font-weight: 600; padding: 2px 4px;
+            border-radius: var(--radius-sm); margin-top: 2px;
+        }
+        .badge-primary {
+            background: var(--accent); color: white;
+        }
+        .badge-not-null {
+            background: var(--warning); color: white;
+        }
 
         /* ========== Lineage Overview ========== */
         .lineage-overview { padding: 10px; }
@@ -973,6 +1079,27 @@ export class WorkspacePanel {
         .stats-bar .stat { display: flex; align-items: center; gap: 4px; }
         .stats-bar .stat-value { font-weight: 600; color: var(--text-primary); }
         .stats-bar .separator { color: var(--text-dim); }
+        .legend-inline {
+            display: flex; align-items: center; gap: 16px; padding: 6px 16px;
+            background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
+            font-size: 11px; color: var(--text-muted); flex-wrap: wrap;
+        }
+        .legend-inline-group { display: flex; align-items: center; gap: 8px; }
+        .legend-inline-item { display: flex; align-items: center; gap: 6px; }
+        .legend-inline-node {
+            width: 12px; height: 12px; border-radius: 3px;
+            border: 1px solid transparent; flex-shrink: 0;
+        }
+        .legend-inline-node.file { background: var(--node-file); border-color: var(--node-file-border); }
+        .legend-inline-node.table { background: var(--node-table); border-color: var(--node-table-border); }
+        .legend-inline-node.view { background: var(--node-view); border-color: var(--node-view-border); }
+        .legend-inline-node.external { background: var(--node-external); border-color: var(--node-external-border); border-style: dashed; }
+        .legend-inline-edge { width: 16px; height: 2px; border-radius: 2px; flex-shrink: 0; }
+        .legend-inline-edge.select { background: #64748b; }
+        .legend-inline-edge.join { background: #a78bfa; }
+        .legend-inline-edge.insert { background: #10b981; }
+        .legend-inline-edge.update { background: #fbbf24; }
+        .legend-inline-edge.delete { background: #f87171; }
 
         /* ========== Issue Banner ========== */
         .issue-banner {
@@ -1264,6 +1391,23 @@ export class WorkspacePanel {
             <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
             <span class="separator">•</span>
             <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
+        </div>
+        <div class="legend-inline">
+            <div class="legend-inline-group">
+                <span>Nodes:</span>
+                <div class="legend-inline-item"><div class="legend-inline-node file"></div><span>Files</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node table"></div><span>Tables</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node view"></div><span>Views</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node external"></div><span>External</span></div>
+            </div>
+            <div class="legend-inline-group">
+                <span>Edges:</span>
+                <div class="legend-inline-item"><div class="legend-inline-edge select"></div><span>SELECT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge join"></div><span>JOIN</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge insert"></div><span>INSERT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge update"></div><span>UPDATE</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge delete"></div><span>DELETE</span></div>
+            </div>
         </div>
 
         <!-- Issue Banner -->
@@ -2162,11 +2306,12 @@ export class WorkspacePanel {
 
         // Generate orphaned details
         const orphanedDetails: DefinitionDetail[] = [];
-        for (const tableName of graph.stats.orphanedDefinitions) {
-            const def = index.definitionMap.get(tableName.toLowerCase());
-            if (def) {
+        for (const tableKey of graph.stats.orphanedDefinitions) {
+            const defs = index.definitionMap.get(tableKey);
+            if (!defs) continue;
+            for (const def of defs) {
                 orphanedDetails.push({
-                    name: def.name,
+                    name: getDisplayName(def.name, def.schema),
                     type: def.type,
                     filePath: def.filePath,
                     lineNumber: def.lineNumber
@@ -2176,12 +2321,15 @@ export class WorkspacePanel {
 
         // Generate missing details
         const missingDetails: MissingDefinitionDetail[] = [];
-        for (const tableName of graph.stats.missingDefinitions) {
-            const refs = index.referenceMap.get(tableName.toLowerCase()) || [];
+        for (const tableKey of graph.stats.missingDefinitions) {
+            const refs = index.referenceMap.get(tableKey) || [];
             const referencingFiles = [...new Set(refs.map(r => r.filePath))];
+            const displayName = refs[0]
+                ? getDisplayName(refs[0].tableName, refs[0].schema)
+                : tableKey;
 
             missingDetails.push({
-                tableName,
+                tableName: displayName,
                 references: refs,
                 referenceCount: refs.length,
                 referencingFiles
