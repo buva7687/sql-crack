@@ -89,7 +89,7 @@ export class LineageView {
             html += `
                 <div class="lineage-section">
                     <h3>📥 Source Tables (${rootNodes.length})</h3>
-                    <p class="section-hint">Tables with no upstream dependencies</p>
+                    <p class="section-hint">Data origins - click to see what tables use their data</p>
                     <div class="node-list">
             `;
             for (const node of rootNodes.slice(0, 10)) {
@@ -115,7 +115,7 @@ export class LineageView {
             html += `
                 <div class="lineage-section">
                     <h3>📤 Output Tables (${leafNodes.length})</h3>
-                    <p class="section-hint">Tables with no downstream consumers</p>
+                    <p class="section-hint">Data endpoints - click to see what tables feed into them</p>
                     <div class="node-list">
             `;
             for (const node of leafNodes.slice(0, 10)) {

@@ -1805,12 +1805,26 @@ export class WorkspacePanel {
             });
         });
 
+        // Helper to update back button text
+        function updateBackButtonText() {
+            if (!lineageBackBtn) return;
+            if (lineageDetailView && currentViewMode !== 'graph') {
+                // In detail view - show "Back to [Tab Name]"
+                const tabNames = { lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
+            } else {
+                // In overview - show "Back to Graph"
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph';
+            }
+        }
+
         // Back button handler - returns to tab overview if in detail view, otherwise to graph
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (lineageDetailView && currentViewMode !== 'graph') {
                 // Return to the current tab's overview
                 lineageDetailView = false;
+                updateBackButtonText();
                 if (currentViewMode === 'lineage') {
                     if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
                     vscode.postMessage({ command: 'switchToLineageView' });
@@ -2020,6 +2034,7 @@ export class WorkspacePanel {
 
                 // Mark that we're entering a detail view
                 lineageDetailView = true;
+                updateBackButtonText();
 
                 switch (action) {
                     case 'explore-table':
