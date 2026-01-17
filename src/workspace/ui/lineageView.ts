@@ -43,19 +43,20 @@ export class LineageView {
         }
 
         // Find root nodes (no upstream) and leaf nodes (no downstream)
+        // Also store connection counts for display
         const flowAnalyzer = new FlowAnalyzer(graph);
-        const rootNodes: LineageNode[] = [];
-        const leafNodes: LineageNode[] = [];
+        const rootNodes: { node: LineageNode; downstreamCount: number }[] = [];
+        const leafNodes: { node: LineageNode; upstreamCount: number }[] = [];
 
         nodes.forEach(node => {
-            const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 1 });
-            const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 1 });
+            const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10 });
+            const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10 });
 
             if (upstream.nodes.length === 0) {
-                rootNodes.push(node);
+                rootNodes.push({ node, downstreamCount: downstream.nodes.length });
             }
             if (downstream.nodes.length === 0) {
-                leafNodes.push(node);
+                leafNodes.push({ node, upstreamCount: upstream.nodes.length });
             }
         });
 
@@ -84,7 +85,8 @@ export class LineageView {
                 </div>
         `;
 
-        // Source tables (roots)
+        // Source tables (roots) - sorted by downstream count descending
+        rootNodes.sort((a, b) => b.downstreamCount - a.downstreamCount);
         if (rootNodes.length > 0) {
             html += `
                 <div class="lineage-section">
@@ -92,12 +94,14 @@ export class LineageView {
                     <p class="section-hint">Data origins - click to see what tables use their data</p>
                     <div class="node-list">
             `;
-            for (const node of rootNodes.slice(0, 10)) {
+            for (const { node, downstreamCount } of rootNodes.slice(0, 10)) {
+                const countClass = downstreamCount > 0 ? 'has-connections' : 'no-connections';
                 html += `
-                    <div class="node-item" data-action="show-downstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
+                    <div class="node-item ${countClass}" data-action="show-downstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
                         <span class="node-icon">${this.getNodeIcon(node.type)}</span>
                         <span class="node-name">${this.escapeHtml(node.name)}</span>
                         <span class="node-type">${node.type}</span>
+                        <span class="connection-count ${countClass}" title="${downstreamCount} downstream">↓${downstreamCount}</span>
                     </div>
                 `;
             }
@@ -110,7 +114,8 @@ export class LineageView {
             `;
         }
 
-        // Output tables (leaves)
+        // Output tables (leaves) - sorted by upstream count descending
+        leafNodes.sort((a, b) => b.upstreamCount - a.upstreamCount);
         if (leafNodes.length > 0) {
             html += `
                 <div class="lineage-section">
@@ -118,12 +123,14 @@ export class LineageView {
                     <p class="section-hint">Data endpoints - click to see what tables feed into them</p>
                     <div class="node-list">
             `;
-            for (const node of leafNodes.slice(0, 10)) {
+            for (const { node, upstreamCount } of leafNodes.slice(0, 10)) {
+                const countClass = upstreamCount > 0 ? 'has-connections' : 'no-connections';
                 html += `
-                    <div class="node-item" data-action="show-upstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
+                    <div class="node-item ${countClass}" data-action="show-upstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
                         <span class="node-icon">${this.getNodeIcon(node.type)}</span>
                         <span class="node-name">${this.escapeHtml(node.name)}</span>
                         <span class="node-type">${node.type}</span>
+                        <span class="connection-count ${countClass}" title="${upstreamCount} upstream">↑${upstreamCount}</span>
                     </div>
                 `;
             }

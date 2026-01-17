@@ -949,6 +949,14 @@ export class WorkspacePanel {
         .node-icon { font-size: 16px; }
         .node-name { flex: 1; font-weight: 500; color: var(--text-primary); }
         .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
+        .connection-count {
+            font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm);
+            min-width: 28px; text-align: center;
+        }
+        .connection-count.has-connections { background: var(--accent); color: white; }
+        .connection-count.no-connections { background: var(--bg-tertiary); color: var(--text-muted); }
+        .node-item.no-connections { opacity: 0.6; }
+        .node-item.no-connections:hover { opacity: 1; }
         .more-items { padding: 8px 14px; color: var(--text-muted); font-size: 12px; font-style: italic; }
         .lineage-tip {
             background: var(--bg-tertiary); padding: 12px 16px; border-radius: var(--radius-md);
