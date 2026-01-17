@@ -584,6 +584,11 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleStats();
         }
+        // O to toggle optimization hints panel
+        if (e.key === 'o' || e.key === 'O') {
+            e.preventDefault();
+            toggleHints();
+        }
         // U for upstream focus mode
         if (e.key === 'u' || e.key === 'U') {
             e.preventDefault();
@@ -4543,6 +4548,14 @@ export function toggleStats(show?: boolean): void {
     statsPanel.style.display = statsVisible ? 'block' : 'none';
 }
 
+let hintsVisible = true;
+
+export function toggleHints(show?: boolean): void {
+    if (!hintsPanel) return;
+    hintsVisible = show ?? !hintsVisible;
+    hintsPanel.style.display = hintsVisible ? 'block' : 'none';
+}
+
 export function toggleLayout(): void {
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
         return;
@@ -6075,6 +6088,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column flows' },
         { key: 'Q', description: 'Toggle query stats' },
+        { key: 'O', description: 'Toggle optimization hints' },
         { key: 'U', description: 'Focus upstream nodes' },
         { key: 'D', description: 'Focus downstream nodes' },
         { key: 'A', description: 'Focus all connected nodes' },
