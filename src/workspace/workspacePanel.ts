@@ -1734,6 +1734,7 @@ export class WorkspacePanel {
 
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
+        let lineageDetailView = false;  // Track if we're in a detail view (upstream/downstream/table)
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
@@ -1804,10 +1805,26 @@ export class WorkspacePanel {
             });
         });
 
-        // Back button handler
+        // Back button handler - returns to tab overview if in detail view, otherwise to graph
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            switchToView('graph');
+            if (lineageDetailView && currentViewMode !== 'graph') {
+                // Return to the current tab's overview
+                lineageDetailView = false;
+                if (currentViewMode === 'lineage') {
+                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (currentViewMode === 'tableExplorer') {
+                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (currentViewMode === 'impact') {
+                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+            } else {
+                // Go back to graph view
+                switchToView('graph');
+            }
         });
 
         // ========== Context Menu ==========
@@ -1997,8 +2014,12 @@ export class WorkspacePanel {
 
                 const action = target.getAttribute('data-action');
                 const tableName = target.getAttribute('data-table');
+                const nodeId = target.getAttribute('data-node-id');
 
                 if (!tableName) return;
+
+                // Mark that we're entering a detail view
+                lineageDetailView = true;
 
                 switch (action) {
                     case 'explore-table':
@@ -2008,16 +2029,16 @@ export class WorkspacePanel {
                         vscode.postMessage({ command: 'exploreTable', tableName: tableName });
                         break;
                     case 'show-upstream':
-                        // Show upstream dependencies
+                        // Show upstream dependencies - use nodeId if available, otherwise construct it
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
                         lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
-                        vscode.postMessage({ command: 'getUpstream', nodeId: 'table:' + tableName.toLowerCase(), depth: 5 });
+                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                     case 'show-downstream':
-                        // Show downstream dependencies
+                        // Show downstream dependencies - use nodeId if available, otherwise construct it
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
                         lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
-                        vscode.postMessage({ command: 'getDownstream', nodeId: 'table:' + tableName.toLowerCase(), depth: 5 });
+                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                 }
             });

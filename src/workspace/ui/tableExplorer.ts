@@ -47,7 +47,7 @@ export class TableExplorer {
             const fileName = table.filePath ? table.filePath.split('/').pop() || '' : '';
 
             html += `
-                <div class="table-list-item" data-action="explore-table" data-table="${this.escapeHtml(table.name)}">
+                <div class="table-list-item" data-action="explore-table" data-node-id="${this.escapeHtml(table.id)}" data-table="${this.escapeHtml(table.name)}">
                     <div class="table-list-icon">${typeIcon}</div>
                     <div class="table-list-info">
                         <span class="table-list-name">${this.escapeHtml(table.name)}</span>

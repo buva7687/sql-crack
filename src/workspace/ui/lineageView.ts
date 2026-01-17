@@ -94,7 +94,7 @@ export class LineageView {
             `;
             for (const node of rootNodes.slice(0, 10)) {
                 html += `
-                    <div class="node-item" data-action="show-downstream" data-table="${this.escapeHtml(node.name)}">
+                    <div class="node-item" data-action="show-downstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
                         <span class="node-icon">${this.getNodeIcon(node.type)}</span>
                         <span class="node-name">${this.escapeHtml(node.name)}</span>
                         <span class="node-type">${node.type}</span>
@@ -120,7 +120,7 @@ export class LineageView {
             `;
             for (const node of leafNodes.slice(0, 10)) {
                 html += `
-                    <div class="node-item" data-action="show-upstream" data-table="${this.escapeHtml(node.name)}">
+                    <div class="node-item" data-action="show-upstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
                         <span class="node-icon">${this.getNodeIcon(node.type)}</span>
                         <span class="node-name">${this.escapeHtml(node.name)}</span>
                         <span class="node-type">${node.type}</span>
