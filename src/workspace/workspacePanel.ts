@@ -298,13 +298,27 @@ export class WorkspacePanel {
             case 'switchToLineageView':
                 this._currentView = 'lineage';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send lineage overview data to webview
+                if (this._lineageGraph) {
+                    const html = this._lineageView.generateLineageOverview(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'lineageOverviewResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'switchToTableExplorer':
                 this._currentView = 'tableExplorer';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send table list to webview
+                if (this._lineageGraph) {
+                    const html = this._tableExplorer.generateTableList(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'tableListResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'switchToImpactView':
@@ -887,6 +901,60 @@ export class WorkspacePanel {
             text-align: center; padding: 60px 20px; color: var(--text-muted);
         }
         .lineage-empty svg { width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5; }
+
+        /* ========== Table List View ========== */
+        .table-list-view { padding: 10px; }
+        .table-list-header { margin-bottom: 16px; }
+        .table-list-header h3 { color: var(--text-primary); margin: 0 0 4px 0; font-size: 16px; }
+        .table-list-header .hint { color: var(--text-muted); font-size: 12px; margin: 0; }
+        .table-list-grid { display: flex; flex-direction: column; gap: 8px; }
+        .table-list-item {
+            display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
+        }
+        .table-list-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
+        .table-list-icon { font-size: 20px; }
+        .table-list-info { flex: 1; min-width: 0; }
+        .table-list-name { display: block; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+        .table-list-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
+        .table-list-type { background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
+        .table-list-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .table-list-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+
+        /* ========== Lineage Overview ========== */
+        .lineage-overview { padding: 10px; }
+        .lineage-overview-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .lineage-stats { margin-bottom: 24px; }
+        .lineage-stats h3 { color: var(--text-primary); margin: 0 0 12px 0; font-size: 16px; }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+        }
+        .stat-item {
+            background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); text-align: center;
+        }
+        .stat-item .stat-value { display: block; font-size: 24px; font-weight: 700; color: var(--accent); }
+        .stat-item .stat-label { display: block; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .lineage-section { margin-bottom: 24px; }
+        .lineage-section h3 { color: var(--text-primary); margin: 0 0 8px 0; font-size: 14px; }
+        .section-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 12px 0; }
+        .node-list { display: flex; flex-direction: column; gap: 6px; }
+        .node-item {
+            display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+            background: var(--bg-secondary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
+        }
+        .node-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
+        .node-icon { font-size: 16px; }
+        .node-name { flex: 1; font-weight: 500; color: var(--text-primary); }
+        .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
+        .more-items { padding: 8px 14px; color: var(--text-muted); font-size: 12px; font-style: italic; }
+        .lineage-tip {
+            background: var(--bg-tertiary); padding: 12px 16px; border-radius: var(--radius-md);
+            font-size: 12px; color: var(--text-muted);
+        }
+        .lineage-tip strong { color: var(--text-secondary); }
 
         /* ========== Stats Bar ========== */
         .stats-bar {
@@ -1680,8 +1748,8 @@ export class WorkspacePanel {
         };
 
         const viewEmptyStates = {
-            lineage: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 9 4-18 3 9h4"/></svg><p>Right-click a node in the graph and choose<br>"Show Upstream" or "Show Downstream" to view data lineage.</p></div>',
-            tableExplorer: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg><p>Right-click on a table node and select "Explore Table"<br>to view its columns and dependencies.</p></div>',
+            lineage: '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading lineage data...</div>',
+            tableExplorer: '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading table list...</div>',
             impact: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><p>Right-click on a table and select "Analyze Impact"<br>to see what would be affected by changes.</p></div>'
         };
 
@@ -1908,8 +1976,52 @@ export class WorkspacePanel {
                         lineageContent.innerHTML = message.data.html;
                     }
                     break;
+                case 'tableListResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                    }
+                    break;
+                case 'lineageOverviewResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                    }
+                    break;
             }
         });
+
+        // ========== Event Delegation for Dynamic Lineage Content ==========
+        if (lineageContent) {
+            lineageContent.addEventListener('click', (e) => {
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+
+                const action = target.getAttribute('data-action');
+                const tableName = target.getAttribute('data-table');
+
+                if (!tableName) return;
+
+                switch (action) {
+                    case 'explore-table':
+                        // Show loading state and request table details
+                        if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'exploreTable', tableName: tableName });
+                        break;
+                    case 'show-upstream':
+                        // Show upstream dependencies
+                        if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'getUpstream', nodeId: 'table:' + tableName.toLowerCase(), depth: 5 });
+                        break;
+                    case 'show-downstream':
+                        // Show downstream dependencies
+                        if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'getDownstream', nodeId: 'table:' + tableName.toLowerCase(), depth: 5 });
+                        break;
+                }
+            });
+        }
 
         // ========== Issue Item Clicks ==========
         document.querySelectorAll('.issue-item').forEach(item => {

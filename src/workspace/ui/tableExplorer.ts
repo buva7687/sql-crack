@@ -10,6 +10,78 @@ import { TableExplorerData } from './types';
  */
 export class TableExplorer {
     /**
+     * Generate a list of all tables in the workspace
+     */
+    generateTableList(graph: LineageGraph): string {
+        // Collect all table/view nodes
+        const tables: LineageNode[] = [];
+        graph.nodes.forEach((node) => {
+            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+                tables.push(node);
+            }
+        });
+
+        // Sort alphabetically
+        tables.sort((a, b) => a.name.localeCompare(b.name));
+
+        if (tables.length === 0) {
+            return `
+                <div class="table-list-empty">
+                    <p>No tables found in workspace.</p>
+                    <p>Open SQL files to populate the table list.</p>
+                </div>
+            `;
+        }
+
+        let html = `
+            <div class="table-list-view">
+                <div class="table-list-header">
+                    <h3>Workspace Tables (${tables.length})</h3>
+                    <p class="hint">Click a table to explore its structure and dependencies</p>
+                </div>
+                <div class="table-list-grid">
+        `;
+
+        for (const table of tables) {
+            const typeIcon = this.getTypeIcon(table.type);
+            const fileName = table.filePath ? table.filePath.split('/').pop() || '' : '';
+
+            html += `
+                <div class="table-list-item" data-action="explore-table" data-table="${this.escapeHtml(table.name)}">
+                    <div class="table-list-icon">${typeIcon}</div>
+                    <div class="table-list-info">
+                        <span class="table-list-name">${this.escapeHtml(table.name)}</span>
+                        <span class="table-list-meta">
+                            <span class="table-list-type">${table.type}</span>
+                            ${fileName ? `<span class="table-list-file">${this.escapeHtml(fileName)}</span>` : ''}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+
+        return html;
+    }
+
+    /**
+     * Get icon for node type
+     */
+    private getTypeIcon(type: string): string {
+        const icons: Record<string, string> = {
+            'table': '📊',
+            'view': '👁️',
+            'cte': '🔄',
+            'external': '🌐'
+        };
+        return icons[type] || '📦';
+    }
+
+    /**
      * Generate table view HTML
      */
     generateTableView(data: TableExplorerData): string {

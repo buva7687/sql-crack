@@ -1,13 +1,151 @@
 // Lineage View - Visualize data lineage
 
-import { LineagePath } from '../lineage/types';
-import { FlowResult } from '../lineage/flowAnalyzer';
+import { LineagePath, LineageGraph, LineageNode } from '../lineage/types';
+import { FlowResult, FlowAnalyzer } from '../lineage/flowAnalyzer';
 import { LineageViewOptions } from './types';
 
 /**
  * Generates HTML for lineage visualization
  */
 export class LineageView {
+    /**
+     * Generate an overview of all lineage relationships in the workspace
+     */
+    generateLineageOverview(graph: LineageGraph): string {
+        // Collect statistics
+        const stats = {
+            tables: 0,
+            views: 0,
+            ctes: 0,
+            external: 0,
+            relationships: graph.edges.length
+        };
+
+        const nodes: LineageNode[] = [];
+        graph.nodes.forEach((node) => {
+            if (node.type === 'table') stats.tables++;
+            else if (node.type === 'view') stats.views++;
+            else if (node.type === 'cte') stats.ctes++;
+            else if (node.type === 'external') stats.external++;
+
+            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+                nodes.push(node);
+            }
+        });
+
+        if (nodes.length === 0) {
+            return `
+                <div class="lineage-overview-empty">
+                    <p>No lineage data found in workspace.</p>
+                    <p>Open SQL files to analyze data dependencies.</p>
+                </div>
+            `;
+        }
+
+        // Find root nodes (no upstream) and leaf nodes (no downstream)
+        const flowAnalyzer = new FlowAnalyzer(graph);
+        const rootNodes: LineageNode[] = [];
+        const leafNodes: LineageNode[] = [];
+
+        nodes.forEach(node => {
+            const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 1 });
+            const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 1 });
+
+            if (upstream.nodes.length === 0) {
+                rootNodes.push(node);
+            }
+            if (downstream.nodes.length === 0) {
+                leafNodes.push(node);
+            }
+        });
+
+        let html = `
+            <div class="lineage-overview">
+                <div class="lineage-stats">
+                    <h3>Workspace Summary</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-value">${stats.tables}</span>
+                            <span class="stat-label">Tables</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${stats.views}</span>
+                            <span class="stat-label">Views</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${stats.ctes}</span>
+                            <span class="stat-label">CTEs</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${stats.relationships}</span>
+                            <span class="stat-label">Relationships</span>
+                        </div>
+                    </div>
+                </div>
+        `;
+
+        // Source tables (roots)
+        if (rootNodes.length > 0) {
+            html += `
+                <div class="lineage-section">
+                    <h3>📥 Source Tables (${rootNodes.length})</h3>
+                    <p class="section-hint">Tables with no upstream dependencies</p>
+                    <div class="node-list">
+            `;
+            for (const node of rootNodes.slice(0, 10)) {
+                html += `
+                    <div class="node-item" data-action="show-downstream" data-table="${this.escapeHtml(node.name)}">
+                        <span class="node-icon">${this.getNodeIcon(node.type)}</span>
+                        <span class="node-name">${this.escapeHtml(node.name)}</span>
+                        <span class="node-type">${node.type}</span>
+                    </div>
+                `;
+            }
+            if (rootNodes.length > 10) {
+                html += `<div class="more-items">+${rootNodes.length - 10} more</div>`;
+            }
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        // Output tables (leaves)
+        if (leafNodes.length > 0) {
+            html += `
+                <div class="lineage-section">
+                    <h3>📤 Output Tables (${leafNodes.length})</h3>
+                    <p class="section-hint">Tables with no downstream consumers</p>
+                    <div class="node-list">
+            `;
+            for (const node of leafNodes.slice(0, 10)) {
+                html += `
+                    <div class="node-item" data-action="show-upstream" data-table="${this.escapeHtml(node.name)}">
+                        <span class="node-icon">${this.getNodeIcon(node.type)}</span>
+                        <span class="node-name">${this.escapeHtml(node.name)}</span>
+                        <span class="node-type">${node.type}</span>
+                    </div>
+                `;
+            }
+            if (leafNodes.length > 10) {
+                html += `<div class="more-items">+${leafNodes.length - 10} more</div>`;
+            }
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `
+                <div class="lineage-tip">
+                    <p><strong>Tip:</strong> Click a table above or right-click any node in the graph to explore its full lineage.</p>
+                </div>
+            </div>
+        `;
+
+        return html;
+    }
+
     /**
      * Generate lineage view HTML
      */
