@@ -73,21 +73,22 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
 
 /**
  * Extract comments from SQL and replace with placeholders
+ * Includes trailing newline to preserve line structure
  */
 function extractComments(sql: string): { sqlWithoutComments: string; comments: Map<string, string> } {
     const comments = new Map<string, string>();
     let result = sql;
     let commentIndex = 0;
 
-    // Extract -- style comments
-    result = result.replace(/--[^\n]*/g, (match) => {
+    // Extract -- style comments (include trailing newline to preserve line breaks)
+    result = result.replace(/--[^\n]*\n?/g, (match) => {
         const placeholder = `__COMMENT_${commentIndex++}__`;
         comments.set(placeholder, match);
         return placeholder;
     });
 
-    // Extract /* */ style comments
-    result = result.replace(/\/\*[\s\S]*?\*\//g, (match) => {
+    // Extract /* */ style comments (include trailing newline if present)
+    result = result.replace(/\/\*[\s\S]*?\*\/\n?/g, (match) => {
         const placeholder = `__COMMENT_${commentIndex++}__`;
         comments.set(placeholder, match);
         return placeholder;
