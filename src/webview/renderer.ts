@@ -840,6 +840,11 @@ export function render(result: ParseResult): void {
     updateStatsPanel();
     updateHintsPanel();
 
+    // Update SQL preview if visible
+    if (sqlPreviewPanel && sqlPreviewPanel.style.display !== 'none') {
+        updateSqlPreview();
+    }
+
     // Fit view
     fitView();
 
