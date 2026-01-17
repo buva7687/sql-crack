@@ -114,36 +114,77 @@ export class LineageBuilder implements LineageGraph {
 
     /**
      * Create edges from query analysis (file references)
+     *
+     * Data flow logic:
+     * - INSERT/UPDATE/DELETE targets are OUTPUTs (data flows INTO them)
+     * - SELECT/JOIN tables are INPUTs (data flows FROM them)
+     * - CREATE TABLE/VIEW definitions are OUTPUTs if the file has input references
+     *
+     * For each file, we create edges: INPUT tables → OUTPUT tables
      */
     private addFileEdges(filePath: string, analysis: FileAnalysis): void {
-        for (const ref of analysis.references) {
-            // Find or create target node
-            const targetNodeId = this.getTableNodeId('table', ref.tableName);
-            let targetNode = this.nodes.get(targetNodeId);
+        // Separate references into inputs (sources) and outputs (targets)
+        const inputTables: Set<string> = new Set();
+        const outputTables: Set<string> = new Set();
 
-            // Create external node if not exists
-            if (!targetNode && this.options.includeExternal) {
-                targetNode = this.addExternalNode(ref.tableName);
+        for (const ref of analysis.references) {
+            const tableName = ref.tableName.toLowerCase();
+
+            // SELECT and JOIN references are data sources (inputs)
+            if (ref.referenceType === 'select' || ref.referenceType === 'join' || ref.referenceType === 'subquery') {
+                inputTables.add(tableName);
             }
 
-            if (!targetNode) continue;
+            // INSERT, UPDATE, DELETE targets are data destinations (outputs)
+            if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
+                outputTables.add(tableName);
+            }
+        }
 
-            // Find source tables (what this reference depends on)
-            const sourceTables = this.extractSourceTables(ref);
+        // Also treat definitions in this file as potential outputs
+        // (e.g., CREATE TABLE AS SELECT, CREATE VIEW AS SELECT)
+        for (const def of analysis.definitions) {
+            const tableName = def.name.toLowerCase();
+            // If there are input tables, this definition is likely created from them
+            if (inputTables.size > 0) {
+                outputTables.add(tableName);
+            }
+        }
 
-            for (const sourceTableName of sourceTables) {
-                const sourceNodeId = this.getTableNodeId('table', sourceTableName);
-                let sourceNode = this.nodes.get(sourceNodeId);
+        // Remove self-references: a table can't be both input and output in the same flow
+        // (unless it's a recursive CTE, which we handle separately)
+        for (const outputTable of outputTables) {
+            inputTables.delete(outputTable);
+        }
 
-                // Create external source node if needed
-                if (!sourceNode && this.options.includeExternal) {
-                    sourceNode = this.addExternalNode(sourceTableName);
+        // Create edges: each input flows into each output
+        for (const sourceTableName of inputTables) {
+            const sourceNodeId = this.getTableNodeId('table', sourceTableName);
+            let sourceNode = this.nodes.get(sourceNodeId);
+
+            // Create external source node if needed
+            if (!sourceNode && this.options.includeExternal) {
+                sourceNode = this.addExternalNode(sourceTableName);
+            }
+
+            if (!sourceNode) continue;
+
+            for (const targetTableName of outputTables) {
+                const targetNodeId = this.getTableNodeId('table', targetTableName);
+                let targetNode = this.nodes.get(targetNodeId);
+
+                // Create external target node if needed
+                if (!targetNode && this.options.includeExternal) {
+                    targetNode = this.addExternalNode(targetTableName);
                 }
 
-                if (!sourceNode) continue;
+                if (!targetNode) continue;
+
+                // Don't create self-referential edges
+                if (sourceNodeId === targetNodeId) continue;
 
                 // Create edge from source to target
-                const edgeId = `${sourceNodeId}->${targetNodeId}-${filePath}`;
+                const edgeId = `${sourceNodeId}->${targetNodeId}`;
                 const existingEdge = this.edges.find(e => e.id === edgeId);
 
                 if (!existingEdge) {
@@ -151,36 +192,16 @@ export class LineageBuilder implements LineageGraph {
                         id: edgeId,
                         sourceId: sourceNodeId,
                         targetId: targetNodeId,
-                        type: this.mapReferenceTypeToEdgeType(ref.referenceType),
+                        type: 'direct',
                         metadata: {
-                            referenceType: ref.referenceType,
                             filePath,
-                            lineNumber: ref.lineNumber,
-                            columns: ref.columns?.length || 0
+                            inputCount: inputTables.size,
+                            outputCount: outputTables.size
                         }
                     });
                 }
             }
         }
-    }
-
-    /**
-     * Extract source tables from a reference
-     */
-    private extractSourceTables(ref: TableReference): string[] {
-        const sources: string[] = [];
-
-        // For self-references or simple references
-        if (ref.referenceType === 'select' || ref.referenceType === 'join') {
-            sources.push(ref.tableName);
-        }
-
-        // For INSERT/UPDATE/DELETE, the table itself is the source
-        if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
-            sources.push(ref.tableName);
-        }
-
-        return sources;
     }
 
     /**
