@@ -1033,66 +1033,120 @@ export class WorkspacePanel {
         
         /* Impact Form Styles */
         .impact-form-container {
-            max-width: 800px; margin: 0 auto;
+            max-width: 900px; margin: 0 auto;
         }
         .impact-form {
-            background: var(--bg-secondary); border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle); padding: 24px;
-            margin-bottom: 24px;
+            background: var(--bg-secondary); border-radius: var(--radius-xl);
+            border: 1px solid var(--border-subtle); padding: 32px;
+            margin-bottom: 24px; box-shadow: var(--shadow-md);
         }
         .form-header {
-            margin-bottom: 20px;
+            display: flex; align-items: flex-start; gap: 16px;
+            margin-bottom: 28px; padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .form-header-icon {
+            font-size: 32px; line-height: 1;
         }
         .form-header h3 {
-            color: var(--text-primary); font-size: 18px; margin: 0 0 8px 0;
+            color: var(--text-primary); font-size: 20px; font-weight: 600;
+            margin: 0 0 6px 0;
         }
         .form-description {
-            color: var(--text-muted); font-size: 13px; margin: 0;
+            color: var(--text-muted); font-size: 14px; margin: 0;
+            line-height: 1.5;
         }
         .form-fields {
-            display: flex; flex-direction: column; gap: 20px;
+            display: flex; flex-direction: column; gap: 24px;
         }
         .form-field {
-            display: flex; flex-direction: column; gap: 8px;
+            display: flex; flex-direction: column; gap: 10px;
         }
         .form-field label {
-            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-primary); font-size: 14px; font-weight: 500;
+        }
+        .form-field label svg {
+            width: 16px; height: 16px; color: var(--text-muted);
         }
         .form-select {
             background: var(--bg-primary); border: 1px solid var(--border-subtle);
-            color: var(--text-secondary); font-size: 13px; padding: 10px 12px;
+            color: var(--text-secondary); font-size: 14px; padding: 12px 16px;
             border-radius: var(--radius-md); outline: none; cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s; font-family: inherit;
         }
-        .form-select:hover { border-color: var(--border-color); }
-        .form-select:focus { border-color: var(--accent); }
-        .radio-group {
-            display: flex; gap: 16px; flex-wrap: wrap;
+        .form-select:hover { 
+            border-color: var(--border-color); 
+            background: var(--bg-tertiary);
         }
-        .radio-label {
-            display: flex; align-items: center; gap: 6px;
-            cursor: pointer; color: var(--text-secondary); font-size: 13px;
+        .form-select:focus { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
         }
-        .radio-label input[type="radio"] {
-            cursor: pointer;
+        
+        /* Modern Button-Style Change Type Selector */
+        .change-type-buttons {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
         }
+        .change-type-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+            padding: 16px 12px; background: var(--bg-primary);
+            border: 2px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; position: relative;
+            min-height: 90px;
+        }
+        .change-type-btn:hover {
+            border-color: var(--accent); background: var(--bg-tertiary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .change-type-btn.active {
+            border-color: var(--accent); background: rgba(99, 102, 241, 0.1);
+            color: var(--accent);
+        }
+        .change-type-btn.active::before {
+            content: '';
+            position: absolute; top: 8px; right: 8px;
+            width: 8px; height: 8px;
+            background: var(--accent); border-radius: 50%;
+        }
+        .change-type-btn svg {
+            width: 24px; height: 24px; stroke-width: 2;
+        }
+        .change-type-btn span {
+            font-size: 13px; font-weight: 500;
+        }
+        .change-type-btn.active svg {
+            color: var(--accent);
+        }
+        
         .form-actions {
-            margin-top: 8px;
+            margin-top: 8px; padding-top: 20px;
+            border-top: 1px solid var(--border-subtle);
         }
         .btn-primary {
-            display: flex; align-items: center; gap: 8px;
-            padding: 10px 20px; background: var(--accent); color: white;
-            border: none; border-radius: var(--radius-md); font-size: 13px;
-            font-weight: 500; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            padding: 14px 28px; background: var(--accent); color: white;
+            border: none; border-radius: var(--radius-md); font-size: 14px;
+            font-weight: 600; cursor: pointer; transition: all 0.2s;
+            width: 100%; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
         }
         .btn-primary:hover:not(:disabled) {
             background: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
         }
         .btn-primary:disabled {
             opacity: 0.5; cursor: not-allowed;
+            transform: none; box-shadow: none;
         }
         .btn-primary svg {
-            width: 16px; height: 16px;
+            width: 18px; height: 18px;
         }
         .impact-results {
             margin-top: 24px;
@@ -2543,7 +2597,17 @@ export class WorkspacePanel {
         function setupImpactForm() {
             const tableSelect = document.getElementById('impact-table-select');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
-            const changeTypeRadios = document.querySelectorAll('input[name="change-type"]');
+            const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+
+            // Handle change type button clicks
+            changeTypeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Remove active class from all buttons
+                    changeTypeButtons.forEach(b => b.classList.remove('active'));
+                    // Add active class to clicked button
+                    btn.classList.add('active');
+                });
+            });
 
             if (tableSelect && analyzeBtn) {
                 // Enable/disable analyze button based on selection
@@ -2556,7 +2620,8 @@ export class WorkspacePanel {
                     const selectedOption = tableSelect.options[tableSelect.selectedIndex];
                     const tableName = selectedOption.getAttribute('data-name');
                     const tableType = selectedOption.getAttribute('data-type');
-                    const changeType = document.querySelector('input[name="change-type"]:checked')?.value || 'modify';
+                    const activeButton = document.querySelector('.change-type-btn.active');
+                    const changeType = activeButton?.getAttribute('data-value') || 'modify';
 
                     if (!tableName) return;
 
