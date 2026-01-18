@@ -1,11 +1,109 @@
 // Impact View - Display impact analysis reports
 
 import { ImpactReport, ImpactItem } from '../lineage/impactAnalyzer';
+import { LineageGraph, LineageNode } from '../lineage/types';
 
 /**
  * Generates HTML for impact analysis reports
  */
 export class ImpactView {
+    /**
+     * Generate impact analysis form interface
+     * 
+     * Provides a form-based UI at the top of the Impact tab allowing users to:
+     * 1. Select a table/view from dropdown (populated from workspace graph)
+     * 2. Choose a change type (Modify, Delete, Rename, Add Column)
+     * 3. Click "Analyze Impact" to run the analysis
+     * 
+     * @param graph - The lineage graph containing all tables/views in workspace
+     * @returns HTML string for the form interface
+     */
+    generateImpactForm(graph: LineageGraph | null): string {
+        // Collect all tables and views from the lineage graph
+        const tables: LineageNode[] = [];
+        if (graph) {
+            graph.nodes.forEach((node) => {
+                // Only include tables and views (exclude CTEs, external references)
+                if (node.type === 'table' || node.type === 'view') {
+                    tables.push(node);
+                }
+            });
+        }
+        // Sort alphabetically for easier navigation
+        tables.sort((a, b) => a.name.localeCompare(b.name));
+
+        return `
+            <div class="impact-form-container">
+                <div class="impact-form">
+                    <div class="form-header">
+                        <h3>🔍 Impact Analysis</h3>
+                        <p class="form-description">Analyze the impact of changes to tables or views in your workspace</p>
+                    </div>
+                    <div class="form-fields">
+                        <div class="form-field">
+                            <label for="impact-table-select">Table/View</label>
+                            <select id="impact-table-select" class="form-select">
+                                <option value="">-- Select a table or view --</option>
+                                ${tables.map(table => `
+                                    <option value="${this.escapeHtml(table.id)}" data-name="${this.escapeHtml(table.name)}" data-type="${table.type}">
+                                        ${this.escapeHtml(table.name)} (${table.type})
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>Change Type</label>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="change-type" value="modify" checked>
+                                    <span>Modify</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="change-type" value="delete">
+                                    <span>Delete</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="change-type" value="rename">
+                                    <span>Rename</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="change-type" value="addColumn">
+                                    <span>Add Column</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="impact-analyze-btn" class="btn-primary" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                                </svg>
+                                Analyze Impact
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="impact-results" class="impact-results" style="display: none;"></div>
+            </div>
+        `;
+    }
+
+    /**
+     * Generate empty state for impact tab
+     */
+    generateEmptyState(): string {
+        return `
+            <div class="impact-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 8v4l3 3"/>
+                </svg>
+                <h3>Impact Analysis</h3>
+                <p>Select a table or view above and choose a change type to analyze the impact of modifications.</p>
+                <p class="hint">This will show you which tables, views, and files would be affected by your changes.</p>
+            </div>
+        `;
+    }
+
     /**
      * Generate impact analysis report HTML
      */
