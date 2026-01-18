@@ -36,8 +36,12 @@ export class LineageView {
         if (nodes.length === 0) {
             return `
                 <div class="lineage-overview-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M3 12h4l3 9 4-18 3 9h4"/>
+                    </svg>
+                    <h3>No Lineage Data</h3>
                     <p>No lineage data found in workspace.</p>
-                    <p>Open SQL files to analyze data dependencies.</p>
+                    <p class="hint">Open SQL files to analyze data dependencies and build the lineage graph.</p>
                 </div>
             `;
         }
@@ -88,13 +92,21 @@ export class LineageView {
         // Source tables (roots) - sorted by downstream count descending
         rootNodes.sort((a, b) => b.downstreamCount - a.downstreamCount);
         if (rootNodes.length > 0) {
+            const displayLimit = 20;
+            const displayNodes = rootNodes.slice(0, displayLimit);
+            const hasMore = rootNodes.length > displayLimit;
             html += `
                 <div class="lineage-section">
-                    <h3>📥 Source Tables (${rootNodes.length})</h3>
-                    <p class="section-hint">Data origins - click to see what tables use their data</p>
+                    <div class="section-header-with-action">
+                        <div>
+                            <h3>📥 Source Tables (${rootNodes.length})</h3>
+                            <p class="section-hint">Data origins - click to see what tables use their data</p>
+                        </div>
+                        ${hasMore ? `<button class="view-all-btn" data-action="view-all" data-section="sources" data-count="${rootNodes.length}">View All</button>` : ''}
+                    </div>
                     <div class="node-list">
             `;
-            for (const { node, downstreamCount } of rootNodes.slice(0, 10)) {
+            for (const { node, downstreamCount } of displayNodes) {
                 const countClass = downstreamCount > 0 ? 'has-connections' : 'no-connections';
                 html += `
                     <div class="node-item ${countClass}" data-action="show-downstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
@@ -105,8 +117,8 @@ export class LineageView {
                     </div>
                 `;
             }
-            if (rootNodes.length > 10) {
-                html += `<div class="more-items">+${rootNodes.length - 10} more</div>`;
+            if (hasMore) {
+                html += `<div class="more-items">+${rootNodes.length - displayLimit} more (use "View All" to see all)</div>`;
             }
             html += `
                     </div>
@@ -117,13 +129,21 @@ export class LineageView {
         // Output tables (leaves) - sorted by upstream count descending
         leafNodes.sort((a, b) => b.upstreamCount - a.upstreamCount);
         if (leafNodes.length > 0) {
+            const displayLimit = 20;
+            const displayNodes = leafNodes.slice(0, displayLimit);
+            const hasMore = leafNodes.length > displayLimit;
             html += `
                 <div class="lineage-section">
-                    <h3>📤 Output Tables (${leafNodes.length})</h3>
-                    <p class="section-hint">Data endpoints - click to see what tables feed into them</p>
+                    <div class="section-header-with-action">
+                        <div>
+                            <h3>📤 Output Tables (${leafNodes.length})</h3>
+                            <p class="section-hint">Data endpoints - click to see what tables feed into them</p>
+                        </div>
+                        ${hasMore ? `<button class="view-all-btn" data-action="view-all" data-section="outputs" data-count="${leafNodes.length}">View All</button>` : ''}
+                    </div>
                     <div class="node-list">
             `;
-            for (const { node, upstreamCount } of leafNodes.slice(0, 10)) {
+            for (const { node, upstreamCount } of displayNodes) {
                 const countClass = upstreamCount > 0 ? 'has-connections' : 'no-connections';
                 html += `
                     <div class="node-item ${countClass}" data-action="show-upstream" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
@@ -134,8 +154,8 @@ export class LineageView {
                     </div>
                 `;
             }
-            if (leafNodes.length > 10) {
-                html += `<div class="more-items">+${leafNodes.length - 10} more</div>`;
+            if (hasMore) {
+                html += `<div class="more-items">+${leafNodes.length - displayLimit} more (use "View All" to see all)</div>`;
             }
             html += `
                     </div>
