@@ -325,7 +325,20 @@ export class WorkspacePanel {
             case 'switchToImpactView':
                 this._currentView = 'impact';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send impact form to webview
+                if (this._lineageGraph) {
+                    const html = this._impactView.generateImpactForm(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'impactFormResult',
+                        data: { html }
+                    });
+                } else {
+                    const html = this._impactView.generateImpactForm(null);
+                    this._panel.webview.postMessage({
+                        command: 'impactFormResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'getLineage':
@@ -905,9 +918,13 @@ export class WorkspacePanel {
 
         /* ========== Table List View ========== */
         .table-list-view { padding: 10px; }
-        .table-list-header { margin-bottom: 16px; }
-        .table-list-header h3 { color: var(--text-primary); margin: 0 0 4px 0; font-size: 16px; }
-        .table-list-header .hint { color: var(--text-muted); font-size: 12px; margin: 0; }
+        .table-list-header { margin-bottom: 20px; }
+        .header-top {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .table-list-header h3 { color: var(--text-primary); margin: 0; font-size: 18px; font-weight: 600; }
+        .table-list-header .hint { color: var(--text-muted); font-size: 12px; margin: 4px 0 0 0; }
         .table-list-grid { display: flex; flex-direction: column; gap: 8px; }
         .table-list-item {
             display: flex; align-items: center; gap: 12px; padding: 12px 16px;
@@ -927,7 +944,270 @@ export class WorkspacePanel {
         }
         .table-list-item.no-connections { opacity: 0.7; }
         .table-list-item.no-connections:hover { opacity: 1; }
-        .table-list-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .table-list-empty { 
+            text-align: center; padding: 60px 20px; color: var(--text-muted); 
+        }
+        .table-list-empty svg {
+            width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.5;
+        }
+        .table-list-empty h3 {
+            color: var(--text-primary); margin: 0 0 8px 0; font-size: 16px;
+        }
+        .table-list-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 8px;
+        }
+        
+        /* Table List Controls */
+        .table-list-controls {
+            display: flex; flex-direction: column; gap: 12px;
+            margin-bottom: 20px; padding: 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .search-box-table {
+            display: flex; align-items: center; gap: 8px;
+            background: var(--bg-primary); padding: 8px 12px;
+            border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+            transition: all 0.2s;
+        }
+        .search-box-table:focus-within { border-color: var(--accent); }
+        .search-box-table svg { flex-shrink: 0; color: var(--text-dim); }
+        .search-input-table {
+            flex: 1; background: transparent; border: none;
+            color: var(--text-secondary); font-size: 13px; outline: none;
+        }
+        .search-input-table::placeholder { color: var(--text-dim); }
+        .search-clear-table {
+            background: transparent; border: none; color: var(--text-dim);
+            cursor: pointer; padding: 4px; display: none;
+            align-items: center; justify-content: center;
+            border-radius: var(--radius-sm);
+        }
+        .search-clear-table:hover { color: var(--error-light); background: rgba(239, 68, 68, 0.1); }
+        /*
+         * Filter Chips UI - Visual toggle buttons for quick filtering
+         * More intuitive than dropdowns, faster to toggle multiple types
+         */
+        .filter-chips {
+            display: flex; gap: 8px; flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .filter-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 6px 12px; background: var(--bg-primary);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-muted); font-size: 12px; cursor: pointer;
+            transition: all 0.2s ease; white-space: nowrap;
+        }
+        .filter-chip:hover {
+            background: var(--bg-tertiary); border-color: var(--border-color);
+            color: var(--text-secondary);
+        }
+        .filter-chip.active {
+            background: var(--accent); border-color: var(--accent);
+            color: white; font-weight: 500;
+        }
+        .chip-icon {
+            font-size: 14px; flex-shrink: 0;
+        }
+        .chip-label {
+            font-size: 12px; font-weight: 500;
+        }
+        .chip-count {
+            font-size: 10px; font-weight: 600; padding: 2px 6px;
+            background: rgba(255, 255, 255, 0.15); border-radius: 10px;
+            min-width: 18px; text-align: center;
+        }
+        .filter-chip:not(.active) .chip-count {
+            background: var(--bg-tertiary); color: var(--text-dim);
+        }
+
+        .filter-controls {
+            display: flex; gap: 8px; flex-wrap: wrap;
+        }
+        .filter-select {
+            flex: 1; min-width: 150px;
+            background: var(--bg-primary); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); font-size: 12px; padding: 8px 12px;
+            border-radius: var(--radius-md); outline: none; cursor: pointer;
+        }
+        .filter-select:hover { border-color: var(--border-color); }
+        .filter-select:focus { border-color: var(--accent); }
+
+        /* Responsive layout for narrow panels */
+        @media (max-width: 600px) {
+            .filter-chips {
+                justify-content: space-between;
+            }
+            .filter-chip {
+                flex: 1; min-width: 70px; justify-content: center;
+                padding: 8px 6px;
+            }
+            .filter-chip .chip-label {
+                display: none; /* Hide label on mobile, show only icon and count */
+            }
+            .filter-controls {
+                flex-direction: column;
+            }
+            .filter-select {
+                min-width: 100%; width: 100%;
+            }
+            .table-list-controls {
+                padding: 12px;
+            }
+        }
+        .table-list-results-info {
+            padding: 12px 16px; margin-bottom: 12px;
+            background: var(--bg-secondary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            font-size: 12px; color: var(--text-muted);
+        }
+        .table-list-empty-filter {
+            text-align: center; padding: 60px 20px; color: var(--text-muted);
+        }
+        .table-list-empty-filter svg {
+            width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.5;
+        }
+        .table-list-empty-filter h3 {
+            color: var(--text-primary); margin: 0 0 8px 0; font-size: 16px;
+        }
+        .table-list-empty-filter .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 8px;
+        }
+        mark {
+            background: rgba(99, 102, 241, 0.3); color: var(--text-primary);
+            padding: 2px 4px; border-radius: 3px;
+        }
+        
+        /* Impact Form Styles */
+        .impact-form-container {
+            max-width: 800px; margin: 0 auto;
+        }
+        .impact-form {
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle); padding: 24px;
+            margin-bottom: 24px;
+        }
+        .form-header {
+            margin-bottom: 20px;
+        }
+        .form-header h3 {
+            color: var(--text-primary); font-size: 18px; margin: 0 0 8px 0;
+        }
+        .form-description {
+            color: var(--text-muted); font-size: 13px; margin: 0;
+        }
+        .form-fields {
+            display: flex; flex-direction: column; gap: 20px;
+        }
+        .form-field {
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .form-field label {
+            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+        }
+        .form-select {
+            background: var(--bg-primary); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); font-size: 13px; padding: 10px 12px;
+            border-radius: var(--radius-md); outline: none; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .form-select:hover { border-color: var(--border-color); }
+        .form-select:focus { border-color: var(--accent); }
+        .radio-group {
+            display: flex; gap: 16px; flex-wrap: wrap;
+        }
+        .radio-label {
+            display: flex; align-items: center; gap: 6px;
+            cursor: pointer; color: var(--text-secondary); font-size: 13px;
+        }
+        .radio-label input[type="radio"] {
+            cursor: pointer;
+        }
+        .form-actions {
+            margin-top: 8px;
+        }
+        .btn-primary {
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px 20px; background: var(--accent); color: white;
+            border: none; border-radius: var(--radius-md); font-size: 13px;
+            font-weight: 500; cursor: pointer; transition: all 0.2s;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5; cursor: not-allowed;
+        }
+        .btn-primary svg {
+            width: 16px; height: 16px;
+        }
+        .impact-results {
+            margin-top: 24px;
+        }
+        .impact-empty {
+            text-align: center; padding: 80px 20px; color: var(--text-muted);
+        }
+        .impact-empty svg {
+            width: 64px; height: 64px; margin: 0 auto 24px; opacity: 0.5;
+        }
+        .impact-empty h3 {
+            color: var(--text-primary); margin: 0 0 12px 0; font-size: 18px;
+        }
+        .impact-empty p {
+            margin: 8px 0; font-size: 14px;
+        }
+        .impact-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 12px;
+        }
+        
+        /* Skeleton Loader */
+        .skeleton-loader {
+            padding: 20px;
+        }
+        .skeleton-line {
+            height: 16px; background: var(--bg-secondary);
+            border-radius: var(--radius-sm); margin-bottom: 12px;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+        .skeleton-line:last-child {
+            width: 60%; margin-bottom: 0;
+        }
+        @keyframes skeleton-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Lineage Enhancements */
+        .lineage-overview-empty {
+            text-align: center; padding: 80px 20px; color: var(--text-muted);
+        }
+        .lineage-overview-empty svg {
+            width: 64px; height: 64px; margin: 0 auto 24px; opacity: 0.5;
+        }
+        .lineage-overview-empty h3 {
+            color: var(--text-primary); margin: 0 0 12px 0; font-size: 18px;
+        }
+        .lineage-overview-empty p {
+            margin: 8px 0; font-size: 14px;
+        }
+        .lineage-overview-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 12px;
+        }
+        .section-header-with-action {
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 16px; margin-bottom: 12px;
+        }
+        .view-all-btn {
+            padding: 6px 12px; background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-secondary); font-size: 12px; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .view-all-btn:hover {
+            background: var(--bg-hover); border-color: var(--accent);
+            color: var(--text-primary);
+        }
 
         /* ========== Table Explorer Detail View ========== */
         .table-explorer { padding: 16px; }
@@ -1901,9 +2181,9 @@ export class WorkspacePanel {
         };
 
         const viewEmptyStates = {
-            lineage: '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading lineage data...</div>',
-            tableExplorer: '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading table list...</div>',
-            impact: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><p>Right-click on a table and select "Analyze Impact"<br>to see what would be affected by changes.</p></div>'
+            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
         function switchToView(view) {
@@ -2162,6 +2442,8 @@ export class WorkspacePanel {
                 case 'tableListResult':
                     if (lineageContent && message.data?.html) {
                         lineageContent.innerHTML = message.data.html;
+                        // Setup table search and filter handlers
+                        setupTableSearchAndFilter();
                     }
                     break;
                 case 'lineageOverviewResult':
@@ -2169,8 +2451,64 @@ export class WorkspacePanel {
                         lineageContent.innerHTML = message.data.html;
                     }
                     break;
+                case 'impactFormResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        // Setup impact form handlers
+                        setupImpactForm();
+                    }
+                    break;
+                case 'impactResult':
+                    if (lineageContent && message.data?.html) {
+                        const resultsDiv = document.getElementById('impact-results');
+                        if (resultsDiv) {
+                            resultsDiv.style.display = 'block';
+                            resultsDiv.innerHTML = message.data.html;
+                        } else {
+                            lineageContent.innerHTML = message.data.html;
+                        }
+                    }
+                    break;
             }
         });
+
+        // ========== Impact Form Setup ==========
+        function setupImpactForm() {
+            const tableSelect = document.getElementById('impact-table-select');
+            const analyzeBtn = document.getElementById('impact-analyze-btn');
+            const changeTypeRadios = document.querySelectorAll('input[name="change-type"]');
+
+            if (tableSelect && analyzeBtn) {
+                // Enable/disable analyze button based on selection
+                tableSelect.addEventListener('change', () => {
+                    analyzeBtn.disabled = !tableSelect.value;
+                });
+
+                // Handle analyze button click
+                analyzeBtn.addEventListener('click', () => {
+                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
+                    const tableName = selectedOption.getAttribute('data-name');
+                    const tableType = selectedOption.getAttribute('data-type');
+                    const changeType = document.querySelector('input[name="change-type"]:checked')?.value || 'modify';
+
+                    if (!tableName) return;
+
+                    // Show loading state
+                    const resultsDiv = document.getElementById('impact-results');
+                    if (resultsDiv) {
+                        resultsDiv.style.display = 'block';
+                        resultsDiv.innerHTML = '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
+                    }
+
+                    vscode.postMessage({
+                        command: 'analyzeImpact',
+                        type: tableType === 'view' ? 'table' : 'table',
+                        name: tableName,
+                        changeType: changeType
+                    });
+                });
+            }
+        }
 
         // ========== Event Delegation for Dynamic Lineage Content ==========
         if (lineageContent) {
@@ -2285,6 +2623,313 @@ export class WorkspacePanel {
 
         function hideTooltip() {
             tooltip.style.display = 'none';
+        }
+
+        // ========== Table Search and Filter Setup ==========
+        /**
+         * Enhanced table search and filter with:
+         * - Filter chips UI (visual toggle buttons)
+         * - State persistence (survives tab navigation)
+         * - Sort direction indicators
+         * - All keyboard shortcuts and accessibility
+         */
+        function setupTableSearchAndFilter() {
+            const searchInput = document.getElementById('table-search-input');
+            const searchClear = document.getElementById('table-search-clear');
+            const sortSelect = document.getElementById('table-sort');
+            const tableGrid = document.getElementById('table-list-grid');
+            const emptyFilter = document.getElementById('table-list-empty-filter');
+            const resultsInfo = document.getElementById('table-list-results-info');
+            const resultsCount = document.getElementById('table-results-count');
+            const emptyMessage = document.getElementById('empty-filter-message');
+            const filterChipsContainer = document.getElementById('filter-chips-container');
+
+            // State management - persists across tab navigation
+            let filterState = {
+                searchQuery: '',
+                activeType: 'all',
+                sortBy: 'connected',
+                // Load saved state if available
+                load: function() {
+                    try {
+                        const saved = sessionStorage.getItem('tableFilterState');
+                        if (saved) {
+                            const parsed = JSON.parse(saved);
+                            this.searchQuery = parsed.searchQuery || '';
+                            this.activeType = parsed.activeType || 'all';
+                            this.sortBy = parsed.sortBy || 'connected';
+                        }
+                    } catch (e) {
+                        console.warn('Could not load filter state:', e);
+                    }
+                },
+                save: function() {
+                    try {
+                        sessionStorage.setItem('tableFilterState', JSON.stringify({
+                            searchQuery: this.searchQuery,
+                            activeType: this.activeType,
+                            sortBy: this.sortBy
+                        }));
+                    } catch (e) {
+                        console.warn('Could not save filter state:', e);
+                    }
+                }
+            };
+
+            // Load persisted state
+            filterState.load();
+
+            let debounceTimeout;
+            const totalItems = tableGrid ? tableGrid.querySelectorAll('.table-list-item').length : 0;
+
+            // Apply saved state to UI
+            if (searchInput && filterState.searchQuery) {
+                searchInput.value = filterState.searchQuery;
+            }
+            if (sortSelect) {
+                sortSelect.value = filterState.sortBy;
+            }
+            if (filterChipsContainer) {
+                updateChipsUI();
+            }
+
+            function filterTables() {
+                if (!tableGrid) return;
+
+                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const typeValue = filterState.activeType; // Use chip state instead of dropdown
+                const sortValue = sortSelect?.value || 'connected';
+
+                const items = Array.from(tableGrid.querySelectorAll('.table-list-item'));
+                let visibleItems = [];
+
+                // Filter
+                items.forEach(item => {
+                    const tableName = item.getAttribute('data-name') || '';
+                    const tableType = item.getAttribute('data-type') || '';
+                    const nameText = item.querySelector('.table-list-name')?.textContent?.toLowerCase() || '';
+
+                    const matchesSearch = !searchQuery || tableName.includes(searchQuery) || nameText.includes(searchQuery);
+                    const matchesType = typeValue === 'all' || tableType === typeValue;
+
+                    if (matchesSearch && matchesType) {
+                        item.style.display = '';
+                        visibleItems.push(item);
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+
+                // Sort
+                visibleItems.sort((a, b) => {
+                    if (sortValue === 'name-asc') {
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameA.localeCompare(nameB);
+                    } else if (sortValue === 'name-desc') {
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameB.localeCompare(nameA);
+                    } else if (sortValue === 'type') {
+                        const typeA = a.getAttribute('data-type') || '';
+                        const typeB = b.getAttribute('data-type') || '';
+                        if (typeA !== typeB) return typeA.localeCompare(typeB);
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameA.localeCompare(nameB);
+                    } else {
+                        // Most connected (default) - items are already sorted by connection count
+                        return 0;
+                    }
+                });
+
+                // Reorder in DOM
+                visibleItems.forEach(item => tableGrid.appendChild(item));
+
+                // Highlight search terms
+                if (searchQuery && visibleItems.length > 0) {
+                    visibleItems.forEach(item => {
+                        const nameEl = item.querySelector('.table-list-name');
+                        if (nameEl) {
+                            const text = nameEl.textContent || '';
+                            let escapedQuery = '';
+                            const specialChars = ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\\\'];
+                            for (let i = 0; i < searchQuery.length; i++) {
+                                const char = searchQuery[i];
+                                if (specialChars.indexOf(char) >= 0) {
+                                    escapedQuery += '\\\\' + char;
+                                } else {
+                                    escapedQuery += char;
+                                }
+                            }
+                            const regex = new RegExp('(' + escapedQuery + ')', 'gi');
+                            nameEl.innerHTML = text.replace(regex, '<mark>$1</mark>');
+                        }
+                    });
+                } else {
+                    // Remove highlights
+                    items.forEach(item => {
+                        const nameEl = item.querySelector('.table-list-name');
+                        if (nameEl) {
+                            nameEl.innerHTML = nameEl.textContent || '';
+                        }
+                    });
+                }
+
+                // Update results count
+                if (resultsInfo && resultsCount) {
+                    if (visibleItems.length < totalItems || searchQuery || typeValue !== 'all') {
+                        resultsInfo.style.display = 'block';
+                        resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
+                    } else {
+                        resultsInfo.style.display = 'none';
+                    }
+                }
+
+                // Show/hide empty state with improved message
+                if (emptyFilter && emptyMessage) {
+                    if (visibleItems.length === 0) {
+                        emptyFilter.style.display = 'block';
+                        let message = 'No tables match your search criteria';
+                        if (searchQuery) {
+                            message = 'No tables matching "' + searchQuery + '"';
+                        } else if (typeValue !== 'all') {
+                            message = 'No ' + typeValue + 's found';
+                        }
+                        emptyMessage.textContent = message;
+                    } else {
+                        emptyFilter.style.display = 'none';
+                    }
+                }
+
+                // Show/hide clear button
+                if (searchClear) {
+                    searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
+                }
+
+                // Save filter state after filtering
+                filterState.searchQuery = searchQuery;
+                filterState.save();
+            }
+
+            /**
+             * Update filter chips UI based on current active type
+             * Shows which chip is active with visual feedback
+             */
+            function updateChipsUI() {
+                if (!filterChipsContainer) return;
+
+                const chips = filterChipsContainer.querySelectorAll('.filter-chip');
+                chips.forEach(chip => {
+                    const chipType = chip.getAttribute('data-type');
+                    if (chipType === filterState.activeType) {
+                        chip.classList.add('active');
+                    } else {
+                        chip.classList.remove('active');
+                    }
+                });
+            }
+
+            /**
+             * Handle chip click - toggle active filter type
+             * If clicking the already-active chip, reset to 'all'
+             */
+            function handleChipClick(chipType: string) {
+                // If clicking the same chip, toggle it off (go back to 'all')
+                if (filterState.activeType === chipType && chipType !== 'all') {
+                    filterState.activeType = 'all';
+                } else {
+                    filterState.activeType = chipType;
+                }
+
+                // Update UI
+                updateChipsUI();
+
+                // Re-filter and save state
+                filterTables();
+                filterState.save();
+            }
+
+            /**
+             * Update sort dropdown with visual direction indicators
+             * Adds arrows (↑/↓) to show current sort direction
+             */
+            function updateSortIndicator() {
+                if (!sortSelect) return;
+
+                const currentValue = sortSelect.value;
+                sortSelect.setAttribute('data-current-sort', currentValue);
+
+                // Visual feedback could be enhanced here with CSS
+                // The option text already includes indicators (↑/↓)
+            }
+
+            // Debounced filter function
+            function debouncedFilter() {
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(filterTables, 180);
+            }
+
+            // Event listeners
+            searchInput?.addEventListener('input', debouncedFilter);
+            searchClear?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                filterState.activeType = 'all'; // Reset to all types
+                filterState.searchQuery = '';
+                filterState.save();
+                updateChipsUI();
+                filterTables();
+                searchInput?.focus();
+            });
+
+            // Filter chips click handlers
+            filterChipsContainer?.addEventListener('click', (e) => {
+                const chip = e.target.closest('.filter-chip');
+                if (chip) {
+                    const chipType = chip.getAttribute('data-type');
+                    if (chipType) {
+                        handleChipClick(chipType);
+                    }
+                }
+            });
+
+            // Sort dropdown change - save state
+            sortSelect?.addEventListener('change', () => {
+                filterState.sortBy = sortSelect.value;
+                filterState.save();
+                updateSortIndicator();
+                filterTables();
+            });
+
+            // Keyboard shortcuts
+            searchInput?.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (searchInput.value) {
+                        searchInput.value = '';
+                        filterState.searchQuery = '';
+                        filterState.save();
+                        filterTables();
+                    } else {
+                        searchInput.blur();
+                    }
+                    e.preventDefault();
+                }
+            });
+
+            // Global keyboard shortcut: / to focus search
+            document.addEventListener('keydown', (e) => {
+                // Only if not typing in an input/textarea
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                // Check for / key (not Shift+/ which is ?)
+                if (e.key === '/' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    searchInput?.focus();
+                    searchInput?.select();
+                }
+            });
+
+            // Initial filter to show results count if needed
+            filterTables();
         }
     </script>
 </body>

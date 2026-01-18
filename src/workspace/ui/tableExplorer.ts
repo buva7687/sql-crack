@@ -10,7 +10,7 @@ import { TableExplorerData } from './types';
  */
 export class TableExplorer {
     /**
-     * Generate a list of all tables in the workspace
+     * Generate a list of all tables in the workspace with search and filtering
      */
     generateTableList(graph: LineageGraph): string {
         // Collect all table/view nodes
@@ -21,12 +21,13 @@ export class TableExplorer {
             }
         });
 
-        // Sort alphabetically
-        tables.sort((a, b) => a.name.localeCompare(b.name));
-
         if (tables.length === 0) {
             return `
                 <div class="table-list-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                    </svg>
+                    <h3>No Tables Found</h3>
                     <p>No tables found in workspace.</p>
                     <p>Open SQL files to populate the table list.</p>
                 </div>
@@ -41,11 +42,84 @@ export class TableExplorer {
             return {
                 table,
                 upstreamCount: upstream.nodes.length,
-                downstreamCount: downstream.nodes.length
+                downstreamCount: downstream.nodes.length,
+                totalConnections: upstream.nodes.length + downstream.nodes.length
             };
         });
 
-        // Sort by total connections (most connected first)
+        // Count by type
+        const typeCounts = {
+            all: tables.length,
+            table: tables.filter(t => t.type === 'table').length,
+            view: tables.filter(t => t.type === 'view').length,
+            cte: tables.filter(t => t.type === 'cte').length
+        };
+
+        let html = `
+            <div class="table-list-view">
+                <div class="table-list-header">
+                    <div class="header-top">
+                        <h3>All Tables & Views (${tables.length})</h3>
+                    </div>
+                    <p class="hint">📋 Complete catalog of tables and views defined in your workspace</p>
+                </div>
+                
+                <!-- Search and Filter Controls -->
+                <div class="table-list-controls">
+                    <div class="search-box-table">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <input type="text" id="table-search-input" class="search-input-table" placeholder="Filter tables, views, CTEs... (Press / to focus)" autocomplete="off">
+                        <button class="search-clear-table" id="table-search-clear" style="display: none;" title="Clear search">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 6L6 18M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Filter Chips - Visual toggle buttons for quick filtering -->
+                    <div class="filter-chips" id="filter-chips-container">
+                        <button class="filter-chip active" data-type="all" data-count="${typeCounts.all}" title="Show all types">
+                            <span class="chip-icon">📋</span>
+                            <span class="chip-label">All</span>
+                            <span class="chip-count">${typeCounts.all}</span>
+                        </button>
+                        <button class="filter-chip" data-type="table" data-count="${typeCounts.table}" title="Show tables only">
+                            <span class="chip-icon">📊</span>
+                            <span class="chip-label">Tables</span>
+                            <span class="chip-count">${typeCounts.table}</span>
+                        </button>
+                        <button class="filter-chip" data-type="view" data-count="${typeCounts.view}" title="Show views only">
+                            <span class="chip-icon">👁️</span>
+                            <span class="chip-label">Views</span>
+                            <span class="chip-count">${typeCounts.view}</span>
+                        </button>
+                        <button class="filter-chip" data-type="cte" data-count="${typeCounts.cte}" title="Show CTEs only">
+                            <span class="chip-icon">🔄</span>
+                            <span class="chip-label">CTEs</span>
+                            <span class="chip-count">${typeCounts.cte}</span>
+                        </button>
+                    </div>
+
+                    <!-- Sort dropdown with direction indicators -->
+                    <div class="filter-controls">
+                        <select id="table-sort" class="filter-select" data-current-sort="connected">
+                            <option value="connected">🔗 Most Connected</option>
+                            <option value="name-asc">🔤 Name (A-Z ↑)</option>
+                            <option value="name-desc">🔤 Name (Z-A ↓)</option>
+                            <option value="type">📦 Type</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-list-results-info" id="table-list-results-info" style="display: none;">
+                    <span id="table-results-count">Showing 0 of 0 tables</span>
+                </div>
+
+                <div class="table-list-grid" id="table-list-grid">
+        `;
+
+        // Sort by total connections (most connected first) - default
         tablesWithCounts.sort((a, b) => {
             const totalA = a.upstreamCount + a.downstreamCount;
             const totalB = b.upstreamCount + b.downstreamCount;
@@ -53,26 +127,18 @@ export class TableExplorer {
             return a.table.name.localeCompare(b.table.name);
         });
 
-        let html = `
-            <div class="table-list-view">
-                <div class="table-list-header">
-                    <h3>All Tables & Views (${tables.length})</h3>
-                    <p class="hint">📋 Complete catalog of tables and views defined in your workspace</p>
-                    <p class="hint" style="margin-top: 4px; font-size: 11px; color: var(--text-dim);">
-                        Click any table to explore its columns, data sources (upstream), and consumers (downstream)
-                    </p>
-                </div>
-                <div class="table-list-grid">
-        `;
-
-        for (const { table, upstreamCount, downstreamCount } of tablesWithCounts) {
+        for (const { table, upstreamCount, downstreamCount, totalConnections } of tablesWithCounts) {
             const typeIcon = this.getTypeIcon(table.type);
             const fileName = table.filePath ? table.filePath.split('/').pop() || '' : '';
-            const totalConnections = upstreamCount + downstreamCount;
             const hasConnections = totalConnections > 0;
 
             html += `
-                <div class="table-list-item ${!hasConnections ? 'no-connections' : ''}" data-action="explore-table" data-node-id="${this.escapeHtml(table.id)}" data-table="${this.escapeHtml(table.name)}">
+                <div class="table-list-item ${!hasConnections ? 'no-connections' : ''}" 
+                     data-action="explore-table" 
+                     data-node-id="${this.escapeHtml(table.id)}" 
+                     data-table="${this.escapeHtml(table.name)}"
+                     data-type="${table.type}"
+                     data-name="${this.escapeHtml(table.name.toLowerCase())}">
                     <div class="table-list-icon">${typeIcon}</div>
                     <div class="table-list-info">
                         <span class="table-list-name">${this.escapeHtml(table.name)}</span>
@@ -88,6 +154,14 @@ export class TableExplorer {
         }
 
         html += `
+                </div>
+                <div id="table-list-empty-filter" class="table-list-empty-filter" style="display: none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    <h3>No tables found</h3>
+                    <p id="empty-filter-message">No tables match your search criteria</p>
+                    <p class="hint">Try a different search term or adjust filters</p>
                 </div>
             </div>
         `;
