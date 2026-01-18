@@ -13,7 +13,7 @@ import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 
-const INDEX_VERSION = 2;
+const INDEX_VERSION = 3; // Bumped for per-statement lineage (statementIndex field)
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const INDEX_STALE_THRESHOLD = 3600000; // 1 hour
 

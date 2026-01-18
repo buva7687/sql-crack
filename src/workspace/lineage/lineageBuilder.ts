@@ -199,13 +199,10 @@ export class LineageBuilder implements LineageGraph {
      * - SELECT/JOIN tables are INPUTs (data flows FROM them)
      * - CREATE TABLE/VIEW definitions are OUTPUTs if the file has input references
      *
-     * For each file, we create edges: INPUT tables → OUTPUT tables
+     * IMPORTANT: Edges are created per-statement, not per-file
+     * This prevents false relationships between unrelated queries in the same file
      */
     private addFileEdges(filePath: string, analysis: FileAnalysis): void {
-        // Separate references into inputs (sources) and outputs (targets)
-        const inputTables: Set<string> = new Set();
-        const outputTables: Set<string> = new Set();
-
         // Collect CTE names from this file to filter them out
         const fileCteNames = new Set<string>();
         if (analysis.queries) {
@@ -219,7 +216,6 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // ALWAYS extract CTE names and subquery aliases directly from SQL file as a fallback/verification
-        // This ensures we catch CTEs and subquery aliases even if queries array is empty or incomplete
         try {
             if (fs.existsSync(filePath)) {
                 const sql = fs.readFileSync(filePath, 'utf8');
@@ -228,6 +224,9 @@ export class LineageBuilder implements LineageGraph {
         } catch (error) {
             // File read error - skip
         }
+
+        // Group references by statement index for per-statement lineage
+        const statementRefs = new Map<number, { inputs: Set<string>; outputs: Set<string> }>();
 
         for (const ref of analysis.references) {
             const tableKey = getQualifiedKey(ref.tableName, ref.schema);
@@ -238,91 +237,107 @@ export class LineageBuilder implements LineageGraph {
                 continue;
             }
 
-            // CRITICAL: Skip if the table name matches a known CTE or subquery alias from this file
-            // This is the most important check - CTE names and subquery aliases should NEVER be treated as table references
-            // regardless of their referenceType (select, subquery, etc.)
+            // Skip if the table name matches a known CTE or subquery alias
             if (fileCteNames.has(tableNameLower)) {
                 continue;
             }
 
+            // Get or create statement bucket (default to 0 for backward compatibility)
+            const stmtIndex = ref.statementIndex ?? 0;
+            if (!statementRefs.has(stmtIndex)) {
+                statementRefs.set(stmtIndex, { inputs: new Set(), outputs: new Set() });
+            }
+            const stmtBucket = statementRefs.get(stmtIndex)!;
+
             // SELECT and JOIN references are data sources (inputs)
             if (ref.referenceType === 'select' || ref.referenceType === 'join' || ref.referenceType === 'subquery') {
-                inputTables.add(tableKey);
+                stmtBucket.inputs.add(tableKey);
             }
 
             // INSERT, UPDATE, DELETE targets are data destinations (outputs)
             if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
-                outputTables.add(tableKey);
+                stmtBucket.outputs.add(tableKey);
             }
         }
 
-        // Also treat definitions in this file as potential outputs
-        // Only for views (always have SELECT) or CTAS (CREATE TABLE ... AS SELECT)
+        // Handle definitions (views, CTAS) - associate with statement 0 or their own bucket
         for (const def of analysis.definitions) {
             const tableKey = getQualifiedKey(def.name, def.schema);
 
-            // Views always derive from a SELECT query
-            if (def.type === 'view' && inputTables.size > 0) {
-                outputTables.add(tableKey);
-            }
-            // For tables, only treat as output if it's a CTAS (has AS SELECT in SQL)
-            else if (def.type === 'table' && def.sql && inputTables.size > 0) {
-                // Check for CTAS pattern: CREATE TABLE ... AS SELECT or AS (SELECT
-                const ctasPattern = /\bAS\s+(?:SELECT|\()/i;
-                if (ctasPattern.test(def.sql)) {
-                    outputTables.add(tableKey);
+            // Find a statement bucket that has inputs (for views/CTAS)
+            // Views and CTAS derive from SELECT queries, so we need to find which statement they belong to
+            for (const [stmtIndex, stmtBucket] of statementRefs) {
+                // Views always derive from a SELECT query
+                if (def.type === 'view' && stmtBucket.inputs.size > 0) {
+                    stmtBucket.outputs.add(tableKey);
+                    break; // Only add to one statement
+                }
+                // For tables, only treat as output if it's a CTAS
+                else if (def.type === 'table' && def.sql && stmtBucket.inputs.size > 0) {
+                    const ctasPattern = /\bAS\s+(?:SELECT|\()/i;
+                    if (ctasPattern.test(def.sql)) {
+                        stmtBucket.outputs.add(tableKey);
+                        break;
+                    }
                 }
             }
         }
 
-        // Remove self-references: a table can't be both input and output in the same flow
-        // (unless it's a recursive CTE, which we handle separately)
-        for (const outputTable of outputTables) {
-            inputTables.delete(outputTable);
-        }
+        // Create edges per statement: each input flows into each output within the same statement
+        for (const [stmtIndex, stmtBucket] of statementRefs) {
+            const { inputs, outputs } = stmtBucket;
 
-        // Create edges: each input flows into each output
-        for (const sourceTableKey of inputTables) {
-            const sourceNodeId = this.resolveTableNodeId(sourceTableKey);
-            let sourceNode = sourceNodeId ? this.nodes.get(sourceNodeId) : undefined;
-
-            // Create external source node if needed
-            if (!sourceNode && this.options.includeExternal) {
-                sourceNode = this.addExternalNode(sourceTableKey);
+            // Remove self-references within this statement
+            for (const outputTable of outputs) {
+                inputs.delete(outputTable);
             }
 
-            if (!sourceNode) continue;
+            // Skip if no outputs in this statement
+            if (outputs.size === 0) continue;
 
-            for (const targetTableKey of outputTables) {
-                const targetNodeId = this.resolveTableNodeId(targetTableKey);
-                let targetNode = targetNodeId ? this.nodes.get(targetNodeId) : undefined;
+            for (const sourceTableKey of inputs) {
+                const sourceNodeId = this.resolveTableNodeId(sourceTableKey);
+                let sourceNode = sourceNodeId ? this.nodes.get(sourceNodeId) : undefined;
 
-                // Create external target node if needed
-                if (!targetNode && this.options.includeExternal) {
-                    targetNode = this.addExternalNode(targetTableKey);
+                // Create external source node if needed
+                if (!sourceNode && this.options.includeExternal) {
+                    sourceNode = this.addExternalNode(sourceTableKey);
                 }
 
-                if (!targetNode) continue;
+                if (!sourceNode) continue;
 
-                // Don't create self-referential edges
-                if (sourceNode.id === targetNode.id) continue;
+                for (const targetTableKey of outputs) {
+                    const targetNodeId = this.resolveTableNodeId(targetTableKey);
+                    let targetNode = targetNodeId ? this.nodes.get(targetNodeId) : undefined;
 
-                // Create edge from source to target
-                const edgeId = `${sourceNode.id}->${targetNode.id}`;
-                const existingEdge = this.edges.find(e => e.id === edgeId);
+                    // Create external target node if needed
+                    if (!targetNode && this.options.includeExternal) {
+                        targetNode = this.addExternalNode(targetTableKey);
+                    }
 
-                if (!existingEdge) {
-                    this.edges.push({
-                        id: edgeId,
-                        sourceId: sourceNode.id,
-                        targetId: targetNode.id,
-                        type: 'direct',
-                        metadata: {
-                            filePath,
-                            inputCount: inputTables.size,
-                            outputCount: outputTables.size
-                        }
-                    });
+                    if (!targetNode) continue;
+
+                    // Don't create self-referential edges
+                    if (sourceNode.id === targetNode.id) continue;
+
+                    // Create edge from source to target
+                    const edgeId = `${sourceNode.id}->${targetNode.id}`;
+                    const existingEdge = this.edges.find(e => e.id === edgeId);
+
+                    if (!existingEdge) {
+                        this.edges.push({
+                            id: edgeId,
+                            sourceId: sourceNode.id,
+                            targetId: targetNode.id,
+                            type: 'direct',
+                            metadata: {
+                                filePath,
+                                statementIndex: stmtIndex,
+                                inputCount: inputs.size,
+                                outputCount: outputs.size
+                            }
+                        });
+                    }
                 }
             }
         }
