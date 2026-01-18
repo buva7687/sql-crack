@@ -51,6 +51,7 @@ export class ReferenceExtractor {
     private parser: Parser;
     private options: ExtractionOptions;
     private columnExtractor: ColumnExtractor;
+    private globalCteNames: Set<string> = new Set(); // Track CTE names across the entire file
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -63,6 +64,18 @@ export class ReferenceExtractor {
      */
     private isReservedWord(name: string): boolean {
         return SQL_RESERVED_WORDS.has(name.toLowerCase());
+    }
+
+    /**
+     * Strip SQL comments from a string to simplify pattern matching
+     * Handles both single-line (--) and multi-line comments
+     */
+    private stripSqlComments(sql: string): string {
+        // Remove multi-line comments first (/* ... */)
+        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
+        // Remove single-line comments (-- ... until end of line)
+        result = result.replace(/--[^\n]*/g, ' ');
+        return result;
     }
 
     /**
@@ -80,17 +93,172 @@ export class ReferenceExtractor {
             const ast = this.parser.astify(sql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
+            // First pass: collect all CTE names from WITH clauses across all statements
+            const globalCteNames = new Set<string>();
+            for (const stmt of statements) {
+                if (!stmt) continue;
+                this.collectCTENames(stmt, globalCteNames);
+            }
+
+            // Strip comments for cleaner regex-based pattern matching
+            const sqlNoComments = this.stripSqlComments(sql);
+            const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
+
+            // Also collect CTE names using regex as backup (handles cases AST parser might miss)
+            // This pattern now works correctly since comments are stripped
+            const ctePattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
+            let match;
+            while ((match = ctePattern.exec(sqlNoComments)) !== null) {
+                const cteName = match[1];
+                if (cteName && !reservedWords.has(cteName.toLowerCase())) {
+                    globalCteNames.add(cteName.toLowerCase());
+                }
+            }
+
+            // Also check for comma-separated CTEs: WITH name1 AS (...), name2 AS (...)
+            const multiCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
+            while ((match = multiCtePattern.exec(sqlNoComments)) !== null) {
+                const cteName = match[1];
+                if (cteName && !reservedWords.has(cteName.toLowerCase())) {
+                    globalCteNames.add(cteName.toLowerCase());
+                }
+            }
+
+            // Also collect subquery aliases from SQL using regex (as backup)
+            // This catches subqueries like: FROM (SELECT ...) AS alias
+            const subqueryAliasPattern = /\)\s+AS\s+(\w+)(?=\s|$|,|\n|WHERE|JOIN|ON)/gi;
+            while ((match = subqueryAliasPattern.exec(sqlNoComments)) !== null) {
+                const aliasName = match[1];
+                if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
+                    // Check if it's in a FROM clause context - look further back
+                    const beforeMatch = sqlNoComments.substring(Math.max(0, match.index - 500), match.index);
+                    // More flexible pattern for UPDATE...FROM
+                    const fromContext = /\bFROM\s+\(/i.test(beforeMatch) ||
+                                      /\bUPDATE\s+[\w\s]+\s+FROM\s+\(/i.test(beforeMatch) ||
+                                      /FROM\s*\([\s\S]*?\)\s*AS\s*$/i.test(beforeMatch.slice(-200));
+                    if (fromContext) {
+                        globalCteNames.add(aliasName.toLowerCase());
+                    }
+                }
+            }
+
+            // Also extract subquery aliases from UPDATE...FROM patterns using balanced parenthesis matching
+            // This is more efficient than regex with large ranges that can cause backtracking
+            this.extractUpdateFromAliases(sqlNoComments, globalCteNames, reservedWords);
+
+            // Store globally for defensive checks
+            this.globalCteNames = globalCteNames;
+
+            // Second pass: extract references with CTE names available
             for (const stmt of statements) {
                 if (!stmt) continue;
                 const aliasMap = this.createAliasMap();
+                // Add globally collected CTE names to the alias map
+                for (const cteName of globalCteNames) {
+                    aliasMap.cteNames.add(cteName);
+                }
                 this.extractFromStatement(stmt, filePath, sql, references, aliasMap, 0);
             }
         } catch (error) {
             // Fallback to regex extraction
-            references.push(...this.extractWithRegex(sql, filePath));
+            const regexRefs = this.extractWithRegex(sql, filePath);
+            // Filter out CTE names and subquery aliases from regex fallback
+            for (const ref of regexRefs) {
+                const tableNameLower = ref.tableName.toLowerCase();
+                if (!this.globalCteNames.has(tableNameLower)) {
+                    references.push(ref);
+                }
+            }
         }
 
-        return this.deduplicateReferences(references);
+        // Final pass: filter out any references that match known CTE/subquery aliases
+        // This is a defensive check in case any slipped through
+        // Keep globalCteNames available for this check
+        const filteredReferences: TableReference[] = [];
+        for (const ref of references) {
+            const tableNameLower = ref.tableName.toLowerCase();
+            // Skip if it matches a known CTE/subquery alias
+            if (this.globalCteNames.has(tableNameLower)) {
+                continue;
+            }
+            filteredReferences.push(ref);
+        }
+
+        // Clear global CTE names after processing
+        this.globalCteNames.clear();
+
+        return this.deduplicateReferences(filteredReferences);
+    }
+
+    /**
+     * Recursively collect all CTE names from a statement tree
+     */
+    private collectCTENames(stmt: any, cteNames: Set<string>): void {
+        if (!stmt || typeof stmt !== 'object') return;
+
+        // Check for WITH clause
+        if (stmt.with) {
+            const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
+            for (const cte of withClause) {
+                const cteName = cte.name?.value || cte.name;
+                if (cteName && typeof cteName === 'string') {
+                    cteNames.add(cteName.toLowerCase());
+                }
+            }
+        }
+
+        // Check if statement is a WITH statement
+        if (stmt.type && stmt.type.toLowerCase() === 'with') {
+            if (stmt.ctes) {
+                const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
+                for (const cte of ctes) {
+                    const cteName = cte.name?.value || cte.name;
+                    if (cteName && typeof cteName === 'string') {
+                        cteNames.add(cteName.toLowerCase());
+                    }
+                }
+            }
+        }
+
+        // Recursively check nested statements and all possible AST structures
+        if (stmt.statement) {
+            this.collectCTENames(stmt.statement, cteNames);
+        }
+        if (stmt.query) {
+            this.collectCTENames(stmt.query, cteNames);
+        }
+        if (stmt.select) {
+            this.collectCTENames(stmt.select, cteNames);
+        }
+        if (stmt.insert) {
+            this.collectCTENames(stmt.insert, cteNames);
+        }
+        if (stmt.update) {
+            this.collectCTENames(stmt.update, cteNames);
+        }
+        if (stmt.delete) {
+            this.collectCTENames(stmt.delete, cteNames);
+        }
+        // Check all array properties that might contain statements
+        if (Array.isArray(stmt)) {
+            for (const item of stmt) {
+                this.collectCTENames(item, cteNames);
+            }
+        }
+        // Check all object properties recursively (but limit depth to avoid infinite loops)
+        if (typeof stmt === 'object' && stmt !== null) {
+            for (const key in stmt) {
+                if (key !== 'with' && key !== 'ctes' && typeof stmt[key] === 'object' && stmt[key] !== null) {
+                    // Only recurse into likely statement-like structures
+                    if (key === 'statement' || key === 'query' || key === 'select' || 
+                        key === 'insert' || key === 'update' || key === 'delete' ||
+                        key === 'ast' || key === 'stmt' || key === 'definition' ||
+                        Array.isArray(stmt[key])) {
+                        this.collectCTENames(stmt[key], cteNames);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -135,9 +303,81 @@ export class ReferenceExtractor {
         aliasMap: AliasMap,
         depth: number
     ): void {
-        if (!stmt || !stmt.type) return;
+        if (!stmt) return;
         if (depth > this.options.maxSubqueryDepth) return;
 
+        // Check for WITH clause at the top level (before statement type)
+        // Some parsers structure WITH clauses separately from the main statement
+        if (stmt.with) {
+            for (const cte of stmt.with) {
+                const cteName = cte.name?.value || cte.name;
+                if (cteName) {
+                    aliasMap.cteNames.add(cteName.toLowerCase());
+                }
+
+                // Extract references from CTE definition
+                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
+                    cte.definition?.ast || cte.definition;
+                if (cteStmt) {
+                    // Create new alias map for CTE scope
+                    const cteAliasMap = this.createAliasMap();
+                    cteAliasMap.cteNames = new Set(aliasMap.cteNames);
+                    this.extractFromStatement(
+                        cteStmt,
+                        filePath,
+                        sql,
+                        references,
+                        cteAliasMap,
+                        depth + 1
+                    );
+                }
+            }
+        }
+
+        // Also check if the statement itself is a WITH statement (some parsers structure it this way)
+        if (stmt.type && stmt.type.toLowerCase() === 'with') {
+            // Process WITH CTEs
+            if (stmt.ctes) {
+                const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
+                for (const cte of ctes) {
+                    const cteName = cte.name?.value || cte.name;
+                    if (cteName) {
+                        aliasMap.cteNames.add(cteName.toLowerCase());
+                    }
+
+                    const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
+                        cte.definition?.ast || cte.definition;
+                    if (cteStmt) {
+                        const cteAliasMap = this.createAliasMap();
+                        cteAliasMap.cteNames = new Set(aliasMap.cteNames);
+                        this.extractFromStatement(
+                            cteStmt,
+                            filePath,
+                            sql,
+                            references,
+                            cteAliasMap,
+                            depth + 1
+                        );
+                    }
+                }
+            }
+
+            // Process the main statement after WITH
+            if (stmt.statement || stmt.query) {
+                const mainStmt = stmt.statement || stmt.query;
+                this.extractFromStatement(
+                    mainStmt,
+                    filePath,
+                    sql,
+                    references,
+                    aliasMap,
+                    depth
+                );
+            }
+            return;
+        }
+
+        if (!stmt.type) return;
         const stmtType = stmt.type.toLowerCase();
 
         switch (stmtType) {
@@ -266,8 +506,12 @@ export class ReferenceExtractor {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
                 const ref = this.createTableReference(t, filePath, sql, 'insert', 'INSERT INTO');
-                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
-                    references.push(ref);
+                const tableNameLower = ref?.tableName?.toLowerCase();
+                if (ref && tableNameLower) {
+                    const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
+                    if (!isCTE) {
+                        references.push(ref);
+                    }
                 }
             }
         }
@@ -298,25 +542,84 @@ export class ReferenceExtractor {
         aliasMap: AliasMap,
         depth: number
     ): void {
+        // Process WITH clause first if present (for UPDATE ... WITH ... UPDATE)
+        if (stmt.with) {
+            for (const cte of stmt.with) {
+                const cteName = cte.name?.value || cte.name;
+                if (cteName) {
+                    aliasMap.cteNames.add(cteName.toLowerCase());
+                }
+
+                // Extract references from CTE definition
+                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
+                    cte.definition?.ast || cte.definition;
+                if (cteStmt) {
+                    // Create new alias map for CTE scope
+                    const cteAliasMap = this.createAliasMap();
+                    cteAliasMap.cteNames = new Set(aliasMap.cteNames);
+                    this.extractFromStatement(
+                        cteStmt,
+                        filePath,
+                        sql,
+                        references,
+                        cteAliasMap,
+                        depth + 1
+                    );
+                }
+            }
+        }
+
         // Target table
         if (stmt.table) {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
                 const ref = this.createTableReference(t, filePath, sql, 'update', 'UPDATE');
-                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
-                    references.push(ref);
-                    // Track alias if present
-                    if (t.as) {
-                        aliasMap.tables.set(t.as.toLowerCase(), { tableName: ref.tableName });
+                const tableNameLower = ref?.tableName?.toLowerCase();
+                if (ref && tableNameLower) {
+                    const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
+                    if (!isCTE) {
+                        references.push(ref);
+                        // Track alias if present
+                        if (t.as) {
+                            aliasMap.tables.set(t.as.toLowerCase(), { tableName: ref.tableName });
+                        }
                     }
                 }
             }
         }
 
         // FROM clause (PostgreSQL, SQL Server style UPDATE...FROM)
+        // IMPORTANT: Process FROM clause BEFORE WHERE clause to track subquery aliases
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
             for (const item of fromItems) {
+                // Track subquery aliases in FROM clause FIRST
+                // Check if this is a subquery with an alias
+                if (item.expr?.type === 'select' || item.expr?.ast) {
+                    // Extract alias name from various possible structures
+                    let aliasName: string | null = null;
+                    if (item.as) {
+                        if (typeof item.as === 'string') {
+                            aliasName = item.as;
+                        } else if (item.as.value) {
+                            aliasName = item.as.value;
+                        } else if (item.as.name) {
+                            aliasName = item.as.name;
+                        } else if (typeof item.as === 'object' && 'alias' in item.as) {
+                            aliasName = item.as.alias;
+                        }
+                    }
+                    
+                    if (aliasName) {
+                        const aliasLower = aliasName.toLowerCase();
+                        // Mark subquery alias - it's not a real table
+                        aliasMap.cteNames.add(aliasLower);
+                        // Also add to global CTE names for defensive checking
+                        this.globalCteNames.add(aliasLower);
+                    }
+                }
+                
+                // Now process the FROM item (this will process the subquery)
                 this.extractFromItem(
                     item,
                     filePath,
@@ -346,14 +649,45 @@ export class ReferenceExtractor {
         aliasMap: AliasMap,
         depth: number
     ): void {
+        // Process WITH clause first if present (for DELETE ... WITH ... DELETE FROM)
+        if (stmt.with) {
+            for (const cte of stmt.with) {
+                const cteName = cte.name?.value || cte.name;
+                if (cteName) {
+                    aliasMap.cteNames.add(cteName.toLowerCase());
+                }
+
+                // Extract references from CTE definition
+                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
+                    cte.definition?.ast || cte.definition;
+                if (cteStmt) {
+                    // Create new alias map for CTE scope
+                    const cteAliasMap = this.createAliasMap();
+                    cteAliasMap.cteNames = new Set(aliasMap.cteNames);
+                    this.extractFromStatement(
+                        cteStmt,
+                        filePath,
+                        sql,
+                        references,
+                        cteAliasMap,
+                        depth + 1
+                    );
+                }
+            }
+        }
+
         // Target table
         const tableSource = stmt.from || stmt.table;
         if (tableSource) {
             const tables = Array.isArray(tableSource) ? tableSource : [tableSource];
             for (const t of tables) {
                 const ref = this.createTableReference(t, filePath, sql, 'delete', 'DELETE FROM');
-                if (ref && !aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
-                    references.push(ref);
+                const tableNameLower = ref?.tableName?.toLowerCase();
+                if (ref && tableNameLower) {
+                    const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
+                    if (!isCTE) {
+                        references.push(ref);
+                    }
                 }
             }
         }
@@ -402,8 +736,11 @@ export class ReferenceExtractor {
         // Direct table reference
         const ref = this.createTableReference(item, filePath, sql, refType, context);
         if (ref && ref.tableName !== 'unknown') {
-            // Skip if it's a CTE name
-            if (!aliasMap.cteNames.has(ref.tableName.toLowerCase())) {
+            // Skip if it's a CTE name (check both current aliasMap and global CTE names)
+            const tableNameLower = ref.tableName.toLowerCase();
+            const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
+            
+            if (!isCTE) {
                 // Extract columns if enabled and parent statement is provided
                 if (this.options.extractColumns && parentStmt) {
                     ref.columns = this.extractColumnsFromTable(item, parentStmt, aliasMap);
@@ -411,6 +748,7 @@ export class ReferenceExtractor {
 
                 references.push(ref);
             }
+            // If it's a CTE, skip adding as a table reference
 
             // Track alias
             if (item.as) {
@@ -423,6 +761,23 @@ export class ReferenceExtractor {
             const subStmt = item.expr?.ast || item.expr;
             const subAliasMap = this.createAliasMap();
             subAliasMap.cteNames = new Set(aliasMap.cteNames);
+            subAliasMap.tables = new Map(aliasMap.tables); // Copy existing aliases
+            
+            // Track subquery alias if present - subqueries are not real tables
+            if (item.as) {
+                const aliasName = (typeof item.as === 'string' ? item.as : item.as.value || item.as.name || '').toLowerCase();
+                if (aliasName) {
+                    // Mark this as a subquery alias, not a real table
+                    // We'll use a special marker or just track it separately
+                    // For now, we'll add it to a set of subquery aliases
+                    // Actually, we can use the tables map but mark it specially
+                    // Or better: add to a new set for subquery aliases
+                    // For simplicity, let's add it to cteNames since subqueries should be treated similarly
+                    aliasMap.cteNames.add(aliasName);
+                    subAliasMap.cteNames.add(aliasName);
+                }
+            }
+            
             this.extractFromStatement(
                 subStmt,
                 filePath,
@@ -511,6 +866,21 @@ export class ReferenceExtractor {
     ): void {
         if (!expr) return;
         if (depth > this.options.maxSubqueryDepth) return;
+
+        // Check for column references with table qualifiers (e.g., customer_totals.customer_id)
+        // These should NOT create table references if the table name is a known alias/CTE
+        if (expr.type === 'column_ref' && expr.table) {
+            const tableName = this.getTableNameFromItem(expr.table);
+            if (tableName) {
+                const tableNameLower = tableName.toLowerCase();
+                // Skip if it's a CTE or subquery alias
+                if (aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower)) {
+                    // This is a column reference to a CTE/subquery alias, not a real table
+                    // Don't extract it as a table reference
+                    return;
+                }
+            }
+        }
 
         // Subquery in expression
         if (expr.type === 'select') {
@@ -933,5 +1303,56 @@ export class ReferenceExtractor {
             seen.add(key);
             return true;
         });
+    }
+
+    /**
+     * Extract subquery aliases from UPDATE...FROM patterns using balanced parenthesis matching
+     * More efficient than regex with large ranges that can cause catastrophic backtracking
+     */
+    private extractUpdateFromAliases(sql: string, cteNames: Set<string>, reservedWords: Set<string>): void {
+        let updateIndex = 0;
+        while ((updateIndex = sql.indexOf('UPDATE', updateIndex)) !== -1) {
+            const fromIndex = sql.indexOf('FROM', updateIndex);
+            if (fromIndex === -1 || fromIndex > updateIndex + 500) {
+                updateIndex += 6;
+                continue;
+            }
+
+            // Find the opening paren after FROM
+            const openParenIndex = sql.indexOf('(', fromIndex);
+            if (openParenIndex === -1) {
+                updateIndex += 6;
+                continue;
+            }
+
+            // Find the matching closing paren using balanced counting
+            let parenCount = 0;
+            let closeParenIndex = -1;
+            const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
+            for (let i = openParenIndex; i < maxSearchLength; i++) {
+                if (sql[i] === '(') parenCount++;
+                else if (sql[i] === ')') {
+                    parenCount--;
+                    if (parenCount === 0) {
+                        closeParenIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (closeParenIndex !== -1) {
+                // Check for AS alias after the closing paren
+                const afterParen = sql.substring(closeParenIndex + 1, closeParenIndex + 50).trim();
+                const asMatch = afterParen.match(/^AS\s+(\w+)/i);
+                if (asMatch) {
+                    const aliasName = asMatch[1].toLowerCase();
+                    if (!reservedWords.has(aliasName)) {
+                        cteNames.add(aliasName);
+                    }
+                }
+            }
+
+            updateIndex = fromIndex + 1;
+        }
     }
 }
