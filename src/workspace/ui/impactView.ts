@@ -9,39 +9,37 @@ import { LineageGraph, LineageNode } from '../lineage/types';
 export class ImpactView {
     /**
      * Generate impact analysis form interface
-     * 
-     * Provides a form-based UI at the top of the Impact tab allowing users to:
-     * 1. Select a table/view from dropdown (populated from workspace graph)
-     * 2. Choose a change type (Modify, Delete, Rename, Add Column)
-     * 3. Click "Analyze Impact" to run the analysis
-     * 
-     * @param graph - The lineage graph containing all tables/views in workspace
-     * @returns HTML string for the form interface
      */
     generateImpactForm(graph: LineageGraph | null): string {
-        // Collect all tables and views from the lineage graph
+        // Collect all tables/views for dropdown
         const tables: LineageNode[] = [];
         if (graph) {
             graph.nodes.forEach((node) => {
-                // Only include tables and views (exclude CTEs, external references)
                 if (node.type === 'table' || node.type === 'view') {
                     tables.push(node);
                 }
             });
         }
-        // Sort alphabetically for easier navigation
         tables.sort((a, b) => a.name.localeCompare(b.name));
 
         return `
             <div class="impact-form-container">
                 <div class="impact-form">
                     <div class="form-header">
-                        <h3>🔍 Impact Analysis</h3>
-                        <p class="form-description">Analyze the impact of changes to tables or views in your workspace</p>
+                        <div class="form-header-icon">🔍</div>
+                        <div>
+                            <h3>Impact Analysis</h3>
+                            <p class="form-description">Analyze the impact of changes to tables or views in your workspace</p>
+                        </div>
                     </div>
                     <div class="form-fields">
                         <div class="form-field">
-                            <label for="impact-table-select">Table/View</label>
+                            <label for="impact-table-select">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                                </svg>
+                                Table/View
+                            </label>
                             <select id="impact-table-select" class="form-select">
                                 <option value="">-- Select a table or view --</option>
                                 ${tables.map(table => `
@@ -52,24 +50,39 @@ export class ImpactView {
                             </select>
                         </div>
                         <div class="form-field">
-                            <label>Change Type</label>
-                            <div class="radio-group">
-                                <label class="radio-label">
-                                    <input type="radio" name="change-type" value="modify" checked>
+                            <label>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                                </svg>
+                                Change Type
+                            </label>
+                            <div class="change-type-buttons">
+                                <button class="change-type-btn active" data-value="modify" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                    </svg>
                                     <span>Modify</span>
-                                </label>
-                                <label class="radio-label">
-                                    <input type="radio" name="change-type" value="delete">
+                                </button>
+                                <button class="change-type-btn" data-value="delete" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    </svg>
                                     <span>Delete</span>
-                                </label>
-                                <label class="radio-label">
-                                    <input type="radio" name="change-type" value="rename">
+                                </button>
+                                <button class="change-type-btn" data-value="rename" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                                    </svg>
                                     <span>Rename</span>
-                                </label>
-                                <label class="radio-label">
-                                    <input type="radio" name="change-type" value="addColumn">
+                                </button>
+                                <button class="change-type-btn" data-value="addColumn" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                                    </svg>
                                     <span>Add Column</span>
-                                </label>
+                                </button>
                             </div>
                         </div>
                         <div class="form-actions">
@@ -77,7 +90,7 @@ export class ImpactView {
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
                                 </svg>
-                                Analyze Impact
+                                <span>Analyze Impact</span>
                             </button>
                         </div>
                     </div>

@@ -918,32 +918,205 @@ export class WorkspacePanel {
 
         /* ========== Table List View ========== */
         .table-list-view { padding: 10px; }
-        .table-list-header { margin-bottom: 20px; }
+        .table-list-header { 
+            margin-bottom: 24px; 
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
         .header-top {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 8px;
+            margin-bottom: 16px;
         }
-        .table-list-header h3 { color: var(--text-primary); margin: 0; font-size: 18px; font-weight: 600; }
-        .table-list-header .hint { color: var(--text-muted); font-size: 12px; margin: 4px 0 0 0; }
-        .table-list-grid { display: flex; flex-direction: column; gap: 8px; }
+        .table-list-header h3 { 
+            color: var(--text-primary); margin: 0 0 6px 0; 
+            font-size: 22px; font-weight: 600; 
+        }
+        .header-subtitle {
+            color: var(--text-muted); font-size: 14px; 
+            margin: 0; line-height: 1.5;
+        }
+        .header-info {
+            display: flex; flex-direction: column; gap: 12px;
+            margin-bottom: 16px; padding: 16px;
+            background: rgba(99, 102, 241, 0.05);
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(99, 102, 241, 0.1);
+        }
+        .info-card {
+            display: flex; gap: 12px; align-items: flex-start;
+        }
+        .info-card svg {
+            flex-shrink: 0; margin-top: 2px;
+            color: var(--accent);
+        }
+        .info-card strong {
+            display: block; color: var(--text-primary);
+            font-size: 13px; font-weight: 600; margin-bottom: 4px;
+        }
+        .info-card p {
+            margin: 0; color: var(--text-muted);
+            font-size: 12px; line-height: 1.5;
+        }
+        .legend-item {
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-right: 12px; font-size: 12px;
+        }
+        .legend-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            display: inline-block;
+        }
+        .legend-dot.high {
+            background: var(--accent);
+        }
+        .legend-dot.medium {
+            background: rgba(99, 102, 241, 0.7);
+        }
+        .legend-dot.low {
+            background: rgba(99, 102, 241, 0.4);
+        }
+        .header-stats {
+            display: flex; gap: 12px; flex-wrap: wrap;
+        }
+        .stat-badge {
+            display: flex; flex-direction: column; align-items: center;
+            padding: 12px 16px; background: var(--bg-secondary);
+            border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+            min-width: 80px;
+        }
+        .stat-value {
+            font-size: 20px; font-weight: 700; color: var(--accent);
+            line-height: 1;
+        }
+        .stat-label {
+            font-size: 11px; color: var(--text-muted);
+            margin-top: 4px; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .table-list-grid { display: flex; flex-direction: column; gap: 12px; }
         .table-list-item {
-            display: flex; align-items: center; gap: 12px; padding: 12px 16px;
-            background: var(--bg-secondary); border-radius: var(--radius-md);
-            border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
+            display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle); cursor: pointer; 
+            transition: all 0.2s; position: relative;
+            box-shadow: var(--shadow-sm);
         }
-        .table-list-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
-        .table-list-icon { font-size: 20px; }
+        .table-list-item:hover { 
+            background: var(--bg-tertiary); 
+            border-color: var(--accent); 
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        .table-list-item.connection-high {
+            border-left: 4px solid var(--accent);
+        }
+        .table-list-item.connection-medium {
+            border-left: 4px solid rgba(99, 102, 241, 0.6);
+        }
+        .table-list-item.connection-low {
+            border-left: 4px solid rgba(99, 102, 241, 0.3);
+        }
+        
+        .table-list-icon-wrapper {
+            position: relative; flex-shrink: 0;
+            width: 48px; height: 48px;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--bg-primary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+        .table-list-icon { font-size: 24px; }
+        .connection-indicator {
+            position: absolute; top: -2px; right: -2px;
+            width: 12px; height: 12px;
+            border-radius: 50%; border: 2px solid var(--bg-secondary);
+        }
+        .connection-indicator.connection-high {
+            background: var(--accent); box-shadow: 0 0 0 2px var(--accent);
+        }
+        .connection-indicator.connection-medium {
+            background: rgba(99, 102, 241, 0.7);
+        }
+        .connection-indicator.connection-low {
+            background: rgba(99, 102, 241, 0.4);
+        }
+        
         .table-list-info { flex: 1; min-width: 0; }
-        .table-list-name { display: block; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
-        .table-list-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
-        .table-list-type { background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
-        .table-list-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .table-list-count {
-            font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--radius-sm);
-            background: var(--accent); color: white; min-width: 20px; text-align: center;
+        .table-list-header-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin-bottom: 8px;
         }
-        .table-list-item.no-connections { opacity: 0.7; }
-        .table-list-item.no-connections:hover { opacity: 1; }
+        .table-list-name { 
+            font-weight: 600; color: var(--text-primary); 
+            font-size: 15px; line-height: 1.4;
+        }
+        .table-list-connections {
+            display: flex; align-items: center; gap: 8px;
+            flex-shrink: 0;
+        }
+        .connection-badge {
+            display: flex; align-items: center; gap: 4px;
+            padding: 4px 8px; border-radius: var(--radius-sm);
+            font-size: 11px; font-weight: 600;
+            background: var(--bg-tertiary);
+        }
+        .connection-badge.upstream {
+            color: var(--success-light);
+        }
+        .connection-badge.downstream {
+            color: var(--accent);
+        }
+        .connection-badge svg {
+            width: 12px; height: 12px;
+        }
+        .no-connections-badge {
+            font-size: 11px; color: var(--text-dim);
+            font-style: italic;
+        }
+        
+        .table-list-meta { 
+            display: flex; align-items: center; gap: 10px; 
+            font-size: 12px; color: var(--text-muted); 
+            flex-wrap: wrap;
+        }
+        .table-list-type-badge { 
+            padding: 4px 10px; border-radius: var(--radius-sm);
+            font-size: 11px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .table-list-type-badge.type-table {
+            background: rgba(16, 185, 129, 0.15); color: var(--success-light);
+        }
+        .table-list-type-badge.type-view {
+            background: rgba(139, 92, 246, 0.15); color: #a78bfa;
+        }
+        .table-list-type-badge.type-cte {
+            background: rgba(99, 102, 241, 0.15); color: var(--accent);
+        }
+        .table-list-file { 
+            display: flex; align-items: center; gap: 4px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            max-width: 200px;
+        }
+        .table-list-file svg {
+            width: 12px; height: 12px; flex-shrink: 0;
+            opacity: 0.6;
+        }
+        .table-list-action {
+            display: flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px;
+            border-radius: var(--radius-sm);
+            color: var(--text-dim);
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .table-list-item:hover .table-list-action {
+            color: var(--accent);
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .table-list-item.no-connections { 
+            opacity: 0.7; 
+        }
+        .table-list-item.no-connections:hover { 
+            opacity: 1; 
+        }
         .table-list-empty { 
             text-align: center; padding: 60px 20px; color: var(--text-muted); 
         }
@@ -959,93 +1132,91 @@ export class WorkspacePanel {
         
         /* Table List Controls */
         .table-list-controls {
-            display: flex; flex-direction: column; gap: 12px;
-            margin-bottom: 20px; padding: 16px;
-            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            display: flex; flex-direction: column; gap: 16px;
+            margin-bottom: 24px; padding: 20px;
+            background: var(--bg-secondary); border-radius: var(--radius-xl);
             border: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-sm);
+        }
+        .controls-header {
+            margin-bottom: 4px;
+        }
+        .controls-header h4 {
+            color: var(--text-primary); font-size: 14px; font-weight: 600;
+            margin: 0 0 6px 0;
+        }
+        .controls-hint {
+            color: var(--text-muted); font-size: 12px; margin: 0;
+            line-height: 1.5;
+        }
+        .controls-hint kbd {
+            background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+            border-radius: 3px; padding: 2px 6px;
+            font-family: monospace; font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .filter-group {
+            display: flex; flex-direction: column; gap: 6px;
+            flex: 1; min-width: 160px;
+        }
+        .filter-label {
+            display: flex; align-items: center; gap: 6px;
+            color: var(--text-secondary); font-size: 12px; font-weight: 500;
+        }
+        .filter-label svg {
+            width: 14px; height: 14px; color: var(--text-muted);
         }
         .search-box-table {
-            display: flex; align-items: center; gap: 8px;
-            background: var(--bg-primary); padding: 8px 12px;
-            border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+            display: flex; align-items: center; gap: 10px;
+            background: var(--bg-primary); padding: 12px 16px;
+            border-radius: var(--radius-md); border: 2px solid var(--border-subtle);
             transition: all 0.2s;
         }
-        .search-box-table:focus-within { border-color: var(--accent); }
-        .search-box-table svg { flex-shrink: 0; color: var(--text-dim); }
+        .search-box-table:focus-within { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .search-box-table svg { 
+            flex-shrink: 0; color: var(--text-dim);
+            width: 16px; height: 16px;
+        }
         .search-input-table {
             flex: 1; background: transparent; border: none;
-            color: var(--text-secondary); font-size: 13px; outline: none;
+            color: var(--text-secondary); font-size: 14px; outline: none;
         }
         .search-input-table::placeholder { color: var(--text-dim); }
         .search-clear-table {
             background: transparent; border: none; color: var(--text-dim);
-            cursor: pointer; padding: 4px; display: none;
+            cursor: pointer; padding: 6px; display: none;
             align-items: center; justify-content: center;
             border-radius: var(--radius-sm);
+            transition: all 0.2s;
         }
-        .search-clear-table:hover { color: var(--error-light); background: rgba(239, 68, 68, 0.1); }
-        /*
-         * Filter Chips UI - Visual toggle buttons for quick filtering
-         * More intuitive than dropdowns, faster to toggle multiple types
-         */
-        .filter-chips {
-            display: flex; gap: 8px; flex-wrap: wrap;
-            margin-bottom: 12px;
+        .search-clear-table:hover { 
+            color: var(--error-light); 
+            background: rgba(239, 68, 68, 0.1); 
         }
-        .filter-chip {
-            display: flex; align-items: center; gap: 6px;
-            padding: 6px 12px; background: var(--bg-primary);
-            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-            color: var(--text-muted); font-size: 12px; cursor: pointer;
-            transition: all 0.2s ease; white-space: nowrap;
-        }
-        .filter-chip:hover {
-            background: var(--bg-tertiary); border-color: var(--border-color);
-            color: var(--text-secondary);
-        }
-        .filter-chip.active {
-            background: var(--accent); border-color: var(--accent);
-            color: white; font-weight: 500;
-        }
-        .chip-icon {
-            font-size: 14px; flex-shrink: 0;
-        }
-        .chip-label {
-            font-size: 12px; font-weight: 500;
-        }
-        .chip-count {
-            font-size: 10px; font-weight: 600; padding: 2px 6px;
-            background: rgba(255, 255, 255, 0.15); border-radius: 10px;
-            min-width: 18px; text-align: center;
-        }
-        .filter-chip:not(.active) .chip-count {
-            background: var(--bg-tertiary); color: var(--text-dim);
-        }
-
         .filter-controls {
-            display: flex; gap: 8px; flex-wrap: wrap;
+            display: flex; gap: 12px; flex-wrap: wrap;
         }
         .filter-select {
-            flex: 1; min-width: 150px;
-            background: var(--bg-primary); border: 1px solid var(--border-subtle);
-            color: var(--text-secondary); font-size: 12px; padding: 8px 12px;
-            border-radius: var(--radius-md); outline: none; cursor: pointer;
+            flex: 1; min-width: 160px;
+            background: var(--bg-primary); border: 2px solid var(--border-subtle);
+            color: var(--text-secondary); font-size: 13px; 
+            padding: 10px 14px; border-radius: var(--radius-md); 
+            outline: none; cursor: pointer; transition: all 0.2s;
         }
-        .filter-select:hover { border-color: var(--border-color); }
-        .filter-select:focus { border-color: var(--accent); }
-
+        .filter-select:hover { 
+            border-color: var(--border-color); 
+            background: var(--bg-tertiary);
+        }
+        .filter-select:focus { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        
         /* Responsive layout for narrow panels */
         @media (max-width: 600px) {
-            .filter-chips {
-                justify-content: space-between;
-            }
-            .filter-chip {
-                flex: 1; min-width: 70px; justify-content: center;
-                padding: 8px 6px;
-            }
-            .filter-chip .chip-label {
-                display: none; /* Hide label on mobile, show only icon and count */
-            }
             .filter-controls {
                 flex-direction: column;
             }
@@ -1081,66 +1252,120 @@ export class WorkspacePanel {
         
         /* Impact Form Styles */
         .impact-form-container {
-            max-width: 800px; margin: 0 auto;
+            max-width: 900px; margin: 0 auto;
         }
         .impact-form {
-            background: var(--bg-secondary); border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle); padding: 24px;
-            margin-bottom: 24px;
+            background: var(--bg-secondary); border-radius: var(--radius-xl);
+            border: 1px solid var(--border-subtle); padding: 32px;
+            margin-bottom: 24px; box-shadow: var(--shadow-md);
         }
         .form-header {
-            margin-bottom: 20px;
+            display: flex; align-items: flex-start; gap: 16px;
+            margin-bottom: 28px; padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .form-header-icon {
+            font-size: 32px; line-height: 1;
         }
         .form-header h3 {
-            color: var(--text-primary); font-size: 18px; margin: 0 0 8px 0;
+            color: var(--text-primary); font-size: 20px; font-weight: 600;
+            margin: 0 0 6px 0;
         }
         .form-description {
-            color: var(--text-muted); font-size: 13px; margin: 0;
+            color: var(--text-muted); font-size: 14px; margin: 0;
+            line-height: 1.5;
         }
         .form-fields {
-            display: flex; flex-direction: column; gap: 20px;
+            display: flex; flex-direction: column; gap: 24px;
         }
         .form-field {
-            display: flex; flex-direction: column; gap: 8px;
+            display: flex; flex-direction: column; gap: 10px;
         }
         .form-field label {
-            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-primary); font-size: 14px; font-weight: 500;
+        }
+        .form-field label svg {
+            width: 16px; height: 16px; color: var(--text-muted);
         }
         .form-select {
             background: var(--bg-primary); border: 1px solid var(--border-subtle);
-            color: var(--text-secondary); font-size: 13px; padding: 10px 12px;
+            color: var(--text-secondary); font-size: 14px; padding: 12px 16px;
             border-radius: var(--radius-md); outline: none; cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s; font-family: inherit;
         }
-        .form-select:hover { border-color: var(--border-color); }
-        .form-select:focus { border-color: var(--accent); }
-        .radio-group {
-            display: flex; gap: 16px; flex-wrap: wrap;
+        .form-select:hover { 
+            border-color: var(--border-color); 
+            background: var(--bg-tertiary);
         }
-        .radio-label {
-            display: flex; align-items: center; gap: 6px;
-            cursor: pointer; color: var(--text-secondary); font-size: 13px;
+        .form-select:focus { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
         }
-        .radio-label input[type="radio"] {
-            cursor: pointer;
+        
+        /* Modern Button-Style Change Type Selector */
+        .change-type-buttons {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
         }
+        .change-type-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+            padding: 16px 12px; background: var(--bg-primary);
+            border: 2px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; position: relative;
+            min-height: 90px;
+        }
+        .change-type-btn:hover {
+            border-color: var(--accent); background: var(--bg-tertiary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .change-type-btn.active {
+            border-color: var(--accent); background: rgba(99, 102, 241, 0.1);
+            color: var(--accent);
+        }
+        .change-type-btn.active::before {
+            content: '';
+            position: absolute; top: 8px; right: 8px;
+            width: 8px; height: 8px;
+            background: var(--accent); border-radius: 50%;
+        }
+        .change-type-btn svg {
+            width: 24px; height: 24px; stroke-width: 2;
+        }
+        .change-type-btn span {
+            font-size: 13px; font-weight: 500;
+        }
+        .change-type-btn.active svg {
+            color: var(--accent);
+        }
+        
         .form-actions {
-            margin-top: 8px;
+            margin-top: 8px; padding-top: 20px;
+            border-top: 1px solid var(--border-subtle);
         }
         .btn-primary {
-            display: flex; align-items: center; gap: 8px;
-            padding: 10px 20px; background: var(--accent); color: white;
-            border: none; border-radius: var(--radius-md); font-size: 13px;
-            font-weight: 500; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            padding: 14px 28px; background: var(--accent); color: white;
+            border: none; border-radius: var(--radius-md); font-size: 14px;
+            font-weight: 600; cursor: pointer; transition: all 0.2s;
+            width: 100%; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
         }
         .btn-primary:hover:not(:disabled) {
             background: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
         }
         .btn-primary:disabled {
             opacity: 0.5; cursor: not-allowed;
+            transform: none; box-shadow: none;
         }
         .btn-primary svg {
-            width: 16px; height: 16px;
+            width: 18px; height: 18px;
         }
         .impact-results {
             margin-top: 24px;
@@ -1232,11 +1457,35 @@ export class WorkspacePanel {
             margin-bottom: 16px;
         }
         .flow-section:last-child { margin-bottom: 0; }
+        .flow-section-header {
+            margin-bottom: 12px;
+        }
         .flow-section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             font-size: 12px; font-weight: 600; color: var(--text-muted);
             text-transform: uppercase; letter-spacing: 0.5px;
-            margin-bottom: 8px; padding-bottom: 4px;
+            margin-bottom: 6px; padding-bottom: 4px;
             border-bottom: 1px solid var(--border-subtle);
+        }
+        .flow-section-title .info-icon {
+            cursor: help;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            flex-shrink: 0;
+            stroke: var(--text-muted);
+        }
+        .flow-section-title .info-icon:hover {
+            opacity: 1;
+            stroke: var(--accent);
+        }
+        .flow-section-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-top: 4px;
+            padding-left: 4px;
         }
         .flow-list {
             display: flex; flex-direction: column; gap: 6px;
@@ -2181,9 +2430,9 @@ export class WorkspacePanel {
         };
 
         const viewEmptyStates = {
-            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
+            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
         function switchToView(view) {
@@ -2446,11 +2695,6 @@ export class WorkspacePanel {
                         setupTableSearchAndFilter();
                     }
                     break;
-                case 'lineageOverviewResult':
-                    if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
-                    }
-                    break;
                 case 'impactFormResult':
                     if (lineageContent && message.data?.html) {
                         lineageContent.innerHTML = message.data.html;
@@ -2469,46 +2713,13 @@ export class WorkspacePanel {
                         }
                     }
                     break;
+                case 'lineageOverviewResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                    }
+                    break;
             }
         });
-
-        // ========== Impact Form Setup ==========
-        function setupImpactForm() {
-            const tableSelect = document.getElementById('impact-table-select');
-            const analyzeBtn = document.getElementById('impact-analyze-btn');
-            const changeTypeRadios = document.querySelectorAll('input[name="change-type"]');
-
-            if (tableSelect && analyzeBtn) {
-                // Enable/disable analyze button based on selection
-                tableSelect.addEventListener('change', () => {
-                    analyzeBtn.disabled = !tableSelect.value;
-                });
-
-                // Handle analyze button click
-                analyzeBtn.addEventListener('click', () => {
-                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
-                    const tableName = selectedOption.getAttribute('data-name');
-                    const tableType = selectedOption.getAttribute('data-type');
-                    const changeType = document.querySelector('input[name="change-type"]:checked')?.value || 'modify';
-
-                    if (!tableName) return;
-
-                    // Show loading state
-                    const resultsDiv = document.getElementById('impact-results');
-                    if (resultsDiv) {
-                        resultsDiv.style.display = 'block';
-                        resultsDiv.innerHTML = '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
-                    }
-
-                    vscode.postMessage({
-                        command: 'analyzeImpact',
-                        type: tableType === 'view' ? 'table' : 'table',
-                        name: tableName,
-                        changeType: changeType
-                    });
-                });
-            }
-        }
 
         // ========== Event Delegation for Dynamic Lineage Content ==========
         if (lineageContent) {
@@ -2625,79 +2836,75 @@ export class WorkspacePanel {
             tooltip.style.display = 'none';
         }
 
+        // ========== Impact Form Setup ==========
+        function setupImpactForm() {
+            const tableSelect = document.getElementById('impact-table-select');
+            const analyzeBtn = document.getElementById('impact-analyze-btn');
+            const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+
+            // Handle change type button clicks
+            changeTypeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Remove active class from all buttons
+                    changeTypeButtons.forEach(b => b.classList.remove('active'));
+                    // Add active class to clicked button
+                    btn.classList.add('active');
+                });
+            });
+
+            if (tableSelect && analyzeBtn) {
+                // Enable/disable analyze button based on selection
+                tableSelect.addEventListener('change', () => {
+                    analyzeBtn.disabled = !tableSelect.value;
+                });
+
+                // Handle analyze button click
+                analyzeBtn.addEventListener('click', () => {
+                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
+                    const tableName = selectedOption.getAttribute('data-name');
+                    const tableType = selectedOption.getAttribute('data-type');
+                    const activeButton = document.querySelector('.change-type-btn.active');
+                    const changeType = activeButton?.getAttribute('data-value') || 'modify';
+
+                    if (!tableName) return;
+
+                    // Show loading state
+                    const resultsDiv = document.getElementById('impact-results');
+                    if (resultsDiv) {
+                        resultsDiv.style.display = 'block';
+                        resultsDiv.innerHTML = '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
+                    }
+
+                    vscode.postMessage({
+                        command: 'analyzeImpact',
+                        type: tableType === 'view' ? 'table' : 'table',
+                        name: tableName,
+                        changeType: changeType
+                    });
+                });
+            }
+        }
+
         // ========== Table Search and Filter Setup ==========
-        /**
-         * Enhanced table search and filter with:
-         * - Filter chips UI (visual toggle buttons)
-         * - State persistence (survives tab navigation)
-         * - Sort direction indicators
-         * - All keyboard shortcuts and accessibility
-         */
         function setupTableSearchAndFilter() {
             const searchInput = document.getElementById('table-search-input');
             const searchClear = document.getElementById('table-search-clear');
+            const typeFilter = document.getElementById('table-type-filter');
             const sortSelect = document.getElementById('table-sort');
             const tableGrid = document.getElementById('table-list-grid');
             const emptyFilter = document.getElementById('table-list-empty-filter');
             const resultsInfo = document.getElementById('table-list-results-info');
             const resultsCount = document.getElementById('table-results-count');
             const emptyMessage = document.getElementById('empty-filter-message');
-            const filterChipsContainer = document.getElementById('filter-chips-container');
-
-            // State management - persists across tab navigation
-            let filterState = {
-                searchQuery: '',
-                activeType: 'all',
-                sortBy: 'connected',
-                // Load saved state if available
-                load: function() {
-                    try {
-                        const saved = sessionStorage.getItem('tableFilterState');
-                        if (saved) {
-                            const parsed = JSON.parse(saved);
-                            this.searchQuery = parsed.searchQuery || '';
-                            this.activeType = parsed.activeType || 'all';
-                            this.sortBy = parsed.sortBy || 'connected';
-                        }
-                    } catch (e) {
-                        console.warn('Could not load filter state:', e);
-                    }
-                },
-                save: function() {
-                    try {
-                        sessionStorage.setItem('tableFilterState', JSON.stringify({
-                            searchQuery: this.searchQuery,
-                            activeType: this.activeType,
-                            sortBy: this.sortBy
-                        }));
-                    } catch (e) {
-                        console.warn('Could not save filter state:', e);
-                    }
-                }
-            };
-
-            // Load persisted state
-            filterState.load();
-
+            
             let debounceTimeout;
             const totalItems = tableGrid ? tableGrid.querySelectorAll('.table-list-item').length : 0;
-
-            // Apply saved state to UI
-            if (searchInput && filterState.searchQuery) {
-                searchInput.value = filterState.searchQuery;
-            }
-            if (sortSelect) {
-                sortSelect.value = filterState.sortBy;
-            }
-            if (filterChipsContainer) {
-                updateChipsUI();
-            }
 
             function filterTables() {
                 if (!tableGrid) return;
 
                 const searchQuery = (searchInput?.value || '').toLowerCase().trim();
-                const typeValue = filterState.activeType; // Use chip state instead of dropdown
+                const typeValue = typeFilter?.value || 'all';
                 const sortValue = sortSelect?.value || 'connected';
 
                 const items = Array.from(tableGrid.querySelectorAll('.table-list-item'));
@@ -2806,62 +3013,6 @@ export class WorkspacePanel {
                 if (searchClear) {
                     searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
                 }
-
-                // Save filter state after filtering
-                filterState.searchQuery = searchQuery;
-                filterState.save();
-            }
-
-            /**
-             * Update filter chips UI based on current active type
-             * Shows which chip is active with visual feedback
-             */
-            function updateChipsUI() {
-                if (!filterChipsContainer) return;
-
-                const chips = filterChipsContainer.querySelectorAll('.filter-chip');
-                chips.forEach(chip => {
-                    const chipType = chip.getAttribute('data-type');
-                    if (chipType === filterState.activeType) {
-                        chip.classList.add('active');
-                    } else {
-                        chip.classList.remove('active');
-                    }
-                });
-            }
-
-            /**
-             * Handle chip click - toggle active filter type
-             * If clicking the already-active chip, reset to 'all'
-             */
-            function handleChipClick(chipType: string) {
-                // If clicking the same chip, toggle it off (go back to 'all')
-                if (filterState.activeType === chipType && chipType !== 'all') {
-                    filterState.activeType = 'all';
-                } else {
-                    filterState.activeType = chipType;
-                }
-
-                // Update UI
-                updateChipsUI();
-
-                // Re-filter and save state
-                filterTables();
-                filterState.save();
-            }
-
-            /**
-             * Update sort dropdown with visual direction indicators
-             * Adds arrows (↑/↓) to show current sort direction
-             */
-            function updateSortIndicator() {
-                if (!sortSelect) return;
-
-                const currentValue = sortSelect.value;
-                sortSelect.setAttribute('data-current-sort', currentValue);
-
-                // Visual feedback could be enhanced here with CSS
-                // The option text already includes indicators (↑/↓)
             }
 
             // Debounced filter function
@@ -2874,40 +3025,18 @@ export class WorkspacePanel {
             searchInput?.addEventListener('input', debouncedFilter);
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
-                filterState.activeType = 'all'; // Reset to all types
-                filterState.searchQuery = '';
-                filterState.save();
-                updateChipsUI();
+                if (typeFilter) typeFilter.value = 'all';
                 filterTables();
                 searchInput?.focus();
             });
-
-            // Filter chips click handlers
-            filterChipsContainer?.addEventListener('click', (e) => {
-                const chip = e.target.closest('.filter-chip');
-                if (chip) {
-                    const chipType = chip.getAttribute('data-type');
-                    if (chipType) {
-                        handleChipClick(chipType);
-                    }
-                }
-            });
-
-            // Sort dropdown change - save state
-            sortSelect?.addEventListener('change', () => {
-                filterState.sortBy = sortSelect.value;
-                filterState.save();
-                updateSortIndicator();
-                filterTables();
-            });
+            typeFilter?.addEventListener('change', filterTables);
+            sortSelect?.addEventListener('change', filterTables);
 
             // Keyboard shortcuts
             searchInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     if (searchInput.value) {
                         searchInput.value = '';
-                        filterState.searchQuery = '';
-                        filterState.save();
                         filterTables();
                     } else {
                         searchInput.blur();
