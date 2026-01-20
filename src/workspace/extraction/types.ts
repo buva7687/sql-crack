@@ -95,6 +95,7 @@ export interface TableReference {
     filePath: string;
     lineNumber: number;
     context: string;            // SQL context (e.g., "FROM", "JOIN", "INSERT INTO")
+    statementIndex?: number;    // Index of the statement within the file (for per-statement lineage)
 
     // Column-level tracking (populated by column extractor)
     columns?: ColumnReference[];  // Columns used from this table

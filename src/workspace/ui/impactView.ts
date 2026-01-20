@@ -1,11 +1,122 @@
 // Impact View - Display impact analysis reports
 
 import { ImpactReport, ImpactItem } from '../lineage/impactAnalyzer';
+import { LineageGraph, LineageNode } from '../lineage/types';
 
 /**
  * Generates HTML for impact analysis reports
  */
 export class ImpactView {
+    /**
+     * Generate impact analysis form interface
+     */
+    generateImpactForm(graph: LineageGraph | null): string {
+        // Collect all tables/views for dropdown
+        const tables: LineageNode[] = [];
+        if (graph) {
+            graph.nodes.forEach((node) => {
+                if (node.type === 'table' || node.type === 'view') {
+                    tables.push(node);
+                }
+            });
+        }
+        tables.sort((a, b) => a.name.localeCompare(b.name));
+
+        return `
+            <div class="impact-form-container">
+                <div class="impact-form">
+                    <div class="form-header">
+                        <div class="form-header-icon">🔍</div>
+                        <div>
+                            <h3>Impact Analysis</h3>
+                            <p class="form-description">Analyze the impact of changes to tables or views in your workspace</p>
+                        </div>
+                    </div>
+                    <div class="form-fields">
+                        <div class="form-field">
+                            <label for="impact-table-select">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                                </svg>
+                                Table/View
+                            </label>
+                            <select id="impact-table-select" class="form-select">
+                                <option value="">-- Select a table or view --</option>
+                                ${tables.map(table => `
+                                    <option value="${this.escapeHtml(table.id)}" data-name="${this.escapeHtml(table.name)}" data-type="${table.type}">
+                                        ${this.escapeHtml(table.name)} (${table.type})
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                                </svg>
+                                Change Type
+                            </label>
+                            <div class="change-type-buttons">
+                                <button class="change-type-btn active" data-value="modify" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                    </svg>
+                                    <span>Modify</span>
+                                </button>
+                                <button class="change-type-btn" data-value="delete" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    </svg>
+                                    <span>Delete</span>
+                                </button>
+                                <button class="change-type-btn" data-value="rename" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                                    </svg>
+                                    <span>Rename</span>
+                                </button>
+                                <button class="change-type-btn" data-value="addColumn" type="button">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                                    </svg>
+                                    <span>Add Column</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="impact-analyze-btn" class="btn-primary" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                                </svg>
+                                <span>Analyze Impact</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="impact-results" class="impact-results" style="display: none;"></div>
+            </div>
+        `;
+    }
+
+    /**
+     * Generate empty state for impact tab
+     */
+    generateEmptyState(): string {
+        return `
+            <div class="impact-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 8v4l3 3"/>
+                </svg>
+                <h3>Impact Analysis</h3>
+                <p>Select a table or view above and choose a change type to analyze the impact of modifications.</p>
+                <p class="hint">This will show you which tables, views, and files would be affected by your changes.</p>
+            </div>
+        `;
+    }
+
     /**
      * Generate impact analysis report HTML
      */

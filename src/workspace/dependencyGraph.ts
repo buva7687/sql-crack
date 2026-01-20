@@ -8,8 +8,10 @@ import {
     WorkspaceEdge,
     WorkspaceStats,
     GraphMode,
-    TableReference
+    TableReference,
+    SchemaDefinition
 } from './types';
+import { getDisplayName, getQualifiedKey, normalizeIdentifier, parseQualifiedKey } from './identifiers';
 
 /**
  * Build a dependency graph from the workspace index
@@ -38,6 +40,37 @@ export function buildDependencyGraph(
     layoutGraph(nodes, edges);
 
     return { nodes, edges, stats };
+}
+
+function findDefinitionsByName(index: WorkspaceIndex, tableName: string): SchemaDefinition[] {
+    const normalized = normalizeIdentifier(tableName);
+    if (!normalized) return [];
+
+    const matches: SchemaDefinition[] = [];
+    for (const defs of index.definitionMap.values()) {
+        for (const def of defs) {
+            if (normalizeIdentifier(def.name) === normalized) {
+                matches.push(def);
+            }
+        }
+    }
+    return matches;
+}
+
+function getDefinitionCandidates(index: WorkspaceIndex, ref: TableReference): SchemaDefinition[] {
+    const key = getQualifiedKey(ref.tableName, ref.schema);
+    const direct = index.definitionMap.get(key);
+    if (direct && direct.length > 0) {
+        return direct;
+    }
+
+    const byName = findDefinitionsByName(index, ref.tableName);
+    if (ref.schema) {
+        const unqualified = byName.filter(def => !def.schema);
+        return unqualified;
+    }
+
+    return byName;
 }
 
 /**
@@ -78,19 +111,20 @@ function buildFileGraph(
         if (!sourceId) continue;
 
         for (const ref of analysis.references) {
-            const def = index.definitionMap.get(ref.tableName.toLowerCase());
-            if (def && def.filePath !== filePath) {
+            const defs = getDefinitionCandidates(index, ref);
+            for (const def of defs) {
+                if (def.filePath === filePath) continue;
                 const targetId = nodeIdMap.get(def.filePath);
-                if (targetId) {
-                    const edgeKey = `${sourceId}->${targetId}`;
-                    if (!edgeMap.has(edgeKey)) {
-                        edgeMap.set(edgeKey, { count: 0, types: new Set(), tables: new Set() });
-                    }
-                    const edgeData = edgeMap.get(edgeKey)!;
-                    edgeData.count++;
-                    edgeData.types.add(ref.referenceType);
-                    edgeData.tables.add(ref.tableName);
+                if (!targetId) continue;
+
+                const edgeKey = `${sourceId}->${targetId}`;
+                if (!edgeMap.has(edgeKey)) {
+                    edgeMap.set(edgeKey, { count: 0, types: new Set(), tables: new Set() });
                 }
+                const edgeData = edgeMap.get(edgeKey)!;
+                edgeData.count++;
+                edgeData.types.add(ref.referenceType);
+                edgeData.tables.add(getDisplayName(ref.tableName, ref.schema));
             }
         }
     }
@@ -119,16 +153,27 @@ function buildTableGraph(
     nodeIdMap: Map<string, string>
 ): void {
     // Create nodes for defined tables/views
-    for (const [name, def] of index.definitionMap.entries()) {
+    const definedKeys = new Set(index.definitionMap.keys());
+    const definedNames = new Set<string>();
+    for (const defs of index.definitionMap.values()) {
+        for (const def of defs) {
+            const normalized = normalizeIdentifier(def.name);
+            if (normalized) definedNames.add(normalized);
+        }
+    }
+
+    for (const [key, defs] of index.definitionMap.entries()) {
+        const def = defs[0];
+        if (!def) continue;
         const nodeId = `table_${nodes.length}`;
-        nodeIdMap.set(name, nodeId);
+        nodeIdMap.set(key, nodeId);
 
         nodes.push({
             id: nodeId,
             type: def.type,
-            label: def.name,
+            label: getDisplayName(def.name, def.schema),
             filePath: def.filePath,
-            definitions: [def],
+            definitions: defs,
             x: 0,
             y: 0,
             width: 160,
@@ -137,15 +182,24 @@ function buildTableGraph(
     }
 
     // Create nodes for external (undefined) tables
-    for (const [name, refs] of index.referenceMap.entries()) {
-        if (!index.definitionMap.has(name)) {
+    for (const [key, refs] of index.referenceMap.entries()) {
+        if (definedKeys.has(key)) continue;
+        const parsed = parseQualifiedKey(key);
+        const normalizedName = normalizeIdentifier(parsed.name);
+        if (!parsed.schema && normalizedName && definedNames.has(normalizedName)) {
+            continue;
+        }
+
             const nodeId = `external_${nodes.length}`;
-            nodeIdMap.set(name, nodeId);
+            nodeIdMap.set(key, nodeId);
+            const displayName = refs[0]
+                ? getDisplayName(refs[0].tableName, refs[0].schema)
+                : getDisplayName(parsed.name, parsed.schema);
 
             nodes.push({
                 id: nodeId,
                 type: 'external',
-                label: name,
+                label: displayName,
                 references: refs,
                 referenceCount: refs.length,
                 x: 0,
@@ -153,7 +207,6 @@ function buildTableGraph(
                 width: 160,
                 height: 60
             });
-        }
     }
 
     // Create edges based on view/query dependencies
@@ -161,25 +214,46 @@ function buildTableGraph(
     for (const [filePath, analysis] of index.files.entries()) {
         // Get tables defined in this file
         const definedHere = new Set(
-            analysis.definitions.map(d => d.name.toLowerCase())
+            analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
         );
 
         for (const def of analysis.definitions) {
             if (def.type === 'view') {
                 // Views reference other tables - find what this view references
                 for (const ref of analysis.references) {
-                    const refKey = ref.tableName.toLowerCase();
-                    if (!definedHere.has(refKey)) {
-                        const sourceId = nodeIdMap.get(def.name.toLowerCase());
-                        const targetId = nodeIdMap.get(refKey);
-                        if (sourceId && targetId && sourceId !== targetId) {
+                    const refKey = getQualifiedKey(ref.tableName, ref.schema);
+                    if (definedHere.has(refKey)) {
+                        continue;
+                    }
+
+                    const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
+                    if (!sourceId) continue;
+
+                    const targets = getDefinitionCandidates(index, ref);
+                    if (targets.length > 0) {
+                        for (const targetDef of targets) {
+                            const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
+                            if (sourceId && targetId && sourceId !== targetId) {
+                                edges.push({
+                                    id: `edge_${edges.length}`,
+                                    source: sourceId,
+                                    target: targetId,
+                                    referenceType: ref.referenceType,
+                                    count: 1,
+                                    tables: [getDisplayName(ref.tableName, ref.schema)]
+                                });
+                            }
+                        }
+                    } else {
+                        const externalId = nodeIdMap.get(refKey);
+                        if (sourceId && externalId && sourceId !== externalId) {
                             edges.push({
                                 id: `edge_${edges.length}`,
                                 source: sourceId,
-                                target: targetId,
+                                target: externalId,
                                 referenceType: ref.referenceType,
                                 count: 1,
-                                tables: [ref.tableName]
+                                tables: [getDisplayName(ref.tableName, ref.schema)]
                             });
                         }
                     }
@@ -202,7 +276,7 @@ function buildHybridGraph(
     const referenceCount = new Map<string, number>();
     for (const refs of index.referenceMap.values()) {
         for (const ref of refs) {
-            const key = ref.tableName.toLowerCase();
+            const key = getQualifiedKey(ref.tableName, ref.schema);
             referenceCount.set(key, (referenceCount.get(key) || 0) + 1);
         }
     }
@@ -232,18 +306,18 @@ function buildHybridGraph(
 
     // Create separate nodes for highly-referenced tables (referenced 3+ times from different files)
     const prominentTables = new Set<string>();
-    for (const [name, count] of referenceCount.entries()) {
+    for (const [key, count] of referenceCount.entries()) {
         if (count >= 3) {
-            const def = index.definitionMap.get(name);
+            const def = index.definitionMap.get(key)?.[0];
             if (def) {
-                prominentTables.add(name);
+                prominentTables.add(key);
                 const nodeId = `table_${nodes.length}`;
-                nodeIdMap.set(`prominent:${name}`, nodeId);
+                nodeIdMap.set(`prominent:${key}`, nodeId);
 
                 nodes.push({
                     id: nodeId,
                     type: def.type,
-                    label: def.name,
+                    label: getDisplayName(def.name, def.schema),
                     filePath: def.filePath,
                     definitions: [def],
                     referenceCount: count,
@@ -264,8 +338,9 @@ function buildHybridGraph(
         if (!sourceId) continue;
 
         for (const ref of analysis.references) {
-            const def = index.definitionMap.get(ref.tableName.toLowerCase());
-            if (def && def.filePath !== filePath) {
+            const defs = getDefinitionCandidates(index, ref);
+            for (const def of defs) {
+                if (def.filePath === filePath) continue;
                 const targetId = nodeIdMap.get(def.filePath);
                 if (targetId) {
                     const edgeKey = `${sourceId}->${targetId}`;
@@ -273,7 +348,7 @@ function buildHybridGraph(
                         edgeMap.set(edgeKey, { count: 0, type: ref.referenceType, tables: new Set() });
                     }
                     edgeMap.get(edgeKey)!.count++;
-                    edgeMap.get(edgeKey)!.tables.add(ref.tableName);
+                    edgeMap.get(edgeKey)!.tables.add(getDisplayName(ref.tableName, ref.schema));
                 }
             }
         }
@@ -302,24 +377,69 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     const orphanedDefinitions: string[] = [];
     const missingDefinitions: string[] = [];
 
-    // Count tables and views
-    for (const def of index.definitionMap.values()) {
-        if (def.type === 'table') totalTables++;
-        else if (def.type === 'view') totalViews++;
+    const definitionsByName = new Map<string, SchemaDefinition[]>();
+    for (const defs of index.definitionMap.values()) {
+        for (const def of defs) {
+            const name = normalizeIdentifier(def.name);
+            if (!name) continue;
+            if (!definitionsByName.has(name)) {
+                definitionsByName.set(name, []);
+            }
+            definitionsByName.get(name)!.push(def);
+        }
+    }
 
-        // Check if orphaned (defined but never referenced)
-        const refs = index.referenceMap.get(def.name.toLowerCase());
-        if (!refs || refs.length === 0) {
-            orphanedDefinitions.push(def.name);
+    const referencesByName = new Map<string, TableReference[]>();
+    for (const refs of index.referenceMap.values()) {
+        for (const ref of refs) {
+            const name = normalizeIdentifier(ref.tableName);
+            if (!name) continue;
+            if (!referencesByName.has(name)) {
+                referencesByName.set(name, []);
+            }
+            referencesByName.get(name)!.push(ref);
+        }
+    }
+
+    // Count tables and views
+    for (const [key, defs] of index.definitionMap.entries()) {
+        for (const def of defs) {
+            if (def.type === 'table') totalTables++;
+            else if (def.type === 'view') totalViews++;
+        }
+
+        const refs = index.referenceMap.get(key);
+        if (refs && refs.length > 0) {
+            continue;
+        }
+
+        const nameKey = normalizeIdentifier(defs[0]?.name);
+        const nameRefs = nameKey ? referencesByName.get(nameKey) : undefined;
+        if (!nameRefs || nameRefs.length === 0) {
+            orphanedDefinitions.push(key);
         }
     }
 
     // Count references and find missing definitions
-    for (const [tableName, refs] of index.referenceMap.entries()) {
+    for (const [key, refs] of index.referenceMap.entries()) {
         totalReferences += refs.length;
 
-        if (!index.definitionMap.has(tableName)) {
-            missingDefinitions.push(tableName);
+        const hasSchema = refs.some(ref => !!ref.schema);
+        if (hasSchema) {
+            if (!index.definitionMap.has(key)) {
+                const refName = normalizeIdentifier(refs[0]?.tableName);
+                const defs = refName ? (definitionsByName.get(refName) || []) : [];
+                const hasUnqualified = defs.some(def => !def.schema);
+                if (!hasUnqualified) {
+                    missingDefinitions.push(key);
+                }
+            }
+            continue;
+        }
+
+        const refName = normalizeIdentifier(refs[0]?.tableName);
+        if (refName && !definitionsByName.has(refName)) {
+            missingDefinitions.push(key);
         }
     }
 
@@ -330,9 +450,11 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const [filePath, analysis] of index.files.entries()) {
         const deps = new Set<string>();
         for (const ref of analysis.references) {
-            const def = index.definitionMap.get(ref.tableName.toLowerCase());
-            if (def && def.filePath !== filePath) {
-                deps.add(def.filePath);
+            const defs = getDefinitionCandidates(index, ref);
+            for (const def of defs) {
+                if (def.filePath !== filePath) {
+                    deps.add(def.filePath);
+                }
             }
         }
         fileDeps.set(filePath, deps);

@@ -11,8 +11,9 @@ import {
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
+import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 3; // Bumped for per-statement lineage (statementIndex field)
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const INDEX_STALE_THRESHOLD = 3600000; // 1 hour
 
@@ -88,14 +89,15 @@ export class IndexManager {
 
                 // Reuse definition and reference mappings
                 for (const def of existing.definitions) {
-                    const key = def.name.toLowerCase();
+                    const key = getQualifiedKey(def.name, def.schema);
                     if (!newIndex.definitionMap.has(key)) {
-                        newIndex.definitionMap.set(key, def);
+                        newIndex.definitionMap.set(key, []);
                     }
+                    newIndex.definitionMap.get(key)!.push(def);
                 }
 
                 for (const ref of existing.references) {
-                    const key = ref.tableName.toLowerCase();
+                    const key = getQualifiedKey(ref.tableName, ref.schema);
                     if (!newIndex.referenceMap.has(key)) {
                         newIndex.referenceMap.set(key, []);
                     }
@@ -195,15 +197,68 @@ export class IndexManager {
     /**
      * Find the definition for a table name
      */
-    findDefinition(tableName: string): SchemaDefinition | undefined {
-        return this.index?.definitionMap.get(tableName.toLowerCase());
+    findDefinition(tableName: string, schema?: string): SchemaDefinition | undefined {
+        if (!this.index) return undefined;
+        const key = getQualifiedKey(tableName, schema);
+        const direct = this.index.definitionMap.get(key);
+        if (direct && direct.length > 0) {
+            return direct[0];
+        }
+
+        const targetName = normalizeIdentifier(tableName);
+        if (!targetName) return undefined;
+
+        if (schema) {
+            for (const defs of this.index.definitionMap.values()) {
+                const match = defs.find(def => !def.schema && normalizeIdentifier(def.name) === targetName);
+                if (match) return match;
+            }
+            return undefined;
+        }
+
+        for (const defs of this.index.definitionMap.values()) {
+            const match = defs.find(def => normalizeIdentifier(def.name) === targetName);
+            if (match) return match;
+        }
+
+        return undefined;
     }
 
     /**
      * Find all references to a table
      */
-    findReferences(tableName: string): TableReference[] {
-        return this.index?.referenceMap.get(tableName.toLowerCase()) || [];
+    findReferences(tableName: string, schema?: string): TableReference[] {
+        if (!this.index) return [];
+        const key = getQualifiedKey(tableName, schema);
+        const direct = this.index.referenceMap.get(key);
+        if (direct && direct.length > 0) {
+            return direct;
+        }
+
+        const targetName = normalizeIdentifier(tableName);
+        if (!targetName) return [];
+
+        if (schema) {
+            const matches: TableReference[] = [];
+            for (const refs of this.index.referenceMap.values()) {
+                for (const ref of refs) {
+                    if (!ref.schema && normalizeIdentifier(ref.tableName) === targetName) {
+                        matches.push(ref);
+                    }
+                }
+            }
+            return matches;
+        }
+
+        const matches: TableReference[] = [];
+        for (const refs of this.index.referenceMap.values()) {
+            for (const ref of refs) {
+                if (normalizeIdentifier(ref.tableName) === targetName) {
+                    matches.push(ref);
+                }
+            }
+        }
+        return matches;
     }
 
     /**
@@ -215,11 +270,11 @@ export class IndexManager {
         if (!analysis) return [];
 
         const localDefinitions = new Set(
-            analysis.definitions.map(d => d.name.toLowerCase())
+            analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
         );
 
         return analysis.references.filter(
-            ref => !localDefinitions.has(ref.tableName.toLowerCase())
+            ref => !localDefinitions.has(getQualifiedKey(ref.tableName, ref.schema))
         );
     }
 
@@ -253,12 +308,37 @@ export class IndexManager {
     getMissingDefinitions(): string[] {
         if (!this.index) return [];
 
-        const defined = new Set(this.index.definitionMap.keys());
+        const definedKeys = new Set(this.index.definitionMap.keys());
+        const definitionsByName = new Map<string, SchemaDefinition[]>();
+        for (const defs of this.index.definitionMap.values()) {
+            for (const def of defs) {
+                const name = normalizeIdentifier(def.name);
+                if (!name) continue;
+                if (!definitionsByName.has(name)) {
+                    definitionsByName.set(name, []);
+                }
+                definitionsByName.get(name)!.push(def);
+            }
+        }
         const missing: string[] = [];
 
-        for (const tableName of this.index.referenceMap.keys()) {
-            if (!defined.has(tableName)) {
-                missing.push(tableName);
+        for (const [key, refs] of this.index.referenceMap.entries()) {
+            const hasSchema = refs.some(ref => !!ref.schema);
+            if (hasSchema) {
+                if (!definedKeys.has(key)) {
+                    const refName = normalizeIdentifier(refs[0]?.tableName);
+                    const defs = refName ? (definitionsByName.get(refName) || []) : [];
+                    const hasUnqualified = defs.some(def => !def.schema);
+                    if (!hasUnqualified) {
+                        missing.push(key);
+                    }
+                }
+                continue;
+            }
+
+            const refName = normalizeIdentifier(refs[0]?.tableName);
+            if (refName && !definitionsByName.has(refName)) {
+                missing.push(key);
             }
         }
 
@@ -272,11 +352,28 @@ export class IndexManager {
         if (!this.index) return [];
 
         const orphaned: string[] = [];
+        const refsByName = new Map<string, TableReference[]>();
+        for (const refs of this.index.referenceMap.values()) {
+            for (const ref of refs) {
+                const name = normalizeIdentifier(ref.tableName);
+                if (!name) continue;
+                if (!refsByName.has(name)) {
+                    refsByName.set(name, []);
+                }
+                refsByName.get(name)!.push(ref);
+            }
+        }
 
-        for (const [tableName, def] of this.index.definitionMap) {
-            const refs = this.index.referenceMap.get(tableName);
-            if (!refs || refs.length === 0) {
-                orphaned.push(def.name);
+        for (const [key, defs] of this.index.definitionMap.entries()) {
+            const refs = this.index.referenceMap.get(key);
+            if (refs && refs.length > 0) {
+                continue;
+            }
+
+            const nameKey = normalizeIdentifier(defs[0]?.name);
+            const nameRefs = nameKey ? refsByName.get(nameKey) : undefined;
+            if (!nameRefs || nameRefs.length === 0) {
+                orphaned.push(key);
             }
         }
 
@@ -327,16 +424,16 @@ export class IndexManager {
 
         // Index definitions
         for (const def of analysis.definitions) {
-            const key = def.name.toLowerCase();
-            // If already defined elsewhere, prefer the first definition
+            const key = getQualifiedKey(def.name, def.schema);
             if (!targetIndex.definitionMap.has(key)) {
-                targetIndex.definitionMap.set(key, def);
+                targetIndex.definitionMap.set(key, []);
             }
+            targetIndex.definitionMap.get(key)!.push(def);
         }
 
         // Index references
         for (const ref of analysis.references) {
-            const key = ref.tableName.toLowerCase();
+            const key = getQualifiedKey(ref.tableName, ref.schema);
             if (!targetIndex.referenceMap.has(key)) {
                 targetIndex.referenceMap.set(key, []);
             }
@@ -356,10 +453,13 @@ export class IndexManager {
 
         // Remove definitions from this file
         for (const def of analysis.definitions) {
-            const key = def.name.toLowerCase();
-            const existing = this.index.definitionMap.get(key);
-            if (existing?.filePath === analysis.filePath) {
+            const key = getQualifiedKey(def.name, def.schema);
+            const existing = this.index.definitionMap.get(key) || [];
+            const remaining = existing.filter(entry => entry.filePath !== analysis.filePath);
+            if (remaining.length === 0) {
                 this.index.definitionMap.delete(key);
+            } else {
+                this.index.definitionMap.set(key, remaining);
             }
         }
 
@@ -421,6 +521,10 @@ export class IndexManager {
         // Reconstruct Maps from arrays
         // Handle backward compatibility: fileHashesArray may not exist in old cache
         const fileHashesArray = cached.fileHashesArray || [];
+        const rawDefinitionArray = (cached.definitionArray || []) as [string, SchemaDefinition[] | SchemaDefinition][];
+        const definitionArray: [string, SchemaDefinition[]][] = rawDefinitionArray.map(([key, value]) => {
+            return [key, Array.isArray(value) ? value : [value]];
+        });
 
         return {
             version: cached.version,
@@ -428,7 +532,7 @@ export class IndexManager {
             fileCount: cached.fileCount,
             files: new Map(cached.filesArray || []),
             fileHashes: new Map(fileHashesArray),
-            definitionMap: new Map(cached.definitionArray || []),
+            definitionMap: new Map(definitionArray),
             referenceMap: new Map(cached.referenceArray || [])
         };
     }

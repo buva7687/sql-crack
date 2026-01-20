@@ -15,6 +15,7 @@ import {
     MissingDefinitionDetail
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
+import { getDisplayName } from './identifiers';
 
 // Lineage modules
 import { LineageBuilder } from './lineage/lineageBuilder';
@@ -197,7 +198,7 @@ export class WorkspacePanel {
             return;
         }
 
-        this._currentGraph = buildDependencyGraph(index, 'files'); // Always use 'files' mode for now
+        this._currentGraph = buildDependencyGraph(index, 'tables'); // Table-first graph by default
         this.renderCurrentView();
     }
 
@@ -298,19 +299,46 @@ export class WorkspacePanel {
             case 'switchToLineageView':
                 this._currentView = 'lineage';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send lineage overview data to webview
+                if (this._lineageGraph) {
+                    const html = this._lineageView.generateLineageOverview(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'lineageOverviewResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'switchToTableExplorer':
                 this._currentView = 'tableExplorer';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send table list to webview
+                if (this._lineageGraph) {
+                    const html = this._tableExplorer.generateTableList(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'tableListResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'switchToImpactView':
                 this._currentView = 'impact';
                 await this.buildLineageGraph();
-                // Don't call renderCurrentView() - causes flickering
+                // Send impact form to webview
+                if (this._lineageGraph) {
+                    const html = this._impactView.generateImpactForm(this._lineageGraph);
+                    this._panel.webview.postMessage({
+                        command: 'impactFormResult',
+                        data: { html }
+                    });
+                } else {
+                    const html = this._impactView.generateImpactForm(null);
+                    this._panel.webview.postMessage({
+                        command: 'impactFormResult',
+                        data: { html }
+                    });
+                }
                 break;
 
             case 'getLineage':
@@ -344,6 +372,29 @@ export class WorkspacePanel {
 
             case 'getDownstream':
                 await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
+                break;
+
+            // ========== Visual Lineage Graph Commands ==========
+            case 'searchLineageTables':
+                await this.handleSearchLineageTables(message.query, message.typeFilter);
+                break;
+
+            case 'getLineageGraph':
+                await this.handleGetLineageGraph(
+                    message.nodeId,
+                    message.depth || 5,
+                    message.direction || 'both',
+                    message.fileFilter,
+                    message.expandedNodes
+                );
+                break;
+
+            case 'expandNodeColumns':
+                await this.handleExpandNodeColumns(message.nodeId);
+                break;
+
+            case 'setLineageDirection':
+                await this.handleSetLineageDirection(message.nodeId, message.direction);
                 break;
         }
     }
@@ -659,6 +710,130 @@ export class WorkspacePanel {
         });
     }
 
+    // ========== Visual Lineage Graph Methods ==========
+
+    /**
+     * Handle search for tables/views in lineage graph
+     */
+    private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) {
+            this._panel.webview.postMessage({
+                command: 'lineageSearchResults',
+                data: { results: [] }
+            });
+            return;
+        }
+
+        const results: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
+        const queryLower = query.toLowerCase();
+
+        for (const [id, node] of this._lineageGraph.nodes) {
+            // Skip columns and external tables in search
+            if (node.type === 'column') continue;
+
+            // Apply type filter
+            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+
+            // Match by name
+            if (node.name.toLowerCase().includes(queryLower)) {
+                results.push({
+                    id: node.id,
+                    name: node.name,
+                    type: node.type,
+                    filePath: node.filePath
+                });
+            }
+        }
+
+        // Sort by relevance (exact matches first, then by name)
+        results.sort((a, b) => {
+            const aExact = a.name.toLowerCase() === queryLower;
+            const bExact = b.name.toLowerCase() === queryLower;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        this._panel.webview.postMessage({
+            command: 'lineageSearchResults',
+            data: { results: results.slice(0, 15) }
+        });
+    }
+
+    /**
+     * Handle get lineage graph for a specific node
+     */
+    private async handleGetLineageGraph(
+        nodeId: string,
+        depth: number,
+        direction: 'both' | 'upstream' | 'downstream',
+        fileFilter?: string[],
+        expandedNodes?: string[]
+    ): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) {
+            this._panel.webview.postMessage({
+                command: 'lineageGraphResult',
+                data: { error: 'No lineage graph available' }
+            });
+            return;
+        }
+
+        // Generate HTML using the new visual graph view
+        const html = this._lineageView.generateLineageGraphView(
+            this._lineageGraph,
+            nodeId,
+            {
+                depth,
+                direction,
+                expandedNodes: new Set(expandedNodes || []),
+                fileFilter
+            }
+        );
+
+        this._panel.webview.postMessage({
+            command: 'lineageGraphResult',
+            data: { html, nodeId, direction }
+        });
+    }
+
+    /**
+     * Handle expand node columns request
+     */
+    private async handleExpandNodeColumns(nodeId: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) return;
+
+        const node = this._lineageGraph.nodes.get(nodeId);
+        if (!node) return;
+
+        // Find column nodes for this table
+        const columns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> = [];
+        for (const [id, colNode] of this._lineageGraph.nodes) {
+            if (colNode.type === 'column' && colNode.parentId === nodeId) {
+                columns.push({
+                    name: colNode.name,
+                    dataType: colNode.columnInfo?.dataType,
+                    isPrimaryKey: colNode.metadata?.isPrimaryKey
+                });
+            }
+        }
+
+        this._panel.webview.postMessage({
+            command: 'nodeColumnsResult',
+            data: { nodeId, columns }
+        });
+    }
+
+    /**
+     * Handle set lineage direction
+     */
+    private async handleSetLineageDirection(nodeId: string, direction: 'both' | 'upstream' | 'downstream'): Promise<void> {
+        // Re-generate graph with new direction
+        await this.handleGetLineageGraph(nodeId, 5, direction);
+    }
+
     /**
      * Get lineage stats for display
      */
@@ -888,6 +1063,1392 @@ export class WorkspacePanel {
         }
         .lineage-empty svg { width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5; }
 
+        /* ========== Table List View ========== */
+        .table-list-view { padding: 10px; }
+        .table-list-header { 
+            margin-bottom: 24px; 
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .header-top {
+            margin-bottom: 16px;
+        }
+        .table-list-header h3 { 
+            color: var(--text-primary); margin: 0 0 6px 0; 
+            font-size: 22px; font-weight: 600; 
+        }
+        .header-subtitle {
+            color: var(--text-muted); font-size: 14px; 
+            margin: 0; line-height: 1.5;
+        }
+        .header-info {
+            display: flex; flex-direction: column; gap: 12px;
+            margin-bottom: 16px; padding: 16px;
+            background: rgba(99, 102, 241, 0.05);
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(99, 102, 241, 0.1);
+        }
+        .info-card {
+            display: flex; gap: 12px; align-items: flex-start;
+        }
+        .info-card svg {
+            flex-shrink: 0; margin-top: 2px;
+            color: var(--accent);
+        }
+        .info-card strong {
+            display: block; color: var(--text-primary);
+            font-size: 13px; font-weight: 600; margin-bottom: 4px;
+        }
+        .info-card p {
+            margin: 0; color: var(--text-muted);
+            font-size: 12px; line-height: 1.5;
+        }
+        .legend-item {
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-right: 12px; font-size: 12px;
+        }
+        .legend-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            display: inline-block;
+        }
+        .legend-dot.high {
+            background: var(--accent);
+        }
+        .legend-dot.medium {
+            background: rgba(99, 102, 241, 0.7);
+        }
+        .legend-dot.low {
+            background: rgba(99, 102, 241, 0.4);
+        }
+        .header-stats {
+            display: flex; gap: 12px; flex-wrap: wrap;
+        }
+        .stat-badge {
+            display: flex; flex-direction: column; align-items: center;
+            padding: 12px 16px; background: var(--bg-secondary);
+            border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+            min-width: 80px;
+        }
+        .stat-value {
+            font-size: 20px; font-weight: 700; color: var(--accent);
+            line-height: 1;
+        }
+        .stat-label {
+            font-size: 11px; color: var(--text-muted);
+            margin-top: 4px; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .table-list-grid { display: flex; flex-direction: column; gap: 12px; }
+        .table-list-item {
+            display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle); cursor: pointer; 
+            transition: all 0.2s; position: relative;
+            box-shadow: var(--shadow-sm);
+        }
+        .table-list-item:hover { 
+            background: var(--bg-tertiary); 
+            border-color: var(--accent); 
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        .table-list-item.connection-high {
+            border-left: 4px solid var(--accent);
+        }
+        .table-list-item.connection-medium {
+            border-left: 4px solid rgba(99, 102, 241, 0.6);
+        }
+        .table-list-item.connection-low {
+            border-left: 4px solid rgba(99, 102, 241, 0.3);
+        }
+        
+        .table-list-icon-wrapper {
+            position: relative; flex-shrink: 0;
+            width: 48px; height: 48px;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--bg-primary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+        .table-list-icon { font-size: 24px; }
+        .connection-indicator {
+            position: absolute; top: -2px; right: -2px;
+            width: 12px; height: 12px;
+            border-radius: 50%; border: 2px solid var(--bg-secondary);
+        }
+        .connection-indicator.connection-high {
+            background: var(--accent); box-shadow: 0 0 0 2px var(--accent);
+        }
+        .connection-indicator.connection-medium {
+            background: rgba(99, 102, 241, 0.7);
+        }
+        .connection-indicator.connection-low {
+            background: rgba(99, 102, 241, 0.4);
+        }
+        
+        .table-list-info { flex: 1; min-width: 0; }
+        .table-list-header-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin-bottom: 8px;
+        }
+        .table-list-name { 
+            font-weight: 600; color: var(--text-primary); 
+            font-size: 15px; line-height: 1.4;
+        }
+        .table-list-connections {
+            display: flex; align-items: center; gap: 8px;
+            flex-shrink: 0;
+        }
+        .connection-badge {
+            display: flex; align-items: center; gap: 4px;
+            padding: 4px 8px; border-radius: var(--radius-sm);
+            font-size: 11px; font-weight: 600;
+            background: var(--bg-tertiary);
+        }
+        .connection-badge.upstream {
+            color: var(--success-light);
+        }
+        .connection-badge.downstream {
+            color: var(--accent);
+        }
+        .connection-badge svg {
+            width: 12px; height: 12px;
+        }
+        .no-connections-badge {
+            font-size: 11px; color: var(--text-dim);
+            font-style: italic;
+        }
+        
+        .table-list-meta { 
+            display: flex; align-items: center; gap: 10px; 
+            font-size: 12px; color: var(--text-muted); 
+            flex-wrap: wrap;
+        }
+        .table-list-type-badge { 
+            padding: 4px 10px; border-radius: var(--radius-sm);
+            font-size: 11px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .table-list-type-badge.type-table {
+            background: rgba(16, 185, 129, 0.15); color: var(--success-light);
+        }
+        .table-list-type-badge.type-view {
+            background: rgba(139, 92, 246, 0.15); color: #a78bfa;
+        }
+        .table-list-type-badge.type-cte {
+            background: rgba(99, 102, 241, 0.15); color: var(--accent);
+        }
+        .table-list-file { 
+            display: flex; align-items: center; gap: 4px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            max-width: 200px;
+        }
+        .table-list-file svg {
+            width: 12px; height: 12px; flex-shrink: 0;
+            opacity: 0.6;
+        }
+        .table-list-action {
+            display: flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px;
+            border-radius: var(--radius-sm);
+            color: var(--text-dim);
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .table-list-item:hover .table-list-action {
+            color: var(--accent);
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .table-list-item.no-connections { 
+            opacity: 0.7; 
+        }
+        .table-list-item.no-connections:hover { 
+            opacity: 1; 
+        }
+        .table-list-empty { 
+            text-align: center; padding: 60px 20px; color: var(--text-muted); 
+        }
+        .table-list-empty svg {
+            width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.5;
+        }
+        .table-list-empty h3 {
+            color: var(--text-primary); margin: 0 0 8px 0; font-size: 16px;
+        }
+        .table-list-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 8px;
+        }
+        
+        /* Table List Controls */
+        .table-list-controls {
+            display: flex; flex-direction: column; gap: 16px;
+            margin-bottom: 24px; padding: 20px;
+            background: var(--bg-secondary); border-radius: var(--radius-xl);
+            border: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-sm);
+        }
+        .controls-header {
+            margin-bottom: 4px;
+        }
+        .controls-header h4 {
+            color: var(--text-primary); font-size: 14px; font-weight: 600;
+            margin: 0 0 6px 0;
+        }
+        .controls-hint {
+            color: var(--text-muted); font-size: 12px; margin: 0;
+            line-height: 1.5;
+        }
+        .controls-hint kbd {
+            background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+            border-radius: 3px; padding: 2px 6px;
+            font-family: monospace; font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .filter-group {
+            display: flex; flex-direction: column; gap: 6px;
+            flex: 1; min-width: 160px;
+        }
+        .filter-label {
+            display: flex; align-items: center; gap: 6px;
+            color: var(--text-secondary); font-size: 12px; font-weight: 500;
+        }
+        .filter-label svg {
+            width: 14px; height: 14px; color: var(--text-muted);
+        }
+        .search-box-table {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--bg-primary); padding: 12px 16px;
+            border-radius: var(--radius-md); border: 2px solid var(--border-subtle);
+            transition: all 0.2s;
+        }
+        .search-box-table:focus-within { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .search-box-table svg { 
+            flex-shrink: 0; color: var(--text-dim);
+            width: 16px; height: 16px;
+        }
+        .search-input-table {
+            flex: 1; background: transparent; border: none;
+            color: var(--text-secondary); font-size: 14px; outline: none;
+        }
+        .search-input-table::placeholder { color: var(--text-dim); }
+        .search-clear-table {
+            background: transparent; border: none; color: var(--text-dim);
+            cursor: pointer; padding: 6px; display: none;
+            align-items: center; justify-content: center;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+        }
+        .search-clear-table:hover { 
+            color: var(--error-light); 
+            background: rgba(239, 68, 68, 0.1); 
+        }
+        .filter-controls {
+            display: flex; gap: 12px; flex-wrap: wrap;
+        }
+        .filter-select {
+            flex: 1; min-width: 160px;
+            background: var(--bg-primary); border: 2px solid var(--border-subtle);
+            color: var(--text-secondary); font-size: 13px; 
+            padding: 10px 14px; border-radius: var(--radius-md); 
+            outline: none; cursor: pointer; transition: all 0.2s;
+        }
+        .filter-select:hover { 
+            border-color: var(--border-color); 
+            background: var(--bg-tertiary);
+        }
+        .filter-select:focus { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        
+        /* Responsive layout for narrow panels */
+        @media (max-width: 600px) {
+            .filter-controls {
+                flex-direction: column;
+            }
+            .filter-select {
+                min-width: 100%; width: 100%;
+            }
+            .table-list-controls {
+                padding: 12px;
+            }
+        }
+        .table-list-results-info {
+            padding: 12px 16px; margin-bottom: 12px;
+            background: var(--bg-secondary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            font-size: 12px; color: var(--text-muted);
+        }
+        .table-list-empty-filter {
+            text-align: center; padding: 60px 20px; color: var(--text-muted);
+        }
+        .table-list-empty-filter svg {
+            width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.5;
+        }
+        .table-list-empty-filter h3 {
+            color: var(--text-primary); margin: 0 0 8px 0; font-size: 16px;
+        }
+        .table-list-empty-filter .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 8px;
+        }
+        mark {
+            background: rgba(99, 102, 241, 0.3); color: var(--text-primary);
+            padding: 2px 4px; border-radius: 3px;
+        }
+        
+        /* Impact Form Styles */
+        .impact-form-container {
+            max-width: 900px; margin: 0 auto;
+        }
+        .impact-form {
+            background: var(--bg-secondary); border-radius: var(--radius-xl);
+            border: 1px solid var(--border-subtle); padding: 32px;
+            margin-bottom: 24px; box-shadow: var(--shadow-md);
+        }
+        .form-header {
+            display: flex; align-items: flex-start; gap: 16px;
+            margin-bottom: 28px; padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .form-header-icon {
+            font-size: 32px; line-height: 1;
+        }
+        .form-header h3 {
+            color: var(--text-primary); font-size: 20px; font-weight: 600;
+            margin: 0 0 6px 0;
+        }
+        .form-description {
+            color: var(--text-muted); font-size: 14px; margin: 0;
+            line-height: 1.5;
+        }
+        .form-fields {
+            display: flex; flex-direction: column; gap: 24px;
+        }
+        .form-field {
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .form-field label {
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-primary); font-size: 14px; font-weight: 500;
+        }
+        .form-field label svg {
+            width: 16px; height: 16px; color: var(--text-muted);
+        }
+        .form-select {
+            background: var(--bg-primary); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); font-size: 14px; padding: 12px 16px;
+            border-radius: var(--radius-md); outline: none; cursor: pointer;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .form-select:hover { 
+            border-color: var(--border-color); 
+            background: var(--bg-tertiary);
+        }
+        .form-select:focus { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        
+        /* Modern Button-Style Change Type Selector */
+        .change-type-buttons {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+        .change-type-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+            padding: 16px 12px; background: var(--bg-primary);
+            border: 2px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-secondary); font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; position: relative;
+            min-height: 90px;
+        }
+        .change-type-btn:hover {
+            border-color: var(--accent); background: var(--bg-tertiary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .change-type-btn.active {
+            border-color: var(--accent); background: rgba(99, 102, 241, 0.1);
+            color: var(--accent);
+        }
+        .change-type-btn.active::before {
+            content: '';
+            position: absolute; top: 8px; right: 8px;
+            width: 8px; height: 8px;
+            background: var(--accent); border-radius: 50%;
+        }
+        .change-type-btn svg {
+            width: 24px; height: 24px; stroke-width: 2;
+        }
+        .change-type-btn span {
+            font-size: 13px; font-weight: 500;
+        }
+        .change-type-btn.active svg {
+            color: var(--accent);
+        }
+        
+        .form-actions {
+            margin-top: 8px; padding-top: 20px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .btn-primary {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            padding: 14px 28px; background: var(--accent); color: white;
+            border: none; border-radius: var(--radius-md); font-size: 14px;
+            font-weight: 600; cursor: pointer; transition: all 0.2s;
+            width: 100%; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5; cursor: not-allowed;
+            transform: none; box-shadow: none;
+        }
+        .btn-primary svg {
+            width: 18px; height: 18px;
+        }
+        .impact-results {
+            margin-top: 24px;
+        }
+        .impact-empty {
+            text-align: center; padding: 80px 20px; color: var(--text-muted);
+        }
+        .impact-empty svg {
+            width: 64px; height: 64px; margin: 0 auto 24px; opacity: 0.5;
+        }
+        .impact-empty h3 {
+            color: var(--text-primary); margin: 0 0 12px 0; font-size: 18px;
+        }
+        .impact-empty p {
+            margin: 8px 0; font-size: 14px;
+        }
+        .impact-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 12px;
+        }
+        
+        /* Skeleton Loader */
+        .skeleton-loader {
+            padding: 20px;
+        }
+        .skeleton-line {
+            height: 16px; background: var(--bg-secondary);
+            border-radius: var(--radius-sm); margin-bottom: 12px;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+        .skeleton-line:last-child {
+            width: 60%; margin-bottom: 0;
+        }
+        @keyframes skeleton-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Lineage Enhancements */
+        .lineage-overview-empty {
+            text-align: center; padding: 80px 20px; color: var(--text-muted);
+        }
+        .lineage-overview-empty svg {
+            width: 64px; height: 64px; margin: 0 auto 24px; opacity: 0.5;
+        }
+        .lineage-overview-empty h3 {
+            color: var(--text-primary); margin: 0 0 12px 0; font-size: 18px;
+        }
+        .lineage-overview-empty p {
+            margin: 8px 0; font-size: 14px;
+        }
+        .lineage-overview-empty .hint {
+            color: var(--text-dim); font-size: 12px; margin-top: 12px;
+        }
+        .section-header-with-action {
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 16px; margin-bottom: 12px;
+        }
+        .view-all-btn {
+            padding: 6px 12px; background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+            color: var(--text-secondary); font-size: 12px; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .view-all-btn:hover {
+            background: var(--bg-hover); border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        /* ========== Table Explorer Detail View ========== */
+        .table-explorer { padding: 16px; }
+        .explorer-header {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 20px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .explorer-header h2 {
+            font-size: 20px; font-weight: 600; color: var(--text-primary); margin: 0;
+        }
+        .flow-panel {
+            margin-top: 24px; padding: 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .flow-panel h3 {
+            font-size: 16px; font-weight: 600; color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .flow-section {
+            margin-bottom: 16px;
+        }
+        .flow-section:last-child { margin-bottom: 0; }
+        .flow-section-header {
+            margin-bottom: 12px;
+        }
+        .flow-section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            margin-bottom: 6px; padding-bottom: 4px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .flow-section-title .info-icon {
+            cursor: help;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            flex-shrink: 0;
+            stroke: var(--text-muted);
+        }
+        .flow-section-title .info-icon:hover {
+            opacity: 1;
+            stroke: var(--accent);
+        }
+        .flow-section-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-top: 4px;
+            padding-left: 4px;
+        }
+        .flow-list {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .flow-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+            background: var(--bg-tertiary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); transition: all 0.15s;
+        }
+        .flow-item-internal {
+            cursor: pointer;
+        }
+        .flow-item-internal:hover {
+            background: var(--bg-hover); border-color: var(--accent);
+        }
+        .flow-item-external {
+            opacity: 0.8;
+        }
+        .flow-node-icon { font-size: 16px; flex-shrink: 0; }
+        .flow-node-name {
+            flex: 1; font-weight: 500; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .flow-node-type {
+            font-size: 11px; color: var(--text-muted);
+            background: var(--bg-secondary); padding: 2px 6px;
+            border-radius: var(--radius-sm); flex-shrink: 0;
+        }
+        .flow-node-type.external {
+            background: rgba(71, 85, 105, 0.3); color: var(--text-dim);
+        }
+        .flow-node-file {
+            font-size: 10px; color: var(--text-dim);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            max-width: 120px;
+        }
+        .column-list {
+            margin-top: 20px; padding: 16px;
+            background: var(--bg-secondary); border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .column-list h3 {
+            font-size: 16px; font-weight: 600; color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .columns-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+        }
+        .column-item {
+            display: flex; flex-direction: column; gap: 4px; padding: 8px 12px;
+            background: var(--bg-tertiary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+        .column-name {
+            font-weight: 500; color: var(--text-primary); font-size: 13px;
+        }
+        .column-type {
+            font-size: 11px; color: var(--text-muted); font-family: monospace;
+        }
+        .badge-primary, .badge-not-null {
+            font-size: 9px; font-weight: 600; padding: 2px 4px;
+            border-radius: var(--radius-sm); margin-top: 2px;
+        }
+        .badge-primary {
+            background: var(--accent); color: white;
+        }
+        .badge-not-null {
+            background: var(--warning); color: white;
+        }
+
+        /* ========== Lineage Overview ========== */
+        .lineage-overview { padding: 10px; }
+        .lineage-overview-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .lineage-stats { margin-bottom: 24px; }
+        .lineage-stats h3 { color: var(--text-primary); margin: 0 0 12px 0; font-size: 16px; }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+        }
+        .stat-item {
+            background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); text-align: center;
+        }
+        .stat-item .stat-value { display: block; font-size: 24px; font-weight: 700; color: var(--accent); }
+        .stat-item .stat-label { display: block; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .lineage-section { margin-bottom: 24px; }
+        .lineage-section h3 { color: var(--text-primary); margin: 0 0 8px 0; font-size: 14px; }
+        .section-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 12px 0; }
+        .node-list { display: flex; flex-direction: column; gap: 6px; }
+        .node-item {
+            display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+            background: var(--bg-secondary); border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
+        }
+        .node-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
+        .node-icon { font-size: 16px; }
+        .node-name { flex: 1; font-weight: 500; color: var(--text-primary); }
+        .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
+        .connection-count {
+            font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm);
+            min-width: 28px; text-align: center;
+        }
+        .connection-count.has-connections { background: var(--accent); color: white; }
+        .connection-count.no-connections { background: var(--bg-tertiary); color: var(--text-muted); }
+        .node-item.no-connections { opacity: 0.6; }
+        .node-item.no-connections:hover { opacity: 1; }
+        .more-items { padding: 8px 14px; color: var(--text-muted); font-size: 12px; font-style: italic; }
+        .lineage-tip {
+            background: var(--bg-tertiary); padding: 12px 16px; border-radius: var(--radius-md);
+            font-size: 12px; color: var(--text-muted);
+        }
+        .lineage-tip strong { color: var(--text-secondary); }
+
+        /* ========== Visual Lineage Graph ========== */
+        .lineage-visual-container {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .lineage-search-panel {
+            margin-bottom: 24px;
+        }
+        .search-header h3 {
+            color: var(--text-primary);
+            font-size: 18px;
+            margin: 0 0 8px 0;
+        }
+        .search-hint {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin: 0 0 16px 0;
+        }
+        .search-form {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .search-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            transition: all 0.2s;
+        }
+        .search-input-wrapper:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .search-input-wrapper .search-icon {
+            width: 18px;
+            height: 18px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .lineage-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+        .lineage-search-input::placeholder {
+            color: var(--text-dim);
+        }
+        .search-clear-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: var(--radius-sm);
+        }
+        .search-clear-btn:hover {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+        .search-clear-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        .search-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 100;
+            margin-top: 4px;
+        }
+        .search-result-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: background 0.15s;
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        .search-result-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .search-result-item .result-icon {
+            font-size: 16px;
+        }
+        .search-result-item .result-name {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .search-result-item .result-type {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+        }
+        .search-result-item .result-file {
+            font-size: 11px;
+            color: var(--text-dim);
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Quick Filters */
+        .quick-filters {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .quick-filters .filter-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .filter-chip {
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-chip:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+        .filter-chip.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        /* File Filter */
+        .file-filter-section {
+            margin-bottom: 20px;
+        }
+        .file-filter-section .filter-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .file-filter-select {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 8px 12px;
+            min-height: 80px;
+            outline: none;
+        }
+        .file-filter-select:focus {
+            border-color: var(--accent);
+        }
+
+        /* Recent Selections */
+        .recent-selections {
+            margin-bottom: 20px;
+        }
+        .recent-selections h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .recent-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .recent-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recent-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        .recent-icon { font-size: 14px; }
+        .recent-name { font-size: 12px; color: var(--text-primary); }
+        .recent-type { font-size: 10px; color: var(--text-dim); }
+
+        /* Popular Tables */
+        .popular-tables {
+            margin-bottom: 24px;
+        }
+        .popular-tables h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .popular-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+        }
+        .popular-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .popular-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .popular-icon { font-size: 18px; }
+        .popular-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .popular-type-badge {
+            font-size: 10px;
+            color: var(--text-dim);
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
+        .popular-connections {
+            display: flex;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .popular-connections .conn-up {
+            color: var(--success-light);
+        }
+        .popular-connections .conn-down {
+            color: var(--accent);
+        }
+        .popular-item.filtered-out {
+            display: none;
+        }
+        .no-popular {
+            color: var(--text-dim);
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        /* Stats Summary */
+        .lineage-stats-summary {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .stat-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+        }
+        .stat-chip .stat-icon { font-size: 16px; }
+        .stat-chip .stat-count { font-size: 16px; font-weight: 700; color: var(--accent); }
+        .stat-chip .stat-label { font-size: 12px; color: var(--text-muted); }
+
+        /* Graph View */
+        .lineage-graph-view {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .graph-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .graph-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .graph-title .graph-icon { font-size: 20px; }
+        .graph-title h3 { font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0; }
+        .node-type-badge {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
+        .graph-stats {
+            display: flex;
+            gap: 16px;
+        }
+        .graph-stats .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .graph-stats .stat.upstream { color: var(--success-light); }
+        .graph-stats .stat.downstream { color: var(--accent); }
+
+        /* Direction Controls */
+        .direction-controls {
+            display: flex;
+            gap: 4px;
+            padding: 8px 16px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .direction-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .direction-btn:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        .direction-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .direction-btn svg { width: 16px; height: 16px; }
+
+        /* Graph Container */
+        .lineage-graph-container {
+            flex: 1;
+            overflow: hidden;
+            background: var(--bg-primary);
+            position: relative;
+        }
+        .lineage-graph-svg {
+            cursor: grab;
+            user-select: none;
+        }
+        .lineage-graph-svg:active {
+            cursor: grabbing;
+        }
+
+        /* Zoom Controls */
+        .lineage-zoom-controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            z-index: 10;
+        }
+        .lineage-zoom-controls .zoom-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .lineage-zoom-controls .zoom-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .lineage-zoom-controls .zoom-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .lineage-zoom-controls .zoom-level {
+            font-size: 11px;
+            font-family: monospace;
+            color: var(--text-muted);
+            min-width: 40px;
+            text-align: center;
+        }
+        .lineage-zoom-controls .zoom-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+            margin: 0 4px;
+        }
+
+        /* Graph Node Styles */
+        .lineage-node {
+            cursor: pointer;
+            transition: opacity 0.2s, filter 0.2s;
+        }
+        .lineage-node .node-bg {
+            stroke-width: 2;
+            transition: all 0.2s;
+        }
+        .lineage-node-table .node-bg {
+            fill: var(--node-table);
+            stroke: var(--node-table-border);
+        }
+        .lineage-node-view .node-bg {
+            fill: var(--node-view);
+            stroke: var(--node-view-border);
+        }
+        .lineage-node-cte .node-bg {
+            fill: var(--accent);
+            stroke: var(--accent-hover);
+        }
+        .lineage-node-external .node-bg {
+            fill: var(--node-external);
+            stroke: var(--node-external-border);
+        }
+        .lineage-node:hover .node-bg {
+            filter: brightness(1.1);
+        }
+        .lineage-node.focused .node-bg {
+            stroke-width: 3;
+            filter: drop-shadow(0 0 8px var(--accent));
+        }
+        .lineage-node.center .node-bg {
+            stroke-width: 3;
+            stroke: var(--warning-light);
+        }
+        .lineage-node.dimmed {
+            opacity: 0.3;
+        }
+        .lineage-node.highlighted .node-bg {
+            stroke-width: 3;
+            stroke: var(--accent);
+        }
+        .lineage-node .node-icon {
+            font-size: 14px;
+            fill: white;
+        }
+        .lineage-node .node-name {
+            font-size: 12px;
+            font-weight: 600;
+            fill: white;
+        }
+        .lineage-node .node-type {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.75);
+        }
+        .lineage-node .node-divider {
+            stroke: rgba(255, 255, 255, 0.2);
+            stroke-width: 1;
+        }
+        .lineage-node .column-dot {
+            fill: rgba(255, 255, 255, 0.5);
+        }
+        .lineage-node .column-dot.primary {
+            fill: var(--warning-light);
+        }
+        .lineage-node .column-name {
+            font-size: 11px;
+            fill: rgba(255, 255, 255, 0.9);
+        }
+        .lineage-node .column-type {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.6);
+            font-family: monospace;
+        }
+        .lineage-node .expand-btn rect {
+            cursor: pointer;
+        }
+        .lineage-node .expand-text {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+        }
+        .lineage-node .count-badge {
+            font-size: 10px;
+            fill: var(--text-muted);
+        }
+
+        /* Graph Edge Styles */
+        .lineage-edge {
+            fill: none;
+            stroke: var(--text-dim);
+            stroke-width: 2;
+            transition: stroke 0.2s, stroke-width 0.2s;
+        }
+        .lineage-edge-direct { stroke: #64748b; }
+        .lineage-edge-join { stroke: #a78bfa; }
+        .lineage-edge-transform { stroke: #f59e0b; }
+        .lineage-edge.highlighted {
+            stroke: var(--accent);
+            stroke-width: 3;
+        }
+
+        /* Tooltip */
+        .lineage-tooltip {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            min-width: 220px;
+            max-width: 300px;
+            pointer-events: none;
+        }
+        .lineage-tooltip .tooltip-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .lineage-tooltip .tooltip-icon { font-size: 18px; }
+        .lineage-tooltip .tooltip-name { font-weight: 600; color: var(--text-primary); }
+        .lineage-tooltip .tooltip-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 8px 0;
+        }
+        .lineage-tooltip .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .lineage-tooltip .label { color: var(--text-muted); }
+        .lineage-tooltip .value { color: var(--text-secondary); }
+        .lineage-tooltip .tooltip-hint {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-align: center;
+        }
+
+        /* Context Menu */
+        .lineage-context-menu {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 180px;
+            z-index: 1001;
+            padding: 4px 0;
+        }
+        .lineage-context-menu .context-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .lineage-context-menu .context-item:hover {
+            background: var(--accent);
+            color: white;
+        }
+        .lineage-context-menu .context-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 0;
+        }
+
+        /* Empty States */
+        .lineage-empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .lineage-empty-state svg {
+            opacity: 0.5;
+            margin-bottom: 20px;
+        }
+        .lineage-empty-state h3 {
+            font-size: 18px;
+            color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .lineage-empty-state p {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+        .lineage-empty-state .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 12px;
+        }
+
+        .lineage-no-relations {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .lineage-no-relations .single-node {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 24px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            margin-bottom: 20px;
+        }
+        .lineage-no-relations .node-icon { font-size: 24px; }
+        .lineage-no-relations .node-name { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+        .lineage-no-relations .no-relations-msg {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .lineage-no-relations .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .lineage-no-relations .direction-suggestion {
+            margin-top: 24px;
+            text-align: center;
+        }
+        .lineage-no-relations .direction-suggestion p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+        .lineage-no-relations .suggestion-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .lineage-no-relations .node-type-badge {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
+
         /* ========== Stats Bar ========== */
         .stats-bar {
             display: flex; align-items: center; gap: 6px; padding: 8px 16px;
@@ -897,6 +2458,27 @@ export class WorkspacePanel {
         .stats-bar .stat { display: flex; align-items: center; gap: 4px; }
         .stats-bar .stat-value { font-weight: 600; color: var(--text-primary); }
         .stats-bar .separator { color: var(--text-dim); }
+        .legend-inline {
+            display: flex; align-items: center; gap: 16px; padding: 6px 16px;
+            background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
+            font-size: 11px; color: var(--text-muted); flex-wrap: wrap;
+        }
+        .legend-inline-group { display: flex; align-items: center; gap: 8px; }
+        .legend-inline-item { display: flex; align-items: center; gap: 6px; }
+        .legend-inline-node {
+            width: 12px; height: 12px; border-radius: 3px;
+            border: 1px solid transparent; flex-shrink: 0;
+        }
+        .legend-inline-node.file { background: var(--node-file); border-color: var(--node-file-border); }
+        .legend-inline-node.table { background: var(--node-table); border-color: var(--node-table-border); }
+        .legend-inline-node.view { background: var(--node-view); border-color: var(--node-view-border); }
+        .legend-inline-node.external { background: var(--node-external); border-color: var(--node-external-border); border-style: dashed; }
+        .legend-inline-edge { width: 16px; height: 2px; border-radius: 2px; flex-shrink: 0; }
+        .legend-inline-edge.select { background: #64748b; }
+        .legend-inline-edge.join { background: #a78bfa; }
+        .legend-inline-edge.insert { background: #10b981; }
+        .legend-inline-edge.update { background: #fbbf24; }
+        .legend-inline-edge.delete { background: #f87171; }
 
         /* ========== Issue Banner ========== */
         .issue-banner {
@@ -1188,6 +2770,23 @@ export class WorkspacePanel {
             <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
             <span class="separator">•</span>
             <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
+        </div>
+        <div class="legend-inline">
+            <div class="legend-inline-group">
+                <span>Nodes:</span>
+                <div class="legend-inline-item"><div class="legend-inline-node file"></div><span>Files</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node table"></div><span>Tables</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node view"></div><span>Views</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node external"></div><span>External</span></div>
+            </div>
+            <div class="legend-inline-group">
+                <span>Edges:</span>
+                <div class="legend-inline-item"><div class="legend-inline-edge select"></div><span>SELECT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge join"></div><span>JOIN</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge insert"></div><span>INSERT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge update"></div><span>UPDATE</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge delete"></div><span>DELETE</span></div>
+            </div>
         </div>
 
         <!-- Issue Banner -->
@@ -1666,6 +3265,7 @@ export class WorkspacePanel {
 
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
+        let lineageDetailView = false;  // Track if we're in a detail view (upstream/downstream/table)
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
@@ -1680,9 +3280,9 @@ export class WorkspacePanel {
         };
 
         const viewEmptyStates = {
-            lineage: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 9 4-18 3 9h4"/></svg><p>Right-click a node in the graph and choose<br>"Show Upstream" or "Show Downstream" to view data lineage.</p></div>',
-            tableExplorer: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg><p>Right-click on a table node and select "Explore Table"<br>to view its columns and dependencies.</p></div>',
-            impact: '<div class="lineage-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><p>Right-click on a table and select "Analyze Impact"<br>to see what would be affected by changes.</p></div>'
+            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
+            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
         function switchToView(view) {
@@ -1736,10 +3336,40 @@ export class WorkspacePanel {
             });
         });
 
-        // Back button handler
+        // Helper to update back button text
+        function updateBackButtonText() {
+            if (!lineageBackBtn) return;
+            if (lineageDetailView && currentViewMode !== 'graph') {
+                // In detail view - show "Back to [Tab Name]"
+                const tabNames = { lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
+            } else {
+                // In overview - show "Back to Graph"
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph';
+            }
+        }
+
+        // Back button handler - returns to tab overview if in detail view, otherwise to graph
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            switchToView('graph');
+            if (lineageDetailView && currentViewMode !== 'graph') {
+                // Return to the current tab's overview
+                lineageDetailView = false;
+                updateBackButtonText();
+                if (currentViewMode === 'lineage') {
+                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (currentViewMode === 'tableExplorer') {
+                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (currentViewMode === 'impact') {
+                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+            } else {
+                // Go back to graph view
+                switchToView('graph');
+            }
         });
 
         // ========== Context Menu ==========
@@ -1908,8 +3538,103 @@ export class WorkspacePanel {
                         lineageContent.innerHTML = message.data.html;
                     }
                     break;
+                case 'tableListResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        // Setup table search and filter handlers
+                        setupTableSearchAndFilter();
+                    }
+                    break;
+                case 'impactFormResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        // Setup impact form handlers
+                        setupImpactForm();
+                    }
+                    break;
+                case 'impactResult':
+                    if (lineageContent && message.data?.html) {
+                        const resultsDiv = document.getElementById('impact-results');
+                        if (resultsDiv) {
+                            resultsDiv.style.display = 'block';
+                            resultsDiv.innerHTML = message.data.html;
+                        } else {
+                            lineageContent.innerHTML = message.data.html;
+                        }
+                    }
+                    break;
+                case 'lineageOverviewResult':
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        // Setup visual lineage search handlers
+                        setupVisualLineageSearch();
+                    }
+                    break;
+                case 'lineageSearchResults':
+                    // Handle search results for lineage
+                    if (message.data?.results) {
+                        showLineageSearchResults(message.data.results);
+                    }
+                    break;
+                case 'lineageGraphResult':
+                    // Handle lineage graph render result
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        // Setup graph interactions (works for both graph view and empty state)
+                        setupLineageGraphInteractions();
+                        // Also setup direction buttons in empty state
+                        setupDirectionButtons();
+                    }
+                    break;
+                case 'nodeColumnsResult':
+                    // Handle column expansion
+                    if (message.data?.nodeId && message.data?.columns) {
+                        expandNodeWithColumns(message.data.nodeId, message.data.columns);
+                    }
+                    break;
             }
         });
+
+        // ========== Event Delegation for Dynamic Lineage Content ==========
+        if (lineageContent) {
+            lineageContent.addEventListener('click', (e) => {
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+
+                const action = target.getAttribute('data-action');
+                const tableName = target.getAttribute('data-table');
+                const nodeId = target.getAttribute('data-node-id');
+
+                if (!tableName) return;
+
+                // Mark that we're entering a detail view
+                lineageDetailView = true;
+                updateBackButtonText();
+
+                switch (action) {
+                    case 'explore-table':
+                        // Show loading state and request table details
+                        if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'exploreTable', tableName: tableName });
+                        break;
+                    case 'show-upstream':
+                        // Show upstream dependencies - use nodeId if available, otherwise construct it
+                        if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        break;
+                    case 'show-downstream':
+                        // Show downstream dependencies - use nodeId if available, otherwise construct it
+                        if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
+                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        break;
+                }
+            });
+        }
 
         // ========== Issue Item Clicks ==========
         document.querySelectorAll('.issue-item').forEach(item => {
@@ -1986,6 +3711,763 @@ export class WorkspacePanel {
         function hideTooltip() {
             tooltip.style.display = 'none';
         }
+
+        // ========== Impact Form Setup ==========
+        function setupImpactForm() {
+            const tableSelect = document.getElementById('impact-table-select');
+            const analyzeBtn = document.getElementById('impact-analyze-btn');
+            const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+
+            // Handle change type button clicks
+            changeTypeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Remove active class from all buttons
+                    changeTypeButtons.forEach(b => b.classList.remove('active'));
+                    // Add active class to clicked button
+                    btn.classList.add('active');
+                });
+            });
+
+            if (tableSelect && analyzeBtn) {
+                // Enable/disable analyze button based on selection
+                tableSelect.addEventListener('change', () => {
+                    analyzeBtn.disabled = !tableSelect.value;
+                });
+
+                // Handle analyze button click
+                analyzeBtn.addEventListener('click', () => {
+                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
+                    const tableName = selectedOption.getAttribute('data-name');
+                    const tableType = selectedOption.getAttribute('data-type');
+                    const activeButton = document.querySelector('.change-type-btn.active');
+                    const changeType = activeButton?.getAttribute('data-value') || 'modify';
+
+                    if (!tableName) return;
+
+                    // Show loading state
+                    const resultsDiv = document.getElementById('impact-results');
+                    if (resultsDiv) {
+                        resultsDiv.style.display = 'block';
+                        resultsDiv.innerHTML = '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
+                    }
+
+                    vscode.postMessage({
+                        command: 'analyzeImpact',
+                        type: tableType === 'view' ? 'table' : 'table',
+                        name: tableName,
+                        changeType: changeType
+                    });
+                });
+            }
+        }
+
+        // ========== Table Search and Filter Setup ==========
+        function setupTableSearchAndFilter() {
+            const searchInput = document.getElementById('table-search-input');
+            const searchClear = document.getElementById('table-search-clear');
+            const typeFilter = document.getElementById('table-type-filter');
+            const sortSelect = document.getElementById('table-sort');
+            const tableGrid = document.getElementById('table-list-grid');
+            const emptyFilter = document.getElementById('table-list-empty-filter');
+            const resultsInfo = document.getElementById('table-list-results-info');
+            const resultsCount = document.getElementById('table-results-count');
+            const emptyMessage = document.getElementById('empty-filter-message');
+            
+            let debounceTimeout;
+            const totalItems = tableGrid ? tableGrid.querySelectorAll('.table-list-item').length : 0;
+
+            function filterTables() {
+                if (!tableGrid) return;
+
+                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const typeValue = typeFilter?.value || 'all';
+                const sortValue = sortSelect?.value || 'connected';
+
+                const items = Array.from(tableGrid.querySelectorAll('.table-list-item'));
+                let visibleItems = [];
+
+                // Filter
+                items.forEach(item => {
+                    const tableName = item.getAttribute('data-name') || '';
+                    const tableType = item.getAttribute('data-type') || '';
+                    const nameText = item.querySelector('.table-list-name')?.textContent?.toLowerCase() || '';
+
+                    const matchesSearch = !searchQuery || tableName.includes(searchQuery) || nameText.includes(searchQuery);
+                    const matchesType = typeValue === 'all' || tableType === typeValue;
+
+                    if (matchesSearch && matchesType) {
+                        item.style.display = '';
+                        visibleItems.push(item);
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+
+                // Sort
+                visibleItems.sort((a, b) => {
+                    if (sortValue === 'name-asc') {
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameA.localeCompare(nameB);
+                    } else if (sortValue === 'name-desc') {
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameB.localeCompare(nameA);
+                    } else if (sortValue === 'type') {
+                        const typeA = a.getAttribute('data-type') || '';
+                        const typeB = b.getAttribute('data-type') || '';
+                        if (typeA !== typeB) return typeA.localeCompare(typeB);
+                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
+                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
+                        return nameA.localeCompare(nameB);
+                    } else {
+                        // Most connected (default) - items are already sorted by connection count
+                        return 0;
+                    }
+                });
+
+                // Reorder in DOM
+                visibleItems.forEach(item => tableGrid.appendChild(item));
+
+                // Highlight search terms
+                if (searchQuery && visibleItems.length > 0) {
+                    visibleItems.forEach(item => {
+                        const nameEl = item.querySelector('.table-list-name');
+                        if (nameEl) {
+                            const text = nameEl.textContent || '';
+                            let escapedQuery = '';
+                            const specialChars = ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\\\'];
+                            for (let i = 0; i < searchQuery.length; i++) {
+                                const char = searchQuery[i];
+                                if (specialChars.indexOf(char) >= 0) {
+                                    escapedQuery += '\\\\' + char;
+                                } else {
+                                    escapedQuery += char;
+                                }
+                            }
+                            const regex = new RegExp('(' + escapedQuery + ')', 'gi');
+                            nameEl.innerHTML = text.replace(regex, '<mark>$1</mark>');
+                        }
+                    });
+                } else {
+                    // Remove highlights
+                    items.forEach(item => {
+                        const nameEl = item.querySelector('.table-list-name');
+                        if (nameEl) {
+                            nameEl.innerHTML = nameEl.textContent || '';
+                        }
+                    });
+                }
+
+                // Update results count
+                if (resultsInfo && resultsCount) {
+                    if (visibleItems.length < totalItems || searchQuery || typeValue !== 'all') {
+                        resultsInfo.style.display = 'block';
+                        resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
+                    } else {
+                        resultsInfo.style.display = 'none';
+                    }
+                }
+
+                // Show/hide empty state with improved message
+                if (emptyFilter && emptyMessage) {
+                    if (visibleItems.length === 0) {
+                        emptyFilter.style.display = 'block';
+                        let message = 'No tables match your search criteria';
+                        if (searchQuery) {
+                            message = 'No tables matching "' + searchQuery + '"';
+                        } else if (typeValue !== 'all') {
+                            message = 'No ' + typeValue + 's found';
+                        }
+                        emptyMessage.textContent = message;
+                    } else {
+                        emptyFilter.style.display = 'none';
+                    }
+                }
+
+                // Show/hide clear button
+                if (searchClear) {
+                    searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
+                }
+            }
+
+            // Debounced filter function
+            function debouncedFilter() {
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(filterTables, 180);
+            }
+
+            // Event listeners
+            searchInput?.addEventListener('input', debouncedFilter);
+            searchClear?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                if (typeFilter) typeFilter.value = 'all';
+                filterTables();
+                searchInput?.focus();
+            });
+            typeFilter?.addEventListener('change', filterTables);
+            sortSelect?.addEventListener('change', filterTables);
+
+            // Keyboard shortcuts
+            searchInput?.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (searchInput.value) {
+                        searchInput.value = '';
+                        filterTables();
+                    } else {
+                        searchInput.blur();
+                    }
+                    e.preventDefault();
+                }
+            });
+
+            // Global keyboard shortcut: / to focus search
+            document.addEventListener('keydown', (e) => {
+                // Only if not typing in an input/textarea
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                // Check for / key (not Shift+/ which is ?)
+                if (e.key === '/' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    searchInput?.focus();
+                    searchInput?.select();
+                }
+            });
+
+            // Initial filter to show results count if needed
+            filterTables();
+        }
+
+        // ========== Visual Lineage Search Setup ==========
+        let lineageSearchData = [];
+        let lineageTypeFilter = 'all';
+        let lineageSearchTimeout = null;
+
+        function setupVisualLineageSearch() {
+            const searchInput = document.getElementById('lineage-search-input');
+            const searchClear = document.getElementById('lineage-search-clear');
+            const searchResults = document.getElementById('lineage-search-results');
+            const filterChips = document.querySelectorAll('.quick-filters .filter-chip');
+            const popularItems = document.querySelectorAll('.popular-item[data-action="select-node"]');
+            const recentItems = document.querySelectorAll('.recent-item[data-action="select-node"]');
+            const dataScript = document.getElementById('lineage-searchable-nodes');
+            const popularList = document.querySelector('.popular-list');
+
+            // Load searchable nodes data
+            if (dataScript) {
+                try {
+                    lineageSearchData = JSON.parse(dataScript.textContent || '[]');
+                } catch (e) {
+                    lineageSearchData = [];
+                }
+            }
+
+            // Function to filter popular tables by type
+            function filterPopularTables(typeFilter) {
+                if (!popularList) return;
+                const items = popularList.querySelectorAll('.popular-item');
+                items.forEach(item => {
+                    const nodeType = item.getAttribute('data-node-type');
+                    if (typeFilter === 'all' || nodeType === typeFilter) {
+                        item.classList.remove('filtered-out');
+                    } else {
+                        item.classList.add('filtered-out');
+                    }
+                });
+            }
+
+            // Search input handling
+            searchInput?.addEventListener('input', () => {
+                const query = searchInput.value.trim();
+                if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+
+                clearTimeout(lineageSearchTimeout);
+                lineageSearchTimeout = setTimeout(() => {
+                    if (query.length >= 1) {
+                        // Local search for instant results
+                        const results = searchLineageLocal(query);
+                        showLineageSearchResults(results);
+                        // Also send to backend for more comprehensive results
+                        vscode.postMessage({ command: 'searchLineageTables', query, typeFilter: lineageTypeFilter });
+                    } else {
+                        hideLineageSearchResults();
+                    }
+                }, 150);
+            });
+
+            searchInput?.addEventListener('focus', () => {
+                const query = searchInput.value.trim();
+                if (query.length >= 1) {
+                    const results = searchLineageLocal(query);
+                    showLineageSearchResults(results);
+                }
+            });
+
+            searchInput?.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    hideLineageSearchResults();
+                    searchInput.blur();
+                } else if (e.key === 'Enter') {
+                    const firstResult = searchResults?.querySelector('.search-result-item');
+                    if (firstResult) {
+                        firstResult.click();
+                    }
+                }
+            });
+
+            searchClear?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                if (searchClear) searchClear.style.display = 'none';
+                hideLineageSearchResults();
+                searchInput?.focus();
+            });
+
+            // Filter chips handling - filter BOTH search results AND popular tables
+            filterChips.forEach(chip => {
+                chip.addEventListener('click', () => {
+                    filterChips.forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
+
+                    // Filter popular tables
+                    filterPopularTables(lineageTypeFilter);
+
+                    // Re-search if there's a query
+                    const query = searchInput?.value.trim();
+                    if (query) {
+                        const results = searchLineageLocal(query);
+                        showLineageSearchResults(results);
+                    }
+                });
+            });
+
+            // Popular item clicks
+            popularItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                    }
+                });
+            });
+
+            // Recent item clicks
+            recentItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                    }
+                });
+            });
+
+            // Close search results when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-form')) {
+                    hideLineageSearchResults();
+                }
+            });
+        }
+
+        function searchLineageLocal(query) {
+            const queryLower = query.toLowerCase();
+            return lineageSearchData
+                .filter(node => {
+                    const matchesQuery = node.name.toLowerCase().includes(queryLower);
+                    const matchesType = lineageTypeFilter === 'all' || node.type === lineageTypeFilter;
+                    return matchesQuery && matchesType;
+                })
+                .slice(0, 10);
+        }
+
+        function showLineageSearchResults(results) {
+            const searchResults = document.getElementById('lineage-search-results');
+            if (!searchResults) return;
+
+            if (!results || results.length === 0) {
+                searchResults.innerHTML = '<div class="search-result-item" style="justify-content: center; color: var(--text-dim);">No results found</div>';
+                searchResults.style.display = 'block';
+                return;
+            }
+
+            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
+            searchResults.innerHTML = results.map(node => {
+                const fileName = node.filePath ? node.filePath.split('/').pop() : '';
+                return '<div class="search-result-item" data-node-id="' + escapeHtmlAttr(node.id) + '">' +
+                    '<span class="result-icon">' + (icons[node.type] || '📦') + '</span>' +
+                    '<span class="result-name">' + escapeHtml(node.name) + '</span>' +
+                    '<span class="result-type">' + node.type + '</span>' +
+                    (fileName ? '<span class="result-file">' + escapeHtml(fileName) + '</span>' : '') +
+                '</div>';
+            }).join('');
+
+            searchResults.style.display = 'block';
+
+            // Add click handlers
+            searchResults.querySelectorAll('.search-result-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                        hideLineageSearchResults();
+                    }
+                });
+            });
+        }
+
+        function hideLineageSearchResults() {
+            const searchResults = document.getElementById('lineage-search-results');
+            if (searchResults) {
+                searchResults.style.display = 'none';
+            }
+        }
+
+        function selectLineageNode(nodeId) {
+            // Show loading state
+            if (lineageContent) {
+                lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
+            }
+            // Request graph data
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: nodeId,
+                depth: 5,
+                direction: 'both'
+            });
+        }
+
+        // ========== Visual Lineage Graph Interactions ==========
+        let lineageScale = 1;
+        let lineageOffsetX = 50;
+        let lineageOffsetY = 50;
+        let lineageIsDragging = false;
+        let lineageDragStartX = 0;
+        let lineageDragStartY = 0;
+        let lineageFocusedNode = null;
+
+        function setupLineageGraphInteractions() {
+            const container = document.getElementById('lineage-graph-container');
+            const svg = container?.querySelector('.lineage-graph-svg');
+            const graphContainer = svg?.querySelector('.lineage-graph-container');
+            const tooltip = document.getElementById('lineage-tooltip');
+            const contextMenu = document.getElementById('lineage-context-menu');
+            const zoomInBtn = document.getElementById('lineage-zoom-in');
+            const zoomOutBtn = document.getElementById('lineage-zoom-out');
+            const zoomFitBtn = document.getElementById('lineage-zoom-fit');
+            const zoomResetBtn = document.getElementById('lineage-zoom-reset');
+            const zoomLevel = document.getElementById('lineage-zoom-level');
+            const directionBtns = document.querySelectorAll('.direction-btn');
+
+            if (!svg || !graphContainer) return;
+
+            // Reset zoom state
+            lineageScale = 1;
+            lineageOffsetX = 50;
+            lineageOffsetY = 50;
+
+            function updateLineageTransform() {
+                graphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
+                if (zoomLevel) {
+                    zoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+            }
+
+            // Initial transform
+            updateLineageTransform();
+
+            // Zoom controls
+            zoomInBtn?.addEventListener('click', () => {
+                lineageScale = Math.min(3, lineageScale * 1.2);
+                updateLineageTransform();
+            });
+
+            zoomOutBtn?.addEventListener('click', () => {
+                lineageScale = Math.max(0.2, lineageScale / 1.2);
+                updateLineageTransform();
+            });
+
+            zoomResetBtn?.addEventListener('click', () => {
+                lineageScale = 1;
+                lineageOffsetX = 50;
+                lineageOffsetY = 50;
+                updateLineageTransform();
+                // Also clear any focused node
+                const nodes = svg?.querySelectorAll('.lineage-node');
+                if (nodes) clearLineageFocus(nodes);
+            });
+
+            zoomFitBtn?.addEventListener('click', () => {
+                // Fit to container
+                const containerRect = container.getBoundingClientRect();
+                const bbox = graphContainer.getBBox();
+                if (bbox.width > 0 && bbox.height > 0) {
+                    const scaleX = (containerRect.width - 100) / bbox.width;
+                    const scaleY = (containerRect.height - 100) / bbox.height;
+                    lineageScale = Math.min(scaleX, scaleY, 1.5);
+                    lineageScale = Math.max(0.2, lineageScale);
+                    lineageOffsetX = (containerRect.width - bbox.width * lineageScale) / 2 - bbox.x * lineageScale;
+                    lineageOffsetY = (containerRect.height - bbox.height * lineageScale) / 2 - bbox.y * lineageScale;
+                    updateLineageTransform();
+                }
+            });
+
+            // Mouse wheel zoom
+            svg.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                lineageScale = Math.max(0.2, Math.min(3, lineageScale * delta));
+                updateLineageTransform();
+            });
+
+            // Pan handling
+            svg.addEventListener('mousedown', (e) => {
+                if (e.target === svg || e.target.closest('.lineage-edge')) {
+                    lineageIsDragging = true;
+                    lineageDragStartX = e.clientX - lineageOffsetX;
+                    lineageDragStartY = e.clientY - lineageOffsetY;
+                    svg.style.cursor = 'grabbing';
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (lineageIsDragging) {
+                    lineageOffsetX = e.clientX - lineageDragStartX;
+                    lineageOffsetY = e.clientY - lineageDragStartY;
+                    updateLineageTransform();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                lineageIsDragging = false;
+                if (svg) svg.style.cursor = 'grab';
+            });
+
+            // Node interactions
+            const nodes = svg.querySelectorAll('.lineage-node');
+            nodes.forEach(node => {
+                // Hover - show tooltip
+                node.addEventListener('mouseenter', (e) => {
+                    showLineageTooltip(e, node);
+                });
+
+                node.addEventListener('mouseleave', () => {
+                    hideLineageTooltip();
+                });
+
+                // Click - focus node
+                node.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    focusLineageNode(node, nodes);
+                });
+
+                // Double-click - open file
+                node.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    const filePath = node.getAttribute('data-file-path');
+                    const lineNumber = parseInt(node.getAttribute('data-line-number') || '0');
+                    if (filePath) {
+                        vscode.postMessage({ command: 'openFileAtLine', filePath, line: lineNumber });
+                    }
+                });
+
+                // Right-click - context menu
+                node.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showLineageContextMenu(e, node);
+                });
+            });
+
+            // Click on SVG background to clear focus
+            svg.addEventListener('click', (e) => {
+                // Only if clicking directly on SVG or the container, not on nodes
+                if (e.target === svg || e.target.classList.contains('lineage-graph-container') ||
+                    e.target.closest('.lineage-edge')) {
+                    clearLineageFocus(nodes);
+                }
+            });
+
+            // Direction toggle buttons
+            directionBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const direction = btn.getAttribute('data-direction');
+                    const nodeId = btn.getAttribute('data-node-id');
+                    if (direction && nodeId) {
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            direction: direction,
+                            depth: 5
+                        });
+                    }
+                });
+            });
+
+            // Close context menu on click outside
+            document.addEventListener('click', () => {
+                if (contextMenu) contextMenu.style.display = 'none';
+            });
+
+            // Fit to screen on initial load
+            setTimeout(() => {
+                if (zoomFitBtn) zoomFitBtn.click();
+            }, 100);
+        }
+
+        function showLineageTooltip(e, node) {
+            const tooltip = document.getElementById('lineage-tooltip');
+            if (!tooltip) return;
+
+            const name = node.getAttribute('data-node-name') || '';
+            const type = node.getAttribute('data-node-type') || '';
+            const filePath = node.getAttribute('data-file-path') || '';
+            const lineNumber = node.getAttribute('data-line-number') || '';
+
+            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
+
+            tooltip.querySelector('.tooltip-icon').textContent = icons[type] || '📦';
+            tooltip.querySelector('.tooltip-name').textContent = name;
+            tooltip.querySelector('.type-value').textContent = type;
+            tooltip.querySelector('.file-value').textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            tooltip.querySelector('.line-value').textContent = lineNumber || 'N/A';
+            tooltip.querySelector('.columns-value').textContent = '-';
+            tooltip.querySelector('.upstream-value').textContent = '-';
+            tooltip.querySelector('.downstream-value').textContent = '-';
+
+            // Position tooltip
+            const rect = node.getBoundingClientRect();
+            tooltip.style.left = (rect.right + 10) + 'px';
+            tooltip.style.top = rect.top + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        function hideLineageTooltip() {
+            const tooltip = document.getElementById('lineage-tooltip');
+            if (tooltip) tooltip.style.display = 'none';
+        }
+
+        function focusLineageNode(node, allNodes) {
+            const nodeId = node.getAttribute('data-node-id');
+
+            // Toggle focus
+            if (lineageFocusedNode === nodeId) {
+                // Unfocus
+                clearLineageFocus(allNodes);
+            } else {
+                // Focus on this node
+                lineageFocusedNode = nodeId;
+                allNodes.forEach(n => {
+                    if (n.getAttribute('data-node-id') === nodeId) {
+                        n.classList.add('focused');
+                        n.classList.remove('highlighted', 'dimmed');
+                    } else {
+                        n.classList.remove('focused', 'highlighted');
+                        n.classList.add('dimmed');
+                    }
+                });
+            }
+        }
+
+        function clearLineageFocus(allNodes) {
+            if (allNodes) {
+                allNodes.forEach(n => n.classList.remove('focused', 'highlighted', 'dimmed'));
+            }
+            lineageFocusedNode = null;
+        }
+
+        function showLineageContextMenu(e, node) {
+            const contextMenu = document.getElementById('lineage-context-menu');
+            if (!contextMenu) return;
+
+            const nodeId = node.getAttribute('data-node-id');
+            const nodeName = node.getAttribute('data-node-name');
+            const filePath = node.getAttribute('data-file-path');
+
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
+            contextMenu.style.display = 'block';
+
+            // Add handlers
+            const handlers = {
+                'open-file': () => {
+                    if (filePath) {
+                        vscode.postMessage({ command: 'openFile', filePath });
+                    }
+                },
+                'focus-upstream': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: 5 });
+                    }
+                },
+                'focus-downstream': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: 5 });
+                    }
+                },
+                'expand-columns': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'expandNodeColumns', nodeId });
+                    }
+                },
+                'copy-name': () => {
+                    if (nodeName) {
+                        navigator.clipboard.writeText(nodeName);
+                    }
+                }
+            };
+
+            contextMenu.querySelectorAll('.context-item').forEach(item => {
+                const action = item.getAttribute('data-action');
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    if (handlers[action]) handlers[action]();
+                    contextMenu.style.display = 'none';
+                };
+            });
+        }
+
+        function expandNodeWithColumns(nodeId, columns) {
+            // This would require re-rendering the node, which is complex
+            // For now, just log or show a notification
+            console.log('Columns for ' + nodeId + ':', columns);
+        }
+
+        // Setup direction buttons (for both graph view and empty state)
+        function setupDirectionButtons() {
+            // Handle all direction buttons (in graph header or in empty state)
+            const directionBtns = document.querySelectorAll('.direction-btn[data-direction][data-node-id]');
+            directionBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const direction = btn.getAttribute('data-direction');
+                    const nodeId = btn.getAttribute('data-node-id');
+                    if (direction && nodeId) {
+                        // Show loading state
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
+                        }
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            direction: direction,
+                            depth: 5
+                        });
+                    }
+                });
+            });
+        }
+
+        function escapeHtml(text) {
+            return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function escapeHtmlAttr(text) {
+            return escapeHtml(text).replace(/"/g, '&quot;');
+        }
     </script>
 </body>
 </html>`;
@@ -2006,11 +4488,12 @@ export class WorkspacePanel {
 
         // Generate orphaned details
         const orphanedDetails: DefinitionDetail[] = [];
-        for (const tableName of graph.stats.orphanedDefinitions) {
-            const def = index.definitionMap.get(tableName.toLowerCase());
-            if (def) {
+        for (const tableKey of graph.stats.orphanedDefinitions) {
+            const defs = index.definitionMap.get(tableKey);
+            if (!defs) continue;
+            for (const def of defs) {
                 orphanedDetails.push({
-                    name: def.name,
+                    name: getDisplayName(def.name, def.schema),
                     type: def.type,
                     filePath: def.filePath,
                     lineNumber: def.lineNumber
@@ -2020,12 +4503,15 @@ export class WorkspacePanel {
 
         // Generate missing details
         const missingDetails: MissingDefinitionDetail[] = [];
-        for (const tableName of graph.stats.missingDefinitions) {
-            const refs = index.referenceMap.get(tableName.toLowerCase()) || [];
+        for (const tableKey of graph.stats.missingDefinitions) {
+            const refs = index.referenceMap.get(tableKey) || [];
             const referencingFiles = [...new Set(refs.map(r => r.filePath))];
+            const displayName = refs[0]
+                ? getDisplayName(refs[0].tableName, refs[0].schema)
+                : tableKey;
 
             missingDetails.push({
-                tableName,
+                tableName: displayName,
                 references: refs,
                 referenceCount: refs.length,
                 referencingFiles
