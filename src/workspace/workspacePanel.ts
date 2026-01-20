@@ -373,6 +373,29 @@ export class WorkspacePanel {
             case 'getDownstream':
                 await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
                 break;
+
+            // ========== Visual Lineage Graph Commands ==========
+            case 'searchLineageTables':
+                await this.handleSearchLineageTables(message.query, message.typeFilter);
+                break;
+
+            case 'getLineageGraph':
+                await this.handleGetLineageGraph(
+                    message.nodeId,
+                    message.depth || 5,
+                    message.direction || 'both',
+                    message.fileFilter,
+                    message.expandedNodes
+                );
+                break;
+
+            case 'expandNodeColumns':
+                await this.handleExpandNodeColumns(message.nodeId);
+                break;
+
+            case 'setLineageDirection':
+                await this.handleSetLineageDirection(message.nodeId, message.direction);
+                break;
         }
     }
 
@@ -685,6 +708,130 @@ export class WorkspacePanel {
                 depth: maxDepth
             }
         });
+    }
+
+    // ========== Visual Lineage Graph Methods ==========
+
+    /**
+     * Handle search for tables/views in lineage graph
+     */
+    private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) {
+            this._panel.webview.postMessage({
+                command: 'lineageSearchResults',
+                data: { results: [] }
+            });
+            return;
+        }
+
+        const results: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
+        const queryLower = query.toLowerCase();
+
+        for (const [id, node] of this._lineageGraph.nodes) {
+            // Skip columns and external tables in search
+            if (node.type === 'column') continue;
+
+            // Apply type filter
+            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+
+            // Match by name
+            if (node.name.toLowerCase().includes(queryLower)) {
+                results.push({
+                    id: node.id,
+                    name: node.name,
+                    type: node.type,
+                    filePath: node.filePath
+                });
+            }
+        }
+
+        // Sort by relevance (exact matches first, then by name)
+        results.sort((a, b) => {
+            const aExact = a.name.toLowerCase() === queryLower;
+            const bExact = b.name.toLowerCase() === queryLower;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        this._panel.webview.postMessage({
+            command: 'lineageSearchResults',
+            data: { results: results.slice(0, 15) }
+        });
+    }
+
+    /**
+     * Handle get lineage graph for a specific node
+     */
+    private async handleGetLineageGraph(
+        nodeId: string,
+        depth: number,
+        direction: 'both' | 'upstream' | 'downstream',
+        fileFilter?: string[],
+        expandedNodes?: string[]
+    ): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) {
+            this._panel.webview.postMessage({
+                command: 'lineageGraphResult',
+                data: { error: 'No lineage graph available' }
+            });
+            return;
+        }
+
+        // Generate HTML using the new visual graph view
+        const html = this._lineageView.generateLineageGraphView(
+            this._lineageGraph,
+            nodeId,
+            {
+                depth,
+                direction,
+                expandedNodes: new Set(expandedNodes || []),
+                fileFilter
+            }
+        );
+
+        this._panel.webview.postMessage({
+            command: 'lineageGraphResult',
+            data: { html, nodeId, direction }
+        });
+    }
+
+    /**
+     * Handle expand node columns request
+     */
+    private async handleExpandNodeColumns(nodeId: string): Promise<void> {
+        await this.buildLineageGraph();
+        if (!this._lineageGraph) return;
+
+        const node = this._lineageGraph.nodes.get(nodeId);
+        if (!node) return;
+
+        // Find column nodes for this table
+        const columns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> = [];
+        for (const [id, colNode] of this._lineageGraph.nodes) {
+            if (colNode.type === 'column' && colNode.parentId === nodeId) {
+                columns.push({
+                    name: colNode.name,
+                    dataType: colNode.columnInfo?.dataType,
+                    isPrimaryKey: colNode.metadata?.isPrimaryKey
+                });
+            }
+        }
+
+        this._panel.webview.postMessage({
+            command: 'nodeColumnsResult',
+            data: { nodeId, columns }
+        });
+    }
+
+    /**
+     * Handle set lineage direction
+     */
+    private async handleSetLineageDirection(nodeId: string, direction: 'both' | 'upstream' | 'downstream'): Promise<void> {
+        // Re-generate graph with new direction
+        await this.handleGetLineageGraph(nodeId, 5, direction);
     }
 
     /**
@@ -1598,6 +1745,709 @@ export class WorkspacePanel {
             font-size: 12px; color: var(--text-muted);
         }
         .lineage-tip strong { color: var(--text-secondary); }
+
+        /* ========== Visual Lineage Graph ========== */
+        .lineage-visual-container {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .lineage-search-panel {
+            margin-bottom: 24px;
+        }
+        .search-header h3 {
+            color: var(--text-primary);
+            font-size: 18px;
+            margin: 0 0 8px 0;
+        }
+        .search-hint {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin: 0 0 16px 0;
+        }
+        .search-form {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .search-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            transition: all 0.2s;
+        }
+        .search-input-wrapper:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .search-input-wrapper .search-icon {
+            width: 18px;
+            height: 18px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .lineage-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+        .lineage-search-input::placeholder {
+            color: var(--text-dim);
+        }
+        .search-clear-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: var(--radius-sm);
+        }
+        .search-clear-btn:hover {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+        .search-clear-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        .search-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 100;
+            margin-top: 4px;
+        }
+        .search-result-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: background 0.15s;
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        .search-result-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .search-result-item .result-icon {
+            font-size: 16px;
+        }
+        .search-result-item .result-name {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .search-result-item .result-type {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+        }
+        .search-result-item .result-file {
+            font-size: 11px;
+            color: var(--text-dim);
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Quick Filters */
+        .quick-filters {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .quick-filters .filter-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .filter-chip {
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-chip:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+        .filter-chip.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        /* File Filter */
+        .file-filter-section {
+            margin-bottom: 20px;
+        }
+        .file-filter-section .filter-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .file-filter-select {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 8px 12px;
+            min-height: 80px;
+            outline: none;
+        }
+        .file-filter-select:focus {
+            border-color: var(--accent);
+        }
+
+        /* Recent Selections */
+        .recent-selections {
+            margin-bottom: 20px;
+        }
+        .recent-selections h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .recent-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .recent-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recent-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        .recent-icon { font-size: 14px; }
+        .recent-name { font-size: 12px; color: var(--text-primary); }
+        .recent-type { font-size: 10px; color: var(--text-dim); }
+
+        /* Popular Tables */
+        .popular-tables {
+            margin-bottom: 24px;
+        }
+        .popular-tables h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .popular-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+        }
+        .popular-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .popular-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .popular-icon { font-size: 18px; }
+        .popular-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .popular-type-badge {
+            font-size: 10px;
+            color: var(--text-dim);
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
+        .popular-connections {
+            display: flex;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .popular-connections .conn-up {
+            color: var(--success-light);
+        }
+        .popular-connections .conn-down {
+            color: var(--accent);
+        }
+        .popular-item.filtered-out {
+            display: none;
+        }
+        .no-popular {
+            color: var(--text-dim);
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        /* Stats Summary */
+        .lineage-stats-summary {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+        .stat-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+        }
+        .stat-chip .stat-icon { font-size: 16px; }
+        .stat-chip .stat-count { font-size: 16px; font-weight: 700; color: var(--accent); }
+        .stat-chip .stat-label { font-size: 12px; color: var(--text-muted); }
+
+        /* Graph View */
+        .lineage-graph-view {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .graph-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .graph-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .graph-title .graph-icon { font-size: 20px; }
+        .graph-title h3 { font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0; }
+        .node-type-badge {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
+        .graph-stats {
+            display: flex;
+            gap: 16px;
+        }
+        .graph-stats .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .graph-stats .stat.upstream { color: var(--success-light); }
+        .graph-stats .stat.downstream { color: var(--accent); }
+
+        /* Direction Controls */
+        .direction-controls {
+            display: flex;
+            gap: 4px;
+            padding: 8px 16px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .direction-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .direction-btn:hover {
+            border-color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+        .direction-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .direction-btn svg { width: 16px; height: 16px; }
+
+        /* Graph Container */
+        .lineage-graph-container {
+            flex: 1;
+            overflow: hidden;
+            background: var(--bg-primary);
+            position: relative;
+        }
+        .lineage-graph-svg {
+            cursor: grab;
+            user-select: none;
+        }
+        .lineage-graph-svg:active {
+            cursor: grabbing;
+        }
+
+        /* Zoom Controls */
+        .lineage-zoom-controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            z-index: 10;
+        }
+        .lineage-zoom-controls .zoom-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .lineage-zoom-controls .zoom-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .lineage-zoom-controls .zoom-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .lineage-zoom-controls .zoom-level {
+            font-size: 11px;
+            font-family: monospace;
+            color: var(--text-muted);
+            min-width: 40px;
+            text-align: center;
+        }
+        .lineage-zoom-controls .zoom-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+            margin: 0 4px;
+        }
+
+        /* Graph Node Styles */
+        .lineage-node {
+            cursor: pointer;
+            transition: opacity 0.2s, filter 0.2s;
+        }
+        .lineage-node .node-bg {
+            stroke-width: 2;
+            transition: all 0.2s;
+        }
+        .lineage-node-table .node-bg {
+            fill: var(--node-table);
+            stroke: var(--node-table-border);
+        }
+        .lineage-node-view .node-bg {
+            fill: var(--node-view);
+            stroke: var(--node-view-border);
+        }
+        .lineage-node-cte .node-bg {
+            fill: var(--accent);
+            stroke: var(--accent-hover);
+        }
+        .lineage-node-external .node-bg {
+            fill: var(--node-external);
+            stroke: var(--node-external-border);
+        }
+        .lineage-node:hover .node-bg {
+            filter: brightness(1.1);
+        }
+        .lineage-node.focused .node-bg {
+            stroke-width: 3;
+            filter: drop-shadow(0 0 8px var(--accent));
+        }
+        .lineage-node.center .node-bg {
+            stroke-width: 3;
+            stroke: var(--warning-light);
+        }
+        .lineage-node.dimmed {
+            opacity: 0.3;
+        }
+        .lineage-node.highlighted .node-bg {
+            stroke-width: 3;
+            stroke: var(--accent);
+        }
+        .lineage-node .node-icon {
+            font-size: 14px;
+            fill: white;
+        }
+        .lineage-node .node-name {
+            font-size: 12px;
+            font-weight: 600;
+            fill: white;
+        }
+        .lineage-node .node-type {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.75);
+        }
+        .lineage-node .node-divider {
+            stroke: rgba(255, 255, 255, 0.2);
+            stroke-width: 1;
+        }
+        .lineage-node .column-dot {
+            fill: rgba(255, 255, 255, 0.5);
+        }
+        .lineage-node .column-dot.primary {
+            fill: var(--warning-light);
+        }
+        .lineage-node .column-name {
+            font-size: 11px;
+            fill: rgba(255, 255, 255, 0.9);
+        }
+        .lineage-node .column-type {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.6);
+            font-family: monospace;
+        }
+        .lineage-node .expand-btn rect {
+            cursor: pointer;
+        }
+        .lineage-node .expand-text {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+        }
+        .lineage-node .count-badge {
+            font-size: 10px;
+            fill: var(--text-muted);
+        }
+
+        /* Graph Edge Styles */
+        .lineage-edge {
+            fill: none;
+            stroke: var(--text-dim);
+            stroke-width: 2;
+            transition: stroke 0.2s, stroke-width 0.2s;
+        }
+        .lineage-edge-direct { stroke: #64748b; }
+        .lineage-edge-join { stroke: #a78bfa; }
+        .lineage-edge-transform { stroke: #f59e0b; }
+        .lineage-edge.highlighted {
+            stroke: var(--accent);
+            stroke-width: 3;
+        }
+
+        /* Tooltip */
+        .lineage-tooltip {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            min-width: 220px;
+            max-width: 300px;
+            pointer-events: none;
+        }
+        .lineage-tooltip .tooltip-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .lineage-tooltip .tooltip-icon { font-size: 18px; }
+        .lineage-tooltip .tooltip-name { font-weight: 600; color: var(--text-primary); }
+        .lineage-tooltip .tooltip-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 8px 0;
+        }
+        .lineage-tooltip .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .lineage-tooltip .label { color: var(--text-muted); }
+        .lineage-tooltip .value { color: var(--text-secondary); }
+        .lineage-tooltip .tooltip-hint {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-align: center;
+        }
+
+        /* Context Menu */
+        .lineage-context-menu {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 180px;
+            z-index: 1001;
+            padding: 4px 0;
+        }
+        .lineage-context-menu .context-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .lineage-context-menu .context-item:hover {
+            background: var(--accent);
+            color: white;
+        }
+        .lineage-context-menu .context-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 0;
+        }
+
+        /* Empty States */
+        .lineage-empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .lineage-empty-state svg {
+            opacity: 0.5;
+            margin-bottom: 20px;
+        }
+        .lineage-empty-state h3 {
+            font-size: 18px;
+            color: var(--text-primary);
+            margin: 0 0 12px 0;
+        }
+        .lineage-empty-state p {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+        .lineage-empty-state .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 12px;
+        }
+
+        .lineage-no-relations {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .lineage-no-relations .single-node {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 24px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            margin-bottom: 20px;
+        }
+        .lineage-no-relations .node-icon { font-size: 24px; }
+        .lineage-no-relations .node-name { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+        .lineage-no-relations .no-relations-msg {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .lineage-no-relations .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .lineage-no-relations .direction-suggestion {
+            margin-top: 24px;
+            text-align: center;
+        }
+        .lineage-no-relations .direction-suggestion p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+        .lineage-no-relations .suggestion-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .lineage-no-relations .node-type-badge {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+        }
 
         /* ========== Stats Bar ========== */
         .stats-bar {
@@ -2716,6 +3566,32 @@ export class WorkspacePanel {
                 case 'lineageOverviewResult':
                     if (lineageContent && message.data?.html) {
                         lineageContent.innerHTML = message.data.html;
+                        // Setup visual lineage search handlers
+                        setupVisualLineageSearch();
+                    }
+                    break;
+                case 'lineageSearchResults':
+                    // Handle search results for lineage
+                    if (message.data?.results) {
+                        showLineageSearchResults(message.data.results);
+                    }
+                    break;
+                case 'lineageGraphResult':
+                    // Handle lineage graph render result
+                    if (lineageContent && message.data?.html) {
+                        lineageContent.innerHTML = message.data.html;
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        // Setup graph interactions (works for both graph view and empty state)
+                        setupLineageGraphInteractions();
+                        // Also setup direction buttons in empty state
+                        setupDirectionButtons();
+                    }
+                    break;
+                case 'nodeColumnsResult':
+                    // Handle column expansion
+                    if (message.data?.nodeId && message.data?.columns) {
+                        expandNodeWithColumns(message.data.nodeId, message.data.columns);
                     }
                     break;
             }
@@ -3059,6 +3935,538 @@ export class WorkspacePanel {
 
             // Initial filter to show results count if needed
             filterTables();
+        }
+
+        // ========== Visual Lineage Search Setup ==========
+        let lineageSearchData = [];
+        let lineageTypeFilter = 'all';
+        let lineageSearchTimeout = null;
+
+        function setupVisualLineageSearch() {
+            const searchInput = document.getElementById('lineage-search-input');
+            const searchClear = document.getElementById('lineage-search-clear');
+            const searchResults = document.getElementById('lineage-search-results');
+            const filterChips = document.querySelectorAll('.quick-filters .filter-chip');
+            const popularItems = document.querySelectorAll('.popular-item[data-action="select-node"]');
+            const recentItems = document.querySelectorAll('.recent-item[data-action="select-node"]');
+            const dataScript = document.getElementById('lineage-searchable-nodes');
+            const popularList = document.querySelector('.popular-list');
+
+            // Load searchable nodes data
+            if (dataScript) {
+                try {
+                    lineageSearchData = JSON.parse(dataScript.textContent || '[]');
+                } catch (e) {
+                    lineageSearchData = [];
+                }
+            }
+
+            // Function to filter popular tables by type
+            function filterPopularTables(typeFilter) {
+                if (!popularList) return;
+                const items = popularList.querySelectorAll('.popular-item');
+                items.forEach(item => {
+                    const nodeType = item.getAttribute('data-node-type');
+                    if (typeFilter === 'all' || nodeType === typeFilter) {
+                        item.classList.remove('filtered-out');
+                    } else {
+                        item.classList.add('filtered-out');
+                    }
+                });
+            }
+
+            // Search input handling
+            searchInput?.addEventListener('input', () => {
+                const query = searchInput.value.trim();
+                if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+
+                clearTimeout(lineageSearchTimeout);
+                lineageSearchTimeout = setTimeout(() => {
+                    if (query.length >= 1) {
+                        // Local search for instant results
+                        const results = searchLineageLocal(query);
+                        showLineageSearchResults(results);
+                        // Also send to backend for more comprehensive results
+                        vscode.postMessage({ command: 'searchLineageTables', query, typeFilter: lineageTypeFilter });
+                    } else {
+                        hideLineageSearchResults();
+                    }
+                }, 150);
+            });
+
+            searchInput?.addEventListener('focus', () => {
+                const query = searchInput.value.trim();
+                if (query.length >= 1) {
+                    const results = searchLineageLocal(query);
+                    showLineageSearchResults(results);
+                }
+            });
+
+            searchInput?.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    hideLineageSearchResults();
+                    searchInput.blur();
+                } else if (e.key === 'Enter') {
+                    const firstResult = searchResults?.querySelector('.search-result-item');
+                    if (firstResult) {
+                        firstResult.click();
+                    }
+                }
+            });
+
+            searchClear?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                if (searchClear) searchClear.style.display = 'none';
+                hideLineageSearchResults();
+                searchInput?.focus();
+            });
+
+            // Filter chips handling - filter BOTH search results AND popular tables
+            filterChips.forEach(chip => {
+                chip.addEventListener('click', () => {
+                    filterChips.forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
+
+                    // Filter popular tables
+                    filterPopularTables(lineageTypeFilter);
+
+                    // Re-search if there's a query
+                    const query = searchInput?.value.trim();
+                    if (query) {
+                        const results = searchLineageLocal(query);
+                        showLineageSearchResults(results);
+                    }
+                });
+            });
+
+            // Popular item clicks
+            popularItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                    }
+                });
+            });
+
+            // Recent item clicks
+            recentItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                    }
+                });
+            });
+
+            // Close search results when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-form')) {
+                    hideLineageSearchResults();
+                }
+            });
+        }
+
+        function searchLineageLocal(query) {
+            const queryLower = query.toLowerCase();
+            return lineageSearchData
+                .filter(node => {
+                    const matchesQuery = node.name.toLowerCase().includes(queryLower);
+                    const matchesType = lineageTypeFilter === 'all' || node.type === lineageTypeFilter;
+                    return matchesQuery && matchesType;
+                })
+                .slice(0, 10);
+        }
+
+        function showLineageSearchResults(results) {
+            const searchResults = document.getElementById('lineage-search-results');
+            if (!searchResults) return;
+
+            if (!results || results.length === 0) {
+                searchResults.innerHTML = '<div class="search-result-item" style="justify-content: center; color: var(--text-dim);">No results found</div>';
+                searchResults.style.display = 'block';
+                return;
+            }
+
+            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
+            searchResults.innerHTML = results.map(node => {
+                const fileName = node.filePath ? node.filePath.split('/').pop() : '';
+                return '<div class="search-result-item" data-node-id="' + escapeHtmlAttr(node.id) + '">' +
+                    '<span class="result-icon">' + (icons[node.type] || '📦') + '</span>' +
+                    '<span class="result-name">' + escapeHtml(node.name) + '</span>' +
+                    '<span class="result-type">' + node.type + '</span>' +
+                    (fileName ? '<span class="result-file">' + escapeHtml(fileName) + '</span>' : '') +
+                '</div>';
+            }).join('');
+
+            searchResults.style.display = 'block';
+
+            // Add click handlers
+            searchResults.querySelectorAll('.search-result-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const nodeId = item.getAttribute('data-node-id');
+                    if (nodeId) {
+                        selectLineageNode(nodeId);
+                        hideLineageSearchResults();
+                    }
+                });
+            });
+        }
+
+        function hideLineageSearchResults() {
+            const searchResults = document.getElementById('lineage-search-results');
+            if (searchResults) {
+                searchResults.style.display = 'none';
+            }
+        }
+
+        function selectLineageNode(nodeId) {
+            // Show loading state
+            if (lineageContent) {
+                lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
+            }
+            // Request graph data
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: nodeId,
+                depth: 5,
+                direction: 'both'
+            });
+        }
+
+        // ========== Visual Lineage Graph Interactions ==========
+        let lineageScale = 1;
+        let lineageOffsetX = 50;
+        let lineageOffsetY = 50;
+        let lineageIsDragging = false;
+        let lineageDragStartX = 0;
+        let lineageDragStartY = 0;
+        let lineageFocusedNode = null;
+
+        function setupLineageGraphInteractions() {
+            const container = document.getElementById('lineage-graph-container');
+            const svg = container?.querySelector('.lineage-graph-svg');
+            const graphContainer = svg?.querySelector('.lineage-graph-container');
+            const tooltip = document.getElementById('lineage-tooltip');
+            const contextMenu = document.getElementById('lineage-context-menu');
+            const zoomInBtn = document.getElementById('lineage-zoom-in');
+            const zoomOutBtn = document.getElementById('lineage-zoom-out');
+            const zoomFitBtn = document.getElementById('lineage-zoom-fit');
+            const zoomResetBtn = document.getElementById('lineage-zoom-reset');
+            const zoomLevel = document.getElementById('lineage-zoom-level');
+            const directionBtns = document.querySelectorAll('.direction-btn');
+
+            if (!svg || !graphContainer) return;
+
+            // Reset zoom state
+            lineageScale = 1;
+            lineageOffsetX = 50;
+            lineageOffsetY = 50;
+
+            function updateLineageTransform() {
+                graphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
+                if (zoomLevel) {
+                    zoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+            }
+
+            // Initial transform
+            updateLineageTransform();
+
+            // Zoom controls
+            zoomInBtn?.addEventListener('click', () => {
+                lineageScale = Math.min(3, lineageScale * 1.2);
+                updateLineageTransform();
+            });
+
+            zoomOutBtn?.addEventListener('click', () => {
+                lineageScale = Math.max(0.2, lineageScale / 1.2);
+                updateLineageTransform();
+            });
+
+            zoomResetBtn?.addEventListener('click', () => {
+                lineageScale = 1;
+                lineageOffsetX = 50;
+                lineageOffsetY = 50;
+                updateLineageTransform();
+                // Also clear any focused node
+                const nodes = svg?.querySelectorAll('.lineage-node');
+                if (nodes) clearLineageFocus(nodes);
+            });
+
+            zoomFitBtn?.addEventListener('click', () => {
+                // Fit to container
+                const containerRect = container.getBoundingClientRect();
+                const bbox = graphContainer.getBBox();
+                if (bbox.width > 0 && bbox.height > 0) {
+                    const scaleX = (containerRect.width - 100) / bbox.width;
+                    const scaleY = (containerRect.height - 100) / bbox.height;
+                    lineageScale = Math.min(scaleX, scaleY, 1.5);
+                    lineageScale = Math.max(0.2, lineageScale);
+                    lineageOffsetX = (containerRect.width - bbox.width * lineageScale) / 2 - bbox.x * lineageScale;
+                    lineageOffsetY = (containerRect.height - bbox.height * lineageScale) / 2 - bbox.y * lineageScale;
+                    updateLineageTransform();
+                }
+            });
+
+            // Mouse wheel zoom
+            svg.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                lineageScale = Math.max(0.2, Math.min(3, lineageScale * delta));
+                updateLineageTransform();
+            });
+
+            // Pan handling
+            svg.addEventListener('mousedown', (e) => {
+                if (e.target === svg || e.target.closest('.lineage-edge')) {
+                    lineageIsDragging = true;
+                    lineageDragStartX = e.clientX - lineageOffsetX;
+                    lineageDragStartY = e.clientY - lineageOffsetY;
+                    svg.style.cursor = 'grabbing';
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (lineageIsDragging) {
+                    lineageOffsetX = e.clientX - lineageDragStartX;
+                    lineageOffsetY = e.clientY - lineageDragStartY;
+                    updateLineageTransform();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                lineageIsDragging = false;
+                if (svg) svg.style.cursor = 'grab';
+            });
+
+            // Node interactions
+            const nodes = svg.querySelectorAll('.lineage-node');
+            nodes.forEach(node => {
+                // Hover - show tooltip
+                node.addEventListener('mouseenter', (e) => {
+                    showLineageTooltip(e, node);
+                });
+
+                node.addEventListener('mouseleave', () => {
+                    hideLineageTooltip();
+                });
+
+                // Click - focus node
+                node.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    focusLineageNode(node, nodes);
+                });
+
+                // Double-click - open file
+                node.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    const filePath = node.getAttribute('data-file-path');
+                    const lineNumber = parseInt(node.getAttribute('data-line-number') || '0');
+                    if (filePath) {
+                        vscode.postMessage({ command: 'openFileAtLine', filePath, line: lineNumber });
+                    }
+                });
+
+                // Right-click - context menu
+                node.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showLineageContextMenu(e, node);
+                });
+            });
+
+            // Click on SVG background to clear focus
+            svg.addEventListener('click', (e) => {
+                // Only if clicking directly on SVG or the container, not on nodes
+                if (e.target === svg || e.target.classList.contains('lineage-graph-container') ||
+                    e.target.closest('.lineage-edge')) {
+                    clearLineageFocus(nodes);
+                }
+            });
+
+            // Direction toggle buttons
+            directionBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const direction = btn.getAttribute('data-direction');
+                    const nodeId = btn.getAttribute('data-node-id');
+                    if (direction && nodeId) {
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            direction: direction,
+                            depth: 5
+                        });
+                    }
+                });
+            });
+
+            // Close context menu on click outside
+            document.addEventListener('click', () => {
+                if (contextMenu) contextMenu.style.display = 'none';
+            });
+
+            // Fit to screen on initial load
+            setTimeout(() => {
+                if (zoomFitBtn) zoomFitBtn.click();
+            }, 100);
+        }
+
+        function showLineageTooltip(e, node) {
+            const tooltip = document.getElementById('lineage-tooltip');
+            if (!tooltip) return;
+
+            const name = node.getAttribute('data-node-name') || '';
+            const type = node.getAttribute('data-node-type') || '';
+            const filePath = node.getAttribute('data-file-path') || '';
+            const lineNumber = node.getAttribute('data-line-number') || '';
+
+            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
+
+            tooltip.querySelector('.tooltip-icon').textContent = icons[type] || '📦';
+            tooltip.querySelector('.tooltip-name').textContent = name;
+            tooltip.querySelector('.type-value').textContent = type;
+            tooltip.querySelector('.file-value').textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            tooltip.querySelector('.line-value').textContent = lineNumber || 'N/A';
+            tooltip.querySelector('.columns-value').textContent = '-';
+            tooltip.querySelector('.upstream-value').textContent = '-';
+            tooltip.querySelector('.downstream-value').textContent = '-';
+
+            // Position tooltip
+            const rect = node.getBoundingClientRect();
+            tooltip.style.left = (rect.right + 10) + 'px';
+            tooltip.style.top = rect.top + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        function hideLineageTooltip() {
+            const tooltip = document.getElementById('lineage-tooltip');
+            if (tooltip) tooltip.style.display = 'none';
+        }
+
+        function focusLineageNode(node, allNodes) {
+            const nodeId = node.getAttribute('data-node-id');
+
+            // Toggle focus
+            if (lineageFocusedNode === nodeId) {
+                // Unfocus
+                clearLineageFocus(allNodes);
+            } else {
+                // Focus on this node
+                lineageFocusedNode = nodeId;
+                allNodes.forEach(n => {
+                    if (n.getAttribute('data-node-id') === nodeId) {
+                        n.classList.add('focused');
+                        n.classList.remove('highlighted', 'dimmed');
+                    } else {
+                        n.classList.remove('focused', 'highlighted');
+                        n.classList.add('dimmed');
+                    }
+                });
+            }
+        }
+
+        function clearLineageFocus(allNodes) {
+            if (allNodes) {
+                allNodes.forEach(n => n.classList.remove('focused', 'highlighted', 'dimmed'));
+            }
+            lineageFocusedNode = null;
+        }
+
+        function showLineageContextMenu(e, node) {
+            const contextMenu = document.getElementById('lineage-context-menu');
+            if (!contextMenu) return;
+
+            const nodeId = node.getAttribute('data-node-id');
+            const nodeName = node.getAttribute('data-node-name');
+            const filePath = node.getAttribute('data-file-path');
+
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
+            contextMenu.style.display = 'block';
+
+            // Add handlers
+            const handlers = {
+                'open-file': () => {
+                    if (filePath) {
+                        vscode.postMessage({ command: 'openFile', filePath });
+                    }
+                },
+                'focus-upstream': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: 5 });
+                    }
+                },
+                'focus-downstream': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: 5 });
+                    }
+                },
+                'expand-columns': () => {
+                    if (nodeId) {
+                        vscode.postMessage({ command: 'expandNodeColumns', nodeId });
+                    }
+                },
+                'copy-name': () => {
+                    if (nodeName) {
+                        navigator.clipboard.writeText(nodeName);
+                    }
+                }
+            };
+
+            contextMenu.querySelectorAll('.context-item').forEach(item => {
+                const action = item.getAttribute('data-action');
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    if (handlers[action]) handlers[action]();
+                    contextMenu.style.display = 'none';
+                };
+            });
+        }
+
+        function expandNodeWithColumns(nodeId, columns) {
+            // This would require re-rendering the node, which is complex
+            // For now, just log or show a notification
+            console.log('Columns for ' + nodeId + ':', columns);
+        }
+
+        // Setup direction buttons (for both graph view and empty state)
+        function setupDirectionButtons() {
+            // Handle all direction buttons (in graph header or in empty state)
+            const directionBtns = document.querySelectorAll('.direction-btn[data-direction][data-node-id]');
+            directionBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const direction = btn.getAttribute('data-direction');
+                    const nodeId = btn.getAttribute('data-node-id');
+                    if (direction && nodeId) {
+                        // Show loading state
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
+                        }
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            direction: direction,
+                            depth: 5
+                        });
+                    }
+                });
+            });
+        }
+
+        function escapeHtml(text) {
+            return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function escapeHtmlAttr(text) {
+            return escapeHtml(text).replace(/"/g, '&quot;');
         }
     </script>
 </body>
