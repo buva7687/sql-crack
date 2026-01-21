@@ -190,7 +190,33 @@ Press `F5` to launch the Extension Development Host.
 
 ### Architecture
 
-Modular workspace architecture with 65% code reduction (6,047 → 2,134 lines): workspacePanel.ts, handlers/, ui/ (shared CSS/JS), extraction/, lineage/, dependencyGraph.ts. Clear separation of concerns, reusable components, dependency injection, zero TypeScript errors.
+The workspace module has been refactored into a modular, maintainable architecture:
+
+```
+src/workspace/
+├── workspacePanel.ts (2,134 lines) — Main orchestration
+├── handlers/
+│   ├── messageHandler.ts (784 lines) — Webview message handling
+│   └── index.ts — Barrel export
+├── ui/
+│   ├── sharedStyles.ts (2,623 lines) — All CSS (design tokens, components)
+│   ├── clientScripts.ts (1,839 lines) — All JavaScript (interactivity)
+│   ├── graphView.ts (330 lines) — Graph HTML generation
+│   ├── tableExplorer.ts — Table browsing UI
+│   ├── lineageView.ts — Lineage visualization
+│   ├── impactView.ts — Impact analysis UI
+│   └── types.ts — Type definitions
+├── extraction/ — SQL parsing and schema extraction
+├── lineage/ — Data lineage tracking and analysis
+└── dependencyGraph.ts — Dependency graph construction
+```
+
+**Refactoring Benefits**:
+- **65% code reduction** in main file (6,047 → 2,134 lines)
+- **Clear separation of concerns** (CSS, JS, HTML, Logic)
+- **Reusable components** with consistent UI across all views
+- **Dependency injection** for testable, decoupled code
+- **Zero TypeScript errors** with full type safety
 
 ## Roadmap
 
