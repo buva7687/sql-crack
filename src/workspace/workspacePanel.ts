@@ -29,8 +29,8 @@ import { TableExplorer } from './ui/tableExplorer';
 import { LineageView } from './ui/lineageView';
 import { ImpactView } from './ui/impactView';
 import { ViewMode } from './ui/types';
-import { getWebviewStyles } from './ui/sharedStyles';
-import { getWebviewScript, WebviewScriptParams } from './ui/clientScripts';
+import { getWebviewStyles, getIssuesStyles, getStateStyles } from './ui/sharedStyles';
+import { getWebviewScript, getIssuesScript, getMinimalScript, WebviewScriptParams } from './ui/clientScripts';
 
 // Handler modules
 import { MessageHandler, MessageHandlerContext } from './handlers';
@@ -1544,11 +1544,15 @@ ${nodesHtml}
 
     /**
      * Get Issues panel HTML
+     * Uses extracted styles and scripts for consistency
      */
     private getIssuesHtml(): string {
         const nonce = getNonce();
         const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
         const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
+
+        const styles = getIssuesStyles();
+        const script = getIssuesScript(nonce);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1558,173 +1562,7 @@ ${nodesHtml}
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Workspace Issues</title>
     <style>
-        :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-tertiary: #334155;
-            --bg-hover: #475569;
-            --border-color: #475569;
-            --border-subtle: #334155;
-            --text-primary: #f1f5f9;
-            --text-secondary: #e2e8f0;
-            --text-muted: #94a3b8;
-            --text-dim: #64748b;
-            --accent: #6366f1;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --error: #ef4444;
-            --radius-sm: 4px;
-            --radius-md: 6px;
-            --radius-lg: 8px;
-        }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body, html {
-            width: 100%; height: 100vh; overflow: auto;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary); color: var(--text-secondary);
-            font-size: 13px;
-        }
-        #app { width: 100%; min-height: 100%; display: flex; flex-direction: column; }
-
-        /* Header */
-        .header {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 12px 20px; background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-subtle);
-            position: sticky; top: 0; z-index: 100;
-        }
-        .header-left { display: flex; align-items: center; gap: 16px; }
-        .header-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-        .header-right { display: flex; align-items: center; gap: 12px; }
-
-        .back-btn {
-            display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-            background: var(--bg-tertiary); border: none; border-radius: var(--radius-md);
-            color: var(--text-secondary); font-size: 13px; cursor: pointer;
-            transition: all 0.15s;
-        }
-        .back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-        .back-btn svg { width: 16px; height: 16px; }
-
-        .issue-count {
-            display: flex; align-items: center; gap: 8px;
-            padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
-        }
-        .issue-count.warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
-        .issue-count.error { background: rgba(239, 68, 68, 0.15); color: var(--error); }
-        .issue-count.success { background: rgba(16, 185, 129, 0.15); color: var(--success); }
-
-        /* Summary Bar */
-        .summary-bar {
-            display: flex; gap: 16px; padding: 16px 20px;
-            background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
-        }
-        .summary-card {
-            flex: 1; padding: 16px 20px; background: var(--bg-primary);
-            border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);
-        }
-        .summary-card-value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
-        .summary-card-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-        .summary-card.warning .summary-card-value { color: var(--warning); }
-        .summary-card.error .summary-card-value { color: var(--error); }
-
-        /* Content */
-        .content { padding: 24px; max-width: 1000px; margin: 0 auto; width: 100%; }
-
-        /* Section */
-        .section { margin-bottom: 32px; }
-        .section-header {
-            display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
-        }
-        .section-icon {
-            width: 36px; height: 36px; border-radius: var(--radius-md);
-            display: flex; align-items: center; justify-content: center;
-        }
-        .section-icon.warning { background: rgba(245, 158, 11, 0.15); }
-        .section-icon.error { background: rgba(239, 68, 68, 0.15); }
-        .section-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-        .section-count {
-            padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
-            background: var(--bg-tertiary); color: var(--text-muted);
-        }
-        .section-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-
-        /* List */
-        .list { display: flex; flex-direction: column; gap: 8px; }
-        .list-item {
-            display: flex; align-items: center; gap: 14px; padding: 14px 18px;
-            background: var(--bg-secondary); border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle); cursor: pointer;
-            transition: all 0.15s;
-        }
-        .list-item:hover { background: var(--bg-tertiary); border-color: var(--border-color); transform: translateX(2px); }
-
-        .item-type {
-            padding: 4px 10px; border-radius: var(--radius-sm); font-size: 10px;
-            font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
-        }
-        .item-type.table { background: #10b981; color: #fff; }
-        .item-type.view { background: #8b5cf6; color: #fff; }
-
-        .item-info { flex: 1; min-width: 0; }
-        .item-name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
-        .item-path {
-            font-size: 12px; color: var(--text-muted); font-family: monospace;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
-        .item-line {
-            padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
-            font-family: monospace; background: var(--bg-primary); color: var(--text-dim);
-        }
-
-        /* Missing Item Card */
-        .missing-card {
-            background: var(--bg-secondary); border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle); margin-bottom: 12px;
-            overflow: hidden;
-        }
-        .missing-card-header {
-            display: flex; align-items: center; gap: 12px;
-            padding: 14px 18px; background: var(--bg-primary);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-        .missing-card-icon {
-            width: 32px; height: 32px; border-radius: var(--radius-sm);
-            background: rgba(239, 68, 68, 0.15); display: flex;
-            align-items: center; justify-content: center;
-        }
-        .missing-card-name { font-size: 14px; font-weight: 600; color: var(--text-primary); flex: 1; }
-        .missing-card-count {
-            padding: 4px 10px; border-radius: 10px; font-size: 11px;
-            background: var(--bg-tertiary); color: var(--text-muted);
-        }
-        .missing-card-refs { padding: 8px; }
-        .missing-ref-item {
-            display: flex; align-items: center; gap: 12px; padding: 10px 14px;
-            border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
-        }
-        .missing-ref-item:hover { background: var(--bg-tertiary); }
-        .missing-ref-path { flex: 1; font-size: 12px; color: var(--text-muted); font-family: monospace; }
-        .missing-ref-line { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-        .missing-more { text-align: center; padding: 10px; font-size: 12px; color: var(--text-dim); }
-
-        /* Empty State */
-        .empty-state {
-            display: flex; flex-direction: column; align-items: center;
-            justify-content: center; padding: 80px 20px; text-align: center;
-        }
-        .empty-state-icon {
-            width: 80px; height: 80px; border-radius: 50%;
-            background: rgba(16, 185, 129, 0.1); display: flex;
-            align-items: center; justify-content: center; margin-bottom: 24px;
-        }
-        .empty-state-icon svg { width: 40px; height: 40px; color: var(--success); }
-        .empty-state-title { font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
-        .empty-state-desc { font-size: 14px; color: var(--text-muted); max-width: 400px; }
-
-        .list-more { text-align: center; padding: 16px; font-size: 13px; color: var(--text-dim); }
+        ${styles}
     </style>
 </head>
 <body>
@@ -1852,27 +1690,7 @@ ${nodesHtml}
         </div>
     </div>
 
-    <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-
-        document.getElementById('btn-back').addEventListener('click', () => {
-            vscode.postMessage({ command: 'switchView', view: 'graph' });
-        });
-
-        document.querySelectorAll('.list-item, .missing-ref-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const filePath = item.getAttribute('data-filepath');
-                const line = item.getAttribute('data-line');
-                if (filePath) {
-                    vscode.postMessage({
-                        command: 'openFileAtLine',
-                        filePath: filePath,
-                        line: parseInt(line) || 0
-                    });
-                }
-            });
-        });
-    </script>
+    ${script}
 </body>
 </html>`;
     }
