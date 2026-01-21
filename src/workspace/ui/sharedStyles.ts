@@ -1827,7 +1827,7 @@ export function getGraphStyles(): string {
         .issue-banner-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         /* ========== Main Layout ========== */
-        .main-layout { display: flex; flex: 1; overflow: hidden; }
+        .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; }
         .graph-area { flex: 1; position: relative; overflow: hidden; }
 
         /* ========== Sidebar ========== */

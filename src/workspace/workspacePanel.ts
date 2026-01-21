@@ -1043,55 +1043,188 @@ ${bodyContent}
         return `<body>
     <div id="app">
         <!-- Header -->
-        <div class="header">
+        <header class="header">
             <div class="header-left">
                 <span class="header-icon">📊</span>
-                <span class="header-title">SQL Workspace Dependencies</span>
-                <span class="header-counts">(${graph.nodes.length} objects, ${graph.edges.length} relationships)</span>
+                <h1 class="header-title">Workspace Dependencies</h1>
             </div>
-            <div class="header-right">
-                <button class="icon-btn" id="btn-sidebar" title="Toggle Sidebar">
+
+            <!-- View Mode Tabs -->
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="graph" title="Dependency Graph">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"/>
-                        <line x1="9" y1="3" x2="9" y2="21"/>
+                        <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
+                        <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
+                    </svg>
+                    Graph
+                </button>
+                <button class="view-tab" data-view="lineage" title="Data Lineage">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h4l3 9 4-18 3 9h4"/>
+                    </svg>
+                    Lineage
+                </button>
+                <button class="view-tab" data-view="tableExplorer" title="Table Explorer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                    </svg>
+                    Tables
+                </button>
+                <button class="view-tab" data-view="impact" title="Impact Analysis">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                    </svg>
+                    Impact
+                </button>
+            </div>
+
+            <div class="header-right">
+                <div class="search-box">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    <input type="text" class="search-input" id="search-input" placeholder="Search nodes..." value="${this.escapeHtml(searchFilter.query)}">
+                    <select class="search-select" id="filter-type">
+                        <option value="all">All</option>
+                        <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files</option>
+                        <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables</option>
+                        <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views</option>
+                        <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
+                    </select>
+                    <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear search">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+                <button class="icon-btn" id="btn-sidebar" title="Toggle panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <path d="M15 3v18"/>
                     </svg>
                 </button>
                 <button class="icon-btn" id="btn-refresh" title="Refresh">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M23 4v6h-6"/>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                        <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-view-issues" title="View Issues">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="8" x2="12" y2="12"/>
-                        <line x1="12" y1="16" x2="12.01" y2="16"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" id="btn-all-issues" title="All Issues">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
-                        <line x1="14" y1="2" x2="14" y2="22"/>
-                        <line x1="2" y1="6" x2="22" y2="6"/>
-                        <line x1="2" y1="10" x2="22" y2="10"/>
-                        <line x1="2" y1="14" x2="22" y2="14"/>
-                        <line x1="2" y1="18" x2="22" y2="18"/>
-                    </svg>
-                </button>
+            </div>
+        </header>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+            <span class="stat"><span class="stat-value">${graph.stats.totalFiles}</span> files</span>
+            <span class="separator">•</span>
+            <span class="stat"><span class="stat-value">${graph.stats.totalTables}</span> tables</span>
+            <span class="separator">•</span>
+            <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
+            <span class="separator">•</span>
+            <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
+        </div>
+        <div class="legend-inline">
+            <div class="legend-inline-group">
+                <span>Nodes:</span>
+                <div class="legend-inline-item"><div class="legend-inline-node file"></div><span>Files</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node table"></div><span>Tables</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node view"></div><span>Views</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-node external"></div><span>External</span></div>
+            </div>
+            <div class="legend-inline-group">
+                <span>Edges:</span>
+                <div class="legend-inline-item"><div class="legend-inline-edge select"></div><span>SELECT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge join"></div><span>JOIN</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge insert"></div><span>INSERT</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge update"></div><span>UPDATE</span></div>
+                <div class="legend-inline-item"><div class="legend-inline-edge delete"></div><span>DELETE</span></div>
             </div>
         </div>
 
-        <!-- Main Content Area -->
-        <div class="content-area">
-            <!-- Sidebar -->
-            <div id="sidebar" class="sidebar">
-                ${statsHtml}
+        <!-- Issue Banner -->
+        ${totalIssues > 0 ? `
+        <div class="issue-banner warning">
+            <svg class="issue-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span class="issue-banner-text">
+                <strong>${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found:</strong>
+                ${graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : ''}
+                ${graph.stats.orphanedDefinitions.length > 0 && graph.stats.missingDefinitions.length > 0 ? ', ' : ''}
+                ${graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : ''}
+            </span>
+            <button class="issue-banner-btn" id="btn-view-issues">View Details →</button>
+        </div>
+        ` : `
+        <div class="issue-banner success">
+            <svg class="issue-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <span class="issue-banner-text"><strong>All clear</strong> — no issues found</span>
+        </div>
+        `}
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Graph Area -->
+            <div class="graph-area-container">
+                <div class="graph-area">
+                    ${graphHtml}
+                </div>
             </div>
 
-            <!-- Graph Area -->
-            <div class="graph-area">
-                ${graphHtml}
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                ${statsHtml}
+            </aside>
+
+            <!-- Lineage Panel (overlays graph) -->
+            <div id="lineage-panel" class="lineage-panel">
+                <div class="lineage-header">
+                    <button class="lineage-back-btn" id="lineage-back-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Back to Graph
+                    </button>
+                    <h2 id="lineage-title">Data Lineage</h2>
+                </div>
+                <div class="lineage-content" id="lineage-content">
+                    <!-- Dynamic lineage content will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu">
+            <div class="context-menu-item" data-action="showUpstream">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 19V5M5 12l7-7 7 7"/>
+                </svg>
+                Show Upstream
+            </div>
+            <div class="context-menu-item" data-action="showDownstream">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+                Show Downstream
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="openFile">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Open File
+            </div>
+            <div class="context-menu-item" data-action="visualize">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
+                    <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
+                </svg>
+                Visualize Dependencies
             </div>
         </div>
     </div>
@@ -1110,24 +1243,124 @@ ${bodyContent}
     ): string {
         return `
         <div class="sidebar-header">
-            <h3>Statistics</h3>
+            <span class="sidebar-title">Panel</span>
+            <button class="sidebar-close" id="btn-sidebar-close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
         </div>
-        <div class="sidebar-stats">
-            <div class="stat-item">
-                <span class="stat-label">Total Objects</span>
-                <span class="stat-value">${graph.nodes.length}</span>
+        <div class="sidebar-content">
+            <!-- Legend Section -->
+            <div class="sidebar-section">
+                <div class="section-header expanded" data-section="legend">
+                    <span class="section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+                        </svg>
+                        Legend
+                    </span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="legend-grid">
+                        <div class="legend-group">
+                            <div class="legend-group-title">Nodes</div>
+                            <div class="legend-item"><div class="legend-node file"></div><span>SQL Files</span></div>
+                            <div class="legend-item"><div class="legend-node table"></div><span>Tables</span></div>
+                            <div class="legend-item"><div class="legend-node view"></div><span>Views</span></div>
+                            <div class="legend-item"><div class="legend-node external"></div><span>External (undefined)</span></div>
+                        </div>
+                        <div class="legend-group">
+                            <div class="legend-group-title">Edges</div>
+                            <div class="legend-item"><div class="legend-edge select"></div><span>SELECT</span></div>
+                            <div class="legend-item"><div class="legend-edge join"></div><span>JOIN</span></div>
+                            <div class="legend-item"><div class="legend-edge insert"></div><span>INSERT</span></div>
+                            <div class="legend-item"><div class="legend-edge update"></div><span>UPDATE</span></div>
+                            <div class="legend-item"><div class="legend-edge delete"></div><span>DELETE</span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-item">
-                <span class="stat-label">Relationships</span>
-                <span class="stat-value">${graph.edges.length}</span>
+
+            <!-- Issues Section -->
+            ${totalIssues > 0 ? `
+            <div class="sidebar-section">
+                <div class="section-header expanded" data-section="issues">
+                    <span class="section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        Issues
+                        <span class="section-badge">${totalIssues}</span>
+                    </span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="issue-list">
+                        ${detailedStats.orphanedDetails.slice(0, 5).map(item => `
+                        <div class="issue-item" data-filepath="${this.escapeHtml(item.filePath)}" data-line="${item.lineNumber}">
+                            <span class="issue-type ${item.type}">${item.type}</span>
+                            <div class="issue-info">
+                                <div class="issue-name">${this.escapeHtml(item.name)}</div>
+                                <div class="issue-path" title="${this.escapeHtml(item.filePath)}">${this.escapeHtml(item.filePath.split('/').pop() || item.filePath)}</div>
+                            </div>
+                            <span class="issue-line">:${item.lineNumber}</span>
+                        </div>
+                        `).join('')}
+                        ${detailedStats.missingDetails.slice(0, 5).map(item => `
+                        <div class="issue-item" data-missing="${this.escapeHtml(item.tableName)}">
+                            <span class="issue-type missing">missing</span>
+                            <div class="issue-info">
+                                <div class="issue-name">${this.escapeHtml(item.tableName)}</div>
+                                <div class="issue-path">${item.referenceCount} reference${item.referenceCount !== 1 ? 's' : ''}</div>
+                            </div>
+                        </div>
+                        `).join('')}
+                        ${totalIssues > 10 ? `<div class="issue-more">+ ${totalIssues - 10} more issues</div>` : ''}
+                        <button class="export-btn" id="btn-all-issues-sidebar" style="margin-top: 8px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            View All Issues
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="stat-item">
-                <span class="stat-label">Orphaned</span>
-                <span class="stat-value ${graph.stats.orphanedDefinitions.length > 0 ? 'stat-error' : ''}">${graph.stats.orphanedDefinitions.length}</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Missing</span>
-                <span class="stat-value ${graph.stats.missingDefinitions.length > 0 ? 'stat-error' : ''}">${graph.stats.missingDefinitions.length}</span>
+            ` : ''}
+
+            <!-- Export Section -->
+            <div class="sidebar-section">
+                <div class="section-header" data-section="export">
+                    <span class="section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Export
+                    </span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="export-grid">
+                        <button class="export-btn" data-format="svg">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                            </svg>
+                            Export as SVG
+                        </button>
+                        <button class="export-btn" data-format="mermaid">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            Export as Mermaid
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>`;
     }
@@ -1137,60 +1370,36 @@ ${bodyContent}
      */
     private generateGraphAreaHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter): string {
         return `
-        <div class="view-tabs">
-            <div class="view-tab active" data-view="graph">Graph</div>
-            <div class="view-tab" data-view="lineage">Lineage</div>
-            <div class="view-tab" data-view="tableExplorer">Tables</div>
-            <div class="view-tab" data-view="impact">Impact</div>
-        </div>
-
-        <div class="graph-toolbar">
-            <div class="search-box">
+        <div id="graph-container" style="width: 100%; height: 100%;">
+            ${graph.nodes.length > 0 ? this.renderGraph(graph) : `
+            <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="11" cy="11" r="8"/>
-                    <path d="M21 21l-4.35-4.35"/>
+                    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
-                <input type="text" id="search-input" class="search-input" placeholder="Search nodes..." value="${this.escapeHtml(searchFilter.query)}">
-                <button class="icon-btn" id="btn-clear-search" style="display: ${searchFilter.query ? 'flex' : 'none'}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                </button>
+                <div class="empty-state-title">No dependencies found</div>
+                <div>Try refreshing or check your SQL files</div>
             </div>
-            <select id="filter-type" class="search-select">
-                <option value="all" ${searchFilter.nodeTypes === undefined ? 'selected' : ''}>All Types</option>
-                <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files Only</option>
-                <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables Only</option>
-                <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views Only</option>
-                <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External Only</option>
-            </select>
-            ${searchFilter.useRegex ? '<span class="regex-badge">Regex</span>' : ''}
-            ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
+            `}
         </div>
 
-        <div id="lineage-panel" class="lineage-panel">
-            <div class="lineage-header">
-                <button class="lineage-back-btn" id="lineage-back-btn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 12H5M12 19l-7-7 7-7"/>
-                    </svg>
-                    Back to Graph
-                </button>
-                <h2 class="lineage-title" id="lineage-title">Data Lineage</h2>
-            </div>
-            <div class="lineage-content" id="lineage-content"></div>
-        </div>
-
-        <div class="graph-container">
-            <svg id="graph-svg" class="graph-svg">
-                <g id="main-group">
-                    ${this.renderGraph(graph)}
-                </g>
-            </svg>
-        </div>
-
-        <div id="tooltip" class="tooltip" style="display: none;"></div>
-        <div id="context-menu" class="context-menu" style="display: none;"></div>`;
+        <!-- Zoom Toolbar -->
+        <div class="zoom-toolbar">
+            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <div class="zoom-divider"></div>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <div class="zoom-divider"></div>
+            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+        </div>`;
     }
 
     /**
