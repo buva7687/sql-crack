@@ -1808,8 +1808,7 @@ function getUtilityScript(): string {
  * Generate script for issues view
  */
 export function getIssuesScript(nonce: string): string {
-    return `
-    <script nonce="${nonce}">
+    return `<script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         document.getElementById('btn-back').addEventListener('click', () => {
