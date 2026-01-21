@@ -231,6 +231,369 @@ export function getLineagePanelStyles(): string {
 }
 
 /**
+ * Shared view container styles - consistent template for all tab views
+ */
+export function getSharedViewStyles(): string {
+    return `
+        /* ========== Shared View Container ========== */
+        .view-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* View Header - consistent across all tabs */
+        .view-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .view-header-icon {
+            font-size: 32px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .view-header-content {
+            flex: 1;
+        }
+        .view-title {
+            color: var(--text-primary);
+            font-size: 22px;
+            font-weight: 600;
+            margin: 0 0 6px 0;
+        }
+        .view-subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* View Stats - consistent stats display */
+        .view-stats {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+        .view-stat-badge {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            min-width: 80px;
+        }
+        .view-stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent);
+            line-height: 1;
+        }
+        .view-stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* View Controls - search and filter section */
+        .view-controls {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+        .view-controls-header {
+            margin-bottom: 16px;
+        }
+        .view-controls-header h4 {
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 4px 0;
+        }
+        .view-controls-hint {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin: 0;
+        }
+        .view-controls-hint kbd {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        /* View Search Input */
+        .view-search-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            transition: all 0.2s;
+        }
+        .view-search-box:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .view-search-box svg {
+            width: 16px;
+            height: 16px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .view-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+        .view-search-input::placeholder {
+            color: var(--text-dim);
+        }
+        .view-search-clear {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: var(--radius-sm);
+        }
+        .view-search-clear.visible {
+            display: flex;
+        }
+        .view-search-clear:hover {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* View Filters */
+        .view-filters {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .view-filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .view-filter-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .view-filter-label svg {
+            width: 14px;
+            height: 14px;
+        }
+        .view-filter-select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            outline: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .view-filter-select:hover {
+            border-color: var(--border-color);
+        }
+        .view-filter-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        /* Quick Filter Chips */
+        .view-quick-filters {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .view-filter-chip {
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .view-filter-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .view-filter-chip.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        /* View Content Grid */
+        .view-content {
+            flex: 1;
+        }
+        .view-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* View Card Item */
+        .view-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: var(--shadow-sm);
+        }
+        .view-card:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        .view-card-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .view-card-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .view-card-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .view-card-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .view-card-badge {
+            padding: 2px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .view-card-arrow {
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .view-card-arrow svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* View Empty State */
+        .view-empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+        .view-empty svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .view-empty h3 {
+            color: var(--text-primary);
+            font-size: 18px;
+            margin: 0 0 8px 0;
+        }
+        .view-empty p {
+            margin: 0 0 8px 0;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .view-empty .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* Form Card for Impact View */
+        .view-form-card {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--border-subtle);
+            padding: 32px;
+            box-shadow: var(--shadow-md);
+        }
+        .view-form-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .view-form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .view-form-field label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .view-form-field label svg {
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
+        }
+        .view-form-actions {
+            margin-top: 8px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-subtle);
+        }
+    `;
+}
+
+/**
  * Table list view styles
  */
 export function getTableListStyles(): string {
@@ -2238,6 +2601,7 @@ export function getWebviewStyles(): string {
         getBaseStyles(),
         getContextMenuStyles(),
         getLineagePanelStyles(),
+        getSharedViewStyles(),
         getTableListStyles(),
         getImpactFormStyles(),
         getLineageVisualStyles(),

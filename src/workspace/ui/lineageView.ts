@@ -49,110 +49,94 @@ export class LineageView {
         }
 
         let html = `
-            <div class="lineage-visual-container">
-                <!-- Search Panel -->
-                <div class="lineage-search-panel">
-                    <div class="search-header">
-                        <h3>Explore Data Lineage</h3>
-                        <p class="search-hint">Search for a table or view to visualize its data flow</p>
+            <div class="view-container">
+                <!-- View Header -->
+                <div class="view-header">
+                    <div class="view-header-icon">📈</div>
+                    <div class="view-header-content">
+                        <h3 class="view-title">Data Lineage</h3>
+                        <p class="view-subtitle">Search for a table or view to visualize its data flow and dependencies</p>
                     </div>
+                </div>
 
-                    <div class="search-form">
-                        <div class="search-input-wrapper">
-                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                            </svg>
-                            <input type="text"
-                                   id="lineage-search-input"
-                                   class="lineage-search-input"
-                                   placeholder="Search tables, views, CTEs..."
-                                   autocomplete="off"
-                                   value="">
-                            <button class="search-clear-btn" id="lineage-search-clear" style="display: none;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M18 6L6 18M6 6l12 12"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="search-results" id="lineage-search-results" style="display: none;"></div>
+                <!-- Stats -->
+                <div class="view-stats">
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.tables}</span>
+                        <span class="view-stat-label">Tables</span>
                     </div>
-
-                    <!-- Quick Filters -->
-                    <div class="quick-filters">
-                        <span class="filter-label">Quick filter:</span>
-                        <button class="filter-chip active" data-filter="all">All</button>
-                        <button class="filter-chip" data-filter="table">Tables</button>
-                        <button class="filter-chip" data-filter="view">Views</button>
-                        <button class="filter-chip" data-filter="cte">CTEs</button>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.views}</span>
+                        <span class="view-stat-label">Views</span>
                     </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.ctes}</span>
+                        <span class="view-stat-label">CTEs</span>
+                    </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.relationships}</span>
+                        <span class="view-stat-label">Relationships</span>
+                    </div>
+                </div>
 
-                    <!-- File Filter -->
-                    <div class="file-filter-section">
-                        <label class="filter-label">
+                <!-- Search Controls -->
+                <div class="view-controls">
+                    <div class="view-controls-header">
+                        <h4>Search & Filter</h4>
+                        <p class="view-controls-hint">Find tables, views, or CTEs to explore their lineage</p>
+                    </div>
+                    <div class="view-search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <input type="text"
+                               id="lineage-search-input"
+                               class="view-search-input"
+                               placeholder="Search tables, views, CTEs..."
+                               autocomplete="off"
+                               value="">
+                        <button class="view-search-clear" id="lineage-search-clear">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
+                                <path d="M18 6L6 18M6 6l12 12"/>
                             </svg>
-                            Filter by file:
-                        </label>
-                        <select id="lineage-file-filter" class="file-filter-select" multiple>
-                            ${filePaths.map(fp => `
-                                <option value="${this.escapeHtml(fp)}" ${fileFilter.includes(fp) ? 'selected' : ''}>
-                                    ${this.escapeHtml(fp.split('/').pop() || fp)}
-                                </option>
-                            `).join('')}
-                        </select>
+                        </button>
+                    </div>
+                    <div class="search-results" id="lineage-search-results" style="display: none;"></div>
+                    <div class="view-filters">
+                        <div class="view-quick-filters">
+                            <span class="view-filter-label">Quick filter:</span>
+                            <button class="view-filter-chip active" data-filter="all">All</button>
+                            <button class="view-filter-chip" data-filter="table">Tables</button>
+                            <button class="view-filter-chip" data-filter="view">Views</button>
+                            <button class="view-filter-chip" data-filter="cte">CTEs</button>
+                        </div>
+                        <div class="view-filter-group">
+                            <label class="view-filter-label">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                </svg>
+                                Filter by file
+                            </label>
+                            <select id="lineage-file-filter" class="view-filter-select" multiple>
+                                ${filePaths.map(fp => `
+                                    <option value="${this.escapeHtml(fp)}" ${fileFilter.includes(fp) ? 'selected' : ''}>
+                                        ${this.escapeHtml(fp.split('/').pop() || fp)}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Recent Selections / Quick Access -->
-                ${recentSelections.length > 0 ? `
-                <div class="recent-selections">
-                    <h4>Recent</h4>
-                    <div class="recent-list">
-                        ${recentSelections.slice(0, this.maxRecentItems).map(item => `
-                            <button class="recent-item"
-                                    data-action="select-node"
-                                    data-node-id="${this.escapeHtml(item.nodeId)}"
-                                    data-node-name="${this.escapeHtml(item.name)}">
-                                <span class="recent-icon">${this.getNodeIcon(item.type)}</span>
-                                <span class="recent-name">${this.escapeHtml(item.name)}</span>
-                                <span class="recent-type">${item.type}</span>
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>
-                ` : ''}
-
-                <!-- Popular Tables Section (tables with most connections) -->
-                <div class="popular-tables">
-                    <h4>Most Connected</h4>
-                    <div class="popular-list">
-                        ${this.generatePopularNodes(graph, 6)}
-                    </div>
-                </div>
-
-                <!-- Stats Summary -->
-                <div class="lineage-stats-summary">
-                    <div class="stat-chip">
-                        <span class="stat-icon">📊</span>
-                        <span class="stat-count">${stats.tables}</span>
-                        <span class="stat-label">Tables</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">👁️</span>
-                        <span class="stat-count">${stats.views}</span>
-                        <span class="stat-label">Views</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">🔄</span>
-                        <span class="stat-count">${stats.ctes}</span>
-                        <span class="stat-label">CTEs</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">🔗</span>
-                        <span class="stat-count">${stats.relationships}</span>
-                        <span class="stat-label">Relationships</span>
+                <!-- Content -->
+                <div class="view-content">
+                    <!-- Popular Tables Section (tables with most connections) -->
+                    <div class="popular-tables">
+                        <h4>Most Connected</h4>
+                        <div class="popular-list">
+                            ${this.generatePopularNodes(graph, 6)}
+                        </div>
                     </div>
                 </div>
 

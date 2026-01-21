@@ -28,6 +28,7 @@ export {
     getBaseStyles,
     getContextMenuStyles,
     getLineagePanelStyles,
+    getSharedViewStyles,
     getTableListStyles,
     getImpactFormStyles,
     getLineageVisualStyles,
