@@ -1077,26 +1077,36 @@ export class WorkspacePanel {
             right: 0;
             bottom: 0;
             background: var(--bg-primary);
-            overflow: auto;
+            overflow: hidden;
             padding: 20px;
+            padding-bottom: 0;
             display: none;
             z-index: 50;
+            flex-direction: column;
         }
         .graph-area-container {
             position: relative;
             flex: 1;
             overflow: hidden;
         }
-        .lineage-panel.visible { display: block; }
-        .lineage-panel.visible { display: block; }
+        .lineage-panel.visible { display: flex; }
         .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
-        .lineage-content { max-width: 1000px; margin: 0 auto; }
+        .lineage-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0; /* Important for flex children to shrink */
+        }
+        /* Constrain width only for search/overview view, not graph view */
+        .lineage-content > .lineage-visual-container { max-width: 1200px; margin: 0 auto; }
         .sidebar.collapsed ~ .lineage-panel { right: 0; }
 
         /* Lineage panel header with back button */
         .lineage-header {
             display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
             padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
         }
         .lineage-back-btn {
             display: flex; align-items: center; gap: 6px; padding: 8px 12px;
@@ -1808,8 +1818,13 @@ export class WorkspacePanel {
         /* ========== Visual Lineage Graph ========== */
         .lineage-visual-container {
             padding: 20px;
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            justify-content: center; /* Vertically center content */
+            overflow-y: auto;
         }
         .lineage-search-panel {
             margin-bottom: 24px;
@@ -2116,7 +2131,9 @@ export class WorkspacePanel {
         .lineage-graph-view {
             display: flex;
             flex-direction: column;
-            height: 100%;
+            flex: 1;
+            min-height: 0; /* Critical for nested flex to work */
+            overflow: hidden;
         }
         .graph-header {
             display: flex;
@@ -2125,6 +2142,7 @@ export class WorkspacePanel {
             padding: 12px 16px;
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
         }
         .graph-title {
             display: flex;
@@ -2162,6 +2180,7 @@ export class WorkspacePanel {
             padding: 8px 16px;
             background: var(--bg-primary);
             border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
         }
         .direction-btn {
             display: flex;
@@ -2190,11 +2209,14 @@ export class WorkspacePanel {
         /* Graph Container */
         .lineage-graph-container {
             flex: 1;
+            min-height: 0;
             overflow: hidden;
             background: var(--bg-primary);
             position: relative;
         }
         .lineage-graph-svg {
+            width: 100%;
+            height: 100%;
             cursor: grab;
             user-select: none;
         }
@@ -3750,7 +3772,13 @@ export class WorkspacePanel {
                     break;
                 case 'lineageGraphResult':
                     // Handle lineage graph render result
+                    // Prevent re-entrant calls during setup
+                    if (lineageSetupInProgress) {
+                        console.log('[Lineage] Ignoring lineageGraphResult during setup');
+                        break;
+                    }
                     if (lineageContent && message.data?.html) {
+                        lineageSetupInProgress = true;
                         lineageContent.innerHTML = message.data.html;
                         lineageDetailView = true;
                         // Track current graph state for expand/collapse
@@ -3769,6 +3797,8 @@ export class WorkspacePanel {
                         setupLineageGraphInteractions();
                         // Also setup direction buttons in empty state
                         setupDirectionButtons();
+                        // Release lock after setup completes
+                        setTimeout(() => { lineageSetupInProgress = false; }, 200);
                     }
                     break;
                 case 'nodeColumnsResult':
@@ -4339,6 +4369,8 @@ export class WorkspacePanel {
         let lineageExpandedNodes = new Set(); // Track expanded nodes
         let lineageCurrentNodeId = null; // Track current graph center node
         let lineageCurrentDirection = 'both'; // Track current direction
+        let lineageAutoFitNodeId = null; // Track which graph was auto-fitted (prevent re-fit)
+        let lineageSetupInProgress = false; // Prevent re-renders during setup
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -4353,24 +4385,70 @@ export class WorkspacePanel {
             const zoomLevel = document.getElementById('lineage-zoom-level');
             const directionBtns = document.querySelectorAll('.direction-btn');
 
-            if (!svg || !graphContainer) return;
-
             // Reset zoom state
             lineageScale = 1;
-            lineageOffsetX = 50;
-            lineageOffsetY = 50;
+            lineageOffsetX = 0;
+            lineageOffsetY = 0;
 
             function updateLineageTransform() {
-                graphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
-                if (zoomLevel) {
-                    zoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                // Re-query to get fresh references (in case DOM was updated)
+                const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
+                const currentZoomLevel = document.getElementById('lineage-zoom-level');
+                if (!currentGraphContainer) return;
+                currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
+                if (currentZoomLevel) {
+                    currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
                 }
             }
 
-            // Initial transform
-            updateLineageTransform();
+            // Fit graph to container, using full available space and centering
+            function fitToContainer(isAutoFit = false) {
+                // For auto-fit, only run once per graph (check using external state)
+                if (isAutoFit && lineageAutoFitNodeId === lineageCurrentNodeId && lineageCurrentNodeId !== null) {
+                    return;
+                }
 
-            // Zoom controls
+                // Re-query to get fresh references (in case DOM was updated)
+                const currentContainer = document.getElementById('lineage-graph-container');
+                const currentGraphContainer = currentContainer?.querySelector('.lineage-graph-svg .lineage-graph-container');
+                if (!currentContainer || !currentGraphContainer) {
+                    return;
+                }
+
+                const containerRect = currentContainer.getBoundingClientRect();
+                const bbox = currentGraphContainer.getBBox();
+
+                if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && containerRect.height > 0) {
+                    const padding = 80; // Padding around the graph
+                    const availableWidth = containerRect.width - padding;
+                    const availableHeight = containerRect.height - padding;
+                    const scaleX = availableWidth / bbox.width;
+                    const scaleY = availableHeight / bbox.height;
+
+                    // Use the smaller scale to fit both dimensions (always fit, can be > or < 100%)
+                    lineageScale = Math.min(scaleX, scaleY);
+                    // Clamp between 20% and 150%
+                    lineageScale = Math.max(0.2, Math.min(1.5, lineageScale));
+
+                    // Center the graph in the container
+                    // Move content so that bbox center aligns with container center
+                    const bboxCenterX = bbox.x + bbox.width / 2;
+                    const bboxCenterY = bbox.y + bbox.height / 2;
+                    const containerCenterX = containerRect.width / 2;
+                    const containerCenterY = containerRect.height / 2;
+
+                    lineageOffsetX = containerCenterX - bboxCenterX * lineageScale;
+                    lineageOffsetY = containerCenterY - bboxCenterY * lineageScale;
+
+                    updateLineageTransform();
+
+                    if (isAutoFit && lineageCurrentNodeId) {
+                        lineageAutoFitNodeId = lineageCurrentNodeId;
+                    }
+                }
+            }
+
+            // Zoom controls - always set up even if graph isn't ready yet
             zoomInBtn?.addEventListener('click', () => {
                 lineageScale = Math.min(3, lineageScale * 1.2);
                 updateLineageTransform();
@@ -4382,28 +4460,24 @@ export class WorkspacePanel {
             });
 
             zoomResetBtn?.addEventListener('click', () => {
-                lineageScale = 1;
-                lineageOffsetX = 50;
-                lineageOffsetY = 50;
-                updateLineageTransform();
+                // Reset to auto-fit centered view
+                fitToContainer();
                 // Also clear any focused node
-                const nodes = svg?.querySelectorAll('.lineage-node');
-                if (nodes) clearLineageFocus(nodes);
+                if (svg) {
+                    const nodes = svg.querySelectorAll('.lineage-node');
+                    if (nodes) clearLineageFocus(nodes);
+                }
             });
 
-            zoomFitBtn?.addEventListener('click', () => {
-                // Fit to container
-                const containerRect = container.getBoundingClientRect();
-                const bbox = graphContainer.getBBox();
-                if (bbox.width > 0 && bbox.height > 0) {
-                    const scaleX = (containerRect.width - 100) / bbox.width;
-                    const scaleY = (containerRect.height - 100) / bbox.height;
-                    lineageScale = Math.min(scaleX, scaleY, 1.5);
-                    lineageScale = Math.max(0.2, lineageScale);
-                    lineageOffsetX = (containerRect.width - bbox.width * lineageScale) / 2 - bbox.x * lineageScale;
-                    lineageOffsetY = (containerRect.height - bbox.height * lineageScale) / 2 - bbox.y * lineageScale;
-                    updateLineageTransform();
-                }
+            zoomFitBtn?.addEventListener('click', fitToContainer);
+
+            // Early return if no graph to interact with
+            if (!svg || !graphContainer) return;
+
+            // Auto-fit and center on initial load (delay to ensure container is rendered)
+            // Pass true to mark as auto-fit (only runs once per graph)
+            requestAnimationFrame(() => {
+                setTimeout(() => fitToContainer(true), 100);
             });
 
             // Mouse wheel zoom
