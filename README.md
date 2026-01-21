@@ -281,53 +281,22 @@ The workspace panel includes multiple views for comprehensive analysis:
 
 **Performance Warning Icons**: Filter Pushdown (⬆), Non-Sargable (🚫), Join Order (⇄), Index Suggestion (📇), Repeated Scan (🔄), Complex (🧮)
 
-## Performance Analysis Examples
+## Performance Analysis
 
-SQL Crack's static performance analysis detects common optimization opportunities:
+SQL Crack provides heuristic-based static performance analysis to identify optimization opportunities:
 
-### Filter Pushdown
-```sql
--- Detected: Filter after JOIN could be applied earlier
-SELECT e.name, d.dept_name
-FROM employees e
-JOIN departments d ON e.dept_id = d.id
-WHERE e.status = 'active';  -- ⬆ Suggestion: Move filter before JOIN
-```
+- **Filter Pushdown** — Identifies WHERE conditions that could be applied earlier
+- **Join Order** — Suggests optimal join ordering based on heuristics
+- **Repeated Scans** — Detects multiple table accesses in single query
+- **Subquery to JOIN** — Finds conversion opportunities for IN/EXISTS subqueries
+- **Index Hints** — Suggests indexes based on WHERE, JOIN, and GROUP BY patterns
+- **Non-Sargable Expressions** — Detects functions in WHERE clauses that prevent index usage
+- **Aggregate Optimization** — Identifies COUNT(DISTINCT) and HAVING issues
+- **Performance Score** — Calculates 0-100 score based on detected issues
 
-### Non-Sargable Expressions
-```sql
--- Detected: Function on column prevents index usage
-SELECT * FROM employees
-WHERE YEAR(hire_date) = 2024;  -- 🚫 Suggestion: Use date range instead
-```
+> **Note**: This is static analysis based on SQL parsing. For production optimization, always test with actual query plans (`EXPLAIN ANALYZE`).
 
-### Subquery to JOIN Conversion
-```sql
--- Detected: IN subquery could be a JOIN
-SELECT * FROM employees
-WHERE dept_id IN (SELECT id FROM departments WHERE location = 'NYC');
--- Suggestion: Convert to INNER JOIN
-```
-
-### Repeated Table Scans
-```sql
--- Detected: Table accessed multiple times
-SELECT e1.name,
-    (SELECT AVG(salary) FROM employees WHERE dept_id = e1.dept_id),
-    (SELECT MAX(salary) FROM employees WHERE dept_id = e1.dept_id)
-FROM employees e1;
--- 🔄 Suggestion: Use CTE to scan once
-```
-
-### Index Suggestions
-```sql
--- Detected: Multiple WHERE conditions
-SELECT * FROM employees
-WHERE dept_id = 5 AND status = 'active' AND salary > 50000;
--- 📇 Suggestion: Composite index on (dept_id, status, salary)
-```
-
-See `examples/example-phase3-performance.sql` for comprehensive test cases.
+**For detailed examples**, see [`examples/PERFORMANCE_EXAMPLES.md`](examples/PERFORMANCE_EXAMPLES.md) and the example SQL files in the `examples/` directory.
 
 ## Configuration
 
@@ -361,59 +330,6 @@ npm run lint         # Lint code
 Press `F5` to launch the Extension Development Host.
 
 ### Architecture
-
-```
-sql-crack/
-├── src/
-│   ├── extension.ts              # Extension entry point
-│   ├── visualizationPanel.ts     # Single-query webview panel
-│   ├── workspace/                # Workspace analysis module (Phase 4)
-│   │   ├── types.ts              # Workspace type definitions
-│   │   ├── schemaExtractor.ts    # CREATE TABLE/VIEW extraction
-│   │   ├── referenceExtractor.ts # Table reference extraction
-│   │   ├── scanner.ts            # SQL file scanner
-│   │   ├── indexManager.ts       # Index management & persistence
-│   │   ├── dependencyGraph.ts    # Dependency graph builder
-│   │   ├── workspacePanel.ts     # Workspace webview panel
-│   │   └── index.ts              # Module exports
-│   └── webview/
-│       ├── index.ts              # Main entry, VS Code message handling
-│       ├── sqlParser.ts          # SQL parsing & analysis
-│       ├── renderer.ts           # SVG rendering & layout
-│       ├── sqlFormatter.ts       # SQL formatting
-│       ├── performanceAnalyzer.ts # Static performance analysis
-│       ├── constants/            # Color constants & node type info
-│       ├── types/                # TypeScript type definitions
-│       │   ├── nodes.ts          # Node & edge types
-│       │   ├── parser.ts         # Parser result types
-│       │   ├── renderer.ts       # View state types
-│       │   └── lineage.ts        # Column lineage types
-│       ├── ui/                   # UI components
-│       │   ├── toolbar.ts        # Toolbar buttons & controls
-│       │   ├── batchTabs.ts      # Multi-query navigation
-│       │   └── pinnedTabs.ts     # Pinned tab management
-│       └── renderer/             # Modular renderer components
-│           ├── state.ts          # View state management
-│           ├── navigation/       # Pan, zoom, search, selection
-│           ├── panels/           # Details, stats, hints, breadcrumb
-│           ├── edges/            # Edge rendering & SQL clause panel
-│           ├── subflows/         # Dagre layout for cloud content
-│           └── utils/            # DOM helpers, colors, icons
-├── examples/                     # Sample SQL files for testing
-├── package.json
-├── tsconfig.json
-└── webpack.config.js
-```
-
-### Tech Stack
-
-- **VS Code Extension API** — Extension framework
-- **TypeScript** — Type-safe development
-- **node-sql-parser** — Multi-dialect SQL parsing
-- **dagre** — Graph layout algorithm
-- **Pure SVG** — Lightweight rendering
-
-### Architecture (Post-Refactoring)
 
 The workspace module has been refactored into a modular, maintainable architecture:
 
