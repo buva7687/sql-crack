@@ -194,14 +194,14 @@ The workspace module has been refactored into a modular, maintainable architectu
 
 ```
 src/workspace/
-├── workspacePanel.ts (2,134 lines) — Main orchestration
+├── workspacePanel.ts — Main orchestration
 ├── handlers/
-│   ├── messageHandler.ts (784 lines) — Webview message handling
+│   ├── messageHandler.ts — Webview message handling
 │   └── index.ts — Barrel export
 ├── ui/
-│   ├── sharedStyles.ts (2,623 lines) — All CSS (design tokens, components)
-│   ├── clientScripts.ts (1,839 lines) — All JavaScript (interactivity)
-│   ├── graphView.ts (330 lines) — Graph HTML generation
+│   ├── sharedStyles.ts — All CSS (design tokens, components)
+│   ├── clientScripts.ts — All JavaScript (interactivity)
+│   ├── graphView.ts — Graph HTML generation
 │   ├── tableExplorer.ts — Table browsing UI
 │   ├── lineageView.ts — Lineage visualization
 │   ├── impactView.ts — Impact analysis UI
@@ -212,7 +212,7 @@ src/workspace/
 ```
 
 **Refactoring Benefits**:
-- **65% code reduction** in main file (6,047 → 2,134 lines)
+- **65% code reduction** in main file
 - **Clear separation of concerns** (CSS, JS, HTML, Logic)
 - **Reusable components** with consistent UI across all views
 - **Dependency injection** for testable, decoupled code
