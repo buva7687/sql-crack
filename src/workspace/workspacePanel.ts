@@ -198,6 +198,13 @@ export class WorkspacePanel {
             return;
         }
 
+        // Clear cached lineage graph so it rebuilds with new data
+        this._lineageGraph = null;
+        this._lineageBuilder = null;
+        this._flowAnalyzer = null;
+        this._impactAnalyzer = null;
+        this._columnLineageTracker = null;
+
         this._currentGraph = buildDependencyGraph(index, 'tables'); // Table-first graph by default
         this.renderCurrentView();
     }
@@ -395,6 +402,22 @@ export class WorkspacePanel {
 
             case 'setLineageDirection':
                 await this.handleSetLineageDirection(message.nodeId, message.direction);
+                break;
+            case 'collapseNodeColumns':
+                // Collapse node - send confirmation to webview
+                this._panel.webview.postMessage({
+                    command: 'nodeCollapsedResult',
+                    data: { nodeId: message.nodeId }
+                });
+                break;
+            case 'selectColumn':
+                await this.handleSelectColumn(message.tableId, message.columnName);
+                break;
+            case 'clearColumnSelection':
+                await this.handleClearColumnSelection();
+                break;
+            case 'getColumnLineage':
+                await this.handleGetColumnLineage(message.tableId, message.columnName);
                 break;
         }
     }
@@ -794,12 +817,14 @@ export class WorkspacePanel {
 
         this._panel.webview.postMessage({
             command: 'lineageGraphResult',
-            data: { html, nodeId, direction }
+            data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
         });
     }
 
     /**
      * Handle expand node columns request
+     * Sends confirmation to webview, which will trigger a graph re-render with the node expanded.
+     * Column data is fetched during the re-render, not here.
      */
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
         await this.buildLineageGraph();
@@ -808,21 +833,10 @@ export class WorkspacePanel {
         const node = this._lineageGraph.nodes.get(nodeId);
         if (!node) return;
 
-        // Find column nodes for this table
-        const columns: Array<{ name: string; dataType?: string; isPrimaryKey?: boolean }> = [];
-        for (const [id, colNode] of this._lineageGraph.nodes) {
-            if (colNode.type === 'column' && colNode.parentId === nodeId) {
-                columns.push({
-                    name: colNode.name,
-                    dataType: colNode.columnInfo?.dataType,
-                    isPrimaryKey: colNode.metadata?.isPrimaryKey
-                });
-            }
-        }
-
+        // Send confirmation - webview will request graph re-render with this node expanded
         this._panel.webview.postMessage({
             command: 'nodeColumnsResult',
-            data: { nodeId, columns }
+            data: { nodeId }
         });
     }
 
@@ -832,6 +846,51 @@ export class WorkspacePanel {
     private async handleSetLineageDirection(nodeId: string, direction: 'both' | 'upstream' | 'downstream'): Promise<void> {
         // Re-generate graph with new direction
         await this.handleGetLineageGraph(nodeId, 5, direction);
+    }
+
+    /**
+     * Handle column selection - trace column lineage
+     */
+    private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
+        console.log(`[Column Lineage] Selecting column: ${tableId}.${columnName}`);
+
+        await this.buildLineageGraph();
+        if (!this._lineageGraph || !this._columnLineageTracker) {
+            console.log('[Column Lineage] Graph or tracker not available');
+            return;
+        }
+
+        // Log column edge stats for debugging
+        const columnEdgeCount = this._lineageGraph.columnEdges?.length || 0;
+        console.log(`[Column Lineage] Graph has ${columnEdgeCount} column edges`);
+
+        const lineage = this._columnLineageTracker.getFullColumnLineage(
+            this._lineageGraph,
+            tableId,
+            columnName
+        );
+
+        console.log(`[Column Lineage] Found ${lineage.upstream.length} upstream paths, ${lineage.downstream.length} downstream paths`);
+
+        // Send result back to webview
+        this._panel.webview.postMessage({
+            command: 'columnLineageResult',
+            data: {
+                tableId,
+                columnName,
+                upstream: lineage.upstream,
+                downstream: lineage.downstream
+            }
+        });
+    }
+
+    /**
+     * Clear column selection
+     */
+    private async handleClearColumnSelection(): Promise<void> {
+        this._panel.webview.postMessage({
+            command: 'columnSelectionCleared'
+        });
     }
 
     /**
@@ -2281,6 +2340,102 @@ export class WorkspacePanel {
             fill: var(--text-muted);
         }
 
+        /* Column Row States */
+        .lineage-node .column-row {
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .lineage-node .column-row:hover {
+            opacity: 1;
+        }
+        .lineage-node .column-row:hover .column-name {
+            fill: white;
+        }
+        .lineage-node .column-row.selected .column-name {
+            fill: white;
+            font-weight: 600;
+        }
+        .lineage-node .column-row.selected .column-state {
+            fill: var(--accent);
+        }
+        .lineage-node .column-row.in-path .column-name {
+            fill: rgba(255, 255, 255, 0.95);
+        }
+        .lineage-node .column-row.in-path .column-state {
+            fill: #22c55e;  /* Green for upstream */
+        }
+        .lineage-node.downstream .column-row.in-path .column-state {
+            fill: #3b82f6;  /* Blue for downstream */
+        }
+        .lineage-node .column-row.dimmed {
+            opacity: 0.3;
+        }
+        .lineage-node .column-state {
+            font-size: 10px;
+            fill: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Column Lineage Info Panel */
+        .column-lineage-info {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            box-shadow: var(--shadow-lg);
+            z-index: 100;
+            min-width: 280px;
+            display: none;
+        }
+        .column-lineage-info .info-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .column-lineage-info .info-icon { font-size: 14px; }
+        .column-lineage-info .info-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            flex: 1;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .column-lineage-info .info-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0;
+        }
+        .column-lineage-info .info-close:hover {
+            color: var(--text-primary);
+        }
+        .column-lineage-info .info-stats {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 8px;
+        }
+        .column-lineage-info .info-stats .stat {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .column-lineage-info .info-stats .stat.upstream {
+            color: #22c55e;
+        }
+        .column-lineage-info .info-stats .stat.downstream {
+            color: #3b82f6;
+        }
+        .column-lineage-info .info-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
         /* Graph Edge Styles */
         .lineage-edge {
             fill: none;
@@ -2294,6 +2449,20 @@ export class WorkspacePanel {
         .lineage-edge.highlighted {
             stroke: var(--accent);
             stroke-width: 3;
+        }
+
+        /* Column Lineage Edge Styles */
+        .column-lineage-edge {
+            pointer-events: none;
+            transition: stroke-opacity 0.2s;
+        }
+        .column-edge-upstream {
+            stroke: #22c55e;
+            stroke-dasharray: 4, 2;
+        }
+        .column-edge-downstream {
+            stroke: #3b82f6;
+            stroke-dasharray: 4, 2;
         }
 
         /* Tooltip */
@@ -3534,9 +3703,12 @@ export class WorkspacePanel {
                     }
                     break;
                 case 'columnLineageResult':
-                    if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
-                    }
+                    // Highlight columns in the current graph based on lineage
+                    handleColumnLineageResult(message.data);
+                    break;
+                case 'columnSelectionCleared':
+                    // Clear column highlighting
+                    clearColumnHighlighting();
                     break;
                 case 'tableListResult':
                     if (lineageContent && message.data?.html) {
@@ -3581,6 +3753,17 @@ export class WorkspacePanel {
                     if (lineageContent && message.data?.html) {
                         lineageContent.innerHTML = message.data.html;
                         lineageDetailView = true;
+                        // Track current graph state for expand/collapse
+                        if (message.data.nodeId) {
+                            lineageCurrentNodeId = message.data.nodeId;
+                        }
+                        if (message.data.direction) {
+                            lineageCurrentDirection = message.data.direction;
+                        }
+                        // Track expanded nodes
+                        if (message.data.expandedNodes) {
+                            lineageExpandedNodes = new Set(message.data.expandedNodes);
+                        }
                         updateBackButtonText();
                         // Setup graph interactions (works for both graph view and empty state)
                         setupLineageGraphInteractions();
@@ -3590,8 +3773,14 @@ export class WorkspacePanel {
                     break;
                 case 'nodeColumnsResult':
                     // Handle column expansion
-                    if (message.data?.nodeId && message.data?.columns) {
-                        expandNodeWithColumns(message.data.nodeId, message.data.columns);
+                    if (message.data?.nodeId) {
+                        expandNodeWithColumns(message.data.nodeId);
+                    }
+                    break;
+                case 'nodeCollapsedResult':
+                    // Handle column collapse
+                    if (message.data?.nodeId) {
+                        collapseNodeWithColumns(message.data.nodeId);
                     }
                     break;
             }
@@ -4147,6 +4336,9 @@ export class WorkspacePanel {
         let lineageDragStartX = 0;
         let lineageDragStartY = 0;
         let lineageFocusedNode = null;
+        let lineageExpandedNodes = new Set(); // Track expanded nodes
+        let lineageCurrentNodeId = null; // Track current graph center node
+        let lineageCurrentDirection = 'both'; // Track current direction
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -4257,9 +4449,49 @@ export class WorkspacePanel {
                     hideLineageTooltip();
                 });
 
-                // Click - focus node
+                // Click - handle column selection, expand/collapse, or focus node
                 node.addEventListener('click', (e) => {
                     e.stopPropagation();
+
+                    // Check for specific data-action targets
+                    const actionTarget = e.target.closest('[data-action]');
+                    if (actionTarget) {
+                        const action = actionTarget.getAttribute('data-action');
+                        const nodeId = node.getAttribute('data-node-id');
+
+                        if (action === 'selectColumn') {
+                            // Column selection - trace column lineage
+                            const columnName = actionTarget.getAttribute('data-column-name');
+                            if (nodeId && columnName) {
+                                vscode.postMessage({
+                                    command: 'selectColumn',
+                                    tableId: nodeId,
+                                    columnName: columnName
+                                });
+                            }
+                            return;
+                        } else if (action === 'expand') {
+                            // Expand node to show columns
+                            if (nodeId) {
+                                vscode.postMessage({
+                                    command: 'expandNodeColumns',
+                                    nodeId: nodeId
+                                });
+                            }
+                            return;
+                        } else if (action === 'collapse') {
+                            // Collapse node to hide columns
+                            if (nodeId) {
+                                vscode.postMessage({
+                                    command: 'collapseNodeColumns',
+                                    nodeId: nodeId
+                                });
+                            }
+                            return;
+                        }
+                    }
+
+                    // Default: focus node
                     focusLineageNode(node, nodes);
                 });
 
@@ -4429,10 +4661,363 @@ export class WorkspacePanel {
             });
         }
 
-        function expandNodeWithColumns(nodeId, columns) {
-            // This would require re-rendering the node, which is complex
-            // For now, just log or show a notification
-            console.log('Columns for ' + nodeId + ':', columns);
+        function expandNodeWithColumns(nodeId) {
+            // Guard: need a current graph to expand nodes in
+            if (!lineageCurrentNodeId) {
+                console.warn('[Lineage] Cannot expand node: no graph loaded');
+                return;
+            }
+
+            // Add node to expanded set and re-render graph
+            if (!lineageExpandedNodes) {
+                lineageExpandedNodes = new Set();
+            }
+            lineageExpandedNodes.add(nodeId);
+
+            // Re-render graph with expanded node
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: Array.from(lineageExpandedNodes)
+            });
+        }
+
+        function collapseNodeWithColumns(nodeId) {
+            // Guard: need a current graph to collapse nodes in
+            if (!lineageCurrentNodeId) {
+                console.warn('[Lineage] Cannot collapse node: no graph loaded');
+                return;
+            }
+
+            // Remove node from expanded set and re-render graph
+            if (lineageExpandedNodes) {
+                lineageExpandedNodes.delete(nodeId);
+            }
+
+            // Re-render graph with collapsed node
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: Array.from(lineageExpandedNodes || new Set())
+            });
+        }
+
+        // ========== Column Lineage Highlighting ==========
+
+        let selectedColumn = null; // Track currently selected column
+
+        function handleColumnLineageResult(data) {
+            if (!data) return;
+
+            const { tableId, columnName, upstream, downstream } = data;
+
+            // Store selected column
+            selectedColumn = { tableId, columnName };
+
+            // Clear previous highlighting
+            clearColumnHighlighting();
+
+            // Get all column rows in the graph
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg) return;
+
+            // Extract all column references from lineage paths
+            const upstreamColumns = new Set();
+            const downstreamColumns = new Set();
+
+            // Process upstream paths to get source column IDs
+            if (upstream && Array.isArray(upstream)) {
+                upstream.forEach(path => {
+                    if (path.nodes) {
+                        path.nodes.forEach(node => {
+                            if (node.type === 'column') {
+                                upstreamColumns.add(node.id);
+                            } else if (node.id && node.name) {
+                                // Add all columns of upstream tables
+                                upstreamColumns.add(node.id);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Process downstream paths to get target column IDs
+            if (downstream && Array.isArray(downstream)) {
+                downstream.forEach(path => {
+                    if (path.nodes) {
+                        path.nodes.forEach(node => {
+                            if (node.type === 'column') {
+                                downstreamColumns.add(node.id);
+                            } else if (node.id && node.name) {
+                                // Add all columns of downstream tables
+                                downstreamColumns.add(node.id);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Find and highlight the selected column
+            const selectedNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(tableId) + '"]');
+            if (selectedNode) {
+                const columnRows = selectedNode.querySelectorAll('.column-row');
+                columnRows.forEach(row => {
+                    const colName = row.getAttribute('data-column-name');
+                    if (colName === columnName) {
+                        row.classList.add('selected');
+                        // Update the state indicator
+                        const stateText = row.querySelector('.column-state');
+                        if (stateText) stateText.textContent = '◉';
+                    } else {
+                        row.classList.add('dimmed');
+                    }
+                });
+            }
+
+            // Highlight upstream columns (source) in green
+            upstreamColumns.forEach(nodeId => {
+                const node = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
+                if (node && node !== selectedNode) {
+                    node.classList.add('in-path', 'upstream');
+                    const columnRows = node.querySelectorAll('.column-row');
+                    columnRows.forEach(row => {
+                        row.classList.add('in-path');
+                        const stateText = row.querySelector('.column-state');
+                        if (stateText) stateText.textContent = '●';
+                    });
+                }
+            });
+
+            // Highlight downstream columns (target) in blue
+            downstreamColumns.forEach(nodeId => {
+                const node = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
+                if (node && node !== selectedNode) {
+                    node.classList.add('in-path', 'downstream');
+                    const columnRows = node.querySelectorAll('.column-row');
+                    columnRows.forEach(row => {
+                        row.classList.add('in-path');
+                        const stateText = row.querySelector('.column-state');
+                        if (stateText) stateText.textContent = '●';
+                    });
+                }
+            });
+
+            // Dim nodes not in the lineage path
+            const allNodes = svg.querySelectorAll('.lineage-node');
+            allNodes.forEach(node => {
+                const nodeId = node.getAttribute('data-node-id');
+                if (nodeId !== tableId && !upstreamColumns.has(nodeId) && !downstreamColumns.has(nodeId)) {
+                    node.classList.add('dimmed');
+                }
+            });
+
+            // Draw column-to-column edges
+            drawColumnLineageEdges(tableId, columnName, upstream, downstream);
+
+            // Show column lineage info panel (optional)
+            showColumnLineageInfo(tableId, columnName, upstream, downstream);
+        }
+
+        function drawColumnLineageEdges(selectedTableId, selectedColumnName, upstream, downstream) {
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg) return;
+
+            const graphContainer = svg.querySelector('.lineage-graph-container');
+            if (!graphContainer) return;
+
+            // Remove existing column edges
+            svg.querySelectorAll('.column-lineage-edge').forEach(el => el.remove());
+
+            // Get selected column position
+            const selectedNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(selectedTableId) + '"]');
+            if (!selectedNode) return;
+
+            const selectedColumnRow = selectedNode.querySelector('.column-row[data-column-name="' + CSS.escape(selectedColumnName) + '"]');
+            if (!selectedColumnRow) return;
+
+            const selectedPos = getColumnPosition(selectedNode, selectedColumnRow);
+            if (!selectedPos) return;
+
+            // Create a group for column edges (insert before nodes so edges appear behind)
+            const edgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            edgeGroup.setAttribute('class', 'column-lineage-edges');
+            graphContainer.insertBefore(edgeGroup, graphContainer.firstChild);
+
+            // Draw upstream edges (from source columns to selected column)
+            if (upstream && Array.isArray(upstream)) {
+                upstream.forEach(path => {
+                    if (path.nodes) {
+                        path.nodes.forEach(node => {
+                            if (node.id && node.id !== selectedTableId) {
+                                const sourceNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(node.id) + '"]');
+                                if (sourceNode) {
+                                    const sourceColumnRows = sourceNode.querySelectorAll('.column-row');
+                                    sourceColumnRows.forEach(row => {
+                                        const sourcePos = getColumnPosition(sourceNode, row);
+                                        if (sourcePos) {
+                                            drawColumnEdge(edgeGroup, sourcePos, selectedPos, 'upstream');
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Draw downstream edges (from selected column to target columns)
+            if (downstream && Array.isArray(downstream)) {
+                downstream.forEach(path => {
+                    if (path.nodes) {
+                        path.nodes.forEach(node => {
+                            if (node.id && node.id !== selectedTableId) {
+                                const targetNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(node.id) + '"]');
+                                if (targetNode) {
+                                    const targetColumnRows = targetNode.querySelectorAll('.column-row');
+                                    targetColumnRows.forEach(row => {
+                                        const targetPos = getColumnPosition(targetNode, row);
+                                        if (targetPos) {
+                                            drawColumnEdge(edgeGroup, selectedPos, targetPos, 'downstream');
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        function getColumnPosition(nodeElement, columnRow) {
+            // Get the node's transform to find its position
+            const transform = nodeElement.getAttribute('transform');
+            if (!transform) return null;
+
+            const match = transform.match(/translate\\(([-\\d.]+),\\s*([-\\d.]+)\\)/);
+            if (!match) return null;
+
+            const nodeX = parseFloat(match[1]);
+            const nodeY = parseFloat(match[2]);
+
+            // Get node dimensions
+            const nodeBg = nodeElement.querySelector('.node-bg');
+            const nodeWidth = nodeBg ? parseFloat(nodeBg.getAttribute('width') || 200) : 200;
+
+            // Find the column row's Y position within the node
+            // Column rows start at Y=68 and each is 24px apart
+            const allRows = nodeElement.querySelectorAll('.column-row');
+            let rowIndex = 0;
+            allRows.forEach((row, idx) => {
+                if (row === columnRow) rowIndex = idx;
+            });
+
+            const columnY = 68 + (rowIndex * 24) - 4;  // -4 to center on the dot
+
+            return {
+                left: { x: nodeX, y: nodeY + columnY },
+                right: { x: nodeX + nodeWidth, y: nodeY + columnY },
+                center: { x: nodeX + nodeWidth / 2, y: nodeY + columnY }
+            };
+        }
+
+        function drawColumnEdge(container, fromPos, toPos, type) {
+            // Determine which side to connect from/to
+            const startX = fromPos.right.x;
+            const startY = fromPos.right.y;
+            const endX = toPos.left.x;
+            const endY = toPos.left.y;
+
+            // Calculate control points for bezier curve
+            const midX = (startX + endX) / 2;
+            const pathD = 'M ' + startX + ' ' + startY +
+                         ' C ' + midX + ' ' + startY + ', ' +
+                               midX + ' ' + endY + ', ' +
+                               endX + ' ' + endY;
+
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('class', 'column-lineage-edge column-edge-' + type);
+            path.setAttribute('d', pathD);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', type === 'upstream' ? '#22c55e' : '#3b82f6');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-opacity', '0.7');
+            path.setAttribute('marker-end', 'url(#column-arrowhead-' + type + ')');
+
+            container.appendChild(path);
+        }
+
+        function clearColumnHighlighting() {
+            selectedColumn = null;
+
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg) return;
+
+            // Remove column lineage edges
+            svg.querySelectorAll('.column-lineage-edges').forEach(el => el.remove());
+
+            // Remove all highlighting classes
+            const allNodes = svg.querySelectorAll('.lineage-node');
+            allNodes.forEach(node => {
+                node.classList.remove('in-path', 'upstream', 'downstream', 'dimmed');
+            });
+
+            // Reset all column rows
+            const columnRows = svg.querySelectorAll('.column-row');
+            columnRows.forEach(row => {
+                row.classList.remove('selected', 'in-path', 'dimmed');
+                const stateText = row.querySelector('.column-state');
+                if (stateText) {
+                    // Reset to default indicator
+                    const isPrimaryKey = row.querySelector('.column-dot.primary');
+                    stateText.textContent = isPrimaryKey ? '●' : '○';
+                }
+            });
+
+            // Hide info panel
+            hideColumnLineageInfo();
+        }
+
+        function showColumnLineageInfo(tableId, columnName, upstream, downstream) {
+            // Create or update info panel
+            let infoPanel = document.getElementById('column-lineage-info');
+            if (!infoPanel) {
+                infoPanel = document.createElement('div');
+                infoPanel.id = 'column-lineage-info';
+                infoPanel.className = 'column-lineage-info';
+                const container = document.getElementById('lineage-graph-container');
+                if (container) container.appendChild(infoPanel);
+            }
+
+            const upstreamCount = upstream ? upstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
+            const downstreamCount = downstream ? downstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
+
+            // Parse table name from tableId (format: type:tablename)
+            const tableName = tableId.includes(':') ? tableId.split(':')[1] : tableId;
+
+            infoPanel.innerHTML = \`
+                <div class="info-header">
+                    <span class="info-icon">📝</span>
+                    <span class="info-title">\${escapeHtml(tableName)}.\${escapeHtml(columnName)}</span>
+                    <button class="info-close" onclick="clearColumnHighlighting()">×</button>
+                </div>
+                <div class="info-stats">
+                    <span class="stat upstream" title="Upstream sources">⬆ \${upstreamCount} sources</span>
+                    <span class="stat downstream" title="Downstream consumers">⬇ \${downstreamCount} consumers</span>
+                </div>
+                <div class="info-hint">Click another column to trace its lineage, or click background to clear.</div>
+            \`;
+            infoPanel.style.display = 'block';
+        }
+
+        function hideColumnLineageInfo() {
+            const infoPanel = document.getElementById('column-lineage-info');
+            if (infoPanel) {
+                infoPanel.style.display = 'none';
+            }
         }
 
         // Setup direction buttons (for both graph view and empty state)
