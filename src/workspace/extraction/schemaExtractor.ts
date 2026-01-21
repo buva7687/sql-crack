@@ -50,6 +50,7 @@ export class SchemaExtractor {
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
+            console.log(`[Schema Extractor] AST parse failed, using regex fallback:`, error);
             definitions.push(...this.extractWithRegex(sql, filePath));
         }
 
@@ -179,6 +180,12 @@ export class SchemaExtractor {
         const columns: ColumnInfo[] = [];
         const createDefinitions = stmt.create_definitions || stmt.columns || [];
 
+        // Debug: Log the structure
+        console.log(`[Schema Extractor] extractColumns: create_definitions=${stmt.create_definitions?.length}, columns=${stmt.columns?.length}, total=${createDefinitions.length}`);
+        if (createDefinitions.length > 0) {
+            console.log(`[Schema Extractor] First column def:`, JSON.stringify(createDefinitions[0], null, 2).substring(0, 500));
+        }
+
         for (const colDef of createDefinitions) {
             if (colDef.resource === 'column' || colDef.column) {
                 const column = this.parseColumnDefinition(colDef);
@@ -186,6 +193,7 @@ export class SchemaExtractor {
             }
         }
 
+        console.log(`[Schema Extractor] Extracted ${columns.length} columns`);
         return columns;
     }
 
@@ -283,20 +291,50 @@ export class SchemaExtractor {
      */
     private extractWithRegex(sql: string, filePath: string): SchemaDefinition[] {
         const definitions: SchemaDefinition[] = [];
+        const fileName = filePath.split('/').pop() || filePath;
 
-        // CREATE TABLE pattern
-        const tableRegex = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
+        // CREATE TABLE pattern - capture table name and body
+        // Use a simpler approach: find CREATE TABLE, then extract body separately
+        const tableHeaderRegex = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
         let match;
-        while ((match = tableRegex.exec(sql)) !== null) {
-            definitions.push({
-                type: 'table',
-                name: match[2],
-                schema: match[1],
-                columns: [],
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                sql: this.extractStatementFromIndex(sql, match.index)
-            });
+        while ((match = tableHeaderRegex.exec(sql)) !== null) {
+            const tableName = match[2];
+            const startIndex = match.index + match[0].length;
+
+            // Find the opening parenthesis
+            const afterHeader = sql.substring(startIndex);
+            const parenStart = afterHeader.indexOf('(');
+
+            if (parenStart !== -1) {
+                // Find matching closing parenthesis
+                const bodyStart = startIndex + parenStart + 1;
+                const tableBody = this.extractBalancedParens(sql, bodyStart);
+                const columns = this.extractColumnsFromBody(tableBody);
+
+                console.log(`[Schema Extractor Regex] Table ${tableName}: found ${columns.length} columns`);
+
+                definitions.push({
+                    type: 'table',
+                    name: tableName,
+                    schema: match[1],
+                    columns,
+                    filePath,
+                    lineNumber: this.getLineNumberAtIndex(sql, match.index),
+                    sql: this.extractStatementFromIndex(sql, match.index)
+                });
+            } else {
+                // No parenthesis - might be CREATE TABLE AS SELECT
+                console.log(`[Schema Extractor Regex] Table ${tableName}: no column definitions (CTAS?)`);
+                definitions.push({
+                    type: 'table',
+                    name: tableName,
+                    schema: match[1],
+                    columns: [],
+                    filePath,
+                    lineNumber: this.getLineNumberAtIndex(sql, match.index),
+                    sql: this.extractStatementFromIndex(sql, match.index)
+                });
+            }
         }
 
         // CREATE VIEW pattern
@@ -314,6 +352,116 @@ export class SchemaExtractor {
         }
 
         return definitions;
+    }
+
+    /**
+     * Extract columns from CREATE TABLE body using regex
+     */
+    private extractColumnsFromBody(body: string): ColumnInfo[] {
+        const columns: ColumnInfo[] = [];
+
+        // Split by comma, but be careful about nested parentheses
+        const parts = this.splitColumnDefinitions(body);
+
+        for (const part of parts) {
+            const trimmed = part.trim();
+            if (!trimmed) continue;
+
+            // Skip constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, CONSTRAINT)
+            if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)/i.test(trimmed)) {
+                continue;
+            }
+
+            // Parse column: name datatype [constraints]
+            // Match: column_name DATA_TYPE(args) or column_name DATA_TYPE
+            const colMatch = trimmed.match(/^["'`]?(\w+)["'`]?\s+(\w+)(?:\s*\([^)]*\))?(.*)$/i);
+            if (colMatch) {
+                const name = colMatch[1];
+                let dataType = colMatch[2];
+                const rest = colMatch[3] || '';
+
+                // Check for type with precision like VARCHAR(255) or DECIMAL(10,2)
+                const typeWithPrecision = trimmed.match(/^["'`]?\w+["'`]?\s+(\w+\s*\([^)]+\))/i);
+                if (typeWithPrecision) {
+                    dataType = typeWithPrecision[1].replace(/\s+/g, '');
+                }
+
+                // Check constraints in the rest
+                const isPrimaryKey = /PRIMARY\s+KEY/i.test(rest);
+                const isNotNull = /NOT\s+NULL/i.test(rest);
+                const hasReferences = /REFERENCES\s+(\w+)\s*\((\w+)\)/i.exec(rest);
+
+                const column: ColumnInfo = {
+                    name,
+                    dataType: dataType.toUpperCase(),
+                    nullable: !isNotNull && !isPrimaryKey,
+                    primaryKey: isPrimaryKey,
+                    isComputed: /GENERATED\s+ALWAYS/i.test(rest)
+                };
+
+                if (hasReferences) {
+                    column.foreignKey = {
+                        referencedTable: hasReferences[1],
+                        referencedColumn: hasReferences[2]
+                    };
+                }
+
+                columns.push(column);
+            }
+        }
+
+        return columns;
+    }
+
+    /**
+     * Extract content between balanced parentheses starting at given index
+     */
+    private extractBalancedParens(sql: string, startIndex: number): string {
+        let depth = 1;
+        let i = startIndex;
+
+        while (i < sql.length && depth > 0) {
+            const char = sql[i];
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                depth--;
+            }
+            i++;
+        }
+
+        // Return content between parens (excluding the final closing paren)
+        return sql.substring(startIndex, i - 1);
+    }
+
+    /**
+     * Split column definitions handling nested parentheses
+     */
+    private splitColumnDefinitions(body: string): string[] {
+        const parts: string[] = [];
+        let current = '';
+        let depth = 0;
+
+        for (const char of body) {
+            if (char === '(') {
+                depth++;
+                current += char;
+            } else if (char === ')') {
+                depth--;
+                current += char;
+            } else if (char === ',' && depth === 0) {
+                parts.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+
+        if (current.trim()) {
+            parts.push(current);
+        }
+
+        return parts;
     }
 
     /**

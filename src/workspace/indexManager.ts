@@ -13,7 +13,7 @@ import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 
-const INDEX_VERSION = 3; // Bumped for per-statement lineage (statementIndex field)
+const INDEX_VERSION = 4; // Bumped for column extraction in schema definitions
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const INDEX_STALE_THRESHOLD = 3600000; // 1 hour
 
@@ -77,36 +77,11 @@ export class IndexManager {
         // Copy existing index for hash comparison if available
         const oldHashes = this.index?.fileHashes || new Map<string, string>();
 
-        // Process files: reuse unchanged files, reprocess changed/new files
+        // Process all files with fresh analysis
+        // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
+        // This ensures schema extractor improvements (like column extraction) take effect
         for (const analysis of analyses) {
-            const oldHash = oldHashes.get(analysis.filePath);
-
-            if (oldHash === analysis.contentHash && this.index?.files.has(analysis.filePath)) {
-                // File unchanged - reuse existing analysis
-                const existing = this.index.files.get(analysis.filePath)!;
-                newIndex.files.set(analysis.filePath, existing);
-                newIndex.fileHashes.set(analysis.filePath, analysis.contentHash);
-
-                // Reuse definition and reference mappings
-                for (const def of existing.definitions) {
-                    const key = getQualifiedKey(def.name, def.schema);
-                    if (!newIndex.definitionMap.has(key)) {
-                        newIndex.definitionMap.set(key, []);
-                    }
-                    newIndex.definitionMap.get(key)!.push(def);
-                }
-
-                for (const ref of existing.references) {
-                    const key = getQualifiedKey(ref.tableName, ref.schema);
-                    if (!newIndex.referenceMap.has(key)) {
-                        newIndex.referenceMap.set(key, []);
-                    }
-                    newIndex.referenceMap.get(key)!.push(ref);
-                }
-            } else {
-                // File changed or new - process it
-                this.addFileToIndex(analysis, newIndex);
-            }
+            this.addFileToIndex(analysis, newIndex);
         }
 
         this.index = newIndex;
@@ -563,5 +538,14 @@ export class IndexManager {
     private isIndexStale(): boolean {
         if (!this.index) return true;
         return Date.now() - this.index.lastUpdated > INDEX_STALE_THRESHOLD;
+    }
+
+    /**
+     * Clear the cached index (force rebuild on next access)
+     */
+    async clearCache(): Promise<void> {
+        this.index = null;
+        await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
+        console.log('[IndexManager] Cache cleared');
     }
 }
