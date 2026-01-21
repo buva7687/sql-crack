@@ -1,7 +1,7 @@
 // Graph View - HTML body generation for main dependency graph
 // Extracted from workspacePanel.ts for modularity
 
-import { WorkspaceDependencyGraph, WorkspaceNode, SearchFilter, DetailedWorkspaceStats } from '../types';
+import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter, DetailedWorkspaceStats } from '../types';
 import { getDisplayName } from '../identifiers';
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
@@ -27,12 +27,11 @@ export function generateGraphBody(params: GraphBodyParams): string {
     
     // Generate graph data JSON for client script
     const graphData = JSON.stringify({
-        nodes: Array.from(graph.nodes.values()).map(node => ({
+        nodes: graph.nodes.map(node => ({
             id: node.id,
             label: node.label,
             type: node.type,
-            filePath: node.filePath,
-            lineNumber: node.lineNumber
+            filePath: node.filePath
         }))
     });
 
@@ -56,7 +55,7 @@ export function generateGraphBody(params: GraphBodyParams): string {
             <div class="header-left">
                 <span class="header-icon">📊</span>
                 <span class="header-title">SQL Workspace Dependencies</span>
-                <span class="header-counts">(${graph.nodes.size} objects, ${graph.edges.length} relationships)</span>
+                <span class="header-counts">(${graph.nodes.length} objects, ${graph.edges.length} relationships)</span>
             </div>
             <div class="header-right">
                 <button class="icon-btn" id="btn-sidebar" title="Toggle Sidebar">
@@ -113,7 +112,7 @@ export function generateGraphBody(params: GraphBodyParams): string {
 /**
  * Generate sidebar content
  */
-function generateSidebarContent(graph: WorkspaceDependencyGraph, detailedStats: DetailedStats, totalIssues: number): string {
+function generateSidebarContent(graph: WorkspaceDependencyGraph, detailedStats: { orphanedDefinitions: any[], missingDefinitions: any[] }, totalIssues: number): string {
     return `
         <div class="sidebar-header">
             <h3>Statistics</h3>
@@ -121,7 +120,7 @@ function generateSidebarContent(graph: WorkspaceDependencyGraph, detailedStats: 
         <div class="sidebar-stats">
             <div class="stat-item">
                 <span class="stat-label">Total Objects</span>
-                <span class="stat-value">${graph.nodes.size}</span>
+                <span class="stat-value">${graph.nodes.length}</span>
             </div>
             <div class="stat-item">
                 <span class="stat-label">Relationships</span>
@@ -186,35 +185,35 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
  */
 function generateSVGContent(graph: WorkspaceDependencyGraph): string {
     let svgContent = '';
-    
+
     // Generate edges first (so they appear behind nodes)
     for (const edge of graph.edges) {
-        const sourceNode = graph.nodes.get(edge.sourceId);
-        const targetNode = graph.nodes.get(edge.targetId);
+        const sourceNode = graph.nodes.find(n => n.id === edge.source);
+        const targetNode = graph.nodes.find(n => n.id === edge.target);
         if (!sourceNode || !targetNode) continue;
-        
+
         svgContent += generateEdge(edge, sourceNode, targetNode);
     }
-    
+
     // Generate nodes
-    for (const node of graph.nodes.values()) {
+    for (const node of graph.nodes) {
         svgContent += generateNode(node);
     }
-    
+
     return svgContent;
 }
 
 /**
  * Generate SVG edge element
  */
-function generateEdge(edge: any, sourceNode: WorkspaceNode, targetNode: WorkspaceNode): string {
+function generateEdge(edge: WorkspaceEdge, sourceNode: WorkspaceNode, targetNode: WorkspaceNode): string {
     // Simple line edge (could be enhanced with bezier curves)
     const sourceX = sourceNode.x || 0;
     const sourceY = sourceNode.y || 0;
     const targetX = targetNode.x || 0;
     const targetY = targetNode.y || 0;
-    
-    return `<line class="edge" data-source-id="${escapeHtml(edge.sourceId)}" data-target-id="${escapeHtml(edge.targetId)}" 
+
+    return `<line class="edge" data-source-id="${escapeHtml(edge.source)}" data-target-id="${escapeHtml(edge.target)}"
             x1="${sourceX}" y1="${sourceY}" x2="${targetX}" y2="${targetY}" stroke="var(--border-color)" stroke-width="1"/>`;
 }
 
