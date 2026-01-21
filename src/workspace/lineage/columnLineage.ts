@@ -1,7 +1,30 @@
 // Column Lineage Tracker - Trace column-to-column data flow
 
-import { LineageGraph, LineageNode, LineagePath } from './types';
-import { ColumnReference } from '../extraction/types';
+import { LineageGraph, LineageNode, LineagePath, ColumnLineageEdge } from './types';
+
+/**
+ * Column lineage path with column-specific information
+ */
+export interface ColumnLineagePath {
+    sourceTableId: string;
+    sourceTableName: string;
+    sourceColumnName: string;
+    targetTableId: string;
+    targetTableName: string;
+    targetColumnName: string;
+    transformationType: ColumnLineageEdge['transformationType'];
+    expression?: string;
+    filePath: string;
+    lineNumber: number;
+}
+
+/**
+ * Full column lineage result
+ */
+export interface ColumnLineageResult {
+    upstream: ColumnLineagePath[];
+    downstream: ColumnLineagePath[];
+}
 
 /**
  * Tracks column-level lineage through the graph
@@ -11,6 +34,7 @@ export class ColumnLineageTracker {
 
     /**
      * Trace a column back to its source(s)
+     * Uses columnEdges to find upstream column dependencies
      */
     traceColumnUpstream(
         graph: LineageGraph,
@@ -18,42 +42,54 @@ export class ColumnLineageTracker {
         columnName: string
     ): LineagePath[] {
         const paths: LineagePath[] = [];
+        const columnNameLower = columnName.toLowerCase();
 
-        // Find the column node
-        const columnId = this.getColumnNodeId(tableId, columnName);
-        const columnNode = graph.nodes.get(columnId);
+        // Find all column edges where this column is the target
+        const upstreamEdges = (graph.columnEdges || []).filter(edge => {
+            const targetMatches = edge.targetTableId === tableId ||
+                                  edge.targetTableId.endsWith(`:${this.getTableName(tableId)}`);
+            const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
+            return targetMatches && columnMatches;
+        });
 
-        if (!columnNode) {
-            // If column node doesn't exist, try table-level lineage
-            return this.traceTableUpstream(tableId);
+        if (upstreamEdges.length === 0) {
+            // Fall back to table-level lineage
+            return this.traceTableUpstream(graph, tableId);
         }
 
-        // Get all upstream nodes
-        const upstreamNodes = graph.getUpstream(columnId, -1);
-
-        // Group by source table
-        const byTable = new Map<string, LineageNode[]>();
-        for (const node of upstreamNodes) {
-            if (node.type === 'column' || node.type === 'table') {
-                const tableName = this.getTableNameFromNodeId(node.id);
-                if (!byTable.has(tableName)) {
-                    byTable.set(tableName, []);
-                }
-                byTable.get(tableName)!.push(node);
+        // Group upstream edges by source table
+        const bySourceTable = new Map<string, ColumnLineageEdge[]>();
+        for (const edge of upstreamEdges) {
+            const sourceTable = edge.sourceTableId;
+            if (!bySourceTable.has(sourceTable)) {
+                bySourceTable.set(sourceTable, []);
             }
+            bySourceTable.get(sourceTable)!.push(edge);
         }
 
         // Create paths for each source table
-        for (const [tableName, nodes] of byTable) {
-            const edges = graph.edges.filter(e =>
-                nodes.some(n => n.id === e.targetId) || e.targetId === columnId
-            );
+        for (const [sourceTableId, edges] of bySourceTable) {
+            const sourceNode = graph.nodes.get(sourceTableId);
+            const targetNode = graph.nodes.get(tableId);
 
-            paths.push({
-                nodes: [columnNode, ...nodes],
-                edges,
-                depth: nodes.length
-            });
+            if (sourceNode) {
+                paths.push({
+                    nodes: [sourceNode, ...(targetNode ? [targetNode] : [])],
+                    edges: edges.map(e => ({
+                        id: e.id,
+                        sourceId: e.sourceTableId,
+                        targetId: e.targetTableId,
+                        type: this.mapTransformToEdgeType(e.transformationType),
+                        transformation: e.expression,
+                        metadata: {
+                            sourceColumn: e.sourceColumnName,
+                            targetColumn: e.targetColumnName,
+                            ...e.metadata
+                        }
+                    })),
+                    depth: 1
+                });
+            }
         }
 
         return paths;
@@ -61,6 +97,7 @@ export class ColumnLineageTracker {
 
     /**
      * Trace where a column is used downstream
+     * Uses columnEdges to find downstream column consumers
      */
     traceColumnDownstream(
         graph: LineageGraph,
@@ -68,42 +105,54 @@ export class ColumnLineageTracker {
         columnName: string
     ): LineagePath[] {
         const paths: LineagePath[] = [];
+        const columnNameLower = columnName.toLowerCase();
 
-        // Find the column node
-        const columnId = this.getColumnNodeId(tableId, columnName);
-        const columnNode = graph.nodes.get(columnId);
+        // Find all column edges where this column is the source
+        const downstreamEdges = (graph.columnEdges || []).filter(edge => {
+            const sourceMatches = edge.sourceTableId === tableId ||
+                                  edge.sourceTableId.endsWith(`:${this.getTableName(tableId)}`);
+            const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
+            return sourceMatches && columnMatches;
+        });
 
-        if (!columnNode) {
-            // If column node doesn't exist, try table-level lineage
-            return this.traceTableDownstream(tableId);
+        if (downstreamEdges.length === 0) {
+            // Fall back to table-level lineage
+            return this.traceTableDownstream(graph, tableId);
         }
 
-        // Get all downstream nodes
-        const downstreamNodes = graph.getDownstream(columnId, -1);
-
-        // Group by target table
-        const byTable = new Map<string, LineageNode[]>();
-        for (const node of downstreamNodes) {
-            if (node.type === 'column' || node.type === 'table' || node.type === 'view') {
-                const tableName = this.getTableNameFromNodeId(node.id);
-                if (!byTable.has(tableName)) {
-                    byTable.set(tableName, []);
-                }
-                byTable.get(tableName)!.push(node);
+        // Group downstream edges by target table
+        const byTargetTable = new Map<string, ColumnLineageEdge[]>();
+        for (const edge of downstreamEdges) {
+            const targetTable = edge.targetTableId;
+            if (!byTargetTable.has(targetTable)) {
+                byTargetTable.set(targetTable, []);
             }
+            byTargetTable.get(targetTable)!.push(edge);
         }
 
         // Create paths for each target table
-        for (const [tableName, nodes] of byTable) {
-            const edges = graph.edges.filter(e =>
-                nodes.some(n => n.id === e.sourceId) || e.sourceId === columnId
-            );
+        for (const [targetTableId, edges] of byTargetTable) {
+            const sourceNode = graph.nodes.get(tableId);
+            const targetNode = graph.nodes.get(targetTableId);
 
-            paths.push({
-                nodes: [columnNode, ...nodes],
-                edges,
-                depth: nodes.length
-            });
+            if (targetNode) {
+                paths.push({
+                    nodes: [...(sourceNode ? [sourceNode] : []), targetNode],
+                    edges: edges.map(e => ({
+                        id: e.id,
+                        sourceId: e.sourceTableId,
+                        targetId: e.targetTableId,
+                        type: this.mapTransformToEdgeType(e.transformationType),
+                        transformation: e.expression,
+                        metadata: {
+                            sourceColumn: e.sourceColumnName,
+                            targetColumn: e.targetColumnName,
+                            ...e.metadata
+                        }
+                    })),
+                    depth: 1
+                });
+            }
         }
 
         return paths;
@@ -127,16 +176,73 @@ export class ColumnLineageTracker {
     }
 
     /**
-     * Trace table-level upstream (fallback for missing column nodes)
+     * Get detailed column lineage paths
      */
-    private traceTableUpstream(tableId: string): LineagePath[] {
-        const tableNode = this.graph.nodes.get(tableId);
+    getColumnLineagePaths(
+        graph: LineageGraph,
+        tableId: string,
+        columnName: string
+    ): ColumnLineageResult {
+        const columnNameLower = columnName.toLowerCase();
+        const tableName = this.getTableName(tableId);
+
+        // Find upstream column paths
+        const upstreamEdges = (graph.columnEdges || []).filter(edge => {
+            const targetMatches = edge.targetTableId === tableId ||
+                                  edge.targetTableId.endsWith(`:${tableName}`);
+            const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
+            return targetMatches && columnMatches;
+        });
+
+        // Find downstream column paths
+        const downstreamEdges = (graph.columnEdges || []).filter(edge => {
+            const sourceMatches = edge.sourceTableId === tableId ||
+                                  edge.sourceTableId.endsWith(`:${tableName}`);
+            const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
+            return sourceMatches && columnMatches;
+        });
+
+        return {
+            upstream: upstreamEdges.map(edge => ({
+                sourceTableId: edge.sourceTableId,
+                sourceTableName: this.getTableName(edge.sourceTableId),
+                sourceColumnName: edge.sourceColumnName,
+                targetTableId: edge.targetTableId,
+                targetTableName: this.getTableName(edge.targetTableId),
+                targetColumnName: edge.targetColumnName,
+                transformationType: edge.transformationType,
+                expression: edge.expression,
+                filePath: edge.filePath,
+                lineNumber: edge.lineNumber
+            })),
+            downstream: downstreamEdges.map(edge => ({
+                sourceTableId: edge.sourceTableId,
+                sourceTableName: this.getTableName(edge.sourceTableId),
+                sourceColumnName: edge.sourceColumnName,
+                targetTableId: edge.targetTableId,
+                targetTableName: this.getTableName(edge.targetTableId),
+                targetColumnName: edge.targetColumnName,
+                transformationType: edge.transformationType,
+                expression: edge.expression,
+                filePath: edge.filePath,
+                lineNumber: edge.lineNumber
+            }))
+        };
+    }
+
+    /**
+     * Trace table-level upstream (fallback for missing column edges)
+     */
+    private traceTableUpstream(graph: LineageGraph, tableId: string): LineagePath[] {
+        const tableNode = graph.nodes.get(tableId);
         if (!tableNode) return [];
 
-        const upstreamNodes = this.graph.getUpstream(tableId, -1);
-        const edges = this.graph.edges.filter(e =>
-            upstreamNodes.some(n => n.id === e.targetId)
+        const upstreamNodes = graph.getUpstream(tableId, -1);
+        const edges = graph.edges.filter(e =>
+            upstreamNodes.some(n => n.id === e.targetId) || e.targetId === tableId
         );
+
+        if (upstreamNodes.length === 0) return [];
 
         return [{
             nodes: [tableNode, ...upstreamNodes],
@@ -146,16 +252,18 @@ export class ColumnLineageTracker {
     }
 
     /**
-     * Trace table-level downstream (fallback for missing column nodes)
+     * Trace table-level downstream (fallback for missing column edges)
      */
-    private traceTableDownstream(tableId: string): LineagePath[] {
-        const tableNode = this.graph.nodes.get(tableId);
+    private traceTableDownstream(graph: LineageGraph, tableId: string): LineagePath[] {
+        const tableNode = graph.nodes.get(tableId);
         if (!tableNode) return [];
 
-        const downstreamNodes = this.graph.getDownstream(tableId, -1);
-        const edges = this.graph.edges.filter(e =>
-            downstreamNodes.some(n => n.id === e.sourceId)
+        const downstreamNodes = graph.getDownstream(tableId, -1);
+        const edges = graph.edges.filter(e =>
+            downstreamNodes.some(n => n.id === e.sourceId) || e.sourceId === tableId
         );
+
+        if (downstreamNodes.length === 0) return [];
 
         return [{
             nodes: [tableNode, ...downstreamNodes],
@@ -165,25 +273,33 @@ export class ColumnLineageTracker {
     }
 
     /**
-     * Generate column node ID
+     * Extract table name from node ID
+     * Handles formats like "table:customers" or "view:my_view"
      */
-    private getColumnNodeId(tableName: string, columnName: string): string {
-        return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+    private getTableName(nodeId: string): string {
+        const colonIndex = nodeId.indexOf(':');
+        if (colonIndex !== -1) {
+            return nodeId.substring(colonIndex + 1);
+        }
+        return nodeId;
     }
 
     /**
-     * Extract table name from node ID
+     * Map column transformation type to edge type
      */
-    private getTableNameFromNodeId(nodeId: string): string {
-        const parts = nodeId.split(':');
-        if (parts.length >= 2) {
-            const typeAndName = parts[1];
-            const dotIndex = typeAndName.indexOf('.');
-            if (dotIndex !== -1) {
-                return typeAndName.substring(0, dotIndex);
-            }
-            return typeAndName;
+    private mapTransformToEdgeType(transformType: ColumnLineageEdge['transformationType']): 'direct' | 'transform' | 'aggregate' | 'filter' | 'join' {
+        switch (transformType) {
+            case 'direct':
+            case 'rename':
+                return 'direct';
+            case 'aggregate':
+                return 'aggregate';
+            case 'join':
+                return 'join';
+            case 'filter':
+                return 'filter';
+            default:
+                return 'transform';
         }
-        return nodeId;
     }
 }

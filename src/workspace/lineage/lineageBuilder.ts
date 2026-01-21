@@ -7,13 +7,14 @@ import {
     FileAnalysis,
     TableReference
 } from '../types';
-import { ColumnInfo } from '../extraction/types';
+import { ColumnInfo, Transformation } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import {
     LineageNode,
     LineageEdge,
     LineageGraph,
-    LineagePath
+    LineagePath,
+    ColumnLineageEdge
 } from './types';
 
 /**
@@ -22,6 +23,7 @@ import {
 export class LineageBuilder implements LineageGraph {
     nodes: Map<string, LineageNode> = new Map();
     edges: LineageEdge[] = [];
+    columnEdges: import('./types').ColumnLineageEdge[] = [];
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -34,6 +36,7 @@ export class LineageBuilder implements LineageGraph {
     buildFromIndex(index: WorkspaceIndex): LineageGraph {
         this.nodes.clear();
         this.edges = [];
+        this.columnEdges = [];
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
@@ -113,10 +116,12 @@ export class LineageBuilder implements LineageGraph {
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
-            for (const defs of index.definitionMap.values()) {
+            console.log(`[LineageBuilder] Adding column nodes from ${index.definitionMap.size} definition groups`);
+            for (const [key, defs] of index.definitionMap.entries()) {
                 for (const def of defs) {
                     const tableKey = getQualifiedKey(def.name, def.schema);
                     const nodeId = this.getTableNodeId(def.type, tableKey);
+                    console.log(`[LineageBuilder] Definition ${def.name}: ${def.columns?.length || 0} columns, nodeId=${nodeId}, exists=${this.nodes.has(nodeId)}`);
                     if (!this.nodes.has(nodeId)) continue;
                     this.addColumnNodes(tableKey, def.columns, def.type);
                 }
@@ -126,6 +131,7 @@ export class LineageBuilder implements LineageGraph {
         // Create edges from file references
         for (const [filePath, analysis] of index.files) {
             this.addFileEdges(filePath, analysis);
+            this.addColumnEdgesFromTransformations(filePath, analysis);
         }
 
         return this;
@@ -160,8 +166,14 @@ export class LineageBuilder implements LineageGraph {
      * Add column nodes for a table
      */
     addColumnNodes(tableKey: string, columns: ColumnInfo[], nodeType: 'table' | 'view'): void {
-        const tableNode = this.nodes.get(this.getTableNodeId(nodeType, tableKey));
-        if (!tableNode) return;
+        const tableNodeId = this.getTableNodeId(nodeType, tableKey);
+        const tableNode = this.nodes.get(tableNodeId);
+        if (!tableNode) {
+            console.log(`[Column Nodes] Table node not found: ${tableNodeId}`);
+            return;
+        }
+
+        console.log(`[Column Nodes] Adding ${columns.length} columns to ${tableKey} (${tableNodeId})`);
 
         for (const column of columns) {
             const columnId = this.getColumnNodeId(tableKey, column.name);
@@ -341,6 +353,234 @@ export class LineageBuilder implements LineageGraph {
                 }
             }
         }
+    }
+
+    /**
+     * Create column-to-column lineage edges from transformations
+     * This implements Phase 2 of the column-level lineage plan
+     */
+    private addColumnEdgesFromTransformations(
+        filePath: string,
+        analysis: FileAnalysis
+    ): void {
+        if (!analysis.queries) {
+            return;
+        }
+
+        const fileName = filePath.split('/').pop() || filePath;
+        let edgesAdded = 0;
+
+        for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
+            const query = analysis.queries[queryIndex];
+            if (!query.transformations || query.transformations.length === 0) continue;
+
+            // Resolve target table for this query
+            const targetTableId = this.resolveTargetTableId(query, queryIndex, analysis, filePath);
+            if (!targetTableId) continue;
+
+            for (const transform of query.transformations) {
+                // Skip if no input columns (literal values)
+                if (!transform.inputColumns || transform.inputColumns.length === 0) continue;
+
+                // For each input column, create a column edge
+                for (const inputCol of transform.inputColumns) {
+                    // Resolve source table
+                    const sourceTableId = this.resolveTableId(
+                        inputCol.tableName || inputCol.tableAlias,
+                        filePath
+                    );
+
+                    if (!sourceTableId) continue; // Skip if source table not found
+
+                    // Create column edge
+                    const columnEdge: ColumnLineageEdge = {
+                        id: `${sourceTableId}.${inputCol.columnName}->${targetTableId}.${transform.outputColumn}`,
+                        sourceTableId,
+                        sourceColumnName: inputCol.columnName,
+                        targetTableId,
+                        targetColumnName: transform.outputColumn,
+                        transformationType: this.mapTransformationType(transform.operation),
+                        expression: transform.expression,
+                        filePath,
+                        lineNumber: transform.lineNumber || 0,
+                        metadata: {
+                            outputAlias: transform.outputAlias
+                        }
+                    };
+
+                    // Avoid duplicates
+                    const exists = this.columnEdges.some(
+                        e => e.id === columnEdge.id
+                    );
+
+                    if (!exists) {
+                        this.columnEdges.push(columnEdge);
+                        edgesAdded++;
+                    }
+                }
+            }
+        }
+
+        if (edgesAdded > 0) {
+            console.log(`[Column Lineage] Added ${edgesAdded} column edges from ${fileName}`);
+        }
+    }
+
+    /**
+     * Resolve table ID from table name or alias
+     */
+    private resolveTableId(tableName: string | undefined, filePath: string): string | null {
+        if (!tableName) return null;
+
+        const normalizedName = tableName.toLowerCase();
+
+        // Try with table: prefix (most common)
+        const tableId = `table:${normalizedName}`;
+        if (this.nodes.has(tableId)) {
+            return tableId;
+        }
+
+        // Try with view: prefix
+        const viewId = `view:${normalizedName}`;
+        if (this.nodes.has(viewId)) {
+            return viewId;
+        }
+
+        // Try with cte: prefix
+        const cteId = `cte:${normalizedName}`;
+        if (this.nodes.has(cteId)) {
+            return cteId;
+        }
+
+        // Try with external: prefix
+        const externalId = `external:${normalizedName}`;
+        if (this.nodes.has(externalId)) {
+            return externalId;
+        }
+
+        // Try to find by node name (without prefix)
+        for (const [nodeId, node] of this.nodes) {
+            if (node.name.toLowerCase() === normalizedName) {
+                return nodeId;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve target table ID from query
+     * Determines where the query's output columns flow to
+     */
+    private resolveTargetTableId(
+        query: any,
+        queryIndex: number,
+        analysis: FileAnalysis,
+        filePath: string
+    ): string | null {
+        // 1. Check statement type from QueryAnalysis
+        const statementType = query.statementType;
+
+        // 2. For INSERT/UPDATE/DELETE, find the target from references
+        if (statementType === 'insert' || statementType === 'update' || statementType === 'delete') {
+            for (const ref of analysis.references) {
+                if (ref.referenceType === statementType &&
+                    (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
+                    const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                    return this.resolveTableId(tableKey, filePath);
+                }
+            }
+        }
+
+        // 3. For CREATE VIEW, find the view from definitions
+        if (statementType === 'create_view') {
+            for (const def of analysis.definitions) {
+                if (def.type === 'view') {
+                    const tableKey = getQualifiedKey(def.name, def.schema);
+                    return this.resolveTableId(tableKey, filePath);
+                }
+            }
+        }
+
+        // 4. For CREATE TABLE (potentially CTAS), find the table from definitions
+        if (statementType === 'create_table') {
+            for (const def of analysis.definitions) {
+                if (def.type === 'table') {
+                    const tableKey = getQualifiedKey(def.name, def.schema);
+                    return this.resolveTableId(tableKey, filePath);
+                }
+            }
+        }
+
+        // 5. For CTEs, check if this query is a CTE definition
+        if (query.ctes && query.ctes.length > 0) {
+            // The main query's output might flow into a later CTE or main query
+            // For now, use the first CTE as the target
+            const cteName = query.ctes[0].name;
+            return this.resolveTableId(cteName, filePath);
+        }
+
+        // 6. Try to find target from statement-level references
+        for (const ref of analysis.references) {
+            if ((ref.referenceType === 'insert' ||
+                 ref.referenceType === 'update') &&
+                (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
+                const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                const resolved = this.resolveTableId(tableKey, filePath);
+                if (resolved) return resolved;
+            }
+        }
+
+        // 7. Fallback: If this file has exactly one definition and this is a data modification query
+        if (analysis.definitions.length === 1) {
+            const def = analysis.definitions[0];
+            const tableKey = getQualifiedKey(def.name, def.schema);
+            const resolved = this.resolveTableId(tableKey, filePath);
+            if (resolved) return resolved;
+        }
+
+        // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
+        if (query.sql) {
+            const sql = query.sql.toUpperCase();
+
+            // SELECT INTO pattern
+            const intoMatch = sql.match(/INTO\s+(\w+)/);
+            if (intoMatch) {
+                return this.resolveTableId(intoMatch[1], filePath);
+            }
+
+            // INSERT INTO pattern
+            const insertMatch = sql.match(/INSERT\s+INTO\s+(\w+)/);
+            if (insertMatch) {
+                return this.resolveTableId(insertMatch[1], filePath);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Map transformation operation type to column edge transformation type
+     */
+    private mapTransformationType(
+        operation: string
+    ): ColumnLineageEdge['transformationType'] {
+        const typeMap: Record<string, ColumnLineageEdge['transformationType']> = {
+            'direct': 'direct',
+            'alias': 'rename',
+            'aggregate': 'aggregate',
+            'arithmetic': 'expression',
+            'concat': 'expression',
+            'scalar': 'expression',
+            'case': 'case',
+            'cast': 'cast',
+            'window': 'expression',
+            'subquery': 'expression',
+            'literal': 'unknown',
+            'complex': 'unknown'
+        };
+
+        return typeMap[operation] || 'unknown';
     }
 
     /**

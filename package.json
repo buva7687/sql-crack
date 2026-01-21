@@ -149,6 +149,18 @@
           "minimum": 10,
           "maximum": 500,
           "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
+        },
+        "sqlCrack.advanced.cacheTTLHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "maximum": 168,
+          "description": "Cache time-to-live in hours. Set to 0 to disable caching. Index will be rebuilt after this time. (Advanced)"
+        },
+        "sqlCrack.advanced.clearCacheOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always rebuild index when VS Code opens the workspace. Overrides cache TTL. (Advanced)"
         }
       }
     }

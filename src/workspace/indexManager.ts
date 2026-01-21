@@ -13,9 +13,9 @@ import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 
-const INDEX_VERSION = 3; // Bumped for per-statement lineage (statementIndex field)
+const INDEX_VERSION = 4; // Bumped for column extraction in schema definitions
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
-const INDEX_STALE_THRESHOLD = 3600000; // 1 hour
+const DEFAULT_CACHE_TTL_HOURS = 24;
 
 /**
  * Manages the workspace SQL index with caching and file watching
@@ -77,36 +77,11 @@ export class IndexManager {
         // Copy existing index for hash comparison if available
         const oldHashes = this.index?.fileHashes || new Map<string, string>();
 
-        // Process files: reuse unchanged files, reprocess changed/new files
+        // Process all files with fresh analysis
+        // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
+        // This ensures schema extractor improvements (like column extraction) take effect
         for (const analysis of analyses) {
-            const oldHash = oldHashes.get(analysis.filePath);
-
-            if (oldHash === analysis.contentHash && this.index?.files.has(analysis.filePath)) {
-                // File unchanged - reuse existing analysis
-                const existing = this.index.files.get(analysis.filePath)!;
-                newIndex.files.set(analysis.filePath, existing);
-                newIndex.fileHashes.set(analysis.filePath, analysis.contentHash);
-
-                // Reuse definition and reference mappings
-                for (const def of existing.definitions) {
-                    const key = getQualifiedKey(def.name, def.schema);
-                    if (!newIndex.definitionMap.has(key)) {
-                        newIndex.definitionMap.set(key, []);
-                    }
-                    newIndex.definitionMap.get(key)!.push(def);
-                }
-
-                for (const ref of existing.references) {
-                    const key = getQualifiedKey(ref.tableName, ref.schema);
-                    if (!newIndex.referenceMap.has(key)) {
-                        newIndex.referenceMap.set(key, []);
-                    }
-                    newIndex.referenceMap.get(key)!.push(ref);
-                }
-            } else {
-                // File changed or new - process it
-                this.addFileToIndex(analysis, newIndex);
-            }
+            this.addFileToIndex(analysis, newIndex);
         }
 
         this.index = newIndex;
@@ -512,9 +487,35 @@ export class IndexManager {
      * Load cached index from workspace state
      */
     private async loadCachedIndex(): Promise<WorkspaceIndex | null> {
+        // Check advanced settings
+        const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
+        const clearOnStartup = config.get<boolean>('clearCacheOnStartup', false);
+        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+
+        // If clear on startup is enabled, always return null (force rebuild)
+        if (clearOnStartup) {
+            console.log('[IndexManager] Clear cache on startup enabled - rebuilding index');
+            await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
+            return null;
+        }
+
+        // If TTL is 0, caching is disabled
+        if (cacheTTLHours === 0) {
+            console.log('[IndexManager] Caching disabled (TTL=0) - rebuilding index');
+            return null;
+        }
+
         const cached = this.context.workspaceState.get<SerializedWorkspaceIndex>('sqlWorkspaceIndex');
 
         if (!cached || cached.version !== INDEX_VERSION) {
+            return null;
+        }
+
+        // Check TTL
+        const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
+        const cacheAge = Date.now() - cached.lastUpdated;
+        if (cacheAge > cacheTTLMs) {
+            console.log(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
             return null;
         }
 
@@ -526,6 +527,7 @@ export class IndexManager {
             return [key, Array.isArray(value) ? value : [value]];
         });
 
+        console.log(`[IndexManager] Using cached index (age: ${Math.round(cacheAge / 3600000)}h)`);
         return {
             version: cached.version,
             lastUpdated: cached.lastUpdated,
@@ -558,10 +560,27 @@ export class IndexManager {
     }
 
     /**
-     * Check if the cached index is stale
+     * Check if the cached index is stale based on TTL settings
      */
     private isIndexStale(): boolean {
         if (!this.index) return true;
-        return Date.now() - this.index.lastUpdated > INDEX_STALE_THRESHOLD;
+
+        const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
+        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+
+        // If TTL is 0, always consider stale (caching disabled)
+        if (cacheTTLHours === 0) return true;
+
+        const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
+        return Date.now() - this.index.lastUpdated > cacheTTLMs;
+    }
+
+    /**
+     * Clear the cached index (force rebuild on next access)
+     */
+    async clearCache(): Promise<void> {
+        this.index = null;
+        await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
+        console.log('[IndexManager] Cache cleared');
     }
 }
