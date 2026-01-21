@@ -1137,6 +1137,13 @@ ${bodyContent}
      */
     private generateGraphAreaHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter): string {
         return `
+        <div class="view-tabs">
+            <div class="view-tab active" data-view="graph">Graph</div>
+            <div class="view-tab" data-view="lineage">Lineage</div>
+            <div class="view-tab" data-view="tableExplorer">Tables</div>
+            <div class="view-tab" data-view="impact">Impact</div>
+        </div>
+
         <div class="graph-toolbar">
             <div class="search-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1159,6 +1166,19 @@ ${bodyContent}
             </select>
             ${searchFilter.useRegex ? '<span class="regex-badge">Regex</span>' : ''}
             ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
+        </div>
+
+        <div id="lineage-panel" class="lineage-panel">
+            <div class="lineage-header">
+                <button class="lineage-back-btn" id="lineage-back-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    Back to Graph
+                </button>
+                <h2 class="lineage-title" id="lineage-title">Data Lineage</h2>
+            </div>
+            <div class="lineage-content" id="lineage-content"></div>
         </div>
 
         <div class="graph-container">
