@@ -1121,24 +1121,6 @@ ${bodyContent}
             <span class="separator">•</span>
             <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
         </div>
-        <div class="legend-inline">
-            <div class="legend-inline-group">
-                <span>Nodes:</span>
-                <div class="legend-inline-item"><div class="legend-inline-node file"></div><span>Files</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-node table"></div><span>Tables</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-node view"></div><span>Views</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-node external"></div><span>External</span></div>
-            </div>
-            <div class="legend-inline-group">
-                <span>Edges:</span>
-                <div class="legend-inline-item"><div class="legend-inline-edge select"></div><span>SELECT</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-edge join"></div><span>JOIN</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-edge insert"></div><span>INSERT</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-edge update"></div><span>UPDATE</span></div>
-                <div class="legend-inline-item"><div class="legend-inline-edge delete"></div><span>DELETE</span></div>
-            </div>
-        </div>
-
         <!-- Issue Banner -->
         ${totalIssues > 0 ? `
         <div class="issue-banner warning">
