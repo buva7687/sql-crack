@@ -1479,6 +1479,73 @@ function getLineageGraphScript(): string {
                 expandedNodes: Array.from(lineageExpandedNodes || new Set())
             });
         }
+
+        // Toggle all column expansions (keyboard shortcut 'C')
+        function toggleAllColumns() {
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg) return;
+
+            const anyExpanded = lineageExpandedNodes && lineageExpandedNodes.size > 0;
+
+            if (anyExpanded) {
+                collapseAllColumns();
+            } else {
+                expandAllColumns();
+            }
+        }
+
+        // Expand all visible nodes
+        function expandAllColumns() {
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg || !lineageCurrentNodeId) return;
+
+            const nodes = svg.querySelectorAll('.lineage-node');
+            nodes.forEach(node => {
+                const nodeId = node.getAttribute('data-node-id');
+                if (nodeId) {
+                    lineageExpandedNodes.add(nodeId);
+                }
+            });
+
+            // Re-render with all nodes expanded
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: Array.from(lineageExpandedNodes)
+            });
+        }
+
+        // Collapse all nodes
+        function collapseAllColumns() {
+            if (!lineageCurrentNodeId) return;
+
+            lineageExpandedNodes.clear();
+
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: []
+            });
+        }
+
+        // Keyboard handler for 'C' key to toggle all columns
+        document.addEventListener('keydown', (e) => {
+            // Only respond if lineage graph is visible
+            const lineageContainer = document.getElementById('lineage-graph-container');
+            if (!lineageContainer || lineageContainer.offsetParent === null) return;
+
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'c' || e.key === 'C') {
+                e.preventDefault();
+                toggleAllColumns();
+            }
+        });
     `;
 }
 

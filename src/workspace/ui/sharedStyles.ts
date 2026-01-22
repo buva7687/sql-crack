@@ -1851,6 +1851,20 @@ export function getLineageNodeStyles(): string {
             fill: rgba(255, 255, 255, 0.7);
             cursor: pointer;
         }
+        .lineage-node .column-close-btn {
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.15s;
+        }
+        .lineage-node .column-close-btn:hover {
+            opacity: 1;
+        }
+        .lineage-node .column-close-btn circle {
+            transition: fill 0.15s;
+        }
+        .lineage-node .column-close-btn:hover circle {
+            fill: rgba(239, 68, 68, 0.9);
+        }
         .lineage-node .count-badge {
             font-size: 10px;
             fill: var(--text-muted);

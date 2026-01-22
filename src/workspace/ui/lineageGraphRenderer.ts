@@ -526,6 +526,15 @@ export class LineageGraphRenderer {
                 `;
                 columnY += this.NODE_HEIGHT_PER_COLUMN;
             }
+
+            // Close button for expanded nodes (top-right corner)
+            svg += `
+                <g class="column-close-btn" data-action="collapse">
+                    <circle cx="${node.width - 16}" cy="16" r="10" fill="rgba(239,68,68,0.6)"/>
+                    <path d="M ${node.width - 21} 11 L ${node.width - 11} 21 M ${node.width - 11} 11 L ${node.width - 21} 21"
+                          stroke="white" stroke-width="2" stroke-linecap="round"/>
+                </g>
+            `;
         }
 
         svg += `</g>`;
