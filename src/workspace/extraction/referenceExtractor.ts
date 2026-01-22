@@ -34,7 +34,7 @@ const SQL_RESERVED_WORDS = new Set([
     'year', 'month', 'day', 'hour', 'minute', 'second', 'dateadd', 'datediff',
     'row_number', 'rank', 'dense_rank', 'ntile', 'lead', 'lag', 'first_value', 'last_value',
     // Other common keywords
-    'true', 'false', 'unknown', 'query', 'result', 'data', 'temp', 'temporary',
+    'true', 'false', 'unknown', 'query', 'result', 'data', 'temp', 'temporary', 'without',
     'with', 'recursive', 'over', 'partition', 'rows', 'range', 'unbounded', 'preceding', 'following',
     'rollup', 'cube', 'grouping', 'sets', 'fetch', 'next', 'only', 'percent',
     'top', 'dual', 'sysdate', 'rownum', 'rowid', 'level', 'connect', 'start',
@@ -996,43 +996,20 @@ export class ReferenceExtractor {
         const references: TableReference[] = [];
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
-        // Build statement boundary map: for each character position, determine which statement it belongs to
-        // Split on semicolons that aren't inside strings or comments
+        // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
+        const sqlNoComments = this.stripSqlComments(sql);
+
+        // Build statement boundary map for comment-stripped SQL
+        // Split on semicolons that aren't inside strings
         const statementBoundaries: number[] = [0]; // Start positions of each statement
         let inString = false;
         let stringChar = '';
-        let inLineComment = false;
-        let inBlockComment = false;
 
-        for (let i = 0; i < sql.length; i++) {
-            const char = sql[i];
-            const nextChar = sql[i + 1];
-
-            // Handle line comments
-            if (!inString && !inBlockComment && char === '-' && nextChar === '-') {
-                inLineComment = true;
-                i++;
-                continue;
-            }
-            if (inLineComment && char === '\n') {
-                inLineComment = false;
-                continue;
-            }
-
-            // Handle block comments
-            if (!inString && !inLineComment && char === '/' && nextChar === '*') {
-                inBlockComment = true;
-                i++;
-                continue;
-            }
-            if (inBlockComment && char === '*' && nextChar === '/') {
-                inBlockComment = false;
-                i++;
-                continue;
-            }
+        for (let i = 0; i < sqlNoComments.length; i++) {
+            const char = sqlNoComments[i];
 
             // Handle strings
-            if (!inLineComment && !inBlockComment && (char === "'" || char === '"' || char === '`')) {
+            if (char === "'" || char === '"' || char === '`') {
                 if (!inString) {
                     inString = true;
                     stringChar = char;
@@ -1043,7 +1020,7 @@ export class ReferenceExtractor {
             }
 
             // Track semicolons as statement boundaries
-            if (!inString && !inLineComment && !inBlockComment && char === ';') {
+            if (!inString && char === ';') {
                 statementBoundaries.push(i + 1);
             }
         }
@@ -1082,12 +1059,17 @@ export class ReferenceExtractor {
         // FROM table pattern
         const fromRegex = /\bFROM\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?(?:\s+(?:AS\s+)?(\w+))?/gi;
         let match;
-        while ((match = fromRegex.exec(sql)) !== null) {
+        while ((match = fromRegex.exec(sqlNoComments)) !== null) {
             if (isFunctionFrom(match.index)) {
                 continue;
             }
+            const tableName = match[2];
+            // Skip reserved words
+            if (this.isReservedWord(tableName)) {
+                continue;
+            }
             references.push({
-                tableName: match[2],
+                tableName,
                 alias: match[3],
                 schema: match[1],
                 referenceType: 'select',
@@ -1100,9 +1082,14 @@ export class ReferenceExtractor {
 
         // JOIN pattern
         const joinRegex = /\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\s*JOIN\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?(?:\s+(?:AS\s+)?(\w+))?/gi;
-        while ((match = joinRegex.exec(sql)) !== null) {
+        while ((match = joinRegex.exec(sqlNoComments)) !== null) {
+            const tableName = match[2];
+            // Skip reserved words
+            if (this.isReservedWord(tableName)) {
+                continue;
+            }
             references.push({
-                tableName: match[2],
+                tableName,
                 alias: match[3],
                 schema: match[1],
                 referenceType: 'join',
@@ -1115,9 +1102,14 @@ export class ReferenceExtractor {
 
         // INSERT INTO pattern
         const insertRegex = /\bINSERT\s+INTO\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
-        while ((match = insertRegex.exec(sql)) !== null) {
+        while ((match = insertRegex.exec(sqlNoComments)) !== null) {
+            const tableName = match[2];
+            // Skip reserved words
+            if (this.isReservedWord(tableName)) {
+                continue;
+            }
             references.push({
-                tableName: match[2],
+                tableName,
                 schema: match[1],
                 referenceType: 'insert',
                 filePath,
@@ -1129,9 +1121,14 @@ export class ReferenceExtractor {
 
         // UPDATE pattern
         const updateRegex = /\bUPDATE\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
-        while ((match = updateRegex.exec(sql)) !== null) {
+        while ((match = updateRegex.exec(sqlNoComments)) !== null) {
+            const tableName = match[2];
+            // Skip reserved words
+            if (this.isReservedWord(tableName)) {
+                continue;
+            }
             references.push({
-                tableName: match[2],
+                tableName,
                 schema: match[1],
                 referenceType: 'update',
                 filePath,
@@ -1143,9 +1140,14 @@ export class ReferenceExtractor {
 
         // DELETE FROM pattern
         const deleteRegex = /\bDELETE\s+FROM\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
-        while ((match = deleteRegex.exec(sql)) !== null) {
+        while ((match = deleteRegex.exec(sqlNoComments)) !== null) {
+            const tableName = match[2];
+            // Skip reserved words
+            if (this.isReservedWord(tableName)) {
+                continue;
+            }
             references.push({
-                tableName: match[2],
+                tableName,
                 schema: match[1],
                 referenceType: 'delete',
                 filePath,
