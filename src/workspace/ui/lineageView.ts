@@ -49,110 +49,94 @@ export class LineageView {
         }
 
         let html = `
-            <div class="lineage-visual-container">
-                <!-- Search Panel -->
-                <div class="lineage-search-panel">
-                    <div class="search-header">
-                        <h3>Explore Data Lineage</h3>
-                        <p class="search-hint">Search for a table or view to visualize its data flow</p>
+            <div class="view-container">
+                <!-- View Header -->
+                <div class="view-header">
+                    <div class="view-header-icon">📈</div>
+                    <div class="view-header-content">
+                        <h3 class="view-title">Data Lineage</h3>
+                        <p class="view-subtitle">Search for a table or view to visualize its data flow and dependencies</p>
                     </div>
+                </div>
 
-                    <div class="search-form">
-                        <div class="search-input-wrapper">
-                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                            </svg>
-                            <input type="text"
-                                   id="lineage-search-input"
-                                   class="lineage-search-input"
-                                   placeholder="Search tables, views, CTEs..."
-                                   autocomplete="off"
-                                   value="">
-                            <button class="search-clear-btn" id="lineage-search-clear" style="display: none;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M18 6L6 18M6 6l12 12"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="search-results" id="lineage-search-results" style="display: none;"></div>
+                <!-- Stats -->
+                <div class="view-stats">
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.tables}</span>
+                        <span class="view-stat-label">Tables</span>
                     </div>
-
-                    <!-- Quick Filters -->
-                    <div class="quick-filters">
-                        <span class="filter-label">Quick filter:</span>
-                        <button class="filter-chip active" data-filter="all">All</button>
-                        <button class="filter-chip" data-filter="table">Tables</button>
-                        <button class="filter-chip" data-filter="view">Views</button>
-                        <button class="filter-chip" data-filter="cte">CTEs</button>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.views}</span>
+                        <span class="view-stat-label">Views</span>
                     </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.ctes}</span>
+                        <span class="view-stat-label">CTEs</span>
+                    </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${stats.relationships}</span>
+                        <span class="view-stat-label">Relationships</span>
+                    </div>
+                </div>
 
-                    <!-- File Filter -->
-                    <div class="file-filter-section">
-                        <label class="filter-label">
+                <!-- Search Controls -->
+                <div class="view-controls">
+                    <div class="view-controls-header">
+                        <h4>Search & Filter</h4>
+                        <p class="view-controls-hint">Find tables, views, or CTEs to explore their lineage</p>
+                    </div>
+                    <div class="view-search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <input type="text"
+                               id="lineage-search-input"
+                               class="view-search-input"
+                               placeholder="Search tables, views, CTEs..."
+                               autocomplete="off"
+                               value="">
+                        <button class="view-search-clear" id="lineage-search-clear">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
+                                <path d="M18 6L6 18M6 6l12 12"/>
                             </svg>
-                            Filter by file:
-                        </label>
-                        <select id="lineage-file-filter" class="file-filter-select" multiple>
-                            ${filePaths.map(fp => `
-                                <option value="${this.escapeHtml(fp)}" ${fileFilter.includes(fp) ? 'selected' : ''}>
-                                    ${this.escapeHtml(fp.split('/').pop() || fp)}
-                                </option>
-                            `).join('')}
-                        </select>
+                        </button>
+                    </div>
+                    <div class="search-results" id="lineage-search-results" style="display: none;"></div>
+                    <div class="view-filters">
+                        <div class="view-quick-filters">
+                            <span class="view-filter-label">Quick filter:</span>
+                            <button class="view-filter-chip active" data-filter="all">All</button>
+                            <button class="view-filter-chip" data-filter="table">Tables</button>
+                            <button class="view-filter-chip" data-filter="view">Views</button>
+                            <button class="view-filter-chip" data-filter="cte">CTEs</button>
+                        </div>
+                        <div class="view-filter-group">
+                            <label class="view-filter-label">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                </svg>
+                                Filter by file
+                            </label>
+                            <select id="lineage-file-filter" class="view-filter-select" multiple>
+                                ${filePaths.map(fp => `
+                                    <option value="${this.escapeHtml(fp)}" ${fileFilter.includes(fp) ? 'selected' : ''}>
+                                        ${this.escapeHtml(fp.split('/').pop() || fp)}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Recent Selections / Quick Access -->
-                ${recentSelections.length > 0 ? `
-                <div class="recent-selections">
-                    <h4>Recent</h4>
-                    <div class="recent-list">
-                        ${recentSelections.slice(0, this.maxRecentItems).map(item => `
-                            <button class="recent-item"
-                                    data-action="select-node"
-                                    data-node-id="${this.escapeHtml(item.nodeId)}"
-                                    data-node-name="${this.escapeHtml(item.name)}">
-                                <span class="recent-icon">${this.getNodeIcon(item.type)}</span>
-                                <span class="recent-name">${this.escapeHtml(item.name)}</span>
-                                <span class="recent-type">${item.type}</span>
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>
-                ` : ''}
-
-                <!-- Popular Tables Section (tables with most connections) -->
-                <div class="popular-tables">
-                    <h4>Most Connected</h4>
-                    <div class="popular-list">
-                        ${this.generatePopularNodes(graph, 6)}
-                    </div>
-                </div>
-
-                <!-- Stats Summary -->
-                <div class="lineage-stats-summary">
-                    <div class="stat-chip">
-                        <span class="stat-icon">📊</span>
-                        <span class="stat-count">${stats.tables}</span>
-                        <span class="stat-label">Tables</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">👁️</span>
-                        <span class="stat-count">${stats.views}</span>
-                        <span class="stat-label">Views</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">🔄</span>
-                        <span class="stat-count">${stats.ctes}</span>
-                        <span class="stat-label">CTEs</span>
-                    </div>
-                    <div class="stat-chip">
-                        <span class="stat-icon">🔗</span>
-                        <span class="stat-count">${stats.relationships}</span>
-                        <span class="stat-label">Relationships</span>
+                <!-- Content -->
+                <div class="view-content">
+                    <!-- Popular Tables Section (tables with most connections) -->
+                    <div class="popular-tables">
+                        <h4>Most Connected</h4>
+                        <div class="popular-list">
+                            ${this.generatePopularNodes(graph, 6)}
+                        </div>
                     </div>
                 </div>
 
@@ -211,6 +195,21 @@ export class LineageView {
         // Generate SVG
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
 
+        // Calculate node counts by type
+        const nodeCounts = { table: 0, view: 0, cte: 0, external: 0 };
+        for (const node of renderableGraph.nodes) {
+            if (node.type in nodeCounts) {
+                nodeCounts[node.type as keyof typeof nodeCounts]++;
+            }
+        }
+
+        // Build node count badge parts
+        const countParts: string[] = [];
+        if (nodeCounts.table > 0) countParts.push(`${nodeCounts.table} table${nodeCounts.table !== 1 ? 's' : ''}`);
+        if (nodeCounts.view > 0) countParts.push(`${nodeCounts.view} view${nodeCounts.view !== 1 ? 's' : ''}`);
+        if (nodeCounts.cte > 0) countParts.push(`${nodeCounts.cte} CTE${nodeCounts.cte !== 1 ? 's' : ''}`);
+        if (nodeCounts.external > 0) countParts.push(`${nodeCounts.external} external`);
+
         return `
             <div class="lineage-graph-view">
                 <!-- Graph Header with controls -->
@@ -221,6 +220,16 @@ export class LineageView {
                         <span class="node-type-badge">${centerNode?.type || 'table'}</span>
                     </div>
                     <div class="graph-stats">
+                        <span class="stat node-count" title="Nodes in graph">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                                <rect x="14" y="14" width="7" height="7" rx="1"/>
+                            </svg>
+                            ${countParts.join(', ') || 'No nodes'}
+                        </span>
+                        <span class="stat-divider">|</span>
                         <span class="stat upstream" title="Upstream tables">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 19V5M5 12l7-7 7 7"/>
@@ -264,37 +273,130 @@ export class LineageView {
                     </button>
                 </div>
 
-                <!-- Graph Container with SVG -->
+                <!-- Graph Container with SVG and overlays -->
                 <div class="lineage-graph-container" id="lineage-graph-container">
                     ${svg}
-                </div>
 
-                <!-- Zoom Controls -->
-                <div class="lineage-zoom-controls">
-                    <button class="zoom-btn" id="lineage-zoom-out" title="Zoom out">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
-                    </button>
-                    <span class="zoom-level" id="lineage-zoom-level">100%</span>
-                    <button class="zoom-btn" id="lineage-zoom-in" title="Zoom in">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="5" x2="12" y2="19"/>
-                            <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
-                    </button>
-                    <div class="zoom-divider"></div>
-                    <button class="zoom-btn" id="lineage-zoom-fit" title="Fit to screen">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                        </svg>
-                    </button>
-                    <button class="zoom-btn" id="lineage-zoom-reset" title="Reset view">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                            <path d="M3 3v5h5"/>
-                        </svg>
-                    </button>
+                    <!-- Zoom Controls -->
+                    <div class="lineage-zoom-controls">
+                        <button class="zoom-btn" id="lineage-zoom-out" title="Zoom out">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                        <span class="zoom-level" id="lineage-zoom-level">100%</span>
+                        <button class="zoom-btn" id="lineage-zoom-in" title="Zoom in">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                        <div class="zoom-divider"></div>
+                        <button class="zoom-btn" id="lineage-zoom-fit" title="Fit to screen">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                            </svg>
+                        </button>
+                        <button class="zoom-btn" id="lineage-zoom-reset" title="Reset view">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                <path d="M3 3v5h5"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Legend Panel -->
+                    <div class="lineage-legend" id="lineage-legend">
+                        <div class="legend-header">
+                            <span class="legend-title">Legend</span>
+                            <button class="legend-toggle" id="legend-toggle" title="Toggle legend">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                                    <path d="M18 15l-6-6-6 6"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="legend-content" id="legend-content">
+                            <div class="legend-section-title">Nodes</div>
+                            <div class="legend-item">
+                                <span class="legend-color legend-table"></span>
+                                <span class="legend-label">Table</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color legend-view"></span>
+                                <span class="legend-label">View</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color legend-cte"></span>
+                                <span class="legend-label">CTE</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color legend-external"></span>
+                                <span class="legend-label">External</span>
+                            </div>
+                            <div class="legend-divider"></div>
+                            <div class="legend-section-title">Column Types</div>
+                            <div class="legend-item">
+                                <span class="legend-dot legend-primary"></span>
+                                <span class="legend-label">Primary Key</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot legend-numeric"></span>
+                                <span class="legend-label">Numeric</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot legend-text"></span>
+                                <span class="legend-label">Text</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot legend-datetime"></span>
+                                <span class="legend-label">Date/Time</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot legend-json"></span>
+                                <span class="legend-label">JSON</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Keyboard Shortcuts Hint -->
+                    <div class="keyboard-hints" id="keyboard-hints">
+                        <div class="hint-item">
+                            <kbd>C</kbd>
+                            <span>Columns</span>
+                        </div>
+                        <div class="hint-divider"></div>
+                        <div class="hint-item">
+                            <kbd>Scroll</kbd>
+                            <span>Zoom</span>
+                        </div>
+                        <div class="hint-divider"></div>
+                        <div class="hint-item">
+                            <kbd>Drag</kbd>
+                            <span>Pan</span>
+                        </div>
+                    </div>
+
+                    <!-- Mini-map -->
+                    <div class="lineage-minimap" id="lineage-minimap">
+                        <div class="minimap-header">
+                            <span>Overview</span>
+                        </div>
+                        <div class="minimap-content" id="minimap-content">
+                            <svg class="minimap-svg" id="minimap-svg" viewBox="0 0 ${renderableGraph.width} ${renderableGraph.height}">
+                                <g class="minimap-nodes">
+                                    ${renderableGraph.nodes.map(node => `
+                                        <rect class="minimap-node minimap-node-${node.type}"
+                                              x="${node.x}" y="${node.y}"
+                                              width="${node.width}" height="${node.height}"
+                                              rx="4"/>
+                                    `).join('')}
+                                </g>
+                                <rect class="minimap-viewport" id="minimap-viewport"
+                                      x="0" y="0" width="100" height="100"
+                                      fill="rgba(99, 102, 241, 0.2)" stroke="var(--accent)" stroke-width="2"/>
+                            </svg>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Node Tooltip -->
@@ -420,12 +522,44 @@ export class LineageView {
     private generateEmptyState(): string {
         return `
             <div class="lineage-empty-state">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
-                    <path d="M3 12h4l3 9 4-18 3 9h4"/>
-                </svg>
-                <h3>No Lineage Data</h3>
-                <p>No lineage data found in workspace.</p>
-                <p class="hint">Open SQL files to analyze data dependencies and build the lineage graph.</p>
+                <div class="empty-illustration">
+                    <svg viewBox="0 0 120 100" fill="none" width="120" height="100">
+                        <!-- Node 1 -->
+                        <rect x="10" y="35" width="30" height="20" rx="4" fill="var(--node-table)" opacity="0.8"/>
+                        <text x="25" y="48" text-anchor="middle" fill="white" font-size="8">\uD83D\uDCCA</text>
+                        <!-- Node 2 -->
+                        <rect x="50" y="15" width="30" height="20" rx="4" fill="var(--node-view)" opacity="0.8"/>
+                        <text x="65" y="28" text-anchor="middle" fill="white" font-size="8">\uD83D\uDC41\uFE0F</text>
+                        <!-- Node 3 -->
+                        <rect x="50" y="55" width="30" height="20" rx="4" fill="var(--accent)" opacity="0.8"/>
+                        <text x="65" y="68" text-anchor="middle" fill="white" font-size="8">\uD83D\uDD04</text>
+                        <!-- Node 4 -->
+                        <rect x="90" y="35" width="30" height="20" rx="4" fill="var(--node-external)" opacity="0.6" stroke-dasharray="3,2" stroke="var(--text-dim)"/>
+                        <text x="105" y="48" text-anchor="middle" fill="white" font-size="8">\uD83C\uDF10</text>
+                        <!-- Connecting lines -->
+                        <path d="M40 45 Q45 45 50 30" stroke="var(--text-dim)" stroke-width="1.5" fill="none" stroke-dasharray="4,2" opacity="0.5"/>
+                        <path d="M40 45 Q45 45 50 65" stroke="var(--text-dim)" stroke-width="1.5" fill="none" stroke-dasharray="4,2" opacity="0.5"/>
+                        <path d="M80 25 Q85 35 90 45" stroke="var(--text-dim)" stroke-width="1.5" fill="none" stroke-dasharray="4,2" opacity="0.5"/>
+                        <path d="M80 65 Q85 55 90 45" stroke="var(--text-dim)" stroke-width="1.5" fill="none" stroke-dasharray="4,2" opacity="0.5"/>
+                    </svg>
+                </div>
+                <h3>Start Exploring Data Lineage</h3>
+                <p>Discover how your data flows between tables, views, and CTEs.</p>
+                <div class="empty-steps">
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <span class="step-text">Open SQL files in your workspace</span>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <span class="step-text">Tables and relationships are detected automatically</span>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <span class="step-text">Search for a table to visualize its lineage</span>
+                    </div>
+                </div>
+                <p class="hint">\uD83D\uDCA1 Tip: The more SQL files you have open, the richer your lineage graph becomes!</p>
             </div>
         `;
     }

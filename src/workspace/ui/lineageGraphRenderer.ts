@@ -33,6 +33,14 @@ export interface ColumnData {
     dataType?: string;
     isPrimaryKey?: boolean;
     isNullable?: boolean;
+    // Lineage tracking
+    sourceColumns?: string[];  // Source table.column names
+    transformationType?: 'direct' | 'rename' | 'aggregate' | 'expression' | 'case' | 'cast' | 'coalesce' | 'join' | 'filter' | 'unknown';
+    expression?: string;
+    isComputed?: boolean;
+    // Interaction state
+    isSelected?: boolean;      // User clicked this column
+    isInPath?: boolean;        // Part of current lineage trace
 }
 
 /**
@@ -264,16 +272,29 @@ export class LineageGraphRenderer {
     private getNodeColumns(node: LineageNode): ColumnData[] {
         const columns: ColumnData[] = [];
 
+        // Debug: Log how many nodes we're searching through
+        let totalNodes = 0;
+        let columnNodes = 0;
+
         // Find column nodes that belong to this table
         for (const [id, potentialColumn] of this.lineageGraph.nodes) {
-            if (potentialColumn.type === 'column' && potentialColumn.parentId === node.id) {
-                columns.push({
-                    name: potentialColumn.name,
-                    dataType: potentialColumn.columnInfo?.dataType,
-                    isPrimaryKey: potentialColumn.metadata?.isPrimaryKey,
-                    isNullable: potentialColumn.metadata?.nullable
-                });
+            totalNodes++;
+            if (potentialColumn.type === 'column') {
+                columnNodes++;
+                if (potentialColumn.parentId === node.id) {
+                    columns.push({
+                        name: potentialColumn.name,
+                        dataType: potentialColumn.columnInfo?.dataType,
+                        isPrimaryKey: potentialColumn.metadata?.isPrimaryKey,
+                        isNullable: potentialColumn.metadata?.nullable
+                    });
+                }
             }
+        }
+
+        // Log for debugging
+        if (columns.length === 0 && node.metadata?.columnCount > 0) {
+            console.log(`[Column Debug] Node ${node.id} (${node.name}): Expected ${node.metadata.columnCount} columns, found ${columns.length}. Total nodes: ${totalNodes}, Column nodes: ${columnNodes}`);
         }
 
         return columns;
@@ -370,8 +391,9 @@ export class LineageGraphRenderer {
         const { focusedNodeId, highlightPath = [] } = options;
         const highlightSet = new Set(highlightPath);
 
-        let svg = `<svg class="lineage-graph-svg" viewBox="0 0 ${graph.width} ${graph.height}"
-                        style="width: 100%; height: 100%;"
+        // Don't use viewBox - let the container handle sizing and we'll manage transforms manually
+        let svg = `<svg class="lineage-graph-svg"
+                        style="width: 100%; height: 100%; overflow: visible;"
                         xmlns="http://www.w3.org/2000/svg">`;
 
         // Add definitions for markers and gradients
@@ -382,6 +404,13 @@ export class LineageGraphRenderer {
                 </marker>
                 <marker id="arrowhead-highlighted" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
                     <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent)" />
+                </marker>
+                <!-- Column lineage arrowheads -->
+                <marker id="column-arrowhead-upstream" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                    <polygon points="0 0, 8 3, 0 6" fill="#22c55e" />
+                </marker>
+                <marker id="column-arrowhead-downstream" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                    <polygon points="0 0, 8 3, 0 6" fill="#3b82f6" />
                 </marker>
             </defs>
         `;
@@ -476,15 +505,41 @@ export class LineageGraphRenderer {
             svg += `<line x1="0" y1="50" x2="${node.width}" y2="50" class="node-divider"/>`;
             let columnY = 68;
             for (const column of node.columns) {
+                // Note: dimmed class is applied dynamically via JS when a column is selected
+                // Don't apply dimmed by default - only selected and in-path states come from server
+                const columnClasses = [
+                    'column-row',
+                    column.isSelected ? 'selected' : '',
+                    column.isInPath ? 'in-path' : ''
+                ].filter(Boolean).join(' ');
+
+                const dotChar = column.isSelected ? '\u25C9' :  // ◉ Selected
+                               column.isInPath ? '\u25CF' :    // ● In path
+                               column.isPrimaryKey ? '\u25CF' : '\u25CB';  // ○ Default
+
+                // Determine column type category for color coding
+                const typeCategory = this.getColumnTypeCategory(column.dataType || '');
+                const dotClass = column.isPrimaryKey ? 'primary' : typeCategory;
+
                 svg += `
-                    <g class="column-row" data-column-name="${this.escapeHtml(column.name)}">
-                        <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot${column.isPrimaryKey ? ' primary' : ''}"/>
+                    <g class="${columnClasses}" data-column-name="${this.escapeHtml(column.name)}" data-action="selectColumn">
+                        <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot ${dotClass}"/>
+                        <text x="20" y="${columnY}" text-anchor="middle" class="column-state">${dotChar}</text>
                         <text x="32" y="${columnY}" class="column-name">${this.escapeHtml(column.name)}</text>
                         ${column.dataType ? `<text x="${node.width - 10}" y="${columnY}" text-anchor="end" class="column-type">${column.dataType}</text>` : ''}
                     </g>
                 `;
                 columnY += this.NODE_HEIGHT_PER_COLUMN;
             }
+
+            // Close button for expanded nodes (top-right corner)
+            svg += `
+                <g class="column-close-btn" data-action="collapse">
+                    <circle cx="${node.width - 16}" cy="16" r="10" fill="rgba(239,68,68,0.6)"/>
+                    <path d="M ${node.width - 21} 11 L ${node.width - 11} 21 M ${node.width - 11} 11 L ${node.width - 21} 21"
+                          stroke="white" stroke-width="2" stroke-linecap="round"/>
+                </g>
+            `;
         }
 
         svg += `</g>`;
@@ -544,6 +599,46 @@ export class LineageGraphRenderer {
             'external': '\uD83C\uDF10'  // 🌐
         };
         return icons[type] || '\uD83D\uDCE6';  // 📦
+    }
+
+    /**
+     * Get column type category for color coding
+     * Categories: numeric, text, datetime, boolean, binary, json, other
+     */
+    private getColumnTypeCategory(dataType: string): string {
+        const type = dataType.toUpperCase();
+
+        // Numeric types
+        if (/INT|DECIMAL|NUMERIC|FLOAT|DOUBLE|REAL|NUMBER|MONEY|SERIAL|BIGINT|SMALLINT|TINYINT/.test(type)) {
+            return 'type-numeric';
+        }
+
+        // Text types
+        if (/CHAR|TEXT|STRING|CLOB|VARCHAR|NCHAR|NVARCHAR/.test(type)) {
+            return 'type-text';
+        }
+
+        // Date/Time types
+        if (/DATE|TIME|TIMESTAMP|DATETIME|YEAR|INTERVAL/.test(type)) {
+            return 'type-datetime';
+        }
+
+        // Boolean
+        if (/BOOL|BOOLEAN|BIT/.test(type)) {
+            return 'type-boolean';
+        }
+
+        // Binary/Blob
+        if (/BLOB|BINARY|BYTEA|VARBINARY|IMAGE/.test(type)) {
+            return 'type-binary';
+        }
+
+        // JSON/Array/Object
+        if (/JSON|JSONB|ARRAY|OBJECT|MAP|STRUCT/.test(type)) {
+            return 'type-json';
+        }
+
+        return 'type-other';
     }
 
     /**

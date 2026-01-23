@@ -31,11 +31,29 @@ export interface LineageEdge {
 }
 
 /**
+ * Column-to-column lineage edge
+ * Tracks how specific columns flow through transformations
+ */
+export interface ColumnLineageEdge {
+    id: string;
+    sourceTableId: string;
+    sourceColumnName: string;
+    targetTableId: string;
+    targetColumnName: string;
+    transformationType: 'direct' | 'rename' | 'aggregate' | 'expression' | 'case' | 'cast' | 'coalesce' | 'join' | 'filter' | 'unknown';
+    expression?: string;
+    filePath: string;
+    lineNumber: number;
+    metadata?: Record<string, any>;
+}
+
+/**
  * Complete lineage graph with query methods
  */
 export interface LineageGraph {
     nodes: Map<string, LineageNode>;
     edges: LineageEdge[];
+    columnEdges: ColumnLineageEdge[];  // Column-level lineage edges
 
     // Query methods
     getUpstream(nodeId: string, depth?: number): LineageNode[];

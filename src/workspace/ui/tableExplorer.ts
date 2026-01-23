@@ -23,13 +23,22 @@ export class TableExplorer {
 
         if (tables.length === 0) {
             return `
-                <div class="table-list-empty">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
-                    </svg>
-                    <h3>No Tables Found</h3>
-                    <p>No tables found in workspace.</p>
-                    <p>Open SQL files to populate the table list.</p>
+                <div class="view-container">
+                    <div class="view-header">
+                        <div class="view-header-icon">📋</div>
+                        <div class="view-header-content">
+                            <h3 class="view-title">Table Explorer</h3>
+                            <p class="view-subtitle">Browse and explore all tables, views, and CTEs in your workspace</p>
+                        </div>
+                    </div>
+                    <div class="view-empty">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                        </svg>
+                        <h3>No Tables Found</h3>
+                        <p>No tables found in workspace.</p>
+                        <p class="hint">Open SQL files to populate the table list.</p>
+                    </div>
                 </div>
             `;
         }
@@ -56,99 +65,77 @@ export class TableExplorer {
         };
 
         let html = `
-            <div class="table-list-view">
-                <div class="table-list-header">
-                    <div class="header-top">
-                        <div>
-                            <h3>Table Explorer</h3>
-                            <p class="header-subtitle">Browse and explore all tables, views, and CTEs in your workspace</p>
-                        </div>
-                    </div>
-                    <div class="header-info">
-                        <div class="info-card">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
-                            </svg>
-                            <div>
-                                <strong>What is this?</strong>
-                                <p>This shows all database objects (tables, views, CTEs) found in your SQL files. Click any item to see its columns, data sources, and where it's used.</p>
-                            </div>
-                        </div>
-                        <div class="info-card">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                            </svg>
-                            <div>
-                                <strong>Connection indicators:</strong>
-                                <p>
-                                    <span class="legend-item"><span class="legend-dot high"></span> High connections (10+)</span>
-                                    <span class="legend-item"><span class="legend-dot medium"></span> Medium (3-9)</span>
-                                    <span class="legend-item"><span class="legend-dot low"></span> Low (1-2)</span>
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="header-stats">
-                        <div class="stat-badge">
-                            <span class="stat-value">${tables.length}</span>
-                            <span class="stat-label">Total Objects</span>
-                        </div>
-                        <div class="stat-badge">
-                            <span class="stat-value">${typeCounts.table}</span>
-                            <span class="stat-label">Tables</span>
-                        </div>
-                        <div class="stat-badge">
-                            <span class="stat-value">${typeCounts.view}</span>
-                            <span class="stat-label">Views</span>
-                        </div>
-                        <div class="stat-badge">
-                            <span class="stat-value">${typeCounts.cte}</span>
-                            <span class="stat-label">CTEs</span>
-                        </div>
+            <div class="view-container">
+                <!-- View Header -->
+                <div class="view-header">
+                    <div class="view-header-icon">📋</div>
+                    <div class="view-header-content">
+                        <h3 class="view-title">Table Explorer</h3>
+                        <p class="view-subtitle">Browse and explore all tables, views, and CTEs in your workspace</p>
                     </div>
                 </div>
-                
-                <!-- Search and Filter Controls -->
-                <div class="table-list-controls">
-                    <div class="controls-header">
-                        <h4>Search & Filter</h4>
-                        <p class="controls-hint">Find specific tables or filter by type. Use <kbd>/</kbd> to focus search, <kbd>Esc</kbd> to clear.</p>
+
+                <!-- Stats -->
+                <div class="view-stats">
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${tables.length}</span>
+                        <span class="view-stat-label">Total</span>
                     </div>
-                    <div class="search-box-table">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${typeCounts.table}</span>
+                        <span class="view-stat-label">Tables</span>
+                    </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${typeCounts.view}</span>
+                        <span class="view-stat-label">Views</span>
+                    </div>
+                    <div class="view-stat-badge">
+                        <span class="view-stat-value">${typeCounts.cte}</span>
+                        <span class="view-stat-label">CTEs</span>
+                    </div>
+                </div>
+
+                <!-- Search Controls -->
+                <div class="view-controls">
+                    <div class="view-controls-header">
+                        <h4>Search & Filter</h4>
+                        <p class="view-controls-hint">Find specific tables or filter by type. Use <kbd>/</kbd> to focus search, <kbd>Esc</kbd> to clear.</p>
+                    </div>
+                    <div class="view-search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                         </svg>
-                        <input type="text" id="table-search-input" class="search-input-table" placeholder="Search by table name... (Press / to focus)" autocomplete="off">
-                        <button class="search-clear-table" id="table-search-clear" style="display: none;" title="Clear search">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <input type="text" id="table-search-input" class="view-search-input" placeholder="Search by table name..." autocomplete="off">
+                        <button class="view-search-clear" id="table-search-clear" title="Clear search">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M18 6L6 18M6 6l12 12"/>
                             </svg>
                         </button>
                     </div>
-                    <div class="filter-controls">
-                        <div class="filter-group">
-                            <label for="table-type-filter" class="filter-label">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="view-filters">
+                        <div class="view-filter-group">
+                            <label class="view-filter-label">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M3 3h18v18H3zM3 9h18M9 3v18"/>
                                 </svg>
-                                Filter by Type
+                                Type
                             </label>
-                            <select id="table-type-filter" class="filter-select">
+                            <select id="table-type-filter" class="view-filter-select">
                                 <option value="all">All Types (${typeCounts.all})</option>
-                                <option value="table">📊 Tables Only (${typeCounts.table})</option>
-                                <option value="view">👁️ Views Only (${typeCounts.view})</option>
-                                <option value="cte">🔄 CTEs Only (${typeCounts.cte})</option>
+                                <option value="table">Tables (${typeCounts.table})</option>
+                                <option value="view">Views (${typeCounts.view})</option>
+                                <option value="cte">CTEs (${typeCounts.cte})</option>
                             </select>
                         </div>
-                        <div class="filter-group">
-                            <label for="table-sort" class="filter-label">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <div class="view-filter-group">
+                            <label class="view-filter-label">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M3 6h18M7 12h14M11 18h10"/>
                                 </svg>
-                                Sort By
+                                Sort
                             </label>
-                            <select id="table-sort" class="filter-select">
-                                <option value="connected">Most Connected (default)</option>
+                            <select id="table-sort" class="view-filter-select">
+                                <option value="connected">Most Connected</option>
                                 <option value="name-asc">Name (A-Z)</option>
                                 <option value="name-desc">Name (Z-A)</option>
                                 <option value="type">Type</option>
@@ -157,11 +144,12 @@ export class TableExplorer {
                     </div>
                 </div>
 
-                <div class="table-list-results-info" id="table-list-results-info" style="display: none;">
-                    <span id="table-results-count">Showing 0 of 0 tables</span>
-                </div>
-
-                <div class="table-list-grid" id="table-list-grid">
+                <!-- Content -->
+                <div class="view-content">
+                    <div class="table-list-results-info" id="table-list-results-info" style="display: none;">
+                        <span id="table-results-count">Showing 0 of 0 tables</span>
+                    </div>
+                    <div class="view-grid" id="table-list-grid">
         `;
 
         // Sort by total connections (most connected first) - default
@@ -233,14 +221,15 @@ export class TableExplorer {
         }
 
         html += `
-                </div>
-                <div id="table-list-empty-filter" class="table-list-empty-filter" style="display: none;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                    </svg>
-                    <h3>No tables found</h3>
-                    <p id="empty-filter-message">No tables match your search criteria</p>
-                    <p class="hint">Try a different search term or adjust filters</p>
+                    </div>
+                    <div id="table-list-empty-filter" class="view-empty" style="display: none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <h3>No tables found</h3>
+                        <p id="empty-filter-message">No tables match your search criteria</p>
+                        <p class="hint">Try a different search term or adjust filters</p>
+                    </div>
                 </div>
             </div>
         `;
