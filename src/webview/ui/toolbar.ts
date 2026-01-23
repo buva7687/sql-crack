@@ -53,6 +53,7 @@ export function createToolbar(
     options: {
         currentDialect: SqlDialect;
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -204,6 +205,7 @@ function createActionButtons(
     callbacks: ToolbarCallbacks,
     options: {
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -301,6 +303,7 @@ function createFeatureGroup(
     callbacks: ToolbarCallbacks,
     options: {
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -342,16 +345,44 @@ function createFeatureGroup(
             featureGroup.appendChild(pinsBtn);
         }
     } else {
-        // Pinned indicator
+        // Pinned indicator with unpin button
+        const pinnedContainer = document.createElement('div');
+        pinnedContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+            border-left: 1px solid rgba(148, 163, 184, 0.2);
+        `;
+
         const pinnedIndicator = document.createElement('span');
         pinnedIndicator.innerHTML = '📌 Pinned';
         pinnedIndicator.style.cssText = `
             color: #94a3b8;
             font-size: 11px;
             padding: 4px 8px;
-            border-left: 1px solid rgba(148, 163, 184, 0.2);
         `;
-        featureGroup.appendChild(pinnedIndicator);
+        pinnedContainer.appendChild(pinnedIndicator);
+
+        // Add unpin button
+        if (options.pinId) {
+            const unpinBtn = createButton('×', () => {
+                callbacks.onUnpinTab(options.pinId!);
+            });
+            unpinBtn.title = 'Unpin and close this tab';
+            unpinBtn.style.cssText = `
+                background: transparent;
+                border: none;
+                color: #94a3b8;
+                padding: 4px 8px;
+                cursor: pointer;
+                font-size: 16px;
+                transition: color 0.2s;
+            `;
+            unpinBtn.addEventListener('mouseenter', () => unpinBtn.style.color = '#ef4444');
+            unpinBtn.addEventListener('mouseleave', () => unpinBtn.style.color = '#94a3b8');
+            pinnedContainer.appendChild(unpinBtn);
+        }
+
+        featureGroup.appendChild(pinnedContainer);
     }
 
     // Legend button

@@ -776,6 +776,9 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
+    // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
+    selectNode(null);
+
     currentNodes = result.nodes;
     currentEdges = result.edges;
     currentStats = result.stats;
@@ -786,7 +789,7 @@ export function render(result: ParseResult): void {
 
     // Reset highlight state
     state.highlightedColumnSources = [];
-    
+
     // Reset zoom state when rendering new query
     state.zoomedNodeId = null;
     state.previousZoomState = null;
@@ -3983,10 +3986,12 @@ export function prevSearchResult(): void {
 }
 
 // Export functions
-export function exportToPng(): void {
-    if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
+/**
+ * Prepares SVG clone for export by embedding inline styles and setting dimensions
+ */
+function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGElement; width: number; height: number } {
+    const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
 
     // Set explicit dimensions
     const bounds = calculateBounds();
@@ -3997,6 +4002,7 @@ export function exportToPng(): void {
     svgClone.setAttribute('width', String(width));
     svgClone.setAttribute('height', String(height));
     svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
+    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
     // Reset transform on main group
     const mainG = svgClone.querySelector('g');
@@ -4004,14 +4010,50 @@ export function exportToPng(): void {
         mainG.removeAttribute('transform');
     }
 
-    // Add background
+    // Add background rect
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bgRect.setAttribute('x', String(bounds.minX - padding));
     bgRect.setAttribute('y', String(bounds.minY - padding));
     bgRect.setAttribute('width', String(width));
     bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
+    bgRect.setAttribute('fill', state.isDarkTheme ? '#0f172a' : '#f8fafc');
     svgClone.insertBefore(bgRect, svgClone.firstChild);
+
+    // Embed inline styles for all elements (needed for image export)
+    embedInlineStyles(svgClone);
+
+    return { svgClone, width, height };
+}
+
+/**
+ * Recursively embeds computed styles as inline styles on SVG elements
+ */
+function embedInlineStyles(element: Element): void {
+    const computedStyle = window.getComputedStyle(element);
+    const originalElement = svg?.querySelector(`[data-id="${element.getAttribute('data-id')}"]`) ||
+                           document.querySelector(`.${element.className}`) as Element | null;
+
+    // Style properties important for SVG rendering
+    const styleProps = ['fill', 'stroke', 'stroke-width', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor'];
+
+    if (originalElement) {
+        const origStyle = window.getComputedStyle(originalElement);
+        styleProps.forEach(prop => {
+            const value = origStyle.getPropertyValue(prop);
+            if (value && value !== 'none' && value !== '') {
+                (element as HTMLElement).style.setProperty(prop, value);
+            }
+        });
+    }
+
+    // Process children
+    Array.from(element.children).forEach(child => embedInlineStyles(child));
+}
+
+export function exportToPng(): void {
+    if (!svg) { return; }
+
+    const { svgClone, width, height } = prepareSvgForExport(svg);
 
     // Convert to image
     const svgData = new XMLSerializer().serializeToString(svgClone);
@@ -4032,39 +4074,20 @@ export function exportToPng(): void {
         a.href = canvas.toDataURL('image/png');
         a.click();
     };
+    img.onerror = (e) => {
+        console.error('Failed to load SVG for export:', e);
+        // Fallback: try without base64 encoding
+        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        img.src = url;
+    };
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
 }
 
 export function exportToSvg(): void {
     if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
-
-    // Set explicit dimensions
-    const bounds = calculateBounds();
-    const padding = 40;
-    const width = bounds.width + padding * 2;
-    const height = bounds.height + padding * 2;
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Reset transform
-    const mainG = svgClone.querySelector('g');
-    if (mainG) {
-        mainG.removeAttribute('transform');
-    }
-
-    // Add background
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('x', String(bounds.minX - padding));
-    bgRect.setAttribute('y', String(bounds.minY - padding));
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
-    svgClone.insertBefore(bgRect, svgClone.firstChild);
+    const { svgClone } = prepareSvgForExport(svg);
 
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const blob = new Blob([svgData], { type: 'image/svg+xml' });
@@ -4298,28 +4321,7 @@ function generateStyleAssignments(nodes: FlowNode[]): string[] {
 export function copyToClipboard(): void {
     if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
-    const bounds = calculateBounds();
-    const padding = 40;
-    const width = bounds.width + padding * 2;
-    const height = bounds.height + padding * 2;
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
-
-    const mainG = svgClone.querySelector('g');
-    if (mainG) {
-        mainG.removeAttribute('transform');
-    }
-
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('x', String(bounds.minX - padding));
-    bgRect.setAttribute('y', String(bounds.minY - padding));
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
-    svgClone.insertBefore(bgRect, svgClone.firstChild);
+    const { svgClone, width, height } = prepareSvgForExport(svg);
 
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const canvas = document.createElement('canvas');
@@ -4338,9 +4340,16 @@ export function copyToClipboard(): void {
             if (blob) {
                 navigator.clipboard.write([
                     new ClipboardItem({ 'image/png': blob })
-                ]).catch(console.error);
+                ]).then(() => {
+                    console.log('Copied to clipboard successfully');
+                }).catch((err) => {
+                    console.error('Failed to copy to clipboard:', err);
+                });
             }
         }, 'image/png');
+    };
+    img.onerror = (e) => {
+        console.error('Failed to load SVG for clipboard:', e);
     };
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
 }

@@ -157,6 +157,7 @@ function init(): void {
     createToolbar(container, createToolbarCallbacks(), {
         currentDialect,
         isPinnedView: window.isPinnedView || false,
+        pinId: window.pinId || null,
         viewLocation: window.viewLocation || 'beside',
         persistedPinnedTabs: window.persistedPinnedTabs || []
     });
