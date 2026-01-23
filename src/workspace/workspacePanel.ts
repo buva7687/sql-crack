@@ -77,6 +77,9 @@ export class WorkspacePanel {
     // Message handler
     private _messageHandler: MessageHandler | null = null;
 
+    // Theme state
+    private _isDarkTheme: boolean = true;
+
     /**
      * Create or show the workspace panel
      */
@@ -124,6 +127,9 @@ export class WorkspacePanel {
         this._extensionUri = extensionUri;
         this._indexManager = new IndexManager(context, dialect);
 
+        // Detect VS Code theme
+        this._isDarkTheme = vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light;
+
         // Handle panel disposal
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
@@ -145,6 +151,16 @@ export class WorkspacePanel {
         this._indexManager.setOnIndexUpdated(() => {
             this.rebuildAndRenderGraph();
         });
+
+        // Listen for VS Code theme changes
+        vscode.window.onDidChangeActiveColorTheme(
+            (theme) => {
+                this._isDarkTheme = theme.kind !== vscode.ColorThemeKind.Light;
+                this.renderCurrentView();
+            },
+            null,
+            this._disposables
+        );
     }
 
     /**
@@ -243,6 +259,10 @@ export class WorkspacePanel {
             getLineageView: () => this._lineageView,
             getImpactView: () => this._impactView,
 
+            // Theme state
+            getIsDarkTheme: () => this._isDarkTheme,
+            setIsDarkTheme: (dark) => { this._isDarkTheme = dark; },
+
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
@@ -324,6 +344,11 @@ export class WorkspacePanel {
 
             case 'toggleHelp':
                 this._showHelp = !this._showHelp;
+                this.renderCurrentView();
+                break;
+
+            case 'toggleTheme':
+                this._isDarkTheme = !this._isDarkTheme;
                 this.renderCurrentView();
                 break;
 
@@ -1001,11 +1026,12 @@ export class WorkspacePanel {
         });
 
         // Get styles and scripts from extracted modules
-        const styles = getWebviewStyles();
+        const styles = getWebviewStyles(this._isDarkTheme);
         const scriptParams: WebviewScriptParams = {
             nonce,
             graphData,
-            searchFilterQuery: searchFilter.query || ''
+            searchFilterQuery: searchFilter.query || '',
+            initialView: this._currentView === 'issues' ? 'graph' : this._currentView
         };
         const script = getWebviewScript(scriptParams);
 
@@ -1102,6 +1128,23 @@ ${bodyContent}
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                         <path d="M15 3v18"/>
                     </svg>
+                </button>
+                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})">
+                    ${this._isDarkTheme ? `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/>
+                        <line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/>
+                        <line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>` : `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>`}
                 </button>
                 <button class="icon-btn" id="btn-refresh" title="Refresh">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1762,7 +1805,7 @@ ${nodesHtml}
         const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
         const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
 
-        const styles = getIssuesStyles();
+        const styles = getIssuesStyles(this._isDarkTheme);
         const script = getIssuesScript(nonce);
 
         return `<!DOCTYPE html>
@@ -1910,26 +1953,11 @@ ${nodesHtml}
      * Get loading HTML
      */
     private getLoadingHtml(): string {
+        const styles = getStateStyles(this._isDarkTheme);
         return `<!DOCTYPE html>
 <html>
 <head>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            display: flex; justify-content: center; align-items: center;
-            height: 100vh; background: #0f172a; color: #e2e8f0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .loader-container { text-align: center; }
-        .loader {
-            width: 48px; height: 48px; border: 3px solid #334155;
-            border-top-color: #6366f1; border-radius: 50%;
-            animation: spin 1s linear infinite; margin: 0 auto 24px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .loader-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
-        .loader-subtitle { color: #94a3b8; font-size: 14px; }
-    </style>
+    <style>${styles}</style>
 </head>
 <body>
     <div class="loader-container">
@@ -1946,37 +1974,15 @@ ${nodesHtml}
      */
     private getManualIndexHtml(fileCount: number): string {
         const nonce = getNonce();
+        const styles = getStateStyles(this._isDarkTheme);
         return `<!DOCTYPE html>
 <html>
 <head>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            display: flex; justify-content: center; align-items: center;
-            height: 100vh; background: #0f172a; color: #e2e8f0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .container { text-align: center; max-width: 400px; padding: 20px; }
-        .icon {
-            width: 64px; height: 64px; margin: 0 auto 24px;
-            background: rgba(99, 102, 241, 0.1); border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .icon svg { width: 32px; height: 32px; color: #6366f1; }
-        .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-        .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-        .file-count { font-size: 32px; font-weight: 700; color: #6366f1; margin-bottom: 8px; }
-        .btn {
-            padding: 12px 28px; background: #6366f1; border: none;
-            border-radius: 8px; color: white; font-size: 14px; font-weight: 500;
-            cursor: pointer; transition: all 0.15s;
-        }
-        .btn:hover { background: #818cf8; transform: translateY(-1px); }
-    </style>
+    <style>${styles}</style>
 </head>
 <body>
     <div class="container">
-        <div class="icon">
+        <div class="icon accent">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
@@ -1998,30 +2004,15 @@ ${nodesHtml}
      * Get empty workspace HTML
      */
     private getEmptyWorkspaceHtml(): string {
+        const styles = getStateStyles(this._isDarkTheme);
         return `<!DOCTYPE html>
 <html>
 <head>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            display: flex; justify-content: center; align-items: center;
-            height: 100vh; background: #0f172a; color: #e2e8f0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .container { text-align: center; max-width: 400px; padding: 20px; }
-        .icon {
-            width: 80px; height: 80px; margin: 0 auto 24px;
-            background: rgba(100, 116, 139, 0.1); border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .icon svg { width: 40px; height: 40px; color: #64748b; }
-        .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-        .subtitle { color: #94a3b8; font-size: 14px; line-height: 1.5; }
-    </style>
+    <style>${styles}</style>
 </head>
 <body>
     <div class="container">
-        <div class="icon">
+        <div class="icon muted">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <path d="M14 2v6h6"/>
@@ -2040,45 +2031,24 @@ ${nodesHtml}
      */
     private getErrorHtml(message: string): string {
         const nonce = getNonce();
+        const styles = getStateStyles(this._isDarkTheme);
         return `<!DOCTYPE html>
 <html>
 <head>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            display: flex; justify-content: center; align-items: center;
-            height: 100vh; background: #0f172a; color: #e2e8f0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .container { text-align: center; max-width: 400px; padding: 20px; }
-        .icon {
-            width: 64px; height: 64px; margin: 0 auto 24px;
-            background: rgba(239, 68, 68, 0.1); border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .icon svg { width: 32px; height: 32px; color: #ef4444; }
-        .title { font-size: 18px; font-weight: 600; color: #f87171; margin-bottom: 8px; }
-        .message { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
-        .btn {
-            padding: 10px 20px; background: #334155; border: none;
-            border-radius: 6px; color: #e2e8f0; font-size: 13px;
-            cursor: pointer; transition: all 0.15s;
-        }
-        .btn:hover { background: #475569; }
-    </style>
+    <style>${styles}</style>
 </head>
 <body>
     <div class="container">
-        <div class="icon">
+        <div class="icon error">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="15" y1="9" x2="9" y2="15"/>
                 <line x1="9" y1="9" x2="15" y2="15"/>
             </svg>
         </div>
-        <div class="title">Something went wrong</div>
+        <div class="title error">Something went wrong</div>
         <div class="message">${message}</div>
-        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+        <button class="btn secondary" onclick="vscode.postMessage({command:'refresh'})">
             Try Again
         </button>
     </div>

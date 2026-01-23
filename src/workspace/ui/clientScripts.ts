@@ -8,18 +8,20 @@ export interface WebviewScriptParams {
     nonce: string;
     graphData: string;
     searchFilterQuery: string;
+    initialView?: string;
 }
 
 /**
  * Generate the complete client script for main webview
  */
 export function getWebviewScript(params: WebviewScriptParams): string {
-    const { nonce, graphData, searchFilterQuery } = params;
+    const { nonce, graphData, searchFilterQuery, initialView = 'graph' } = params;
 
     return `
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         const graphData = ${graphData};
+        const initialViewMode = '${initialView}';
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -209,6 +211,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         function visualizeFile(filePath) { vscode.postMessage({ command: 'visualizeFile', filePath }); }
 
         document.getElementById('btn-refresh')?.addEventListener('click', refresh);
+        document.getElementById('btn-theme')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'toggleTheme' });
+        });
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
@@ -264,7 +269,7 @@ function getViewModeScript(): string {
             impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
-        function switchToView(view) {
+        function switchToView(view, skipMessage = false) {
             if (view === currentViewMode) return;
 
             viewTabs.forEach(t => {
@@ -291,12 +296,15 @@ function getViewModeScript(): string {
                     lineageContent.innerHTML = viewEmptyStates[view] || '';
                 }
 
-                if (view === 'lineage') {
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (view === 'tableExplorer') {
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
-                } else if (view === 'impact') {
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                // Only send message if not restoring view (skipMessage = false by default)
+                if (!skipMessage) {
+                    if (view === 'lineage') {
+                        vscode.postMessage({ command: 'switchToLineageView' });
+                    } else if (view === 'tableExplorer') {
+                        vscode.postMessage({ command: 'switchToTableExplorer' });
+                    } else if (view === 'impact') {
+                        vscode.postMessage({ command: 'switchToImpactView' });
+                    }
                 }
             }
         }
@@ -308,6 +316,22 @@ function getViewModeScript(): string {
                 switchToView(view);
             });
         });
+
+        // Restore initial view if not graph (e.g., after theme change)
+        if (typeof initialViewMode !== 'undefined' && initialViewMode !== 'graph') {
+            // Use setTimeout to ensure DOM is ready and to avoid blocking
+            setTimeout(() => {
+                switchToView(initialViewMode, true);
+                // Re-request the view content from server
+                if (initialViewMode === 'lineage') {
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (initialViewMode === 'tableExplorer') {
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (initialViewMode === 'impact') {
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+            }, 0);
+        }
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;

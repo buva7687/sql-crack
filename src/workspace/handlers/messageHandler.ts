@@ -59,6 +59,10 @@ export interface MessageHandlerContext {
     getLineageView: () => LineageView;
     getImpactView: () => ImpactView;
 
+    // Theme state
+    getIsDarkTheme: () => boolean;
+    setIsDarkTheme: (dark: boolean) => void;
+
     // Callbacks
     renderCurrentView: () => void;
     getWebviewHtml: (graph: any, searchFilter: SearchFilter) => string;
@@ -101,6 +105,10 @@ export class MessageHandler {
 
             case 'toggleHelp':
                 this.handleToggleHelp();
+                break;
+
+            case 'toggleTheme':
+                this.handleToggleTheme();
                 break;
 
             case 'export':
@@ -242,6 +250,12 @@ export class MessageHandler {
     private handleToggleHelp(): void {
         const currentHelp = this._context.getShowHelp();
         this._context.setShowHelp(!currentHelp);
+        this._context.renderCurrentView();
+    }
+
+    private handleToggleTheme(): void {
+        const currentTheme = this._context.getIsDarkTheme();
+        this._context.setIsDarkTheme(!currentTheme);
         this._context.renderCurrentView();
     }
 
