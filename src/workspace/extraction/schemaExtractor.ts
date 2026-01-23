@@ -10,6 +10,21 @@ import {
     DEFAULT_EXTRACTION_OPTIONS
 } from './types';
 
+// SQL reserved words that should never be treated as table/view names
+const SQL_RESERVED_WORDS = new Set([
+    'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'truncate',
+    'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null', 'like', 'between',
+    'join', 'inner', 'outer', 'left', 'right', 'full', 'cross', 'on', 'using',
+    'group', 'by', 'having', 'order', 'asc', 'desc', 'limit', 'offset',
+    'union', 'intersect', 'except', 'all', 'distinct', 'as',
+    'case', 'when', 'then', 'else', 'end', 'if', 'exists',
+    'values', 'set', 'into', 'table', 'view', 'index', 'database', 'schema',
+    'primary', 'foreign', 'key', 'references', 'constraint', 'unique', 'check',
+    'default', 'auto_increment', 'identity', 'serial',
+    'with', 'recursive', 'over', 'partition', 'rows', 'range',
+    'true', 'false', 'unknown'
+]);
+
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
  */
@@ -287,28 +302,57 @@ export class SchemaExtractor {
     }
 
     /**
+     * Check if a name is a SQL reserved word
+     */
+    private isReservedWord(name: string): boolean {
+        return SQL_RESERVED_WORDS.has(name.toLowerCase());
+    }
+
+    /**
+     * Strip SQL comments from a string to prevent false matches
+     * Handles both single-line (--) and multi-line comments
+     */
+    private stripSqlComments(sql: string): string {
+        // Remove multi-line comments first (/* ... */)
+        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
+        // Remove single-line comments (-- ... until end of line)
+        result = result.replace(/--[^\n]*/g, ' ');
+        return result;
+    }
+
+    /**
      * Regex-based fallback for extracting schema definitions
      */
     private extractWithRegex(sql: string, filePath: string): SchemaDefinition[] {
         const definitions: SchemaDefinition[] = [];
         const fileName = filePath.split('/').pop() || filePath;
 
+        // Strip comments to prevent false matches like "CREATE TABLE AS SELECT" in comments
+        const sqlNoComments = this.stripSqlComments(sql);
+
         // CREATE TABLE pattern - capture table name and body
         // Use a simpler approach: find CREATE TABLE, then extract body separately
         const tableHeaderRegex = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
         let match;
-        while ((match = tableHeaderRegex.exec(sql)) !== null) {
+        while ((match = tableHeaderRegex.exec(sqlNoComments)) !== null) {
             const tableName = match[2];
+
+            // Skip if table name is a SQL reserved word
+            if (this.isReservedWord(tableName)) {
+                console.log(`[Schema Extractor Regex] Skipping reserved word as table name: ${tableName}`);
+                continue;
+            }
+
             const startIndex = match.index + match[0].length;
 
             // Find the opening parenthesis
-            const afterHeader = sql.substring(startIndex);
+            const afterHeader = sqlNoComments.substring(startIndex);
             const parenStart = afterHeader.indexOf('(');
 
             if (parenStart !== -1) {
                 // Find matching closing parenthesis
                 const bodyStart = startIndex + parenStart + 1;
-                const tableBody = this.extractBalancedParens(sql, bodyStart);
+                const tableBody = this.extractBalancedParens(sqlNoComments, bodyStart);
                 const columns = this.extractColumnsFromBody(tableBody);
 
                 console.log(`[Schema Extractor Regex] Table ${tableName}: found ${columns.length} columns`);
@@ -339,10 +383,18 @@ export class SchemaExtractor {
 
         // CREATE VIEW pattern
         const viewRegex = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?["'`]?(\w+)["'`]?/gi;
-        while ((match = viewRegex.exec(sql)) !== null) {
+        while ((match = viewRegex.exec(sqlNoComments)) !== null) {
+            const viewName = match[2];
+
+            // Skip if view name is a SQL reserved word
+            if (this.isReservedWord(viewName)) {
+                console.log(`[Schema Extractor Regex] Skipping reserved word as view name: ${viewName}`);
+                continue;
+            }
+
             definitions.push({
                 type: 'view',
-                name: match[2],
+                name: viewName,
                 schema: match[1],
                 columns: [],
                 filePath,

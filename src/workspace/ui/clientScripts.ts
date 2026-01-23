@@ -84,8 +84,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             const graphWidth = maxX - minX + 100;
             const graphHeight = maxY - minY + 100;
 
-            scale = Math.min(containerWidth / graphWidth, containerHeight / graphHeight, 1.5);
-            scale = Math.max(0.2, Math.min(scale, 1.5));
+            // Cap auto-fit at 100% to prevent zooming in too much for small graphs
+            scale = Math.min(containerWidth / graphWidth, containerHeight / graphHeight, 1.0);
+            scale = Math.max(0.3, Math.min(scale, 1.0));
 
             offsetX = (containerWidth - graphWidth * scale) / 2 - minX * scale + 50;
             offsetY = (containerHeight - graphHeight * scale) / 2 - minY * scale + 50;
@@ -1157,20 +1158,27 @@ function getLineageGraphScript(): string {
                 const bbox = currentGraphContainer.getBBox();
 
                 if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && containerRect.height > 0) {
-                    const padding = 80;
-                    const availableWidth = containerRect.width - padding;
-                    const availableHeight = containerRect.height - padding;
+                    // Work in pixel coordinates (no viewBox transformation)
+                    const padding = 60;
+                    const availableWidth = containerRect.width - padding * 2;
+                    const availableHeight = containerRect.height - padding * 2;
+
                     const scaleX = availableWidth / bbox.width;
                     const scaleY = availableHeight / bbox.height;
 
                     lineageScale = Math.min(scaleX, scaleY);
-                    lineageScale = Math.max(0.2, Math.min(1.5, lineageScale));
+                    // Cap auto-fit at 100% to prevent zooming in too much for small graphs
+                    lineageScale = Math.max(0.3, Math.min(1.0, lineageScale));
 
+                    // Calculate bbox center
                     const bboxCenterX = bbox.x + bbox.width / 2;
                     const bboxCenterY = bbox.y + bbox.height / 2;
+
+                    // Container center
                     const containerCenterX = containerRect.width / 2;
                     const containerCenterY = containerRect.height / 2;
 
+                    // Offset to center the scaled bbox in the container
                     lineageOffsetX = containerCenterX - bboxCenterX * lineageScale;
                     lineageOffsetY = containerCenterY - bboxCenterY * lineageScale;
 
@@ -1479,6 +1487,204 @@ function getLineageGraphScript(): string {
                 expandedNodes: Array.from(lineageExpandedNodes || new Set())
             });
         }
+
+        // Toggle all column expansions (keyboard shortcut 'C')
+        function toggleAllColumns() {
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg) return;
+
+            const anyExpanded = lineageExpandedNodes && lineageExpandedNodes.size > 0;
+
+            if (anyExpanded) {
+                collapseAllColumns();
+            } else {
+                expandAllColumns();
+            }
+        }
+
+        // Expand all visible nodes
+        function expandAllColumns() {
+            const svg = document.querySelector('.lineage-graph-svg');
+            if (!svg || !lineageCurrentNodeId) return;
+
+            const nodes = svg.querySelectorAll('.lineage-node');
+            nodes.forEach(node => {
+                const nodeId = node.getAttribute('data-node-id');
+                if (nodeId) {
+                    lineageExpandedNodes.add(nodeId);
+                }
+            });
+
+            // Re-render with all nodes expanded
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: Array.from(lineageExpandedNodes)
+            });
+        }
+
+        // Collapse all nodes
+        function collapseAllColumns() {
+            if (!lineageCurrentNodeId) return;
+
+            lineageExpandedNodes.clear();
+
+            vscode.postMessage({
+                command: 'getLineageGraph',
+                nodeId: lineageCurrentNodeId,
+                depth: 5,
+                direction: lineageCurrentDirection,
+                expandedNodes: []
+            });
+        }
+
+        // Keyboard handler for 'C' key to toggle all columns
+        document.addEventListener('keydown', (e) => {
+            // Only respond if lineage graph is visible
+            const lineageContainer = document.getElementById('lineage-graph-container');
+            if (!lineageContainer || lineageContainer.offsetParent === null) return;
+
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'c' || e.key === 'C') {
+                e.preventDefault();
+                toggleAllColumns();
+            }
+        });
+
+        // ========== Legend Panel Toggle ==========
+        const legendToggle = document.getElementById('legend-toggle');
+        const legendPanel = document.getElementById('lineage-legend');
+        if (legendToggle && legendPanel) {
+            legendToggle.addEventListener('click', () => {
+                legendPanel.classList.toggle('collapsed');
+            });
+        }
+
+        // ========== Mini-map Functionality ==========
+        function setupMinimap() {
+            const minimap = document.getElementById('lineage-minimap');
+            const minimapSvg = document.getElementById('minimap-svg');
+            const minimapViewport = document.getElementById('minimap-viewport');
+            const minimapContent = document.getElementById('minimap-content');
+            const container = document.getElementById('lineage-graph-container');
+
+            if (!minimap || !minimapSvg || !minimapViewport || !container) return;
+
+            let minimapDragging = false;
+
+            // Get graph data for calculations
+            const graphDataEl = document.getElementById('lineage-graph-data');
+            let graphWidth = 800, graphHeight = 600;
+            if (graphDataEl) {
+                try {
+                    const data = JSON.parse(graphDataEl.textContent || '{}');
+                    graphWidth = data.width || 800;
+                    graphHeight = data.height || 600;
+                } catch (e) {}
+            }
+
+            // Update viewport rectangle on the minimap
+            function updateMinimapViewport() {
+                if (!minimapViewport) return;
+
+                const containerRect = container.getBoundingClientRect();
+                const minimapRect = minimapContent.getBoundingClientRect();
+
+                // Calculate the visible area in graph coordinates
+                const visibleX = -lineageOffsetX / lineageScale;
+                const visibleY = -lineageOffsetY / lineageScale;
+                const visibleWidth = containerRect.width / lineageScale;
+                const visibleHeight = containerRect.height / lineageScale;
+
+                // Scale to minimap coordinates
+                const scaleX = minimapRect.width / graphWidth;
+                const scaleY = minimapRect.height / graphHeight;
+                const scale = Math.min(scaleX, scaleY);
+
+                minimapViewport.setAttribute('x', String(visibleX));
+                minimapViewport.setAttribute('y', String(visibleY));
+                minimapViewport.setAttribute('width', String(visibleWidth));
+                minimapViewport.setAttribute('height', String(visibleHeight));
+            }
+
+            // Handle click on minimap to pan
+            minimapContent.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                minimapDragging = true;
+                panToMinimapPosition(e);
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (minimapDragging) {
+                    panToMinimapPosition(e);
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                minimapDragging = false;
+            });
+
+            function panToMinimapPosition(e) {
+                const minimapRect = minimapContent.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+
+                // Calculate click position relative to minimap
+                const clickX = e.clientX - minimapRect.left;
+                const clickY = e.clientY - minimapRect.top;
+
+                // Convert to graph coordinates
+                const graphX = (clickX / minimapRect.width) * graphWidth;
+                const graphY = (clickY / minimapRect.height) * graphHeight;
+
+                // Calculate offset to center the viewport on click point
+                const visibleWidth = containerRect.width / lineageScale;
+                const visibleHeight = containerRect.height / lineageScale;
+
+                lineageOffsetX = -(graphX - visibleWidth / 2) * lineageScale;
+                lineageOffsetY = -(graphY - visibleHeight / 2) * lineageScale;
+
+                // Update main transform
+                const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
+                const currentZoomLevel = document.getElementById('lineage-zoom-level');
+                if (currentGraphContainer) {
+                    currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
+                }
+                if (currentZoomLevel) {
+                    currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+
+                updateMinimapViewport();
+            }
+
+            // Update minimap viewport when zooming/panning
+            const originalUpdateTransform = function() {
+                const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
+                const currentZoomLevel = document.getElementById('lineage-zoom-level');
+                if (!currentGraphContainer) return;
+                currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
+                if (currentZoomLevel) {
+                    currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+                updateMinimapViewport();
+            };
+
+            // Hook into zoom/pan events to update minimap
+            const mainSvg = container.querySelector('.lineage-graph-svg');
+            if (mainSvg) {
+                mainSvg.addEventListener('wheel', updateMinimapViewport);
+                mainSvg.addEventListener('mouseup', updateMinimapViewport);
+            }
+
+            // Initial viewport update
+            setTimeout(updateMinimapViewport, 200);
+        }
+
+        // Initialize minimap after graph is ready
+        setupMinimap();
     `;
 }
 

@@ -1834,6 +1834,28 @@ export function getLineageNodeStyles(): string {
         .lineage-node .column-dot.primary {
             fill: var(--warning-light);
         }
+        /* Column type color coding */
+        .lineage-node .column-dot.type-numeric {
+            fill: #60a5fa;  /* Blue for numbers */
+        }
+        .lineage-node .column-dot.type-text {
+            fill: #4ade80;  /* Green for text */
+        }
+        .lineage-node .column-dot.type-datetime {
+            fill: #c084fc;  /* Purple for dates */
+        }
+        .lineage-node .column-dot.type-boolean {
+            fill: #fb923c;  /* Orange for boolean */
+        }
+        .lineage-node .column-dot.type-binary {
+            fill: #f87171;  /* Red for binary */
+        }
+        .lineage-node .column-dot.type-json {
+            fill: #2dd4bf;  /* Teal for JSON */
+        }
+        .lineage-node .column-dot.type-other {
+            fill: rgba(255, 255, 255, 0.5);  /* Gray for unknown */
+        }
         .lineage-node .column-name {
             font-size: 11px;
             fill: rgba(255, 255, 255, 0.9);
@@ -1850,6 +1872,20 @@ export function getLineageNodeStyles(): string {
             font-size: 10px;
             fill: rgba(255, 255, 255, 0.7);
             cursor: pointer;
+        }
+        .lineage-node .column-close-btn {
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.15s;
+        }
+        .lineage-node .column-close-btn:hover {
+            opacity: 1;
+        }
+        .lineage-node .column-close-btn circle {
+            transition: fill 0.15s;
+        }
+        .lineage-node .column-close-btn:hover circle {
+            fill: rgba(239, 68, 68, 0.9);
         }
         .lineage-node .count-badge {
             font-size: 10px;
@@ -1953,10 +1989,16 @@ export function getLineageNodeStyles(): string {
         }
 
         /* Graph Edge Styles */
+        @keyframes flowAnimation {
+            from { stroke-dashoffset: 24; }
+            to { stroke-dashoffset: 0; }
+        }
         .lineage-edge {
             fill: none;
             stroke: var(--text-dim);
             stroke-width: 2;
+            stroke-dasharray: 8, 4;
+            animation: flowAnimation 1s linear infinite;
             transition: stroke 0.2s, stroke-width 0.2s;
         }
         .lineage-edge-direct { stroke: #64748b; }
@@ -1965,6 +2007,8 @@ export function getLineageNodeStyles(): string {
         .lineage-edge.highlighted {
             stroke: var(--accent);
             stroke-width: 3;
+            stroke-dasharray: 12, 6;
+            animation: flowAnimation 0.8s linear infinite;
         }
 
         /* Column Lineage Edge Styles */
@@ -2052,6 +2096,214 @@ export function getLineageNodeStyles(): string {
             margin: 4px 0;
         }
 
+        /* Legend Panel */
+        .lineage-legend {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            z-index: 100;
+            min-width: 120px;
+            overflow: hidden;
+        }
+        .lineage-legend .legend-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .lineage-legend .legend-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .lineage-legend .legend-toggle {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s, color 0.15s;
+        }
+        .lineage-legend .legend-toggle:hover {
+            color: var(--text-primary);
+        }
+        .lineage-legend.collapsed .legend-toggle {
+            transform: rotate(180deg);
+        }
+        .lineage-legend .legend-content {
+            padding: 8px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .lineage-legend.collapsed .legend-content {
+            display: none;
+        }
+        .lineage-legend .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .lineage-legend .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+        .lineage-legend .legend-table { background: var(--node-table); }
+        .lineage-legend .legend-view { background: var(--node-view); }
+        .lineage-legend .legend-cte { background: var(--accent); }
+        .lineage-legend .legend-external { background: var(--node-external); }
+        .lineage-legend .legend-icon {
+            font-size: 12px;
+        }
+        .lineage-legend .legend-label {
+            flex: 1;
+        }
+        .lineage-legend .legend-section-title {
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .lineage-legend .legend-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 8px 0;
+        }
+        .lineage-legend .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .lineage-legend .legend-primary { background: var(--warning-light); }
+        .lineage-legend .legend-numeric { background: #60a5fa; }
+        .lineage-legend .legend-text { background: #4ade80; }
+        .lineage-legend .legend-datetime { background: #c084fc; }
+        .lineage-legend .legend-json { background: #2dd4bf; }
+
+        /* Keyboard Shortcuts Hint */
+        .keyboard-hints {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 6px 12px;
+            box-shadow: var(--shadow-md);
+            z-index: 10;
+            opacity: 0.85;
+            transition: opacity 0.2s;
+        }
+        .keyboard-hints:hover {
+            opacity: 1;
+        }
+        .keyboard-hints .hint-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .keyboard-hints .hint-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+        }
+        .keyboard-hints kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 24px;
+            height: 24px;
+            padding: 0 6px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        /* Mini-map */
+        .lineage-minimap {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            width: 180px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            z-index: 100;
+            overflow: hidden;
+        }
+        .lineage-minimap .minimap-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .lineage-minimap .minimap-content {
+            height: 120px;
+            background: var(--bg-primary);
+            cursor: pointer;
+        }
+        .lineage-minimap .minimap-svg {
+            width: 100%;
+            height: 100%;
+        }
+        .lineage-minimap .minimap-node {
+            fill: var(--text-dim);
+            opacity: 0.6;
+        }
+        .lineage-minimap .minimap-node-table { fill: var(--node-table); opacity: 0.8; }
+        .lineage-minimap .minimap-node-view { fill: var(--node-view); opacity: 0.8; }
+        .lineage-minimap .minimap-node-cte { fill: var(--accent); opacity: 0.8; }
+        .lineage-minimap .minimap-node-external { fill: var(--node-external); opacity: 0.8; }
+        .lineage-minimap .minimap-viewport {
+            fill: rgba(99, 102, 241, 0.15);
+            stroke: var(--accent);
+            stroke-width: 2;
+            cursor: move;
+        }
+
+        /* Graph Stats Divider */
+        .graph-stats .stat-divider {
+            color: var(--border-subtle);
+            margin: 0 4px;
+        }
+        .graph-stats .stat.node-count {
+            color: var(--text-secondary);
+        }
+
         /* Empty States */
         .lineage-empty-state {
             display: flex;
@@ -2062,23 +2314,74 @@ export function getLineageNodeStyles(): string {
             text-align: center;
             color: var(--text-muted);
         }
+        .lineage-empty-state .empty-illustration {
+            margin-bottom: 24px;
+            padding: 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px dashed var(--border-subtle);
+        }
+        .lineage-empty-state .empty-illustration svg {
+            opacity: 1;
+            margin-bottom: 0;
+        }
         .lineage-empty-state svg {
             opacity: 0.5;
             margin-bottom: 20px;
         }
         .lineage-empty-state h3 {
-            font-size: 18px;
+            font-size: 20px;
             color: var(--text-primary);
-            margin: 0 0 12px 0;
+            margin: 0 0 8px 0;
+            font-weight: 600;
         }
         .lineage-empty-state p {
             margin: 4px 0;
             font-size: 14px;
+            color: var(--text-secondary);
+            max-width: 400px;
+        }
+        .lineage-empty-state .empty-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 24px 0;
+            text-align: left;
+        }
+        .lineage-empty-state .step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+        .lineage-empty-state .step-number {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            font-size: 12px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .lineage-empty-state .step-text {
+            font-size: 13px;
+            color: var(--text-secondary);
         }
         .lineage-empty-state .hint {
-            font-size: 12px;
-            color: var(--text-dim);
-            margin-top: 12px;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            max-width: 420px;
         }
 
         .lineage-no-relations {

@@ -391,8 +391,9 @@ export class LineageGraphRenderer {
         const { focusedNodeId, highlightPath = [] } = options;
         const highlightSet = new Set(highlightPath);
 
-        let svg = `<svg class="lineage-graph-svg" viewBox="0 0 ${graph.width} ${graph.height}"
-                        style="width: 100%; height: 100%;"
+        // Don't use viewBox - let the container handle sizing and we'll manage transforms manually
+        let svg = `<svg class="lineage-graph-svg"
+                        style="width: 100%; height: 100%; overflow: visible;"
                         xmlns="http://www.w3.org/2000/svg">`;
 
         // Add definitions for markers and gradients
@@ -516,9 +517,13 @@ export class LineageGraphRenderer {
                                column.isInPath ? '\u25CF' :    // ● In path
                                column.isPrimaryKey ? '\u25CF' : '\u25CB';  // ○ Default
 
+                // Determine column type category for color coding
+                const typeCategory = this.getColumnTypeCategory(column.dataType || '');
+                const dotClass = column.isPrimaryKey ? 'primary' : typeCategory;
+
                 svg += `
                     <g class="${columnClasses}" data-column-name="${this.escapeHtml(column.name)}" data-action="selectColumn">
-                        <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot${column.isPrimaryKey ? ' primary' : ''}"/>
+                        <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot ${dotClass}"/>
                         <text x="20" y="${columnY}" text-anchor="middle" class="column-state">${dotChar}</text>
                         <text x="32" y="${columnY}" class="column-name">${this.escapeHtml(column.name)}</text>
                         ${column.dataType ? `<text x="${node.width - 10}" y="${columnY}" text-anchor="end" class="column-type">${column.dataType}</text>` : ''}
@@ -526,6 +531,15 @@ export class LineageGraphRenderer {
                 `;
                 columnY += this.NODE_HEIGHT_PER_COLUMN;
             }
+
+            // Close button for expanded nodes (top-right corner)
+            svg += `
+                <g class="column-close-btn" data-action="collapse">
+                    <circle cx="${node.width - 16}" cy="16" r="10" fill="rgba(239,68,68,0.6)"/>
+                    <path d="M ${node.width - 21} 11 L ${node.width - 11} 21 M ${node.width - 11} 11 L ${node.width - 21} 21"
+                          stroke="white" stroke-width="2" stroke-linecap="round"/>
+                </g>
+            `;
         }
 
         svg += `</g>`;
@@ -585,6 +599,46 @@ export class LineageGraphRenderer {
             'external': '\uD83C\uDF10'  // 🌐
         };
         return icons[type] || '\uD83D\uDCE6';  // 📦
+    }
+
+    /**
+     * Get column type category for color coding
+     * Categories: numeric, text, datetime, boolean, binary, json, other
+     */
+    private getColumnTypeCategory(dataType: string): string {
+        const type = dataType.toUpperCase();
+
+        // Numeric types
+        if (/INT|DECIMAL|NUMERIC|FLOAT|DOUBLE|REAL|NUMBER|MONEY|SERIAL|BIGINT|SMALLINT|TINYINT/.test(type)) {
+            return 'type-numeric';
+        }
+
+        // Text types
+        if (/CHAR|TEXT|STRING|CLOB|VARCHAR|NCHAR|NVARCHAR/.test(type)) {
+            return 'type-text';
+        }
+
+        // Date/Time types
+        if (/DATE|TIME|TIMESTAMP|DATETIME|YEAR|INTERVAL/.test(type)) {
+            return 'type-datetime';
+        }
+
+        // Boolean
+        if (/BOOL|BOOLEAN|BIT/.test(type)) {
+            return 'type-boolean';
+        }
+
+        // Binary/Blob
+        if (/BLOB|BINARY|BYTEA|VARBINARY|IMAGE/.test(type)) {
+            return 'type-binary';
+        }
+
+        // JSON/Array/Object
+        if (/JSON|JSONB|ARRAY|OBJECT|MAP|STRUCT/.test(type)) {
+            return 'type-json';
+        }
+
+        return 'type-other';
     }
 
     /**
