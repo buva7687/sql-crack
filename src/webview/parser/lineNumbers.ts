@@ -84,7 +84,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                                 break;
                             }
                         }
-                        if (node.startLine) break;
+                        if (node.startLine) {break;}
                     }
                 }
                 break;
@@ -92,46 +92,46 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             case 'filter': {
                 if (node.label === 'WHERE') {
                     const whereLines = keywordLines.get('WHERE') || [];
-                    if (whereLines.length > 0) node.startLine = whereLines[0];
+                    if (whereLines.length > 0) {node.startLine = whereLines[0];}
                 } else if (node.label === 'HAVING') {
                     const havingLines = keywordLines.get('HAVING') || [];
-                    if (havingLines.length > 0) node.startLine = havingLines[0];
+                    if (havingLines.length > 0) {node.startLine = havingLines[0];}
                 }
                 break;
             }
             case 'aggregate': {
                 const groupLines = keywordLines.get('GROUP BY') || [];
-                if (groupLines.length > 0) node.startLine = groupLines[0];
+                if (groupLines.length > 0) {node.startLine = groupLines[0];}
                 break;
             }
             case 'sort': {
                 const orderLines = keywordLines.get('ORDER BY') || [];
-                if (orderLines.length > 0) node.startLine = orderLines[0];
+                if (orderLines.length > 0) {node.startLine = orderLines[0];}
                 break;
             }
             case 'limit': {
                 const limitLines = keywordLines.get('LIMIT') || [];
-                if (limitLines.length > 0) node.startLine = limitLines[0];
+                if (limitLines.length > 0) {node.startLine = limitLines[0];}
                 break;
             }
             case 'select': {
                 const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) node.startLine = selectLines[0];
+                if (selectLines.length > 0) {node.startLine = selectLines[0];}
                 break;
             }
             case 'cte': {
                 const withLines = keywordLines.get('WITH') || [];
-                if (withLines.length > 0) node.startLine = withLines[0];
+                if (withLines.length > 0) {node.startLine = withLines[0];}
                 break;
             }
             case 'union': {
                 const unionLines = keywordLines.get('UNION') || keywordLines.get('INTERSECT') || keywordLines.get('EXCEPT') || [];
-                if (unionLines.length > 0) node.startLine = unionLines[0];
+                if (unionLines.length > 0) {node.startLine = unionLines[0];}
                 break;
             }
             case 'result': {
                 const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) node.startLine = selectLines[0];
+                if (selectLines.length > 0) {node.startLine = selectLines[0];}
                 break;
             }
         }

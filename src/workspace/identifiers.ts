@@ -4,7 +4,7 @@
  * Normalize identifier for consistent map keys.
  */
 export function normalizeIdentifier(value?: string): string | undefined {
-    if (!value) return undefined;
+    if (!value) {return undefined;}
     const trimmed = value.trim();
     return trimmed ? trimmed.toLowerCase() : undefined;
 }

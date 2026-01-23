@@ -110,14 +110,14 @@ function renderBreadcrumb(): void {
         // Click to focus on this node
         if (node.id !== 'main-query') {
             item.addEventListener('click', () => {
-                if (onSelectNode) onSelectNode(node.id);
-                if (onZoomToNode) onZoomToNode(node);
+                if (onSelectNode) {onSelectNode(node.id);}
+                if (onZoomToNode) {onZoomToNode(node);}
             });
         } else {
             // For main query, reset to full view
             item.addEventListener('click', () => {
-                if (onSelectNode) onSelectNode(null);
-                if (onResetView) onResetView();
+                if (onSelectNode) {onSelectNode(null);}
+                if (onResetView) {onResetView();}
             });
         }
 

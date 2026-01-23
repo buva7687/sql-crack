@@ -1,6 +1,7 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
+import { isAggregateFunction, isWindowFunction, getAggregateFunctions, getWindowFunctions } from '../dialects';
 
 // Import types from centralized type definitions
 import {
@@ -45,6 +46,7 @@ let hasSelectStar = false;
 let hasNoLimit = false;
 let statementType = '';
 let tableUsageMap: Map<string, number> = new Map();
+let currentDialect: SqlDialect = 'MySQL';
 
 function resetStats(): void {
     stats = {
@@ -339,7 +341,7 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                                 break;
                             }
                         }
-                        if (node.startLine) break;
+                        if (node.startLine) {break;}
                     }
                 }
                 break;
@@ -347,47 +349,47 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             case 'filter': {
                 if (node.label === 'WHERE') {
                     const whereLines = keywordLines.get('WHERE') || [];
-                    if (whereLines.length > 0) node.startLine = whereLines[0];
+                    if (whereLines.length > 0) {node.startLine = whereLines[0];}
                 } else if (node.label === 'HAVING') {
                     const havingLines = keywordLines.get('HAVING') || [];
-                    if (havingLines.length > 0) node.startLine = havingLines[0];
+                    if (havingLines.length > 0) {node.startLine = havingLines[0];}
                 }
                 break;
             }
             case 'aggregate': {
                 const groupLines = keywordLines.get('GROUP BY') || [];
-                if (groupLines.length > 0) node.startLine = groupLines[0];
+                if (groupLines.length > 0) {node.startLine = groupLines[0];}
                 break;
             }
             case 'sort': {
                 const orderLines = keywordLines.get('ORDER BY') || [];
-                if (orderLines.length > 0) node.startLine = orderLines[0];
+                if (orderLines.length > 0) {node.startLine = orderLines[0];}
                 break;
             }
             case 'limit': {
                 const limitLines = keywordLines.get('LIMIT') || [];
-                if (limitLines.length > 0) node.startLine = limitLines[0];
+                if (limitLines.length > 0) {node.startLine = limitLines[0];}
                 break;
             }
             case 'select': {
                 const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) node.startLine = selectLines[0];
+                if (selectLines.length > 0) {node.startLine = selectLines[0];}
                 break;
             }
             case 'cte': {
                 const withLines = keywordLines.get('WITH') || [];
-                if (withLines.length > 0) node.startLine = withLines[0];
+                if (withLines.length > 0) {node.startLine = withLines[0];}
                 break;
             }
             case 'union': {
                 const unionLines = keywordLines.get('UNION') || keywordLines.get('INTERSECT') || keywordLines.get('EXCEPT') || [];
-                if (unionLines.length > 0) node.startLine = unionLines[0];
+                if (unionLines.length > 0) {node.startLine = unionLines[0];}
                 break;
             }
             case 'result': {
                 // Result is at the end - use last SELECT line
                 const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) node.startLine = selectLines[0];
+                if (selectLines.length > 0) {node.startLine = selectLines[0];}
                 break;
             }
         }
@@ -396,6 +398,7 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     nodeCounter = 0;
+    currentDialect = dialect;
     resetStats();
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -586,7 +589,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
         
         if (!referencedCTEs.has(cteName)) {
             // CTE is defined but never used
-            if (!cteNode.warnings) cteNode.warnings = [];
+            if (!cteNode.warnings) {cteNode.warnings = [];}
             cteNode.warnings.push({
                 type: 'unused',
                 severity: 'medium',
@@ -649,14 +652,14 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     // 2. Extract subqueries from SQL using balanced parentheses matching
     // This handles nested subqueries correctly by tracking parenthesis depth
     const extractSubquery = (sql: string, startIndex: number): { sql: string; endIndex: number } | null => {
-        if (sql[startIndex] !== '(') return null;
+        if (sql[startIndex] !== '(') {return null;}
         
         let depth = 0;
         let i = startIndex;
         let start = i + 1; // Skip opening (
         
         while (i < sql.length) {
-            if (sql[i] === '(') depth++;
+            if (sql[i] === '(') {depth++;}
             if (sql[i] === ')') {
                 depth--;
                 if (depth === 0) {
@@ -677,7 +680,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     while (searchIndex < sql.length) {
         // Look for SELECT keyword
         const selectPos = sqlLower.indexOf('select', searchIndex);
-        if (selectPos === -1) break;
+        if (selectPos === -1) {break;}
         
         // Check if it's inside parentheses (subquery)
         // Look backwards for opening parenthesis
@@ -687,7 +690,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 parenPos = i;
                 break;
             }
-            if (sql[i] === ')' || sql[i] === ';') break; // Not a subquery
+            if (sql[i] === ')' || sql[i] === ';') {break;} // Not a subquery
         }
         
         if (parenPos >= 0) {
@@ -737,11 +740,11 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     const processed = new Set<string>();
     
     allSubqueries.forEach((subq1, idx1) => {
-        if (processed.has(subq1.normalized)) return;
+        if (processed.has(subq1.normalized)) {return;}
         
         const similar: SubqueryMatch[] = [subq1];
         allSubqueries.forEach((subq2, idx2) => {
-            if (idx1 >= idx2 || processed.has(subq2.normalized)) return;
+            if (idx1 >= idx2 || processed.has(subq2.normalized)) {return;}
             
             // Check if subqueries are similar (same FROM table and similar structure)
             const sig1 = subq1.normalized;
@@ -774,7 +777,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     similarGroups.forEach(group => {
         group.forEach(subq => {
             if (subq.node) {
-                if (!subq.node.warnings) subq.node.warnings = [];
+                if (!subq.node.warnings) {subq.node.warnings = [];}
                 subq.node.warnings.push({
                     type: 'complex',
                     severity: 'low',
@@ -792,7 +795,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 }
                 
                 if (targetNode) {
-                    if (!targetNode.warnings) targetNode.warnings = [];
+                    if (!targetNode.warnings) {targetNode.warnings = [];}
                     targetNode.warnings.push({
                         type: 'complex',
                         severity: 'low',
@@ -818,7 +821,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
             group.forEach(subq => {
                 if (subq.node) {
                     // FROM subquery - has a node, add warning to it
-                    if (!subq.node.warnings) subq.node.warnings = [];
+                    if (!subq.node.warnings) {subq.node.warnings = [];}
                     subq.node.warnings.push({
                         type: 'complex',
                         severity: 'low',
@@ -840,7 +843,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                     }
                     
                     if (targetNode) {
-                        if (!targetNode.warnings) targetNode.warnings = [];
+                        if (!targetNode.warnings) {targetNode.warnings = [];}
                         targetNode.warnings.push({
                             type: 'complex',
                             severity: 'low',
@@ -877,7 +880,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     
     const selectNodes = nodes.filter(n => n.type === 'select' && n.columns);
     selectNodes.forEach(selectNode => {
-        if (!selectNode.columns || selectNode.columns.length === 0) return;
+        if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
         // Skip dead column detection for top-level SELECT nodes (final query output)
         // A SELECT with no parentId is a top-level query - all its columns are output columns
@@ -905,8 +908,8 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
             let parenDepth = 0;
             for (let i = 0; i < selectClause.length; i++) {
                 const char = selectClause[i];
-                if (char === '(') parenDepth++;
-                else if (char === ')') parenDepth--;
+                if (char === '(') {parenDepth++;}
+                else if (char === ')') {parenDepth--;}
                 else if (char === ',' && parenDepth === 0) {
                     columnParts.push(current.trim());
                     current = '';
@@ -914,7 +917,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 }
                 current += char;
             }
-            if (current.trim()) columnParts.push(current.trim());
+            if (current.trim()) {columnParts.push(current.trim());}
             
             columnParts.forEach(part => {
                 const trimmed = part.trim();
@@ -964,7 +967,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
             // This is more reliable than AST traversal for detecting column usage
             if (normalizedSql) {
                 for (const nameToCheck of Array.from(colNamesToCheck)) {
-                    if (isUsed) break;
+                    if (isUsed) {break;}
                     
                     // Escape special regex characters to prevent regex injection
                     const escapedColName = nameToCheck.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1010,13 +1013,13 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                             break;
                         }
                     }
-                    if (isUsed) break;
+                    if (isUsed) {break;}
                 }
             }
 
             // If column is not used in any clause, it's a dead column
             if (!isUsed) {
-                if (!selectNode.warnings) selectNode.warnings = [];
+                if (!selectNode.warnings) {selectNode.warnings = [];}
                 selectNode.warnings.push({
                     type: 'dead-column',
                     severity: 'low',
@@ -1058,7 +1061,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
     tableUsage.forEach((usages, tableName) => {
         if (usages.length > 1) {
             usages.forEach(node => {
-                if (!node.warnings) node.warnings = [];
+                if (!node.warnings) {node.warnings = [];}
                 node.warnings.push({
                     type: 'repeated-scan',
                     severity: 'medium',
@@ -1098,11 +1101,11 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
 
     // Calculate critical path length (longest path from source to result)
     const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
-        if (visited.has(nodeId)) return 0;
+        if (visited.has(nodeId)) {return 0;}
         visited.add(nodeId);
 
         const outgoing = edges.filter(e => e.source === nodeId);
-        if (outgoing.length === 0) return 1;
+        if (outgoing.length === 0) {return 1;}
 
         const maxChildPath = Math.max(
             ...outgoing.map(edge => calculatePathLength(edge.target, new Set(visited)))
@@ -1132,7 +1135,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
     nodes.forEach(node => {
         const fanOut = fanOutMap.get(node.id) || 0;
         if (fanOut >= 3) {
-            if (!node.warnings) node.warnings = [];
+            if (!node.warnings) {node.warnings = [];}
             node.warnings.push({
                 type: 'fan-out',
                 severity: fanOut >= 5 ? 'high' : 'medium',
@@ -1143,7 +1146,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
         // Mark nodes with high complexity
         if ((node.type === 'join' && stats.joins > 3) ||
             (node.type === 'aggregate' && node.aggregateDetails && node.aggregateDetails.functions.length > 3)) {
-            if (!node.warnings) node.warnings = [];
+            if (!node.warnings) {node.warnings = [];}
             node.warnings.push({
                 type: 'complex',
                 severity: 'medium',
@@ -1883,21 +1886,20 @@ function extractWindowFunctionDetails(columns: any): Array<{
         frame?: string;
     }> = [];
 
+    // Get dialect-specific window functions
+    const windowFuncList = getWindowFunctions(currentDialect);
+
     for (const col of columns) {
         if (col.expr?.over) {
             // Safely extract function name - could be in various formats
             let funcName = 'WINDOW';
             const expr = col.expr;
 
-            // Common window functions to check for
-            const WINDOW_FUNCS = ['LAG', 'LEAD', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
-                'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
-
             // Helper to safely get string value
             const getStringName = (obj: any): string | null => {
-                if (typeof obj === 'string') return obj;
-                if (obj && typeof obj.name === 'string') return obj.name;
-                if (obj && typeof obj.value === 'string') return obj.value;
+                if (typeof obj === 'string') {return obj;}
+                if (obj && typeof obj.name === 'string') {return obj.name;}
+                if (obj && typeof obj.value === 'string') {return obj.value;}
                 return null;
             };
 
@@ -1907,28 +1909,28 @@ function extractWindowFunctionDetails(columns: any): Array<{
                 funcName = nameFromExpr;
             } else if (expr.type === 'aggr_func' || expr.type === 'function') {
                 const aggName = getStringName(expr.name);
-                if (aggName) funcName = aggName;
+                if (aggName) {funcName = aggName;}
             } else if (expr.args?.expr) {
                 const argsName = getStringName(expr.args.expr.name) || getStringName(expr.args.expr);
-                if (argsName) funcName = argsName;
+                if (argsName) {funcName = argsName;}
             }
 
             // Check for window function in alias patterns
             if (funcName === 'WINDOW' && col.as) {
                 const alias = String(col.as).toLowerCase();
-                if (alias.includes('prev') || alias.includes('lag')) funcName = 'LAG';
-                else if (alias.includes('next') || alias.includes('lead')) funcName = 'LEAD';
-                else if (alias.includes('rank')) funcName = 'RANK';
-                else if (alias.includes('row_num')) funcName = 'ROW_NUMBER';
-                else if (alias.includes('running') || alias.includes('total')) funcName = 'SUM';
-                else if (alias.includes('avg') || alias.includes('average')) funcName = 'AVG';
+                if (alias.includes('prev') || alias.includes('lag')) {funcName = 'LAG';}
+                else if (alias.includes('next') || alias.includes('lead')) {funcName = 'LEAD';}
+                else if (alias.includes('rank')) {funcName = 'RANK';}
+                else if (alias.includes('row_num')) {funcName = 'ROW_NUMBER';}
+                else if (alias.includes('running') || alias.includes('total')) {funcName = 'SUM';}
+                else if (alias.includes('avg') || alias.includes('average')) {funcName = 'AVG';}
             }
 
-            // Final fallback - search JSON for known function names
+            // Final fallback - search JSON for known function names (dialect-aware)
             if (funcName === 'WINDOW') {
                 try {
                     const exprStr = JSON.stringify(expr).toUpperCase();
-                    for (const wf of WINDOW_FUNCS) {
+                    for (const wf of windowFuncList) {
                         if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
                             funcName = wf;
                             break;
@@ -1981,15 +1983,17 @@ function extractAggregateFunctionDetails(columns: any): Array<{
 }> {
     if (!columns || !Array.isArray(columns)) { return []; }
 
-    const aggregateFuncs = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT', 'STRING_AGG', 'ARRAY_AGG'];
+    // Get dialect-specific aggregate functions
+    const aggregateFuncSet = new Set(getAggregateFunctions(currentDialect));
     const details: Array<{ name: string; expression: string; alias?: string }> = [];
 
     function extractAggregatesFromExpr(expr: any): void {
-        if (!expr) return;
+        if (!expr) {return;}
 
-        // Check if this is an aggregate function
-        if (expr.type === 'aggr_func' || (expr.name && aggregateFuncs.includes(String(expr.name).toUpperCase()))) {
-            const funcName = String(expr.name || 'AGG').toUpperCase();
+        // Check if this is an aggregate function (dialect-aware)
+        const exprFuncName = String(expr.name || '').toUpperCase();
+        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+            const funcName = exprFuncName || 'AGG';
             
             // Extract arguments/expression
             let expression = funcName + '()';
@@ -1997,9 +2001,9 @@ function extractAggregateFunctionDetails(columns: any): Array<{
                 const args = expr.args.value || expr.args;
                 if (Array.isArray(args)) {
                     const argStrs = args.map((arg: any) => {
-                        if (arg.column) return arg.column;
-                        if (arg.value) return String(arg.value);
-                        if (arg.expr?.column) return arg.expr.column;
+                        if (arg.column) {return arg.column;}
+                        if (arg.value) {return String(arg.value);}
+                        if (arg.expr?.column) {return arg.expr.column;}
                         return '?';
                     });
                     expression = funcName + '(' + argStrs.join(', ') + ')';
@@ -2025,8 +2029,8 @@ function extractAggregateFunctionDetails(columns: any): Array<{
                 extractAggregatesFromExpr(args);
             }
         }
-        if (expr.left) extractAggregatesFromExpr(expr.left);
-        if (expr.right) extractAggregatesFromExpr(expr.right);
+        if (expr.left) {extractAggregatesFromExpr(expr.left);}
+        if (expr.right) {extractAggregatesFromExpr(expr.right);}
     }
 
     for (const col of columns) {
@@ -2057,9 +2061,9 @@ function extractCaseStatementDetails(columns: any): Array<{
     }> = [];
 
     function formatExpr(expr: any): string {
-        if (!expr) return '?';
-        if (expr.column) return expr.column;
-        if (expr.value) return String(expr.value);
+        if (!expr) {return '?';}
+        if (expr.column) {return expr.column;}
+        if (expr.value) {return String(expr.value);}
         if (expr.type === 'binary_expr') {
             const left = formatExpr(expr.left);
             const right = formatExpr(expr.right);
@@ -2359,7 +2363,7 @@ function extractSourcesFromExpr(
     tableAliasMap: Map<string, string>,
     tableNodes: FlowNode[]
 ): void {
-    if (!expr) return;
+    if (!expr) {return;}
 
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {
@@ -2451,11 +2455,11 @@ function generateColumnFlows(
 
     // Find SELECT nodes (output nodes)
     const selectNodes = nodes.filter(n => n.type === 'select');
-    if (selectNodes.length === 0) return columnFlows;
+    if (selectNodes.length === 0) {return columnFlows;}
 
     // Process each SELECT node's output columns
     for (const selectNode of selectNodes) {
-        if (!selectNode.columns || selectNode.columns.length === 0) continue;
+        if (!selectNode.columns || selectNode.columns.length === 0) {continue;}
 
         for (const outputCol of selectNode.columns) {
             // Build full lineage path for this output column
@@ -2494,7 +2498,7 @@ function buildColumnLineagePath(
     const path: ColumnFlow['lineagePath'] = [];
 
     // Prevent infinite loops
-    if (visited.has(currentNode.id)) return path;
+    if (visited.has(currentNode.id)) {return path;}
     visited.add(currentNode.id);
 
     // Determine transformation at current node
@@ -2522,7 +2526,7 @@ function buildColumnLineagePath(
 
     for (const sourceNodeId of incoming) {
         const sourceNode = nodeMap.get(sourceNodeId);
-        if (!sourceNode) continue;
+        if (!sourceNode) {continue;}
 
         // Find matching source column
         const sourceColumn = findSourceColumn(column, sourceNode, currentNode);

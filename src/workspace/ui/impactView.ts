@@ -19,8 +19,8 @@ export class ImpactView {
             graph.nodes.forEach((node) => {
                 if (node.type === 'table' || node.type === 'view') {
                     tables.push(node);
-                    if (node.type === 'table') tableCount++;
-                    else viewCount++;
+                    if (node.type === 'table') {tableCount++;}
+                    else {viewCount++;}
                 }
             });
         }

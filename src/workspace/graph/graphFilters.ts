@@ -18,7 +18,7 @@ export class GraphFilters {
         while (queue.length > 0) {
             const [currentId, currentDepth] = queue.shift()!;
 
-            if (maxDepth !== -1 && currentDepth >= maxDepth) continue;
+            if (maxDepth !== -1 && currentDepth >= maxDepth) {continue;}
 
             const incoming = graph.edges
                 .filter(e => e.target === currentId)
@@ -47,7 +47,7 @@ export class GraphFilters {
         while (queue.length > 0) {
             const [currentId, currentDepth] = queue.shift()!;
 
-            if (maxDepth !== -1 && currentDepth >= maxDepth) continue;
+            if (maxDepth !== -1 && currentDepth >= maxDepth) {continue;}
 
             const outgoing = graph.edges
                 .filter(e => e.source === currentId)
@@ -242,14 +242,14 @@ export class GraphFilters {
         const components: Graph[] = [];
 
         for (const node of graph.nodes) {
-            if (visited.has(node.id)) continue;
+            if (visited.has(node.id)) {continue;}
 
             const componentIds = new Set<string>();
             const queue: string[] = [node.id];
 
             while (queue.length > 0) {
                 const current = queue.shift()!;
-                if (componentIds.has(current)) continue;
+                if (componentIds.has(current)) {continue;}
 
                 componentIds.add(current);
                 visited.add(current);

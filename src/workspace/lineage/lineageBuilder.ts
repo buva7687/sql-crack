@@ -44,7 +44,7 @@ export class LineageBuilder implements LineageGraph {
             for (const def of defs) {
                 const tableKey = getQualifiedKey(def.name, def.schema);
                 const nodeId = this.getTableNodeId(def.type, tableKey);
-                if (seenNodes.has(nodeId)) continue;
+                if (seenNodes.has(nodeId)) {continue;}
                 seenNodes.add(nodeId);
                 this.addDefinitionNode(def);
             }
@@ -96,7 +96,7 @@ export class LineageBuilder implements LineageGraph {
         // Create CTE nodes
         for (const [cteKey, cteInfo] of cteNames) {
             const nodeId = this.getTableNodeId('cte', cteKey);
-            if (seenNodes.has(nodeId)) continue;
+            if (seenNodes.has(nodeId)) {continue;}
             seenNodes.add(nodeId);
             
             // Create CTE node
@@ -122,7 +122,7 @@ export class LineageBuilder implements LineageGraph {
                     const tableKey = getQualifiedKey(def.name, def.schema);
                     const nodeId = this.getTableNodeId(def.type, tableKey);
                     console.log(`[LineageBuilder] Definition ${def.name}: ${def.columns?.length || 0} columns, nodeId=${nodeId}, exists=${this.nodes.has(nodeId)}`);
-                    if (!this.nodes.has(nodeId)) continue;
+                    if (!this.nodes.has(nodeId)) {continue;}
                     this.addColumnNodes(tableKey, def.columns, def.type);
                 }
             }
@@ -305,7 +305,7 @@ export class LineageBuilder implements LineageGraph {
             }
 
             // Skip if no outputs in this statement
-            if (outputs.size === 0) continue;
+            if (outputs.size === 0) {continue;}
 
             for (const sourceTableKey of inputs) {
                 const sourceNodeId = this.resolveTableNodeId(sourceTableKey);
@@ -316,7 +316,7 @@ export class LineageBuilder implements LineageGraph {
                     sourceNode = this.addExternalNode(sourceTableKey);
                 }
 
-                if (!sourceNode) continue;
+                if (!sourceNode) {continue;}
 
                 for (const targetTableKey of outputs) {
                     const targetNodeId = this.resolveTableNodeId(targetTableKey);
@@ -327,10 +327,10 @@ export class LineageBuilder implements LineageGraph {
                         targetNode = this.addExternalNode(targetTableKey);
                     }
 
-                    if (!targetNode) continue;
+                    if (!targetNode) {continue;}
 
                     // Don't create self-referential edges
-                    if (sourceNode.id === targetNode.id) continue;
+                    if (sourceNode.id === targetNode.id) {continue;}
 
                     // Create edge from source to target
                     const edgeId = `${sourceNode.id}->${targetNode.id}`;
@@ -372,15 +372,15 @@ export class LineageBuilder implements LineageGraph {
 
         for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
             const query = analysis.queries[queryIndex];
-            if (!query.transformations || query.transformations.length === 0) continue;
+            if (!query.transformations || query.transformations.length === 0) {continue;}
 
             // Resolve target table for this query
             const targetTableId = this.resolveTargetTableId(query, queryIndex, analysis, filePath);
-            if (!targetTableId) continue;
+            if (!targetTableId) {continue;}
 
             for (const transform of query.transformations) {
                 // Skip if no input columns (literal values)
-                if (!transform.inputColumns || transform.inputColumns.length === 0) continue;
+                if (!transform.inputColumns || transform.inputColumns.length === 0) {continue;}
 
                 // For each input column, create a column edge
                 for (const inputCol of transform.inputColumns) {
@@ -390,7 +390,7 @@ export class LineageBuilder implements LineageGraph {
                         filePath
                     );
 
-                    if (!sourceTableId) continue; // Skip if source table not found
+                    if (!sourceTableId) {continue;} // Skip if source table not found
 
                     // Create column edge
                     const columnEdge: ColumnLineageEdge = {
@@ -430,7 +430,7 @@ export class LineageBuilder implements LineageGraph {
      * Resolve table ID from table name or alias
      */
     private resolveTableId(tableName: string | undefined, filePath: string): string | null {
-        if (!tableName) return null;
+        if (!tableName) {return null;}
 
         const normalizedName = tableName.toLowerCase();
 
@@ -527,7 +527,7 @@ export class LineageBuilder implements LineageGraph {
                 (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
                 const tableKey = getQualifiedKey(ref.tableName, ref.schema);
                 const resolved = this.resolveTableId(tableKey, filePath);
-                if (resolved) return resolved;
+                if (resolved) {return resolved;}
             }
         }
 
@@ -536,7 +536,7 @@ export class LineageBuilder implements LineageGraph {
             const def = analysis.definitions[0];
             const tableKey = getQualifiedKey(def.name, def.schema);
             const resolved = this.resolveTableId(tableKey, filePath);
-            if (resolved) return resolved;
+            if (resolved) {return resolved;}
         }
 
         // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
@@ -629,8 +629,8 @@ export class LineageBuilder implements LineageGraph {
         const result: LineageNode[] = [];
 
         const traverse = (currentId: string, currentDepth: number) => {
-            if (depth !== -1 && currentDepth >= depth) return;
-            if (visited.has(currentId)) return;
+            if (depth !== -1 && currentDepth >= depth) {return;}
+            if (visited.has(currentId)) {return;}
 
             visited.add(currentId);
 
@@ -658,8 +658,8 @@ export class LineageBuilder implements LineageGraph {
         const result: LineageNode[] = [];
 
         const traverse = (currentId: string, currentDepth: number) => {
-            if (depth !== -1 && currentDepth >= depth) return;
-            if (visited.has(currentId)) return;
+            if (depth !== -1 && currentDepth >= depth) {return;}
+            if (visited.has(currentId)) {return;}
 
             visited.add(currentId);
 
@@ -686,7 +686,7 @@ export class LineageBuilder implements LineageGraph {
         const columnId = this.getColumnNodeId(tableId, columnName);
         const columnNode = this.nodes.get(columnId);
 
-        if (!columnNode) return [];
+        if (!columnNode) {return [];}
 
         // Get upstream lineage
         const upstreamNodes = this.getUpstream(columnId, -1);
@@ -957,7 +957,7 @@ export class LineageBuilder implements LineageGraph {
             let closeParenIndex = -1;
             const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
             for (let i = openParenIndex; i < maxSearchLength; i++) {
-                if (sql[i] === '(') parenCount++;
+                if (sql[i] === '(') {parenCount++;}
                 else if (sql[i] === ')') {
                     parenCount--;
                     if (parenCount === 0) {

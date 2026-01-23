@@ -10,7 +10,7 @@ import { selectNode } from './selection';
  * Upstream = edges where edge.target === nodeId (find edge.source)
  */
 function findAllUpstream(nodeId: string, edges: FlowEdge[], visited: Set<string> = new Set()): Set<string> {
-    if (visited.has(nodeId)) return visited;
+    if (visited.has(nodeId)) {return visited;}
     visited.add(nodeId);
 
     for (const edge of edges) {
@@ -26,7 +26,7 @@ function findAllUpstream(nodeId: string, edges: FlowEdge[], visited: Set<string>
  * Downstream = edges where edge.source === nodeId (find edge.target)
  */
 function findAllDownstream(nodeId: string, edges: FlowEdge[], visited: Set<string> = new Set()): Set<string> {
-    if (visited.has(nodeId)) return visited;
+    if (visited.has(nodeId)) {return visited;}
     visited.add(nodeId);
 
     for (const edge of edges) {

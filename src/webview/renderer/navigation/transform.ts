@@ -17,7 +17,7 @@ export function updateTransform(): void {
 }
 
 export function clearFocusMode(): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     const allNodes = mainGroup.querySelectorAll('.node');
     allNodes.forEach(nodeEl => {

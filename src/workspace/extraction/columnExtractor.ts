@@ -63,7 +63,7 @@ export class ColumnExtractor {
             const expr = col.expr;
             const alias = col.as;
 
-            if (!expr) return null;
+            if (!expr) {return null;}
 
             // Check if this is a direct column reference
             if (expr.type === 'column_ref') {
@@ -139,7 +139,7 @@ export class ColumnExtractor {
     ): ColumnReference[] {
         const columns: ColumnReference[] = [];
 
-        if (!ast) return columns;
+        if (!ast) {return columns;}
 
         // Extract based on context
         switch (context) {
@@ -197,7 +197,7 @@ export class ColumnExtractor {
         tableRef: any,
         aliasMap: Map<string, string>
     ): void {
-        if (!tableRef) return;
+        if (!tableRef) {return;}
 
         const table = tableRef.table || tableRef;
 
@@ -220,7 +220,7 @@ export class ColumnExtractor {
      * Get table name from table reference
      */
     private getTableName(table: any): string | null {
-        if (!table) return null;
+        if (!table) {return null;}
 
         if (table.table) {
             return this.getTableName(table.table);
@@ -258,7 +258,7 @@ export class ColumnExtractor {
      * Extract column name from column reference
      */
     private extractColumnName(column: any): string {
-        if (!column) return '';
+        if (!column) {return '';}
 
         if (column.column) {
             return column.column;
@@ -275,7 +275,7 @@ export class ColumnExtractor {
      * Check if expression is a computed expression (not simple column ref)
      */
     private isExpression(expr: any): boolean {
-        if (!expr || !expr.type) return false;
+        if (!expr || !expr.type) {return false;}
 
         const expressionTypes = [
             'binary_expr',      // a + b
@@ -295,7 +295,7 @@ export class ColumnExtractor {
      * Generate a name for an expression
      */
     private generateExpressionName(expr: any): string {
-        if (!expr) return 'expr';
+        if (!expr) {return 'expr';}
 
         const type = expr.type || '';
 
@@ -315,7 +315,7 @@ export class ColumnExtractor {
      * Convert expression to string representation
      */
     private expressionToString(expr: any): string {
-        if (!expr) return '';
+        if (!expr) {return '';}
 
         try {
             const sql = this.parser.sqlify(expr);
@@ -333,7 +333,7 @@ export class ColumnExtractor {
         columns: ColumnReference[],
         context: ColumnUsageContext
     ): void {
-        if (!expr) return;
+        if (!expr) {return;}
 
         if (expr.type === 'column_ref') {
             const columnName = this.extractColumnName(expr);
@@ -377,7 +377,7 @@ export class ColumnExtractor {
         columns: ColumnReference[],
         context: ColumnUsageContext
     ): void {
-        if (!from) return;
+        if (!from) {return;}
 
         for (const fromClause of from) {
             if (fromClause.on) {
@@ -417,7 +417,7 @@ export class ColumnExtractor {
         columns: ColumnReference[],
         context: ColumnUsageContext
     ): void {
-        if (!list) return;
+        if (!list) {return;}
 
         const items = Array.isArray(list) ? list : [list];
 
@@ -447,7 +447,7 @@ export class ColumnExtractor {
         result: ColumnReference[],
         context: ColumnUsageContext
     ): void {
-        if (!columns) return;
+        if (!columns) {return;}
 
         for (const col of columns) {
             if (col.expr) {

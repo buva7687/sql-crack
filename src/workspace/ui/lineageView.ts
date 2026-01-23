@@ -205,10 +205,10 @@ export class LineageView {
 
         // Build node count badge parts
         const countParts: string[] = [];
-        if (nodeCounts.table > 0) countParts.push(`${nodeCounts.table} table${nodeCounts.table !== 1 ? 's' : ''}`);
-        if (nodeCounts.view > 0) countParts.push(`${nodeCounts.view} view${nodeCounts.view !== 1 ? 's' : ''}`);
-        if (nodeCounts.cte > 0) countParts.push(`${nodeCounts.cte} CTE${nodeCounts.cte !== 1 ? 's' : ''}`);
-        if (nodeCounts.external > 0) countParts.push(`${nodeCounts.external} external`);
+        if (nodeCounts.table > 0) {countParts.push(`${nodeCounts.table} table${nodeCounts.table !== 1 ? 's' : ''}`);}
+        if (nodeCounts.view > 0) {countParts.push(`${nodeCounts.view} view${nodeCounts.view !== 1 ? 's' : ''}`);}
+        if (nodeCounts.cte > 0) {countParts.push(`${nodeCounts.cte} CTE${nodeCounts.cte !== 1 ? 's' : ''}`);}
+        if (nodeCounts.external > 0) {countParts.push(`${nodeCounts.external} external`);}
 
         return `
             <div class="lineage-graph-view">
@@ -647,10 +647,10 @@ export class LineageView {
         };
 
         graph.nodes.forEach((node) => {
-            if (node.type === 'table') stats.tables++;
-            else if (node.type === 'view') stats.views++;
-            else if (node.type === 'cte') stats.ctes++;
-            else if (node.type === 'external') stats.external++;
+            if (node.type === 'table') {stats.tables++;}
+            else if (node.type === 'view') {stats.views++;}
+            else if (node.type === 'cte') {stats.ctes++;}
+            else if (node.type === 'external') {stats.external++;}
         });
 
         return stats;

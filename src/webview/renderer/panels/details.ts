@@ -180,6 +180,6 @@ export function updateDetailsPanel(nodeId: string | null): void {
 
     // Close button handler
     detailsPanel.querySelector('#close-details')?.addEventListener('click', () => {
-        if (onSelectNode) onSelectNode(null);
+        if (onSelectNode) {onSelectNode(null);}
     });
 }

@@ -53,6 +53,7 @@ export function createToolbar(
     options: {
         currentDialect: SqlDialect;
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -204,6 +205,7 @@ function createActionButtons(
     callbacks: ToolbarCallbacks,
     options: {
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -301,6 +303,7 @@ function createFeatureGroup(
     callbacks: ToolbarCallbacks,
     options: {
         isPinnedView: boolean;
+        pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
@@ -342,16 +345,44 @@ function createFeatureGroup(
             featureGroup.appendChild(pinsBtn);
         }
     } else {
-        // Pinned indicator
+        // Pinned indicator with unpin button
+        const pinnedContainer = document.createElement('div');
+        pinnedContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+            border-left: 1px solid rgba(148, 163, 184, 0.2);
+        `;
+
         const pinnedIndicator = document.createElement('span');
         pinnedIndicator.innerHTML = '📌 Pinned';
         pinnedIndicator.style.cssText = `
             color: #94a3b8;
             font-size: 11px;
             padding: 4px 8px;
-            border-left: 1px solid rgba(148, 163, 184, 0.2);
         `;
-        featureGroup.appendChild(pinnedIndicator);
+        pinnedContainer.appendChild(pinnedIndicator);
+
+        // Add unpin button
+        if (options.pinId) {
+            const unpinBtn = createButton('×', () => {
+                callbacks.onUnpinTab(options.pinId!);
+            });
+            unpinBtn.title = 'Unpin and close this tab';
+            unpinBtn.style.cssText = `
+                background: transparent;
+                border: none;
+                color: #94a3b8;
+                padding: 4px 8px;
+                cursor: pointer;
+                font-size: 16px;
+                transition: color 0.2s;
+            `;
+            unpinBtn.addEventListener('mouseenter', () => unpinBtn.style.color = '#ef4444');
+            unpinBtn.addEventListener('mouseleave', () => unpinBtn.style.color = '#94a3b8');
+            pinnedContainer.appendChild(unpinBtn);
+        }
+
+        featureGroup.appendChild(pinnedContainer);
     }
 
     // Legend button
@@ -672,10 +703,10 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
         `;
 
         item.addEventListener('mouseenter', () => {
-            if (!isActive) item.style.background = 'rgba(148, 163, 184, 0.1)';
+            if (!isActive) {item.style.background = 'rgba(148, 163, 184, 0.1)';}
         });
         item.addEventListener('mouseleave', () => {
-            if (!isActive) item.style.background = 'transparent';
+            if (!isActive) {item.style.background = 'transparent';}
         });
 
         item.addEventListener('click', (e) => {
@@ -862,7 +893,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     const closeModal = () => overlay.remove();
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
+        if (e.target === overlay) {closeModal();}
     });
     modal.querySelector('#close-shortcuts')?.addEventListener('click', closeModal);
 
@@ -893,7 +924,7 @@ export function updateToolbarTheme(
     });
 
     const titleSpan = toolbar.querySelector('span');
-    if (titleSpan) titleSpan.style.color = textColor;
+    if (titleSpan) {titleSpan.style.color = textColor;}
 
     searchContainer.style.background = bgColor;
     searchContainer.style.borderColor = borderColor;

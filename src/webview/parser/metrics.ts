@@ -52,11 +52,11 @@ export function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): 
 
     // Calculate critical path length (longest path from source to result)
     const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
-        if (visited.has(nodeId)) return 0;
+        if (visited.has(nodeId)) {return 0;}
         visited.add(nodeId);
 
         const outgoing = edges.filter(e => e.source === nodeId);
-        if (outgoing.length === 0) return 1;
+        if (outgoing.length === 0) {return 1;}
 
         const maxChildPath = Math.max(
             ...outgoing.map(edge => calculatePathLength(edge.target, new Set(visited)))
@@ -93,7 +93,7 @@ export function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): 
     nodes.forEach(node => {
         const fanOut = fanOutMap.get(node.id) || 0;
         if (fanOut >= 3) {
-            if (!node.warnings) node.warnings = [];
+            if (!node.warnings) {node.warnings = [];}
             node.warnings.push({
                 type: 'fan-out',
                 severity: fanOut >= 5 ? 'high' : 'medium',
@@ -104,7 +104,7 @@ export function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): 
         // Mark nodes with high complexity
         if ((node.type === 'join' && stats.joins > 3) ||
             (node.type === 'aggregate' && node.aggregateDetails && node.aggregateDetails.functions.length > 3)) {
-            if (!node.warnings) node.warnings = [];
+            if (!node.warnings) {node.warnings = [];}
             node.warnings.push({
                 type: 'complex',
                 severity: 'medium',

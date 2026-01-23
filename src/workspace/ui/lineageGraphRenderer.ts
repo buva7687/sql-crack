@@ -160,7 +160,7 @@ export class LineageGraphRenderer {
         // Build edges between visible nodes
         for (const edge of this.lineageGraph.edges) {
             // Skip column edges (table -> column)
-            if (edge.metadata?.relationship === 'contains') continue;
+            if (edge.metadata?.relationship === 'contains') {continue;}
 
             if (nodeMap.has(edge.sourceId) && nodeMap.has(edge.targetId)) {
                 edges.push({
@@ -213,12 +213,12 @@ export class LineageGraphRenderer {
         includeExternal: boolean,
         fileFilter?: string[]
     ): void {
-        if (!includeExternal && node.type === 'external') return;
-        if (node.type === 'column') return; // Skip column nodes
+        if (!includeExternal && node.type === 'external') {return;}
+        if (node.type === 'column') {return;} // Skip column nodes
 
         // Filter by file if specified
         if (fileFilter && fileFilter.length > 0 && node.filePath) {
-            if (!fileFilter.includes(node.filePath)) return;
+            if (!fileFilter.includes(node.filePath)) {return;}
         }
 
         const isExpanded = expandedNodes.has(node.id);
@@ -550,7 +550,7 @@ export class LineageGraphRenderer {
      * Render an edge as SVG path
      */
     private renderEdge(edge: GraphEdge, isHighlighted: boolean): string {
-        if (edge.points.length < 2) return '';
+        if (edge.points.length < 2) {return '';}
 
         const classes = [
             'lineage-edge',
@@ -645,7 +645,7 @@ export class LineageGraphRenderer {
      * Truncate name to fit in node
      */
     private truncateName(name: string, maxLength: number): string {
-        if (name.length <= maxLength) return name;
+        if (name.length <= maxLength) {return name;}
         return name.substring(0, maxLength - 3) + '...';
     }
 

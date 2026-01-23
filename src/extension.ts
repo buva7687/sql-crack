@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { VisualizationPanel } from './visualizationPanel';
 import { WorkspacePanel } from './workspace';
+import { setCustomFunctions } from './dialects';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -8,8 +9,21 @@ let lastActiveSqlDocument: vscode.TextDocument | null = null;
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Load custom functions from VS Code settings and inject into the function registry
+ */
+function loadCustomFunctions(): void {
+    const config = vscode.workspace.getConfiguration('sqlCrack');
+    const customAggregates = config.get<string[]>('customAggregateFunctions') || [];
+    const customWindow = config.get<string[]>('customWindowFunctions') || [];
+    setCustomFunctions(customAggregates, customWindow);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
+
+    // Load custom functions from settings
+    loadCustomFunctions();
 
     // Initialize VisualizationPanel with context for persistence
     VisualizationPanel.setContext(context);
@@ -239,10 +253,19 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Listen for configuration changes to reload custom functions
+    const configChangeListener = vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('sqlCrack.customAggregateFunctions') ||
+            e.affectsConfiguration('sqlCrack.customWindowFunctions')) {
+            loadCustomFunctions();
+        }
+    });
+
     context.subscriptions.push(visualizeCommand);
     context.subscriptions.push(refreshCommand);
     context.subscriptions.push(cursorChangeListener);
     context.subscriptions.push(docChangeListener);
+    context.subscriptions.push(configChangeListener);
 }
 
 export function deactivate() {

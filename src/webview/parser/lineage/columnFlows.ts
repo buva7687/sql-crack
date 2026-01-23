@@ -27,11 +27,11 @@ export function generateColumnFlows(
 
     // Find SELECT nodes (output nodes)
     const selectNodes = nodes.filter(n => n.type === 'select');
-    if (selectNodes.length === 0) return columnFlows;
+    if (selectNodes.length === 0) {return columnFlows;}
 
     // Process each SELECT node's output columns
     for (const selectNode of selectNodes) {
-        if (!selectNode.columns || selectNode.columns.length === 0) continue;
+        if (!selectNode.columns || selectNode.columns.length === 0) {continue;}
 
         for (const outputCol of selectNode.columns) {
             // Build full lineage path for this output column
@@ -67,7 +67,7 @@ export function buildColumnLineagePath(
     const path: ColumnFlow['lineagePath'] = [];
 
     // Prevent infinite loops
-    if (visited.has(currentNode.id)) return path;
+    if (visited.has(currentNode.id)) {return path;}
     visited.add(currentNode.id);
 
     // Determine transformation at current node
@@ -94,7 +94,7 @@ export function buildColumnLineagePath(
 
     for (const sourceNodeId of incoming) {
         const sourceNode = nodeMap.get(sourceNodeId);
-        if (!sourceNode) continue;
+        if (!sourceNode) {continue;}
 
         // Find matching source column
         const sourceColumn = findSourceColumn(column, sourceNode, currentNode);

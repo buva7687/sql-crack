@@ -537,7 +537,7 @@ function setupEventListeners(): void {
         }
 
         // Skip other shortcuts if input is focused
-        if (isInputFocused) return;
+        if (isInputFocused) {return;}
 
         // + or = to zoom in
         if (e.key === '+' || e.key === '=') {
@@ -776,6 +776,9 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
+    // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
+    selectNode(null);
+
     currentNodes = result.nodes;
     currentEdges = result.edges;
     currentStats = result.stats;
@@ -786,7 +789,7 @@ export function render(result: ParseResult): void {
 
     // Reset highlight state
     state.highlightedColumnSources = [];
-    
+
     // Reset zoom state when rendering new query
     state.zoomedNodeId = null;
     state.previousZoomState = null;
@@ -3534,7 +3537,7 @@ function updateHintsPanel(): void {
         <!-- Hints List -->
         <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
             ${Object.entries(hintsByCategory).map(([category, hints]) => {
-                if (hints.length === 0) return '';
+                if (hints.length === 0) {return '';}
                 
                 const categoryLabels: Record<string, string> = {
                     'performance': '⚡ Performance',
@@ -3983,10 +3986,12 @@ export function prevSearchResult(): void {
 }
 
 // Export functions
-export function exportToPng(): void {
-    if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
+/**
+ * Prepares SVG clone for export by embedding inline styles and setting dimensions
+ */
+function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGElement; width: number; height: number } {
+    const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
 
     // Set explicit dimensions
     const bounds = calculateBounds();
@@ -3997,6 +4002,7 @@ export function exportToPng(): void {
     svgClone.setAttribute('width', String(width));
     svgClone.setAttribute('height', String(height));
     svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
+    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
     // Reset transform on main group
     const mainG = svgClone.querySelector('g');
@@ -4004,14 +4010,50 @@ export function exportToPng(): void {
         mainG.removeAttribute('transform');
     }
 
-    // Add background
+    // Add background rect
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bgRect.setAttribute('x', String(bounds.minX - padding));
     bgRect.setAttribute('y', String(bounds.minY - padding));
     bgRect.setAttribute('width', String(width));
     bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
+    bgRect.setAttribute('fill', state.isDarkTheme ? '#0f172a' : '#f8fafc');
     svgClone.insertBefore(bgRect, svgClone.firstChild);
+
+    // Embed inline styles for all elements (needed for image export)
+    embedInlineStyles(svgClone);
+
+    return { svgClone, width, height };
+}
+
+/**
+ * Recursively embeds computed styles as inline styles on SVG elements
+ */
+function embedInlineStyles(element: Element): void {
+    const computedStyle = window.getComputedStyle(element);
+    const originalElement = svg?.querySelector(`[data-id="${element.getAttribute('data-id')}"]`) ||
+                           document.querySelector(`.${element.className}`) as Element | null;
+
+    // Style properties important for SVG rendering
+    const styleProps = ['fill', 'stroke', 'stroke-width', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor'];
+
+    if (originalElement) {
+        const origStyle = window.getComputedStyle(originalElement);
+        styleProps.forEach(prop => {
+            const value = origStyle.getPropertyValue(prop);
+            if (value && value !== 'none' && value !== '') {
+                (element as HTMLElement).style.setProperty(prop, value);
+            }
+        });
+    }
+
+    // Process children
+    Array.from(element.children).forEach(child => embedInlineStyles(child));
+}
+
+export function exportToPng(): void {
+    if (!svg) { return; }
+
+    const { svgClone, width, height } = prepareSvgForExport(svg);
 
     // Convert to image
     const svgData = new XMLSerializer().serializeToString(svgClone);
@@ -4032,39 +4074,20 @@ export function exportToPng(): void {
         a.href = canvas.toDataURL('image/png');
         a.click();
     };
+    img.onerror = (e) => {
+        console.error('Failed to load SVG for export:', e);
+        // Fallback: try without base64 encoding
+        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        img.src = url;
+    };
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
 }
 
 export function exportToSvg(): void {
     if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
-
-    // Set explicit dimensions
-    const bounds = calculateBounds();
-    const padding = 40;
-    const width = bounds.width + padding * 2;
-    const height = bounds.height + padding * 2;
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Reset transform
-    const mainG = svgClone.querySelector('g');
-    if (mainG) {
-        mainG.removeAttribute('transform');
-    }
-
-    // Add background
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('x', String(bounds.minX - padding));
-    bgRect.setAttribute('y', String(bounds.minY - padding));
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
-    svgClone.insertBefore(bgRect, svgClone.firstChild);
+    const { svgClone } = prepareSvgForExport(svg);
 
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const blob = new Blob([svgData], { type: 'image/svg+xml' });
@@ -4298,28 +4321,7 @@ function generateStyleAssignments(nodes: FlowNode[]): string[] {
 export function copyToClipboard(): void {
     if (!svg) { return; }
 
-    const svgClone = svg.cloneNode(true) as SVGSVGElement;
-    const bounds = calculateBounds();
-    const padding = 40;
-    const width = bounds.width + padding * 2;
-    const height = bounds.height + padding * 2;
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
-
-    const mainG = svgClone.querySelector('g');
-    if (mainG) {
-        mainG.removeAttribute('transform');
-    }
-
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('x', String(bounds.minX - padding));
-    bgRect.setAttribute('y', String(bounds.minY - padding));
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', '#0f172a');
-    svgClone.insertBefore(bgRect, svgClone.firstChild);
+    const { svgClone, width, height } = prepareSvgForExport(svg);
 
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const canvas = document.createElement('canvas');
@@ -4338,9 +4340,16 @@ export function copyToClipboard(): void {
             if (blob) {
                 navigator.clipboard.write([
                     new ClipboardItem({ 'image/png': blob })
-                ]).catch(console.error);
+                ]).then(() => {
+                    console.log('Copied to clipboard successfully');
+                }).catch((err) => {
+                    console.error('Failed to copy to clipboard:', err);
+                });
             }
         }, 'image/png');
+    };
+    img.onerror = (e) => {
+        console.error('Failed to load SVG for clipboard:', e);
     };
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
 }
@@ -4442,7 +4451,7 @@ const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description:
 };
 
 function updateLegendPanel(): void {
-    if (!legendPanel) return;
+    if (!legendPanel) {return;}
 
     legendPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -4540,7 +4549,7 @@ function updateLegendPanel(): void {
 }
 
 export function toggleLegend(show?: boolean): void {
-    if (!legendPanel) return;
+    if (!legendPanel) {return;}
     state.legendVisible = show ?? !state.legendVisible;
     legendPanel.style.display = state.legendVisible ? 'block' : 'none';
 }
@@ -4548,7 +4557,7 @@ export function toggleLegend(show?: boolean): void {
 let statsVisible = true;
 
 export function toggleStats(show?: boolean): void {
-    if (!statsPanel) return;
+    if (!statsPanel) {return;}
     statsVisible = show ?? !statsVisible;
     statsPanel.style.display = statsVisible ? 'block' : 'none';
 }
@@ -4556,7 +4565,7 @@ export function toggleStats(show?: boolean): void {
 let hintsVisible = true;
 
 export function toggleHints(show?: boolean): void {
-    if (!hintsPanel) return;
+    if (!hintsPanel) {return;}
     hintsVisible = show ?? !hintsVisible;
     hintsPanel.style.display = hintsVisible ? 'block' : 'none';
 }
@@ -4680,7 +4689,7 @@ export function toggleFocusMode(enable?: boolean): void {
 }
 
 function applyFocusMode(nodeId: string): void {
-    if (!state.focusModeEnabled || !mainGroup) return;
+    if (!state.focusModeEnabled || !mainGroup) {return;}
 
     const connectedIds = getConnectedNodes(nodeId);
     connectedIds.add(nodeId);
@@ -4710,7 +4719,7 @@ function applyFocusMode(nodeId: string): void {
 }
 
 function clearFocusMode(): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     const allNodes = mainGroup.querySelectorAll('.node');
     allNodes.forEach(nodeEl => {
@@ -4781,7 +4790,7 @@ function getConnectedNodes(nodeId: string): Set<string> {
 // ============================================================
 
 export function highlightColumnSources(columnName: string): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     // Find lineage for this column
     const lineage = currentColumnLineage.find(l =>
@@ -4791,14 +4800,14 @@ export function highlightColumnSources(columnName: string): void {
     // Clear previous highlights
     clearColumnHighlights();
 
-    if (!lineage || lineage.sources.length === 0) return;
+    if (!lineage || lineage.sources.length === 0) {return;}
 
     // Store highlighted node IDs
     state.highlightedColumnSources = lineage.sources.map(s => s.nodeId).filter(Boolean);
 
     // Highlight source nodes with special glow
     for (const source of lineage.sources) {
-        if (!source.nodeId) continue;
+        if (!source.nodeId) {continue;}
 
         const nodeEl = mainGroup.querySelector(`.node[data-id="${source.nodeId}"]`);
         if (nodeEl) {
@@ -4817,11 +4826,11 @@ export function highlightColumnSources(columnName: string): void {
 }
 
 function highlightPathToSelect(): void {
-    if (!mainGroup || state.highlightedColumnSources.length === 0) return;
+    if (!mainGroup || state.highlightedColumnSources.length === 0) {return;}
 
     // Find SELECT node
     const selectNode = currentNodes.find(n => n.type === 'select');
-    if (!selectNode) return;
+    if (!selectNode) {return;}
 
     // Highlight edges between sources and select
     const pathNodeIds = new Set<string>(state.highlightedColumnSources);
@@ -4845,7 +4854,7 @@ function highlightPathToSelect(): void {
 }
 
 function findPath(fromId: string, toId: string, visited: Set<string>): boolean {
-    if (fromId === toId) return true;
+    if (fromId === toId) {return true;}
 
     for (const edge of currentEdges) {
         if (edge.source === fromId && !visited.has(edge.target)) {
@@ -4859,7 +4868,7 @@ function findPath(fromId: string, toId: string, visited: Set<string>): boolean {
 }
 
 function clearColumnHighlights(): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     state.highlightedColumnSources = [];
 
@@ -4892,7 +4901,7 @@ function clearColumnHighlights(): void {
 // ============================================================
 
 export function toggleSqlPreview(show?: boolean): void {
-    if (!sqlPreviewPanel) return;
+    if (!sqlPreviewPanel) {return;}
     const shouldShow = show ?? (sqlPreviewPanel.style.display === 'none');
     sqlPreviewPanel.style.display = shouldShow ? 'block' : 'none';
 
@@ -4902,7 +4911,7 @@ export function toggleSqlPreview(show?: boolean): void {
 }
 
 function updateSqlPreview(): void {
-    if (!sqlPreviewPanel || !currentSql) return;
+    if (!sqlPreviewPanel || !currentSql) {return;}
 
     const formattedSql = formatSql(currentSql);
     const highlightedSql = highlightSql(formattedSql);
@@ -4960,7 +4969,7 @@ function updateSqlPreview(): void {
 
 export function toggleNodeCollapse(nodeId: string): void {
     const node = currentNodes.find(n => n.id === nodeId);
-    if (!node || !node.collapsible) return;
+    if (!node || !node.collapsible) {return;}
 
     node.expanded = !node.expanded;
 
@@ -5028,7 +5037,7 @@ export function toggleExpandAll(): void {
         n => (n.type === 'cte' || n.type === 'subquery') && n.collapsible && n.children && n.children.length > 0
     );
 
-    if (expandableNodes.length === 0) return;
+    if (expandableNodes.length === 0) {return;}
 
     // Determine if we should expand or collapse (toggle based on majority state)
     const expandedCount = expandableNodes.filter(n => n.expanded).length;
@@ -5096,7 +5105,7 @@ export function updateMinimap(): void {
 
     if (!minimapContainer || !minimapSvg || currentNodes.length < 8) {
         // Only show minimap for complex queries (8+ nodes)
-        if (minimapContainer) minimapContainer.style.display = 'none';
+        if (minimapContainer) {minimapContainer.style.display = 'none';}
         return;
     }
 
@@ -5135,7 +5144,7 @@ function updateMinimapViewport(): void {
     const viewport = document.getElementById('minimap-viewport');
     const minimapContainer = document.getElementById('minimap-container');
 
-    if (!viewport || !minimapContainer || !svg || currentNodes.length < 8) return;
+    if (!viewport || !minimapContainer || !svg || currentNodes.length < 8) {return;}
 
     const bounds = calculateBounds();
     const svgRect = svg.getBoundingClientRect();
@@ -5184,13 +5193,13 @@ export function getQueryComplexityInfo(): { nodeCount: number; tableCount: numbe
 function calculateQueryDepth(): number {
     // Calculate max depth (longest path from any table to result)
     const resultNode = currentNodes.find(n => n.type === 'result');
-    if (!resultNode) return 0;
+    if (!resultNode) {return 0;}
 
     const visited = new Set<string>();
     let maxDepth = 0;
 
     function dfs(nodeId: string, depth: number) {
-        if (visited.has(nodeId)) return;
+        if (visited.has(nodeId)) {return;}
         visited.add(nodeId);
         maxDepth = Math.max(maxDepth, depth);
 
@@ -5410,7 +5419,7 @@ export function isDarkTheme(): boolean {
 }
 
 function applyTheme(dark: boolean): void {
-    if (!svg) return;
+    if (!svg) {return;}
 
     const colors = dark ? {
         bg: '#0f172a',
@@ -5480,7 +5489,7 @@ function applyTheme(dark: boolean): void {
 // ============================================================
 
 function showTooltip(node: FlowNode, e: MouseEvent): void {
-    if (!tooltipElement) return;
+    if (!tooltipElement) {return;}
 
     // Build tooltip content
     let content = `
@@ -5616,7 +5625,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 }
 
 function updateTooltipPosition(e: MouseEvent): void {
-    if (!tooltipElement) return;
+    if (!tooltipElement) {return;}
 
     const padding = 12;
     const tooltipRect = tooltipElement.getBoundingClientRect();
@@ -5836,7 +5845,7 @@ function hideColumnLineagePanel(): void {
  * Show the lineage path in the details panel
  */
 function showLineagePath(flow: ColumnFlow): void {
-    if (!detailsPanel) return;
+    if (!detailsPanel) {return;}
 
     const transformationColors: Record<string, string> = {
         source: '#10b981',
@@ -5936,7 +5945,7 @@ function showLineagePath(flow: ColumnFlow): void {
  * Highlight nodes in the lineage path
  */
 function highlightLineageNodes(flow: ColumnFlow): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     // Reset all nodes to dimmed state
     const allNodes = mainGroup.querySelectorAll('.node-group');
@@ -5993,7 +6002,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
  * Clear all lineage highlights
  */
 function clearLineageHighlights(): void {
-    if (!mainGroup) return;
+    if (!mainGroup) {return;}
 
     // Reset all nodes
     const allNodes = mainGroup.querySelectorAll('.node-group');
@@ -6129,7 +6138,7 @@ export function highlightNodeAtLine(line: number): void {
 
     // Find node that contains this line
     const node = findNodeAtLine(line);
-    if (!node) return;
+    if (!node) {return;}
 
     // Highlight the node
     const group = document.querySelector(`g[data-id="${node.id}"]`);
@@ -6245,11 +6254,11 @@ export function getJoinVennDiagram(joinType: string, isDark: boolean = true): st
 export function getJoinColor(joinType: string): string {
     const type = joinType.toUpperCase();
 
-    if (type.includes('LEFT')) return '#3b82f6';      // Blue
-    if (type.includes('RIGHT')) return '#f59e0b';     // Amber
-    if (type.includes('FULL')) return '#8b5cf6';      // Purple
-    if (type.includes('CROSS')) return '#ef4444';     // Red
-    if (type.includes('INNER')) return '#22c55e';     // Green
+    if (type.includes('LEFT')) {return '#3b82f6';}      // Blue
+    if (type.includes('RIGHT')) {return '#f59e0b';}     // Amber
+    if (type.includes('FULL')) {return '#8b5cf6';}      // Purple
+    if (type.includes('CROSS')) {return '#ef4444';}     // Red
+    if (type.includes('INNER')) {return '#22c55e';}     // Green
 
     return '#6366f1'; // Default indigo
 }
@@ -6257,11 +6266,11 @@ export function getJoinColor(joinType: string): string {
 export function getJoinDescription(joinType: string): string {
     const type = joinType.toUpperCase();
 
-    if (type.includes('LEFT')) return 'Returns all rows from left table, matched rows from right';
-    if (type.includes('RIGHT')) return 'Returns all rows from right table, matched rows from left';
-    if (type.includes('FULL')) return 'Returns all rows from both tables';
-    if (type.includes('CROSS')) return 'Returns Cartesian product of both tables';
-    if (type.includes('INNER')) return 'Returns only matching rows from both tables';
+    if (type.includes('LEFT')) {return 'Returns all rows from left table, matched rows from right';}
+    if (type.includes('RIGHT')) {return 'Returns all rows from right table, matched rows from left';}
+    if (type.includes('FULL')) {return 'Returns all rows from both tables';}
+    if (type.includes('CROSS')) {return 'Returns Cartesian product of both tables';}
+    if (type.includes('INNER')) {return 'Returns only matching rows from both tables';}
 
     return 'Combines rows from two tables';
 }
