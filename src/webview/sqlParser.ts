@@ -1,6 +1,7 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
+import { isAggregateFunction, isWindowFunction, getAggregateFunctions, getWindowFunctions } from '../dialects';
 
 // Import types from centralized type definitions
 import {
@@ -45,6 +46,7 @@ let hasSelectStar = false;
 let hasNoLimit = false;
 let statementType = '';
 let tableUsageMap: Map<string, number> = new Map();
+let currentDialect: SqlDialect = 'MySQL';
 
 function resetStats(): void {
     stats = {
@@ -396,6 +398,7 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     nodeCounter = 0;
+    currentDialect = dialect;
     resetStats();
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -1883,15 +1886,14 @@ function extractWindowFunctionDetails(columns: any): Array<{
         frame?: string;
     }> = [];
 
+    // Get dialect-specific window functions
+    const windowFuncList = getWindowFunctions(currentDialect);
+
     for (const col of columns) {
         if (col.expr?.over) {
             // Safely extract function name - could be in various formats
             let funcName = 'WINDOW';
             const expr = col.expr;
-
-            // Common window functions to check for
-            const WINDOW_FUNCS = ['LAG', 'LEAD', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
-                'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
 
             // Helper to safely get string value
             const getStringName = (obj: any): string | null => {
@@ -1924,11 +1926,11 @@ function extractWindowFunctionDetails(columns: any): Array<{
                 else if (alias.includes('avg') || alias.includes('average')) funcName = 'AVG';
             }
 
-            // Final fallback - search JSON for known function names
+            // Final fallback - search JSON for known function names (dialect-aware)
             if (funcName === 'WINDOW') {
                 try {
                     const exprStr = JSON.stringify(expr).toUpperCase();
-                    for (const wf of WINDOW_FUNCS) {
+                    for (const wf of windowFuncList) {
                         if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
                             funcName = wf;
                             break;
@@ -1981,15 +1983,17 @@ function extractAggregateFunctionDetails(columns: any): Array<{
 }> {
     if (!columns || !Array.isArray(columns)) { return []; }
 
-    const aggregateFuncs = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT', 'STRING_AGG', 'ARRAY_AGG'];
+    // Get dialect-specific aggregate functions
+    const aggregateFuncSet = new Set(getAggregateFunctions(currentDialect));
     const details: Array<{ name: string; expression: string; alias?: string }> = [];
 
     function extractAggregatesFromExpr(expr: any): void {
         if (!expr) return;
 
-        // Check if this is an aggregate function
-        if (expr.type === 'aggr_func' || (expr.name && aggregateFuncs.includes(String(expr.name).toUpperCase()))) {
-            const funcName = String(expr.name || 'AGG').toUpperCase();
+        // Check if this is an aggregate function (dialect-aware)
+        const exprFuncName = String(expr.name || '').toUpperCase();
+        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+            const funcName = exprFuncName || 'AGG';
             
             // Extract arguments/expression
             let expression = funcName + '()';

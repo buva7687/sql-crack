@@ -1,6 +1,7 @@
 // Window, aggregate, and case function extraction utilities
 
-import { WindowFunctionDetail, AggregateFunctionDetail, CaseDetail } from '../../types';
+import { WindowFunctionDetail, AggregateFunctionDetail, CaseDetail, SqlDialect } from '../../types';
+import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 
 export function extractWindowFunctions(columns: any): string[] {
     if (!columns || !Array.isArray(columns)) { return []; }
@@ -29,12 +30,12 @@ export function extractWindowFunctions(columns: any): string[] {
     return windowFuncs;
 }
 
-export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail[] {
+export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): WindowFunctionDetail[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
     const details: WindowFunctionDetail[] = [];
-    const WINDOW_FUNCS = ['LAG', 'LEAD', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
-        'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+    // Get dialect-specific window functions
+    const windowFuncList = getWindowFunctions(dialect);
 
     const getStringName = (obj: any): string | null => {
         if (typeof obj === 'string') return obj;
@@ -72,7 +73,7 @@ export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail
             if (funcName === 'WINDOW') {
                 try {
                     const exprStr = JSON.stringify(expr).toUpperCase();
-                    for (const wf of WINDOW_FUNCS) {
+                    for (const wf of windowFuncList) {
                         if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
                             funcName = wf;
                             break;
@@ -113,17 +114,19 @@ export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail
     return details;
 }
 
-export function extractAggregateFunctionDetails(columns: any): AggregateFunctionDetail[] {
+export function extractAggregateFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): AggregateFunctionDetail[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
-    const aggregateFuncs = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT', 'STRING_AGG', 'ARRAY_AGG'];
+    // Get dialect-specific aggregate functions
+    const aggregateFuncSet = new Set(getAggregateFunctions(dialect));
     const details: AggregateFunctionDetail[] = [];
 
     function extractAggregatesFromExpr(expr: any): void {
         if (!expr) return;
 
-        if (expr.type === 'aggr_func' || (expr.name && aggregateFuncs.includes(String(expr.name).toUpperCase()))) {
-            const funcName = String(expr.name || 'AGG').toUpperCase();
+        const exprFuncName = String(expr.name || '').toUpperCase();
+        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+            const funcName = exprFuncName || 'AGG';
 
             let expression = funcName + '()';
             if (expr.args) {
