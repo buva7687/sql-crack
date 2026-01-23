@@ -24,7 +24,7 @@ export interface PerformanceAnalysisResult {
 function extractColumnReferences(expr: any): string[] {
     const columns: string[] = [];
     
-    if (!expr) return columns;
+    if (!expr) {return columns;}
     
     if (typeof expr === 'string') {
         // Simple column reference
@@ -63,15 +63,15 @@ function getTableFromColumn(columnRef: string): string | null {
 
 // Helper function to check if a condition uses aggregates
 function hasAggregateFunctions(expr: any): boolean {
-    if (!expr) return false;
+    if (!expr) {return false;}
     
     if (expr.type === 'aggr_func') {
         return true;
     }
     
-    if (expr.left && hasAggregateFunctions(expr.left)) return true;
-    if (expr.right && hasAggregateFunctions(expr.right)) return true;
-    if (expr.expr && hasAggregateFunctions(expr.expr)) return true;
+    if (expr.left && hasAggregateFunctions(expr.left)) {return true;}
+    if (expr.right && hasAggregateFunctions(expr.right)) {return true;}
+    if (expr.expr && hasAggregateFunctions(expr.expr)) {return true;}
     if (expr.args && Array.isArray(expr.args)) {
         return expr.args.some((arg: any) => hasAggregateFunctions(arg));
     }
@@ -90,11 +90,11 @@ function traceFilterLineage(filterNode: FlowNode, nodes: FlowNode[], edges: Flow
     const visited = new Set<string>();
     
     function traverse(nodeId: string) {
-        if (visited.has(nodeId)) return;
+        if (visited.has(nodeId)) {return;}
         visited.add(nodeId);
         
         const node = nodes.find(n => n.id === nodeId);
-        if (!node) return;
+        if (!node) {return;}
         
         if (node.type === 'table') {
             sourceTables.push(node.label);
@@ -146,7 +146,7 @@ function detectFilterPushdownOpportunities(
                 });
                 
                 // Add warning to the filter node
-                if (!filterNode.warnings) filterNode.warnings = [];
+                if (!filterNode.warnings) {filterNode.warnings = [];}
                 filterNode.warnings.push({
                     type: 'filter-pushdown',
                     severity: 'medium',
@@ -177,7 +177,7 @@ function analyzeJoinOrder(
     nodes: FlowNode[],
     hints: OptimizationHint[]
 ): void {
-    if (!ast.from || !Array.isArray(ast.from)) return;
+    if (!ast.from || !Array.isArray(ast.from)) {return;}
     
     const joinNodes = findNodesByType(nodes, 'join');
     const tableNodes = findNodesByType(nodes, 'table');
@@ -222,7 +222,7 @@ function analyzeJoinOrder(
         
         // Add warning to the join node
         if (crossJoinNode) {
-            if (!crossJoinNode.warnings) crossJoinNode.warnings = [];
+            if (!crossJoinNode.warnings) {crossJoinNode.warnings = [];}
             crossJoinNode.warnings.push({
                 type: 'join-order',
                 severity: 'high',
@@ -304,7 +304,7 @@ function detectSubqueryConversionOpportunities(
     hints: OptimizationHint[]
 ): void {
     function analyzeSubquery(subquery: any, context: string): void {
-        if (!subquery || !subquery.expr) return;
+        if (!subquery || !subquery.expr) {return;}
         
         const expr = subquery.expr;
         
@@ -500,7 +500,7 @@ function detectNonSargableExpressions(
     hints: OptimizationHint[]
 ): void {
     function checkExpression(expr: any, context: string): void {
-        if (!expr) return;
+        if (!expr) {return;}
         
         // Check for function calls wrapping columns
         if (expr.type === 'function') {
@@ -514,7 +514,7 @@ function detectNonSargableExpressions(
                 funcName = String(expr.name).toUpperCase();
             }
             
-            if (!funcName) return;
+            if (!funcName) {return;}
             
             const args = expr.args?.expr || expr.args;
             
@@ -589,9 +589,9 @@ function detectNonSargableExpressions(
         }
         
         // Recursively check nested expressions
-        if (expr.left) checkExpression(expr.left, context);
-        if (expr.right) checkExpression(expr.right, context);
-        if (expr.expr) checkExpression(expr.expr, context);
+        if (expr.left) {checkExpression(expr.left, context);}
+        if (expr.right) {checkExpression(expr.right, context);}
+        if (expr.expr) {checkExpression(expr.expr, context);}
     }
     
     if (ast.where) {
@@ -604,7 +604,7 @@ function analyzeAggregatePerformance(
     ast: any,
     hints: OptimizationHint[]
 ): void {
-    if (!ast.columns || !Array.isArray(ast.columns)) return;
+    if (!ast.columns || !Array.isArray(ast.columns)) {return;}
     
     let hasCountStar = false;
     let hasCountDistinct = false;
@@ -623,7 +623,7 @@ function analyzeAggregatePerformance(
                 funcName = String(col.expr.name).toUpperCase();
             }
             
-            if (!funcName) return;
+            if (!funcName) {return;}
             
             if (funcName === 'COUNT') {
                 if (col.expr.args && col.expr.args.expr === '*') {

@@ -44,7 +44,7 @@ export function buildDependencyGraph(
 
 function findDefinitionsByName(index: WorkspaceIndex, tableName: string): SchemaDefinition[] {
     const normalized = normalizeIdentifier(tableName);
-    if (!normalized) return [];
+    if (!normalized) {return [];}
 
     const matches: SchemaDefinition[] = [];
     for (const defs of index.definitionMap.values()) {
@@ -108,14 +108,14 @@ function buildFileGraph(
 
     for (const [filePath, analysis] of index.files.entries()) {
         const sourceId = nodeIdMap.get(filePath);
-        if (!sourceId) continue;
+        if (!sourceId) {continue;}
 
         for (const ref of analysis.references) {
             const defs = getDefinitionCandidates(index, ref);
             for (const def of defs) {
-                if (def.filePath === filePath) continue;
+                if (def.filePath === filePath) {continue;}
                 const targetId = nodeIdMap.get(def.filePath);
-                if (!targetId) continue;
+                if (!targetId) {continue;}
 
                 const edgeKey = `${sourceId}->${targetId}`;
                 if (!edgeMap.has(edgeKey)) {
@@ -158,13 +158,13 @@ function buildTableGraph(
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
             const normalized = normalizeIdentifier(def.name);
-            if (normalized) definedNames.add(normalized);
+            if (normalized) {definedNames.add(normalized);}
         }
     }
 
     for (const [key, defs] of index.definitionMap.entries()) {
         const def = defs[0];
-        if (!def) continue;
+        if (!def) {continue;}
         const nodeId = `table_${nodes.length}`;
         nodeIdMap.set(key, nodeId);
 
@@ -183,7 +183,7 @@ function buildTableGraph(
 
     // Create nodes for external (undefined) tables
     for (const [key, refs] of index.referenceMap.entries()) {
-        if (definedKeys.has(key)) continue;
+        if (definedKeys.has(key)) {continue;}
         const parsed = parseQualifiedKey(key);
         const normalizedName = normalizeIdentifier(parsed.name);
         if (!parsed.schema && normalizedName && definedNames.has(normalizedName)) {
@@ -227,7 +227,7 @@ function buildTableGraph(
                     }
 
                     const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
-                    if (!sourceId) continue;
+                    if (!sourceId) {continue;}
 
                     const targets = getDefinitionCandidates(index, ref);
                     if (targets.length > 0) {
@@ -335,12 +335,12 @@ function buildHybridGraph(
 
     for (const [filePath, analysis] of index.files.entries()) {
         const sourceId = nodeIdMap.get(filePath);
-        if (!sourceId) continue;
+        if (!sourceId) {continue;}
 
         for (const ref of analysis.references) {
             const defs = getDefinitionCandidates(index, ref);
             for (const def of defs) {
-                if (def.filePath === filePath) continue;
+                if (def.filePath === filePath) {continue;}
                 const targetId = nodeIdMap.get(def.filePath);
                 if (targetId) {
                     const edgeKey = `${sourceId}->${targetId}`;
@@ -381,7 +381,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
             const name = normalizeIdentifier(def.name);
-            if (!name) continue;
+            if (!name) {continue;}
             if (!definitionsByName.has(name)) {
                 definitionsByName.set(name, []);
             }
@@ -393,7 +393,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const refs of index.referenceMap.values()) {
         for (const ref of refs) {
             const name = normalizeIdentifier(ref.tableName);
-            if (!name) continue;
+            if (!name) {continue;}
             if (!referencesByName.has(name)) {
                 referencesByName.set(name, []);
             }
@@ -404,8 +404,8 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     // Count tables and views
     for (const [key, defs] of index.definitionMap.entries()) {
         for (const def of defs) {
-            if (def.type === 'table') totalTables++;
-            else if (def.type === 'view') totalViews++;
+            if (def.type === 'table') {totalTables++;}
+            else if (def.type === 'view') {totalViews++;}
         }
 
         const refs = index.referenceMap.get(key);
@@ -465,7 +465,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const [fileA, depsA] of fileDeps.entries()) {
         for (const fileB of depsA) {
             const pairKey = [fileA, fileB].sort().join('|');
-            if (checkedPairs.has(pairKey)) continue;
+            if (checkedPairs.has(pairKey)) {continue;}
             checkedPairs.add(pairKey);
 
             const depsB = fileDeps.get(fileB);
@@ -491,10 +491,10 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
  */
 function getPrimaryReferenceType(types: TableReference['referenceType'][]): TableReference['referenceType'] {
     // Priority: write operations > join > select
-    if (types.includes('insert')) return 'insert';
-    if (types.includes('update')) return 'update';
-    if (types.includes('delete')) return 'delete';
-    if (types.includes('join')) return 'join';
+    if (types.includes('insert')) {return 'insert';}
+    if (types.includes('update')) {return 'update';}
+    if (types.includes('delete')) {return 'delete';}
+    if (types.includes('join')) {return 'join';}
     return 'select';
 }
 
@@ -506,7 +506,7 @@ function getPrimaryReferenceType(types: TableReference['referenceType'][]): Tabl
  * - Better spacing for large graphs
  */
 function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
-    if (nodes.length === 0) return;
+    if (nodes.length === 0) {return;}
 
     // Calculate canvas dimensions
     const canvasWidth = 3200;
@@ -551,10 +551,10 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
 
     // Assign levels using longest path from roots
     function longestPathFrom(nodeId: string, currentLevel: number, visited: Set<string>): void {
-        if (visited.has(nodeId)) return;
+        if (visited.has(nodeId)) {return;}
 
         const existingLevel = levels.get(nodeId) ?? -1;
-        if (currentLevel <= existingLevel) return;
+        if (currentLevel <= existingLevel) {return;}
 
         levels.set(nodeId, currentLevel);
         visited.add(nodeId);

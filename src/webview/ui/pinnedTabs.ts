@@ -59,7 +59,7 @@ export function pinCurrentVisualization(callbacks: PinnedTabsCallbacks, fileName
 
 export function unpinTab(tabId: string, callbacks: PinnedTabsCallbacks): void {
     const index = pinnedTabs.findIndex(t => t.id === tabId);
-    if (index === -1) return;
+    if (index === -1) {return;}
 
     pinnedTabs.splice(index, 1);
 
@@ -91,7 +91,7 @@ export function updateTabsUI(callbacks: PinnedTabsCallbacks): void {
     tabsContainer.style.display = pinnedTabs.length > 0 ? 'flex' : 'none';
 
     const tabsList = tabsContainer.querySelector('#tabs-list') as HTMLElement;
-    if (!tabsList) return;
+    if (!tabsList) {return;}
 
     tabsList.innerHTML = '';
 
@@ -173,10 +173,10 @@ function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTa
     });
 
     tabEl.addEventListener('mouseenter', () => {
-        if (!isActive) tabEl.style.background = 'rgba(148, 163, 184, 0.1)';
+        if (!isActive) {tabEl.style.background = 'rgba(148, 163, 184, 0.1)';}
     });
     tabEl.addEventListener('mouseleave', () => {
-        if (!isActive) tabEl.style.background = 'transparent';
+        if (!isActive) {tabEl.style.background = 'transparent';}
     });
 
     if (tab.id !== 'current') {

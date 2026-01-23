@@ -228,9 +228,9 @@ export class ImpactAnalyzer {
     calculateSeverity(impact: ImpactReport | { summary: ImpactReport['summary'] }): 'low' | 'medium' | 'high' | 'critical' {
         const total = impact.summary.totalAffected;
 
-        if (total >= 20) return 'critical';
-        if (total >= 10) return 'high';
-        if (total >= 3) return 'medium';
+        if (total >= 20) {return 'critical';}
+        if (total >= 10) {return 'high';}
+        if (total >= 3) {return 'medium';}
         return 'low';
     }
 
@@ -244,8 +244,8 @@ export class ImpactAnalyzer {
             return ratio > 0.5 ? 'high' : 'medium';
         }
 
-        if (ratio > 1) return 'high';
-        if (ratio > 0.3) return 'medium';
+        if (ratio > 1) {return 'high';}
+        if (ratio > 0.3) {return 'medium';}
         return 'low';
     }
 
@@ -263,9 +263,9 @@ export class ImpactAnalyzer {
         const files = new Set<string>();
 
         for (const impact of allImpacts) {
-            if (impact.node.type === 'table') tables.add(impact.node.name);
-            if (impact.node.type === 'view') views.add(impact.node.name);
-            if (impact.filePath) files.add(impact.filePath);
+            if (impact.node.type === 'table') {tables.add(impact.node.name);}
+            if (impact.node.type === 'view') {views.add(impact.node.name);}
+            if (impact.filePath) {files.add(impact.filePath);}
         }
 
         return {

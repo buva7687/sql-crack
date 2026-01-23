@@ -235,14 +235,14 @@ export class ColumnLineageTracker {
      */
     private traceTableUpstream(graph: LineageGraph, tableId: string): LineagePath[] {
         const tableNode = graph.nodes.get(tableId);
-        if (!tableNode) return [];
+        if (!tableNode) {return [];}
 
         const upstreamNodes = graph.getUpstream(tableId, -1);
         const edges = graph.edges.filter(e =>
             upstreamNodes.some(n => n.id === e.targetId) || e.targetId === tableId
         );
 
-        if (upstreamNodes.length === 0) return [];
+        if (upstreamNodes.length === 0) {return [];}
 
         return [{
             nodes: [tableNode, ...upstreamNodes],
@@ -256,14 +256,14 @@ export class ColumnLineageTracker {
      */
     private traceTableDownstream(graph: LineageGraph, tableId: string): LineagePath[] {
         const tableNode = graph.nodes.get(tableId);
-        if (!tableNode) return [];
+        if (!tableNode) {return [];}
 
         const downstreamNodes = graph.getDownstream(tableId, -1);
         const edges = graph.edges.filter(e =>
             downstreamNodes.some(n => n.id === e.sourceId) || e.sourceId === tableId
         );
 
-        if (downstreamNodes.length === 0) return [];
+        if (downstreamNodes.length === 0) {return [];}
 
         return [{
             nodes: [tableNode, ...downstreamNodes],

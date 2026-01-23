@@ -96,7 +96,7 @@ export class ReferenceExtractor {
             // First pass: collect all CTE names from WITH clauses across all statements
             const globalCteNames = new Set<string>();
             for (const stmt of statements) {
-                if (!stmt) continue;
+                if (!stmt) {continue;}
                 this.collectCTENames(stmt, globalCteNames);
             }
 
@@ -152,7 +152,7 @@ export class ReferenceExtractor {
             // Second pass: extract references with CTE names available
             for (let stmtIndex = 0; stmtIndex < statements.length; stmtIndex++) {
                 const stmt = statements[stmtIndex];
-                if (!stmt) continue;
+                if (!stmt) {continue;}
                 const aliasMap = this.createAliasMap();
                 // Add globally collected CTE names to the alias map
                 for (const cteName of globalCteNames) {
@@ -195,7 +195,7 @@ export class ReferenceExtractor {
      * Recursively collect all CTE names from a statement tree
      */
     private collectCTENames(stmt: any, cteNames: Set<string>): void {
-        if (!stmt || typeof stmt !== 'object') return;
+        if (!stmt || typeof stmt !== 'object') {return;}
 
         // Check for WITH clause
         if (stmt.with) {
@@ -305,8 +305,8 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!stmt) return;
-        if (depth > this.options.maxSubqueryDepth) return;
+        if (!stmt) {return;}
+        if (depth > this.options.maxSubqueryDepth) {return;}
 
         // Check for WITH clause at the top level (before statement type)
         // Some parsers structure WITH clauses separately from the main statement
@@ -382,7 +382,7 @@ export class ReferenceExtractor {
             return;
         }
 
-        if (!stmt.type) return;
+        if (!stmt.type) {return;}
         const stmtType = stmt.type.toLowerCase();
 
         switch (stmtType) {
@@ -745,7 +745,7 @@ export class ReferenceExtractor {
         statementIndex: number = 0,
         parentStmt?: any
     ): void {
-        if (!item) return;
+        if (!item) {return;}
 
         // Determine reference type (join or select)
         const refType: ReferenceType = item.join ? 'join' : defaultType;
@@ -825,7 +825,7 @@ export class ReferenceExtractor {
         statementIndex: number = 0
     ): TableReference | null {
         const tableName = this.getTableName(item);
-        if (!tableName) return null;
+        if (!tableName) {return null;}
 
         return {
             tableName,
@@ -851,10 +851,10 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!Array.isArray(columns)) return;
+        if (!Array.isArray(columns)) {return;}
 
         for (const col of columns) {
-            if (!col) continue;
+            if (!col) {continue;}
 
             // Scalar subquery in column
             if (col.expr?.type === 'select') {
@@ -888,8 +888,8 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!expr) return;
-        if (depth > this.options.maxSubqueryDepth) return;
+        if (!expr) {return;}
+        if (depth > this.options.maxSubqueryDepth) {return;}
 
         // Check for column references with table qualifiers (e.g., customer_totals.customer_id)
         // These should NOT create table references if the table name is a known alias/CTE
@@ -952,16 +952,16 @@ export class ReferenceExtractor {
      * Get table name from AST item
      */
     private getTableName(item: any): string | null {
-        if (!item) return null;
-        if (typeof item === 'string') return item;
+        if (!item) {return null;}
+        if (typeof item === 'string') {return item;}
 
         if (item.table) {
-            if (typeof item.table === 'string') return item.table;
-            if (item.table.table) return item.table.table;
-            if (item.table.name) return item.table.name;
+            if (typeof item.table === 'string') {return item.table;}
+            if (item.table.table) {return item.table.table;}
+            if (item.table.name) {return item.table.name;}
         }
 
-        if (item.name) return item.name;
+        if (item.name) {return item.name;}
 
         return null;
     }
@@ -1045,11 +1045,11 @@ export class ReferenceExtractor {
 
             for (const fn of functionFromKeywords) {
                 const fnIndex = lowerLine.lastIndexOf(fn, fromPos);
-                if (fnIndex === -1) continue;
+                if (fnIndex === -1) {continue;}
                 const parenIndex = lowerLine.indexOf('(', fnIndex + fn.length);
-                if (parenIndex === -1 || parenIndex > fromPos) continue;
+                if (parenIndex === -1 || parenIndex > fromPos) {continue;}
                 const closeParenIndex = lowerLine.indexOf(')', parenIndex + 1);
-                if (closeParenIndex !== -1 && closeParenIndex < fromPos) continue;
+                if (closeParenIndex !== -1 && closeParenIndex < fromPos) {continue;}
                 return true;
             }
 
@@ -1269,7 +1269,7 @@ export class ReferenceExtractor {
         tableAliases: Map<string, string>,
         context: string
     ): any[] {
-        if (!expr) return [];
+        if (!expr) {return [];}
 
         const columns: any[] = [];
 
@@ -1308,7 +1308,7 @@ export class ReferenceExtractor {
         tableAlias: string | undefined,
         tableAliases: Map<string, string>
     ): boolean {
-        if (!tableName) return true; // If no table specified, include all columns
+        if (!tableName) {return true;} // If no table specified, include all columns
 
         // Check if column explicitly references this table
         if (col.tableName === tableName) {
@@ -1340,7 +1340,7 @@ export class ReferenceExtractor {
      * Get table name from AST item
      */
     private getTableNameFromItem(item: any): string | undefined {
-        if (!item) return undefined;
+        if (!item) {return undefined;}
 
         if (item.table) {
             return this.getTableNameFromItem(item.table);
@@ -1364,7 +1364,7 @@ export class ReferenceExtractor {
         const seen = new Set<string>();
         return columns.filter(col => {
             const key = `${col.columnName}|${col.usedIn}`;
-            if (seen.has(key)) return false;
+            if (seen.has(key)) {return false;}
             seen.add(key);
             return true;
         });
@@ -1392,7 +1392,7 @@ export class ReferenceExtractor {
             }
 
             const key = `${ref.tableName.toLowerCase()}|${ref.referenceType}|${ref.lineNumber}`;
-            if (seen.has(key)) return false;
+            if (seen.has(key)) {return false;}
             seen.add(key);
             return true;
         });
@@ -1423,7 +1423,7 @@ export class ReferenceExtractor {
             let closeParenIndex = -1;
             const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
             for (let i = openParenIndex; i < maxSearchLength; i++) {
-                if (sql[i] === '(') parenCount++;
+                if (sql[i] === '(') {parenCount++;}
                 else if (sql[i] === ')') {
                     parenCount--;
                     if (parenCount === 0) {

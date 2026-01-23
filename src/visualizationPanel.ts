@@ -118,7 +118,7 @@ export class VisualizationPanel {
     }
 
     private static savePinnedTab(pin: PinnedVisualization) {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
         const existingIndex = pinnedTabs.findIndex(t => t.id === pin.id);
@@ -133,7 +133,7 @@ export class VisualizationPanel {
     }
 
     private static removePinnedTab(pinId: string) {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
         const filtered = pinnedTabs.filter(t => t.id !== pinId);
@@ -141,7 +141,7 @@ export class VisualizationPanel {
     }
 
     private static restorePinnedTabs() {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
 
@@ -151,7 +151,7 @@ export class VisualizationPanel {
     }
 
     public static getPinnedTabs(): PinnedVisualization[] {
-        if (!VisualizationPanel._context) return [];
+        if (!VisualizationPanel._context) {return [];}
         return VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
     }
 

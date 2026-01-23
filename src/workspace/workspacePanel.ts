@@ -495,10 +495,10 @@ export class WorkspacePanel {
      * Build lineage graph from workspace index
      */
     private async buildLineageGraph(): Promise<void> {
-        if (this._lineageGraph) return; // Already built
+        if (this._lineageGraph) {return;} // Already built
 
         const index = this._indexManager.getIndex();
-        if (!index) return;
+        if (!index) {return;}
 
         this._lineageBuilder = new LineageBuilder({ includeExternal: true, includeColumns: true });
         this._lineageGraph = this._lineageBuilder.buildFromIndex(index);
@@ -516,7 +516,7 @@ export class WorkspacePanel {
         depth: number
     ): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._flowAnalyzer || !this._lineageGraph) return;
+        if (!this._flowAnalyzer || !this._lineageGraph) {return;}
 
         let result: FlowResult | null = null;
 
@@ -566,7 +566,7 @@ export class WorkspacePanel {
         changeType: 'modify' | 'rename' | 'drop' = 'modify'
     ): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._impactAnalyzer) return;
+        if (!this._impactAnalyzer) {return;}
 
         let report: ImpactReport;
         if (type === 'table') {
@@ -614,7 +614,7 @@ export class WorkspacePanel {
      */
     private async handleExploreTable(tableName: string): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._lineageGraph) return;
+        if (!this._lineageGraph) {return;}
 
         const nodeId = `table:${tableName.toLowerCase()}`;
         const node = this._lineageGraph.nodes.get(nodeId);
@@ -654,7 +654,7 @@ export class WorkspacePanel {
      */
     private async handleGetColumnLineage(tableName: string, columnName: string): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._columnLineageTracker || !this._lineageGraph) return;
+        if (!this._columnLineageTracker || !this._lineageGraph) {return;}
 
         const lineage = this._columnLineageTracker.getFullColumnLineage(
             this._lineageGraph,
@@ -686,7 +686,7 @@ export class WorkspacePanel {
      * Handle node selection in lineage view
      */
     private handleSelectLineageNode(nodeId: string): void {
-        if (!this._lineageGraph) return;
+        if (!this._lineageGraph) {return;}
 
         const node = this._lineageGraph.nodes.get(nodeId);
         if (node) {
@@ -699,7 +699,7 @@ export class WorkspacePanel {
      */
     private async handleGetUpstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._flowAnalyzer) return;
+        if (!this._flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their upstream
         let nodeIds: string[] = [];
@@ -752,7 +752,7 @@ export class WorkspacePanel {
      */
     private async handleGetDownstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._flowAnalyzer) return;
+        if (!this._flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their downstream
         let nodeIds: string[] = [];
@@ -820,10 +820,10 @@ export class WorkspacePanel {
 
         for (const [id, node] of this._lineageGraph.nodes) {
             // Skip columns and external tables in search
-            if (node.type === 'column') continue;
+            if (node.type === 'column') {continue;}
 
             // Apply type filter
-            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
 
             // Match by name
             if (node.name.toLowerCase().includes(queryLower)) {
@@ -840,8 +840,8 @@ export class WorkspacePanel {
         results.sort((a, b) => {
             const aExact = a.name.toLowerCase() === queryLower;
             const bExact = b.name.toLowerCase() === queryLower;
-            if (aExact && !bExact) return -1;
-            if (!aExact && bExact) return 1;
+            if (aExact && !bExact) {return -1;}
+            if (!aExact && bExact) {return 1;}
             return a.name.localeCompare(b.name);
         });
 
@@ -895,10 +895,10 @@ export class WorkspacePanel {
      */
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
         await this.buildLineageGraph();
-        if (!this._lineageGraph) return;
+        if (!this._lineageGraph) {return;}
 
         const node = this._lineageGraph.nodes.get(nodeId);
-        if (!node) return;
+        if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
         this._panel.webview.postMessage({
@@ -964,13 +964,13 @@ export class WorkspacePanel {
      * Get lineage stats for display
      */
     private getLineageStats(): { tables: number; views: number; columns: number; edges: number } | null {
-        if (!this._lineageGraph) return null;
+        if (!this._lineageGraph) {return null;}
 
         let tables = 0, views = 0, columns = 0;
         for (const node of this._lineageGraph.nodes.values()) {
-            if (node.type === 'table') tables++;
-            else if (node.type === 'view') views++;
-            else if (node.type === 'column') columns++;
+            if (node.type === 'table') {tables++;}
+            else if (node.type === 'view') {views++;}
+            else if (node.type === 'column') {columns++;}
         }
 
         return {
@@ -1401,7 +1401,7 @@ ${bodyContent}
         const orphanedDetails: DefinitionDetail[] = [];
         for (const tableKey of graph.stats.orphanedDefinitions) {
             const defs = index.definitionMap.get(tableKey);
-            if (!defs) continue;
+            if (!defs) {continue;}
             for (const def of defs) {
                 orphanedDetails.push({
                     name: getDisplayName(def.name, def.schema),
@@ -1456,7 +1456,7 @@ ${bodyContent}
         const edgesHtml = graph.edges.map(edge => {
             const source = graph.nodes.find(n => n.id === edge.source);
             const target = graph.nodes.find(n => n.id === edge.target);
-            if (!source || !target) return '';
+            if (!source || !target) {return '';}
 
             // Calculate connection points
             const x1 = source.x + source.width / 2;
@@ -1645,7 +1645,7 @@ ${bodyContent}
      * Export graph as Mermaid diagram
      */
     private async exportAsMermaid(): Promise<void> {
-        if (!this._currentGraph) return;
+        if (!this._currentGraph) {return;}
 
         let mermaid = '```mermaid\ngraph TD\n';
 
@@ -1682,7 +1682,7 @@ ${bodyContent}
      * Export graph as SVG
      */
     private async exportAsSvg(): Promise<void> {
-        if (!this._currentGraph) return;
+        if (!this._currentGraph) {return;}
 
         const svg = this.generateSvgString(this._currentGraph);
 
@@ -1719,7 +1719,7 @@ ${bodyContent}
         const edgesHtml = graph.edges.map(edge => {
             const source = graph.nodes.find(n => n.id === edge.source);
             const target = graph.nodes.find(n => n.id === edge.target);
-            if (!source || !target) return '';
+            if (!source || !target) {return '';}
 
             const x1 = source.x + source.width / 2;
             const y1 = source.y + source.height;
@@ -2098,7 +2098,7 @@ ${nodesHtml}
 
         while (this._disposables.length) {
             const d = this._disposables.pop();
-            if (d) d.dispose();
+            if (d) {d.dispose();}
         }
     }
 }

@@ -53,14 +53,14 @@ export class SchemaExtractor {
             const statements = Array.isArray(ast) ? ast : [ast];
 
             for (const stmt of statements) {
-                if (!stmt) continue;
+                if (!stmt) {continue;}
 
                 if (this.isCreateTable(stmt)) {
                     const def = this.parseCreateTable(stmt, filePath, sql);
-                    if (def) definitions.push(def);
+                    if (def) {definitions.push(def);}
                 } else if (this.isCreateView(stmt)) {
                     const def = this.parseCreateView(stmt, filePath, sql);
-                    if (def) definitions.push(def);
+                    if (def) {definitions.push(def);}
                 }
             }
         } catch (error) {
@@ -96,7 +96,7 @@ export class SchemaExtractor {
      * Check if statement is CREATE TABLE
      */
     private isCreateTable(stmt: any): boolean {
-        if (!stmt || !stmt.type) return false;
+        if (!stmt || !stmt.type) {return false;}
         const type = stmt.type.toLowerCase();
         return type === 'create' && stmt.keyword?.toLowerCase() === 'table';
     }
@@ -105,7 +105,7 @@ export class SchemaExtractor {
      * Check if statement is CREATE VIEW
      */
     private isCreateView(stmt: any): boolean {
-        if (!stmt || !stmt.type) return false;
+        if (!stmt || !stmt.type) {return false;}
         const type = stmt.type.toLowerCase();
         return type === 'create' && (
             stmt.keyword?.toLowerCase() === 'view' ||
@@ -204,7 +204,7 @@ export class SchemaExtractor {
         for (const colDef of createDefinitions) {
             if (colDef.resource === 'column' || colDef.column) {
                 const column = this.parseColumnDefinition(colDef);
-                if (column) columns.push(column);
+                if (column) {columns.push(column);}
             }
         }
 
@@ -417,7 +417,7 @@ export class SchemaExtractor {
 
         for (const part of parts) {
             const trimmed = part.trim();
-            if (!trimmed) continue;
+            if (!trimmed) {continue;}
 
             // Skip constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, CONSTRAINT)
             if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)/i.test(trimmed)) {
@@ -575,7 +575,7 @@ export class SchemaExtractor {
             end = nextCreate;
         }
 
-        if (end < 0) end = sql.length;
+        if (end < 0) {end = sql.length;}
 
         return sql.substring(startIndex, end).trim();
     }

@@ -110,7 +110,7 @@ export class GraphBuilder {
      */
     focusOnNode(graph: Graph, nodeId: string, depth: number = 2): Graph {
         const focusNode = graph.nodes.find(n => n.id === nodeId);
-        if (!focusNode) return graph;
+        if (!focusNode) {return graph;}
 
         const includedIds = new Set<string>([nodeId]);
         const queue: [string, number][] = [[nodeId, 0]];
@@ -119,7 +119,7 @@ export class GraphBuilder {
         while (queue.length > 0) {
             const [currentId, currentDepth] = queue.shift()!;
 
-            if (currentDepth >= depth) continue;
+            if (currentDepth >= depth) {continue;}
 
             // Find neighbors
             const incoming = graph.edges

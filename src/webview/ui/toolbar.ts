@@ -703,10 +703,10 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
         `;
 
         item.addEventListener('mouseenter', () => {
-            if (!isActive) item.style.background = 'rgba(148, 163, 184, 0.1)';
+            if (!isActive) {item.style.background = 'rgba(148, 163, 184, 0.1)';}
         });
         item.addEventListener('mouseleave', () => {
-            if (!isActive) item.style.background = 'transparent';
+            if (!isActive) {item.style.background = 'transparent';}
         });
 
         item.addEventListener('click', (e) => {
@@ -893,7 +893,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     const closeModal = () => overlay.remove();
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
+        if (e.target === overlay) {closeModal();}
     });
     modal.querySelector('#close-shortcuts')?.addEventListener('click', closeModal);
 
@@ -924,7 +924,7 @@ export function updateToolbarTheme(
     });
 
     const titleSpan = toolbar.querySelector('span');
-    if (titleSpan) titleSpan.style.color = textColor;
+    if (titleSpan) {titleSpan.style.color = textColor;}
 
     searchContainer.style.background = bgColor;
     searchContainer.style.borderColor = borderColor;

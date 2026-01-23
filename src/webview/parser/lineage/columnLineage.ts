@@ -65,7 +65,7 @@ export function extractSourcesFromExpr(
     tableAliasMap: Map<string, string>,
     tableNodes: FlowNode[]
 ): void {
-    if (!expr) return;
+    if (!expr) {return;}
 
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {

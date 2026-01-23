@@ -152,7 +152,7 @@ export class IndexManager {
      * Remove a file from the index
      */
     async removeFile(uri: vscode.Uri): Promise<void> {
-        if (!this.index) return;
+        if (!this.index) {return;}
 
         const analysis = this.index.files.get(uri.fsPath);
         if (analysis) {
@@ -173,7 +173,7 @@ export class IndexManager {
      * Find the definition for a table name
      */
     findDefinition(tableName: string, schema?: string): SchemaDefinition | undefined {
-        if (!this.index) return undefined;
+        if (!this.index) {return undefined;}
         const key = getQualifiedKey(tableName, schema);
         const direct = this.index.definitionMap.get(key);
         if (direct && direct.length > 0) {
@@ -181,19 +181,19 @@ export class IndexManager {
         }
 
         const targetName = normalizeIdentifier(tableName);
-        if (!targetName) return undefined;
+        if (!targetName) {return undefined;}
 
         if (schema) {
             for (const defs of this.index.definitionMap.values()) {
                 const match = defs.find(def => !def.schema && normalizeIdentifier(def.name) === targetName);
-                if (match) return match;
+                if (match) {return match;}
             }
             return undefined;
         }
 
         for (const defs of this.index.definitionMap.values()) {
             const match = defs.find(def => normalizeIdentifier(def.name) === targetName);
-            if (match) return match;
+            if (match) {return match;}
         }
 
         return undefined;
@@ -203,7 +203,7 @@ export class IndexManager {
      * Find all references to a table
      */
     findReferences(tableName: string, schema?: string): TableReference[] {
-        if (!this.index) return [];
+        if (!this.index) {return [];}
         const key = getQualifiedKey(tableName, schema);
         const direct = this.index.referenceMap.get(key);
         if (direct && direct.length > 0) {
@@ -211,7 +211,7 @@ export class IndexManager {
         }
 
         const targetName = normalizeIdentifier(tableName);
-        if (!targetName) return [];
+        if (!targetName) {return [];}
 
         if (schema) {
             const matches: TableReference[] = [];
@@ -242,7 +242,7 @@ export class IndexManager {
      */
     getExternalReferences(filePath: string): TableReference[] {
         const analysis = this.index?.files.get(filePath);
-        if (!analysis) return [];
+        if (!analysis) {return [];}
 
         const localDefinitions = new Set(
             analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
@@ -265,7 +265,7 @@ export class IndexManager {
      * Get all defined table names
      */
     getDefinedTables(): string[] {
-        if (!this.index) return [];
+        if (!this.index) {return [];}
         return [...this.index.definitionMap.keys()];
     }
 
@@ -273,7 +273,7 @@ export class IndexManager {
      * Get all referenced table names (including external)
      */
     getReferencedTables(): string[] {
-        if (!this.index) return [];
+        if (!this.index) {return [];}
         return [...this.index.referenceMap.keys()];
     }
 
@@ -281,14 +281,14 @@ export class IndexManager {
      * Get tables that are referenced but not defined (external/missing)
      */
     getMissingDefinitions(): string[] {
-        if (!this.index) return [];
+        if (!this.index) {return [];}
 
         const definedKeys = new Set(this.index.definitionMap.keys());
         const definitionsByName = new Map<string, SchemaDefinition[]>();
         for (const defs of this.index.definitionMap.values()) {
             for (const def of defs) {
                 const name = normalizeIdentifier(def.name);
-                if (!name) continue;
+                if (!name) {continue;}
                 if (!definitionsByName.has(name)) {
                     definitionsByName.set(name, []);
                 }
@@ -324,14 +324,14 @@ export class IndexManager {
      * Get tables that are defined but never referenced (orphaned)
      */
     getOrphanedDefinitions(): string[] {
-        if (!this.index) return [];
+        if (!this.index) {return [];}
 
         const orphaned: string[] = [];
         const refsByName = new Map<string, TableReference[]>();
         for (const refs of this.index.referenceMap.values()) {
             for (const ref of refs) {
                 const name = normalizeIdentifier(ref.tableName);
-                if (!name) continue;
+                if (!name) {continue;}
                 if (!refsByName.has(name)) {
                     refsByName.set(name, []);
                 }
@@ -392,7 +392,7 @@ export class IndexManager {
      */
     private addFileToIndex(analysis: FileAnalysis, index?: WorkspaceIndex): void {
         const targetIndex = index || this.index;
-        if (!targetIndex) return;
+        if (!targetIndex) {return;}
 
         targetIndex.files.set(analysis.filePath, analysis);
         targetIndex.fileHashes.set(analysis.filePath, analysis.contentHash);
@@ -422,7 +422,7 @@ export class IndexManager {
      * Remove a file analysis from the index
      */
     private removeFileFromIndex(analysis: FileAnalysis): void {
-        if (!this.index) return;
+        if (!this.index) {return;}
 
         this.index.files.delete(analysis.filePath);
 
@@ -543,7 +543,7 @@ export class IndexManager {
      * Persist index to workspace state
      */
     private async persistIndex(): Promise<void> {
-        if (!this.index) return;
+        if (!this.index) {return;}
 
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {
@@ -563,13 +563,13 @@ export class IndexManager {
      * Check if the cached index is stale based on TTL settings
      */
     private isIndexStale(): boolean {
-        if (!this.index) return true;
+        if (!this.index) {return true;}
 
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
         const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
 
         // If TTL is 0, always consider stale (caching disabled)
-        if (cacheTTLHours === 0) return true;
+        if (cacheTTLHours === 0) {return true;}
 
         const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
         return Date.now() - this.index.lastUpdated > cacheTTLMs;

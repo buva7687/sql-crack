@@ -345,7 +345,7 @@ export class MessageHandler {
         const flowAnalyzer = this._context.getFlowAnalyzer();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!flowAnalyzer || !lineageGraph) return;
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
         let result: FlowResult | null = null;
 
@@ -394,7 +394,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const impactAnalyzer = this._context.getImpactAnalyzer();
 
-        if (!impactAnalyzer) return;
+        if (!impactAnalyzer) {return;}
 
         let report: ImpactReport;
         if (type === 'table') {
@@ -441,7 +441,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
         const nodeId = `table:${tableName.toLowerCase()}`;
         const node = lineageGraph.nodes.get(nodeId);
@@ -481,7 +481,7 @@ export class MessageHandler {
         const columnLineageTracker = this._context.getColumnLineageTracker();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!columnLineageTracker || !lineageGraph) return;
+        if (!columnLineageTracker || !lineageGraph) {return;}
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
@@ -511,7 +511,7 @@ export class MessageHandler {
 
     private handleSelectLineageNode(nodeId: string): void {
         const lineageGraph = this._context.getLineageGraph();
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
         const node = lineageGraph.nodes.get(nodeId);
         if (node) {
@@ -528,7 +528,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) return;
+        if (!flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their upstream
         let nodeIds: string[] = [];
@@ -580,7 +580,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) return;
+        if (!flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their downstream
         let nodeIds: string[] = [];
@@ -641,10 +641,10 @@ export class MessageHandler {
 
         for (const [id, node] of lineageGraph.nodes) {
             // Skip columns and external tables in search
-            if (node.type === 'column') continue;
+            if (node.type === 'column') {continue;}
 
             // Apply type filter
-            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
 
             // Match by name
             if (node.name.toLowerCase().includes(queryLower)) {
@@ -661,8 +661,8 @@ export class MessageHandler {
         results.sort((a, b) => {
             const aExact = a.name.toLowerCase() === queryLower;
             const bExact = b.name.toLowerCase() === queryLower;
-            if (aExact && !bExact) return -1;
-            if (!aExact && bExact) return 1;
+            if (aExact && !bExact) {return -1;}
+            if (!aExact && bExact) {return 1;}
             return a.name.localeCompare(b.name);
         });
 
@@ -712,10 +712,10 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
         const node = lineageGraph.nodes.get(nodeId);
-        if (!node) return;
+        if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
         this._context.panel.webview.postMessage({

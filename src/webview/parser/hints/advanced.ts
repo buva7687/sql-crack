@@ -50,7 +50,7 @@ function detectUnusedCTEs(nodes: FlowNode[]): void {
         }
 
         if (!referencedCTEs.has(cteName)) {
-            if (!cteNode.warnings) cteNode.warnings = [];
+            if (!cteNode.warnings) {cteNode.warnings = [];}
             cteNode.warnings.push({
                 type: 'unused',
                 severity: 'medium',
@@ -91,14 +91,14 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
 
     // Extract subqueries from SQL
     const extractSubquery = (sql: string, startIndex: number): { sql: string; endIndex: number } | null => {
-        if (sql[startIndex] !== '(') return null;
+        if (sql[startIndex] !== '(') {return null;}
 
         let depth = 0;
         let i = startIndex;
         let start = i + 1;
 
         while (i < sql.length) {
-            if (sql[i] === '(') depth++;
+            if (sql[i] === '(') {depth++;}
             if (sql[i] === ')') {
                 depth--;
                 if (depth === 0) {
@@ -116,7 +116,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
     let searchIndex = 0;
     while (searchIndex < sql.length) {
         const selectPos = sqlLower.indexOf('select', searchIndex);
-        if (selectPos === -1) break;
+        if (selectPos === -1) {break;}
 
         let parenPos = -1;
         for (let i = selectPos - 1; i >= 0 && i >= selectPos - 100; i--) {
@@ -124,7 +124,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
                 parenPos = i;
                 break;
             }
-            if (sql[i] === ')' || sql[i] === ';') break;
+            if (sql[i] === ')' || sql[i] === ';') {break;}
         }
 
         if (parenPos >= 0) {
@@ -170,11 +170,11 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
     const processed = new Set<string>();
 
     allSubqueries.forEach((subq1, idx1) => {
-        if (processed.has(subq1.normalized)) return;
+        if (processed.has(subq1.normalized)) {return;}
 
         const similar: SubqueryMatch[] = [subq1];
         allSubqueries.forEach((subq2, idx2) => {
-            if (idx1 >= idx2 || processed.has(subq2.normalized)) return;
+            if (idx1 >= idx2 || processed.has(subq2.normalized)) {return;}
 
             const sig1 = subq1.normalized;
             const sig2 = subq2.normalized;
@@ -204,7 +204,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
     similarGroups.forEach(group => {
         group.forEach(subq => {
             if (subq.node) {
-                if (!subq.node.warnings) subq.node.warnings = [];
+                if (!subq.node.warnings) {subq.node.warnings = [];}
                 subq.node.warnings.push({
                     type: 'complex',
                     severity: 'low',
@@ -222,7 +222,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
                 }
 
                 if (targetNode) {
-                    if (!targetNode.warnings) targetNode.warnings = [];
+                    if (!targetNode.warnings) {targetNode.warnings = [];}
                     targetNode.warnings.push({
                         type: 'complex',
                         severity: 'low',
@@ -246,7 +246,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
         if (group.length > 1 && signature.length > 15 && !processed.has(signature)) {
             group.forEach(subq => {
                 if (subq.node) {
-                    if (!subq.node.warnings) subq.node.warnings = [];
+                    if (!subq.node.warnings) {subq.node.warnings = [];}
                     subq.node.warnings.push({
                         type: 'complex',
                         severity: 'low',
@@ -264,7 +264,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
                     }
 
                     if (targetNode) {
-                        if (!targetNode.warnings) targetNode.warnings = [];
+                        if (!targetNode.warnings) {targetNode.warnings = [];}
                         targetNode.warnings.push({
                             type: 'complex',
                             severity: 'low',
@@ -288,7 +288,7 @@ function detectDuplicateSubqueries(nodes: FlowNode[], sql: string): void {
 function detectDeadColumns(nodes: FlowNode[], sql: string): void {
     const selectNodes = nodes.filter(n => n.type === 'select' && n.columns);
     selectNodes.forEach(selectNode => {
-        if (!selectNode.columns || selectNode.columns.length === 0) return;
+        if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
         // Skip top-level SELECT nodes
         if (!selectNode.parentId) {
@@ -308,8 +308,8 @@ function detectDeadColumns(nodes: FlowNode[], sql: string): void {
             let parenDepth = 0;
             for (let i = 0; i < selectClause.length; i++) {
                 const char = selectClause[i];
-                if (char === '(') parenDepth++;
-                else if (char === ')') parenDepth--;
+                if (char === '(') {parenDepth++;}
+                else if (char === ')') {parenDepth--;}
                 else if (char === ',' && parenDepth === 0) {
                     columnParts.push(current.trim());
                     current = '';
@@ -317,7 +317,7 @@ function detectDeadColumns(nodes: FlowNode[], sql: string): void {
                 }
                 current += char;
             }
-            if (current.trim()) columnParts.push(current.trim());
+            if (current.trim()) {columnParts.push(current.trim());}
 
             columnParts.forEach(part => {
                 const trimmed = part.trim();
@@ -360,7 +360,7 @@ function detectDeadColumns(nodes: FlowNode[], sql: string): void {
 
             if (normalizedSql) {
                 for (const nameToCheck of Array.from(colNamesToCheck)) {
-                    if (isUsed) break;
+                    if (isUsed) {break;}
 
                     const escapedColName = nameToCheck.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     const wordBoundaryPattern = new RegExp(`\\b${escapedColName}\\b`, 'i');
@@ -397,12 +397,12 @@ function detectDeadColumns(nodes: FlowNode[], sql: string): void {
                             break;
                         }
                     }
-                    if (isUsed) break;
+                    if (isUsed) {break;}
                 }
             }
 
             if (!isUsed) {
-                if (!selectNode.warnings) selectNode.warnings = [];
+                if (!selectNode.warnings) {selectNode.warnings = [];}
                 selectNode.warnings.push({
                     type: 'dead-column',
                     severity: 'low',
@@ -443,7 +443,7 @@ function detectRepeatedTableScans(nodes: FlowNode[]): void {
     tableUsage.forEach((usages, tableName) => {
         if (usages.length > 1) {
             usages.forEach(node => {
-                if (!node.warnings) node.warnings = [];
+                if (!node.warnings) {node.warnings = [];}
                 node.warnings.push({
                     type: 'repeated-scan',
                     severity: 'medium',
