@@ -539,6 +539,10 @@ function setupEventListeners(): void {
         // Skip other shortcuts if input is focused
         if (isInputFocused) {return;}
 
+        // Skip single-key shortcuts if modifier keys are pressed
+        // This allows native browser shortcuts (Ctrl+C, Cmd+V, etc.) to work normally
+        if (e.metaKey || e.ctrlKey || e.altKey) {return;}
+
         // + or = to zoom in
         if (e.key === '+' || e.key === '=') {
             e.preventDefault();
@@ -2952,18 +2956,66 @@ function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
     });
 }
 
+/**
+ * Renders error message in the visualization area
+ * Enhanced to show helpful dialect suggestions when parse errors occur
+ */
 function renderError(message: string): void {
     if (!mainGroup) { return; }
 
+    // Check if message contains a dialect suggestion (from improved error handling in sqlParser)
+    const hasSuggestion = message.includes('Try ') && message.includes(' dialect');
+    const parts = hasSuggestion ? message.split('. ') : [message];
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('transform', 'translate(0, -20)');
+
+    // Error icon
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', '50%');
+    icon.setAttribute('y', hasSuggestion ? '45%' : '48%');
+    icon.setAttribute('text-anchor', 'middle');
+    icon.setAttribute('fill', '#f87171');
+    icon.setAttribute('font-size', '24');
+    icon.textContent = '⚠';
+    g.appendChild(icon);
+
+    // Main error message
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', '50%');
-    text.setAttribute('y', '50%');
+    text.setAttribute('y', hasSuggestion ? '52%' : '55%');
     text.setAttribute('text-anchor', 'middle');
     text.setAttribute('fill', '#f87171');
     text.setAttribute('font-size', '14');
     text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-    text.textContent = `Error: ${message}`;
-    mainGroup.appendChild(text);
+    text.textContent = hasSuggestion ? parts[0] : `Error: ${message}`;
+    g.appendChild(text);
+
+    // Suggestion line (if present)
+    if (hasSuggestion && parts[1]) {
+        const suggestion = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        suggestion.setAttribute('x', '50%');
+        suggestion.setAttribute('y', '58%');
+        suggestion.setAttribute('text-anchor', 'middle');
+        suggestion.setAttribute('fill', '#94a3b8');
+        suggestion.setAttribute('font-size', '12');
+        suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        suggestion.textContent = `💡 ${parts[1]}`;
+        g.appendChild(suggestion);
+
+        // Hint about dialect selector
+        const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        hint.setAttribute('x', '50%');
+        hint.setAttribute('y', '64%');
+        hint.setAttribute('text-anchor', 'middle');
+        hint.setAttribute('fill', '#64748b');
+        hint.setAttribute('font-size', '11');
+        hint.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        hint.textContent = 'Change dialect using the dropdown in the top-left toolbar';
+        g.appendChild(hint);
+    }
+
+    mainGroup.appendChild(g);
 }
 
 function selectNode(nodeId: string | null): void {
@@ -4027,11 +4079,36 @@ function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGEleme
 
 /**
  * Recursively embeds computed styles as inline styles on SVG elements
+ * Required for proper rendering when exporting SVG to PNG (canvas needs inline styles)
+ * 
+ * Handles SVGAnimatedString issue: SVG elements have className as object, not string
+ * Uses classList instead which works reliably for both HTML and SVG elements
  */
 function embedInlineStyles(element: Element): void {
-    const computedStyle = window.getComputedStyle(element);
-    const originalElement = svg?.querySelector(`[data-id="${element.getAttribute('data-id')}"]`) ||
-                           document.querySelector(`.${element.className}`) as Element | null;
+    // Get SVG from DOM if local reference is missing (fallback for export functions)
+    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
+
+    // Try to find original element by data-id first (most reliable)
+    let originalElement: Element | null = null;
+    const dataId = element.getAttribute('data-id');
+    if (dataId && svgElement) {
+        originalElement = svgElement.querySelector(`[data-id="${dataId}"]`);
+    }
+
+    // Fallback: try by class name using classList (handles SVGAnimatedString correctly)
+    if (!originalElement && element.classList && element.classList.length > 0) {
+        const firstClass = element.classList[0];
+        if (firstClass) {
+            try {
+                // Escape special CSS selector characters to prevent invalid selectors
+                const escapedClass = firstClass.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+                originalElement = svgElement?.querySelector(`.${escapedClass}`) || 
+                                document.querySelector(`.${escapedClass}`);
+            } catch {
+                // Invalid selector, skip
+            }
+        }
+    }
 
     // Style properties important for SVG rendering
     const styleProps = ['fill', 'stroke', 'stroke-width', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor'];
@@ -4050,55 +4127,139 @@ function embedInlineStyles(element: Element): void {
     Array.from(element.children).forEach(child => embedInlineStyles(child));
 }
 
+/**
+ * Exports the current visualization as PNG image
+ * Converts SVG to PNG via canvas with fallback mechanisms for webview compatibility
+ */
 export function exportToPng(): void {
-    if (!svg) { return; }
+    // Get SVG from DOM if local reference is missing (fallback for reliability)
+    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
+    if (!svgElement) {
+        console.log('No visualization to export. Please render a query first.');
+        return;
+    }
 
-    const { svgClone, width, height } = prepareSvgForExport(svg);
+    try {
+        const { svgClone, width, height } = prepareSvgForExport(svgElement);
+        const svgData = new XMLSerializer().serializeToString(svgClone);
 
-    // Convert to image
-    const svgData = new XMLSerializer().serializeToString(svgClone);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { return; }
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            console.log('Failed to create canvas context');
+            return;
+        }
 
-    const scale = 2; // High DPI
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    ctx.scale(scale, scale);
+        // High DPI scaling for crisp exports
+        const scale = 2;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        ctx.scale(scale, scale);
 
-    const img = new Image();
-    img.onload = () => {
-        ctx.drawImage(img, 0, 0);
-        const a = document.createElement('a');
-        a.download = `sql-flow-${Date.now()}.png`;
-        a.href = canvas.toDataURL('image/png');
-        a.click();
-    };
-    img.onerror = (e) => {
-        console.error('Failed to load SVG for export:', e);
-        // Fallback: try without base64 encoding
-        const blob = new Blob([svgData], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        img.src = url;
-    };
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        // Helper function to trigger download (adds link to DOM for webview compatibility)
+        const triggerDownload = (dataUrl: string) => {
+            const a = document.createElement('a');
+            a.download = `sql-flow-${Date.now()}.png`;
+            a.href = dataUrl;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                if (a.parentNode) {
+                    document.body.removeChild(a);
+                }
+            }, 100);
+        };
+
+        // Fallback: try blob URL if base64 data URL fails (CSP or browser compatibility)
+        const tryBlobUrlFallback = () => {
+            try {
+                const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const img2 = new Image();
+                img2.crossOrigin = 'anonymous';
+                img2.onload = () => {
+                    try {
+                        ctx.drawImage(img2, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/png');
+                        triggerDownload(dataUrl);
+                        URL.revokeObjectURL(url);
+                    } catch (e) {
+                        console.log('PNG export failed in fallback:', e);
+                        URL.revokeObjectURL(url);
+                    }
+                };
+                img2.onerror = (e) => {
+                    console.log('Failed to render PNG from blob URL. Try SVG export instead.', e);
+                    URL.revokeObjectURL(url);
+                };
+                img2.src = url;
+            } catch (e) {
+                console.log('Blob fallback failed:', e);
+            }
+        };
+
+        // Load SVG as image for canvas conversion
+        // Set crossOrigin to avoid CORS issues with data/blob URLs
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = () => {
+            try {
+                ctx.drawImage(img, 0, 0);
+                const dataUrl = canvas.toDataURL('image/png');
+                triggerDownload(dataUrl);
+            } catch (e) {
+                console.log('PNG export error:', e);
+                // Fallback: try with blob URL
+                tryBlobUrlFallback();
+            }
+        };
+        
+        img.onerror = (e) => {
+            console.log('Image load error, trying blob URL fallback:', e);
+            tryBlobUrlFallback();
+        };
+        
+        // Try base64 first
+        try {
+            img.src = 'data:image/svg+xml;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        } catch (e) {
+            console.log('Failed to create base64 data URL, trying blob URL:', e);
+            tryBlobUrlFallback();
+        }
+    } catch (e) {
+        console.log('PNG export failed: ' + e);
+    }
 }
 
 export function exportToSvg(): void {
-    if (!svg) { return; }
+    // Get SVG from DOM if local reference is missing
+    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
+    if (!svgElement) {
+        console.error('No SVG element found - cannot export');
+        return;
+    }
 
-    const { svgClone } = prepareSvgForExport(svg);
+    try {
+        const { svgClone } = prepareSvgForExport(svgElement);
+        const svgData = new XMLSerializer().serializeToString(svgClone);
 
-    const svgData = new XMLSerializer().serializeToString(svgClone);
-    const blob = new Blob([svgData], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
+        // Export pattern: create blob URL and trigger download
+        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.download = `sql-flow-${Date.now()}.svg`;
+        a.href = url;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('SVG export failed:', e);
+    }
+}
 
-    const a = document.createElement('a');
-    a.download = `sql-flow-${Date.now()}.svg`;
-    a.href = url;
-    a.click();
-
-    URL.revokeObjectURL(url);
+function showExportNotification(type: 'success' | 'error', message: string): void {
+    showClipboardNotification(type, message);
 }
 
 /**
@@ -4319,39 +4480,124 @@ function generateStyleAssignments(nodes: FlowNode[]): string[] {
 }
 
 export function copyToClipboard(): void {
-    if (!svg) { return; }
+    // Get SVG from DOM if local reference is missing
+    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
+    if (!svgElement) {
+        console.log('No visualization to copy. Please render a query first.');
+        return;
+    }
 
-    const { svgClone, width, height } = prepareSvgForExport(svg);
+    try {
+        const { svgClone, width, height } = prepareSvgForExport(svgElement);
+        const svgData = new XMLSerializer().serializeToString(svgClone);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            console.log('Failed to create canvas context');
+            return;
+        }
 
-    const svgData = new XMLSerializer().serializeToString(svgClone);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { return; }
+        const scale = 2;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        ctx.scale(scale, scale);
 
-    const scale = 2;
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    ctx.scale(scale, scale);
+        const img = new Image();
+        img.onload = () => {
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((blob) => {
+                if (blob && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+                    navigator.clipboard.write([
+                        new ClipboardItem({ 'image/png': blob })
+                    ]).then(() => {
+                        // Success - notification shown via UI
+                    }).catch(() => {
+                        // Fallback: download as PNG (same as Mermaid)
+                        const a = document.createElement('a');
+                        a.download = `sql-flow-${Date.now()}.png`;
+                        a.href = canvas.toDataURL('image/png');
+                        a.click();
+                        console.log('Clipboard unavailable - downloaded as PNG');
+                    });
+                } else {
+                    // Fallback: download as PNG (same as Mermaid)
+                    const a = document.createElement('a');
+                    a.download = `sql-flow-${Date.now()}.png`;
+                    a.href = canvas.toDataURL('image/png');
+                    a.click();
+                    console.log('Downloaded as PNG');
+                }
+            }, 'image/png');
+        };
+        img.onerror = () => {
+            // Try with blob URL
+            const blob = new Blob([svgData], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const img2 = new Image();
+            img2.onload = () => {
+                ctx.drawImage(img2, 0, 0);
+                const a = document.createElement('a');
+                a.download = `sql-flow-${Date.now()}.png`;
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+                URL.revokeObjectURL(url);
+                console.log('Downloaded as PNG');
+            };
+            img2.onerror = () => {
+                console.log('Failed to copy. Try SVG export instead.');
+            };
+            img2.src = url;
+        };
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    } catch (e) {
+        console.log('Copy failed: ' + e);
+    }
+}
 
-    const img = new Image();
-    img.onload = () => {
-        ctx.drawImage(img, 0, 0);
-        canvas.toBlob((blob) => {
-            if (blob) {
-                navigator.clipboard.write([
-                    new ClipboardItem({ 'image/png': blob })
-                ]).then(() => {
-                    console.log('Copied to clipboard successfully');
-                }).catch((err) => {
-                    console.error('Failed to copy to clipboard:', err);
-                });
-            }
-        }, 'image/png');
-    };
-    img.onerror = (e) => {
-        console.error('Failed to load SVG for clipboard:', e);
-    };
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+function showClipboardNotification(type: 'success' | 'error', message: string): void {
+    // Use the container element or fall back to body
+    const parent = containerElement || document.body;
+
+    // Remove existing notification if any
+    const existing = document.getElementById('clipboard-notification');
+    if (existing) {existing.remove();}
+
+    const notification = document.createElement('div');
+    notification.id = 'clipboard-notification';
+    notification.style.cssText = `
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        ${type === 'success'
+            ? 'background: rgba(34, 197, 94, 0.95); color: white;'
+            : 'background: rgba(239, 68, 68, 0.95); color: white;'}
+    `;
+    notification.textContent = message;
+
+    parent.appendChild(notification);
+
+    // Animate in
+    notification.animate([
+        { transform: 'translateX(-50%) translateY(20px)', opacity: 0 },
+        { transform: 'translateX(-50%) translateY(0)', opacity: 1 }
+    ], { duration: 300, easing: 'ease-out' });
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.animate([
+            { opacity: 1 },
+            { opacity: 0 }
+        ], { duration: 300, easing: 'ease-out' }).onfinish = () => {
+            notification.remove();
+        };
+    }, 3000);
 }
 
 function calculateBounds(): { minX: number; minY: number; width: number; height: number } {

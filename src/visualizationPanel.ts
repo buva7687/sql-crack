@@ -405,7 +405,8 @@ export class VisualizationPanel {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <!-- CSP: Allow img-src for data: and blob: URLs to enable PNG export and clipboard copy -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data: blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Visualization</title>
     <style>

@@ -478,7 +478,44 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         return { nodes, edges, stats, hints, sql, columnLineage, columnFlows, tableUsage: tableUsageMap };
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Parse error';
+        let message = err instanceof Error ? err.message : 'Parse error';
+
+        // Enhance error messages with helpful dialect suggestions for common issues
+        // This helps users quickly identify when they need to switch SQL dialects
+        const upperSql = sql.toUpperCase();
+        const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(sql);
+        const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
+
+        if (message.includes('found') || message.includes('Expected')) {
+            if (currentDialect === 'MySQL') {
+                // MySQL-specific issues - check in order of likelihood
+                if (hasParenthesizedUnion && hasIntervalQuoted) {
+                    message = `This query uses PostgreSQL syntax (INTERVAL '...' and parenthesized UNION). Try PostgreSQL dialect.`;
+                } else if (hasParenthesizedUnion) {
+                    message = `Parenthesized set operations not supported in MySQL. Try PostgreSQL dialect.`;
+                } else if (hasIntervalQuoted) {
+                    message = `PostgreSQL-style INTERVAL syntax detected. Try PostgreSQL dialect, or use MySQL syntax: INTERVAL 30 DAY.`;
+                } else {
+                    message = `SQL syntax not recognized by MySQL parser. Try PostgreSQL dialect (most compatible).`;
+                }
+            }
+            // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
+            else if (upperSql.includes('INTERSECT') || upperSql.includes('EXCEPT')) {
+                const dialectsWithSupport = ['MySQL', 'PostgreSQL'];
+                if (!dialectsWithSupport.includes(currentDialect)) {
+                    message = `INTERSECT/EXCEPT not supported in ${currentDialect}. Try MySQL or PostgreSQL dialect.`;
+                }
+            }
+            // Check for recursive CTE
+            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(currentDialect)) {
+                message = `RECURSIVE CTE not supported in ${currentDialect}. Try PostgreSQL or MySQL dialect.`;
+            }
+            // Generic parse error - make it more user-friendly
+            else {
+                message = `SQL syntax not recognized by ${currentDialect} parser. Try PostgreSQL dialect (most compatible).`;
+            }
+        }
+
         return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
     }
 }
