@@ -2,198 +2,40 @@ import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 
-export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
+// Import types from centralized type definitions
+import {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ColumnInfo,
+    ColumnLineage,
+    QueryStats,
+    OptimizationHint,
+    ParseResult,
+    BatchParseResult,
+    SqlDialect,
+    NodeType,
+} from './types';
 
-export interface FlowNode {
-    id: string;
-    type: 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window' | 'case';
-    label: string;
-    description?: string;
-    details?: string[];
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    // Line numbers in SQL for editor sync
-    startLine?: number;
-    endLine?: number;
-    // Join type for differentiated styling
-    joinType?: string;
-    // Table category for visual distinction
-    tableCategory?: 'physical' | 'derived' | 'cte_reference';
-    // Access mode for read/write differentiation
-    accessMode?: 'read' | 'write' | 'derived';
-    // Operation type for write operations
-    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
-    // For nested visualizations (CTEs, subqueries)
-    children?: FlowNode[];
-    childEdges?: FlowEdge[];
-    expanded?: boolean;
-    collapsible?: boolean; // Can this node be collapsed?
-    parentId?: string; // Parent CTE/Subquery ID for breadcrumb navigation
-    depth?: number; // Depth in CTE hierarchy (0 = root, 1 = first level CTE, etc.)
-    // For window functions - detailed breakdown
-    windowDetails?: {
-        functions: Array<{
-            name: string;
-            partitionBy?: string[];
-            orderBy?: string[];
-            frame?: string;
-        }>;
-    };
-    // For aggregate nodes - function details
-    aggregateDetails?: {
-        functions: Array<{
-            name: string;
-            expression: string;
-            alias?: string;
-        }>;
-        groupBy?: string[];
-        having?: string;
-    };
-    // For CASE nodes - case details
-    caseDetails?: {
-        cases: Array<{
-            conditions: Array<{
-                when: string;
-                then: string;
-            }>;
-            elseValue?: string;
-            alias?: string;
-        }>;
-    };
-    // For SELECT nodes - column details with source tracking
-    columns?: ColumnInfo[];
-    // For visual column lineage
-    visibleColumns?: string[]; // Column names to display in the node
-    columnPositions?: Map<string, { x: number; y: number }>; // Column positions for drawing connections
-    // For warning indicators
-    warnings?: Array<{ type: 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex' | 'filter-pushdown' | 'non-sargable' | 'join-order' | 'index-suggestion'; severity: 'low' | 'medium' | 'high'; message: string }>;
-    complexityLevel?: 'low' | 'medium' | 'high'; // Visual complexity indicator
-    isBottleneck?: boolean; // Critical path indicator
-}
+// Import color constants
+import { getNodeColor } from './constants';
 
-export interface FlowEdge {
-    id: string;
-    source: string;
-    target: string;
-    label?: string;
-    sqlClause?: string; // The actual SQL clause (JOIN condition, WHERE clause, etc.)
-    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow'; // Type of SQL clause
-    startLine?: number; // Starting line of the clause in the SQL
-    endLine?: number;   // Ending line of the clause in the SQL
-}
-
-// Column-level lineage connection - redesigned for full path tracing
-export interface ColumnFlow {
-    id: string;
-    outputColumn: string;           // Final output column name
-    outputNodeId: string;           // Node that outputs this column (usually SELECT)
-    // Full lineage path from source to output
-    lineagePath: Array<{
-        nodeId: string;
-        nodeName: string;           // Human-readable node name
-        nodeType: string;           // table, select, aggregate, etc.
-        columnName: string;         // Column name at this step
-        transformation: 'source' | 'passthrough' | 'renamed' | 'aggregated' | 'calculated' | 'joined';
-        expression?: string;        // Transformation expression if any
-    }>;
-}
-
-export interface QueryStats {
-    tables: number;
-    joins: number;
-    subqueries: number;
-    ctes: number;
-    aggregations: number;
-    windowFunctions: number;
-    unions: number;
-    conditions: number;
-    complexity: 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
-    complexityScore: number;
-    // Enhanced metrics
-    maxCteDepth?: number;        // Maximum nesting depth of CTEs
-    maxFanOut?: number;          // Maximum number of outgoing edges from a single node
-    criticalPathLength?: number; // Length of the longest execution path
-    complexityBreakdown?: {      // Breakdown of complexity score
-        joins: number;
-        subqueries: number;
-        ctes: number;
-        aggregations: number;
-        windowFunctions: number;
-    };
-    // Phase 3: Performance metrics
-    performanceScore?: number;   // 0-100 performance score
-    performanceIssues?: number; // Count of detected performance issues
-}
-
-export interface OptimizationHint {
-    type: 'warning' | 'info' | 'error';
-    message: string;
-    suggestion?: string;
-    category?: 'performance' | 'quality' | 'best-practice' | 'complexity';
-    nodeId?: string; // Related node ID for targeted warnings
-    severity?: 'low' | 'medium' | 'high';
-}
-
-// Column lineage tracking
-export interface ColumnInfo {
-    name: string;           // Column name or alias
-    expression: string;     // Full expression
-    sourceTable?: string;   // Source table name if direct column
-    sourceColumn?: string;  // Source column name if direct column
-    isAggregate?: boolean;  // Is this an aggregate function?
-    isWindowFunc?: boolean; // Is this a window function?
-    transformationType?: 'passthrough' | 'renamed' | 'aggregated' | 'calculated'; // Type of transformation
-    sourceNodeId?: string;  // ID of the source node (table/CTE)
-}
-
-export interface ColumnLineage {
-    outputColumn: string;
-    sources: Array<{
-        table: string;
-        column: string;
-        nodeId: string;
-    }>;
-}
-
-export interface ParseResult {
-    nodes: FlowNode[];
-    edges: FlowEdge[];
-    stats: QueryStats;
-    hints: OptimizationHint[];
-    sql: string;
-    columnLineage: ColumnLineage[];
-    columnFlows?: ColumnFlow[]; // Column-level lineage connections
-    tableUsage: Map<string, number>; // Table name -> usage count
-    error?: string;
-}
-
-export interface BatchParseResult {
-    queries: ParseResult[];
-    totalStats: QueryStats;
-    queryLineRanges?: Array<{ startLine: number; endLine: number }>; // Line ranges for each query (1-indexed)
-}
-
-const NODE_COLORS: Record<FlowNode['type'], string> = {
-    table: '#3b82f6',      // blue
-    filter: '#8b5cf6',     // purple
-    join: '#ec4899',       // pink
-    aggregate: '#f59e0b',  // amber
-    sort: '#10b981',       // green
-    limit: '#06b6d4',      // cyan
-    select: '#6366f1',     // indigo
-    result: '#22c55e',     // green
-    cte: '#a855f7',        // purple
-    union: '#f97316',      // orange
-    subquery: '#14b8a6',   // teal
-    window: '#d946ef',     // fuchsia
-    case: '#eab308',       // yellow
+// Re-export types for backward compatibility
+export type {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ColumnInfo,
+    ColumnLineage,
+    QueryStats,
+    OptimizationHint,
+    ParseResult,
+    BatchParseResult,
+    SqlDialect,
 };
 
-export function getNodeColor(type: FlowNode['type']): string {
-    return NODE_COLORS[type] || '#6366f1';
-}
+// Re-export getNodeColor for backward compatibility
+export { getNodeColor };
 
 // Stats tracking during parsing
 let stats: QueryStats;

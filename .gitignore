@@ -16,6 +16,7 @@ env/
 .vscode/
 .idea/
 .cursor/
+.factory/
 *.swp
 *.swo
 *~
@@ -28,3 +29,6 @@ yarn-error.log*
 
 # OS
 Thumbs.db
+
+#archive
+archive/

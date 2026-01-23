@@ -1,40 +1,25 @@
-import { FlowNode, FlowEdge, ColumnFlow, getNodeColor, ParseResult, QueryStats, OptimizationHint, ColumnLineage } from './sqlParser';
+// Import types from centralized type definitions
+import {
+    FlowNode,
+    FlowEdge,
+    ColumnFlow,
+    ParseResult,
+    QueryStats,
+    OptimizationHint,
+    ColumnLineage,
+    ViewState,
+    CloudViewState,
+    Severity,
+    FocusMode,
+    LayoutType,
+} from './types';
+
+// Import color utilities
+import { getNodeColor } from './constants';
+
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
-
-interface ViewState {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    selectedNodeId: string | null;
-    isDragging: boolean;
-    dragStartX: number;
-    dragStartY: number;
-    isDraggingNode: boolean; // True when dragging a node
-    isDraggingCloud: boolean; // True when dragging a cloud container
-    draggingNodeId: string | null; // ID of node being dragged
-    draggingCloudNodeId: string | null; // ID of node whose cloud is being dragged
-    dragNodeStartX: number; // Node's x position when drag started
-    dragNodeStartY: number; // Node's y position when drag started
-    dragCloudStartOffsetX: number; // Cloud offset X when drag started
-    dragCloudStartOffsetY: number; // Cloud offset Y when drag started
-    dragMouseStartX: number; // Mouse x position when drag started
-    dragMouseStartY: number; // Mouse y position when drag started
-    searchTerm: string;
-    searchResults: string[];
-    currentSearchIndex: number;
-    focusModeEnabled: boolean;
-    legendVisible: boolean;
-    highlightedColumnSources: string[]; // Node IDs to highlight for column flow
-    isFullscreen: boolean;
-    isDarkTheme: boolean;
-    breadcrumbPath: FlowNode[]; // Current CTE/Subquery breadcrumb path
-    showColumnLineage: boolean; // Toggle column-level lineage view
-    showColumnFlows: boolean; // Toggle column flow visualization
-    selectedColumn: string | null; // Currently selected column for highlighting
-    zoomedNodeId: string | null; // Currently zoomed node ID (for toggle behavior)
-    previousZoomState: { scale: number; offsetX: number; offsetY: number } | null; // Previous zoom state before zooming to node
-}
+import { layoutGraphHorizontal } from './parser/forceLayout';
 
 const state: ViewState = {
     scale: 1,
@@ -67,7 +52,9 @@ const state: ViewState = {
     showColumnFlows: false,
     selectedColumn: null,
     zoomedNodeId: null,
-    previousZoomState: null
+    previousZoomState: null,
+    focusMode: 'all' as FocusMode,
+    layoutType: (window.defaultLayout === 'horizontal' ? 'horizontal' : 'vertical') as LayoutType
 };
 
 let svg: SVGSVGElement | null = null;
@@ -94,15 +81,7 @@ let currentTableUsage: Map<string, number> = new Map();
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 // Store references to cloud and arrow elements for dynamic updates
 let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
-// Store per-cloud view state for independent pan/zoom
-interface CloudViewState {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    isDragging: boolean;
-    dragStartX: number;
-    dragStartY: number;
-}
+// Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
 let cloudViewStates: Map<string, CloudViewState> = new Map();
 
 export function initRenderer(container: HTMLElement): void {
@@ -112,6 +91,10 @@ export function initRenderer(container: HTMLElement): void {
     svg.setAttribute('height', '100%');
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.zIndex = '1';
 
     // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -581,10 +564,10 @@ function setupEventListeners(): void {
             e.preventDefault();
             toggleTheme();
         }
-        // L to toggle legend
-        if (e.key === 'l' || e.key === 'L') {
+        // H to toggle layout
+        if (e.key === 'h' || e.key === 'H') {
             e.preventDefault();
-            toggleLegend();
+            toggleLayout();
         }
         // S to show SQL preview
         if (e.key === 's' || e.key === 'S') {
@@ -595,6 +578,36 @@ function setupEventListeners(): void {
         if (e.key === 'c' || e.key === 'C') {
             e.preventDefault();
             toggleColumnFlows();
+        }
+        // Q to toggle query stats panel
+        if (e.key === 'q' || e.key === 'Q') {
+            e.preventDefault();
+            toggleStats();
+        }
+        // O to toggle optimization hints panel
+        if (e.key === 'o' || e.key === 'O') {
+            e.preventDefault();
+            toggleHints();
+        }
+        // U for upstream focus mode
+        if (e.key === 'u' || e.key === 'U') {
+            e.preventDefault();
+            setFocusMode('upstream');
+        }
+        // D for downstream focus mode
+        if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            setFocusMode('downstream');
+        }
+        // A for all connected focus mode
+        if (e.key === 'a' || e.key === 'A') {
+            e.preventDefault();
+            setFocusMode('all');
+        }
+        // E to toggle expand/collapse all CTEs and subqueries
+        if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            toggleExpandAll();
         }
         // / to focus search (like vim)
         if (e.key === '/') {
@@ -827,6 +840,11 @@ export function render(result: ParseResult): void {
     updateStatsPanel();
     updateHintsPanel();
 
+    // Update SQL preview if visible
+    if (sqlPreviewPanel && sqlPreviewPanel.style.display !== 'none') {
+        updateSqlPreview();
+    }
+
     // Fit view
     fitView();
 
@@ -994,7 +1012,16 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
                     columnLineage: currentColumnLineage,
                     tableUsage: currentTableUsage
                 };
+                // Preserve current layout type
+                const wasHorizontal = state.layoutType === 'horizontal';
                 render(result);
+                // Re-apply horizontal layout if it was active
+                if (wasHorizontal) {
+                    // Reset to vertical first (render uses vertical positions)
+                    state.layoutType = 'vertical';
+                    // Then toggle to horizontal
+                    toggleLayout();
+                }
             }
         } else {
             zoomToNode(node);
@@ -3646,13 +3673,41 @@ function fitView(): void {
     const rect = svg.getBoundingClientRect();
     const padding = 80;
 
-    // Calculate bounds
+    // Calculate bounds including nodes and expanded cloud containers
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const node of currentNodes) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
         maxY = Math.max(maxY, node.y + node.height);
+
+        // Account for expanded cloud containers (CTE/subquery)
+        if (node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+            const cloudPadding = 15;
+            const cloudGap = 30;
+            const nodeHeight = 60;
+
+            // Calculate cloud dimensions based on children layout
+            const childEdges = node.childEdges || [];
+            const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+            const cloudWidth = layoutSize.width + cloudPadding * 2;
+            const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
+
+            // Get cloud offset (custom or default)
+            const offset = cloudOffsets.get(node.id) || {
+                offsetX: -cloudWidth - cloudGap,
+                offsetY: -(cloudHeight - nodeHeight) / 2
+            };
+
+            const cloudX = node.x + offset.offsetX;
+            const cloudY = node.y + offset.offsetY;
+
+            // Include cloud bounds
+            minX = Math.min(minX, cloudX);
+            minY = Math.min(minY, cloudY);
+            maxX = Math.max(maxX, cloudX + cloudWidth);
+            maxY = Math.max(maxY, cloudY + cloudHeight);
+        }
     }
 
     const graphWidth = maxX - minX;
@@ -3810,14 +3865,30 @@ export function resetView(): void {
 }
 
 // Search functionality
+// Debounce timer for search
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
+
 export function setSearchBox(input: HTMLInputElement): void {
     searchBox = input;
     input.addEventListener('input', () => {
-        performSearch(input.value);
+        // Clear any existing debounce timer
+        if (searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+
+        // Immediately highlight matches without zooming (for visual feedback)
+        highlightMatches(input.value);
+
+        // Debounce the zoom/navigation to first result
+        searchDebounceTimer = setTimeout(() => {
+            navigateToFirstResult();
+        }, SEARCH_DEBOUNCE_DELAY);
     });
 }
 
-function performSearch(term: string): void {
+// Highlight matching nodes without navigating (immediate feedback)
+function highlightMatches(term: string): void {
     state.searchTerm = term.toLowerCase();
     state.searchResults = [];
     state.currentSearchIndex = -1;
@@ -3835,7 +3906,7 @@ function performSearch(term: string): void {
 
     if (!term) { return; }
 
-    // Find matching nodes
+    // Find and highlight matching nodes
     allNodes?.forEach(g => {
         const label = g.getAttribute('data-label') || '';
         const id = g.getAttribute('data-id') || '';
@@ -3849,11 +3920,18 @@ function performSearch(term: string): void {
             }
         }
     });
+}
 
-    // Navigate to first result
+// Navigate to first result after debounce delay
+function navigateToFirstResult(): void {
     if (state.searchResults.length > 0) {
         navigateSearch(0);
     }
+}
+
+function performSearch(term: string): void {
+    highlightMatches(term);
+    navigateToFirstResult();
 }
 
 function navigateSearch(delta: number): void {
@@ -3998,6 +4076,223 @@ export function exportToSvg(): void {
     a.click();
 
     URL.revokeObjectURL(url);
+}
+
+/**
+ * Export the current visualization to Mermaid.js flowchart format
+ * Exports as .md file with code block for VS Code Mermaid preview compatibility
+ */
+export function exportToMermaid(): void {
+    if (currentNodes.length === 0) {
+        console.warn('No nodes to export');
+        return;
+    }
+
+    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
+
+    // Wrap in markdown code block for VS Code Mermaid extension compatibility
+    const markdownContent = `# SQL Flow Diagram
+
+\`\`\`mermaid
+${mermaidCode}
+\`\`\`
+`;
+
+    // Download as .md file
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.download = `sql-flow-${Date.now()}.md`;
+    a.href = url;
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Generate Mermaid flowchart code from nodes and edges
+ */
+function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
+    const lines: string[] = ['flowchart TD'];
+
+    // Group nodes by type for subgraph organization
+    const tableNodes = nodes.filter(n => n.type === 'table');
+    const resultNodes = nodes.filter(n => n.type === 'result');
+    const otherNodes = nodes.filter(n => n.type !== 'table' && n.type !== 'result');
+
+    // Add Sources subgraph for tables
+    if (tableNodes.length > 0) {
+        lines.push('    subgraph Sources');
+        tableNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add intermediate nodes
+    otherNodes.forEach(node => {
+        lines.push(`    ${formatMermaidNode(node)}`);
+    });
+
+    // Add Results subgraph
+    if (resultNodes.length > 0) {
+        lines.push('    subgraph Results');
+        resultNodes.forEach(node => {
+            lines.push(`        ${formatMermaidNode(node)}`);
+        });
+        lines.push('    end');
+    }
+
+    // Add blank line before edges
+    lines.push('');
+
+    // Add edges
+    edges.forEach(edge => {
+        const edgeLine = formatMermaidEdge(edge);
+        if (edgeLine) {
+            lines.push(`    ${edgeLine}`);
+        }
+    });
+
+    // Add styling section
+    lines.push('');
+    lines.push('    %% Node styling');
+    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
+    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
+    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
+    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
+    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
+    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
+    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
+    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
+    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
+
+    // Apply classes to nodes
+    const styleAssignments = generateStyleAssignments(nodes);
+    styleAssignments.forEach(assignment => {
+        lines.push(`    ${assignment}`);
+    });
+
+    return lines.join('\n');
+}
+
+/**
+ * Format a node for Mermaid syntax with appropriate shape based on type
+ */
+function formatMermaidNode(node: FlowNode): string {
+    const id = sanitizeMermaidId(node.id);
+    const label = escapeMermaidLabel(node.label);
+
+    // Different shapes for different node types
+    switch (node.type) {
+        case 'table':
+            // Cylinder shape for tables
+            return `${id}[("${label}")]`;
+        case 'filter':
+            // Diamond/rhombus for filters
+            return `${id}{{"${label}"}}`;
+        case 'join':
+            // Hexagon for joins
+            return `${id}{{{"${label}"}}}`;
+        case 'aggregate':
+            // Subroutine box for aggregates
+            return `${id}[["${label}"]]`;
+        case 'sort':
+            // Trapezoid for sort
+            return `${id}[/"${label}"/]`;
+        case 'result':
+            // Stadium shape for results
+            return `${id}(["${label}"])`;
+        case 'cte':
+            // Double circle for CTEs
+            return `${id}((("${label}")))`;
+        case 'union':
+            // Parallelogram for unions
+            return `${id}[/"${label}"\\]`;
+        case 'subquery':
+            // Subroutine for subqueries
+            return `${id}[["${label}"]]`;
+        case 'window':
+            // Asymmetric shape for window functions
+            return `${id}>"${label}"]`;
+        default:
+            // Default rounded rectangle
+            return `${id}("${label}")`;
+    }
+}
+
+/**
+ * Format an edge for Mermaid syntax
+ */
+function formatMermaidEdge(edge: FlowEdge): string {
+    const sourceId = sanitizeMermaidId(edge.source);
+    const targetId = sanitizeMermaidId(edge.target);
+
+    if (edge.label) {
+        const label = escapeMermaidLabel(edge.label);
+        return `${sourceId} -->|"${label}"| ${targetId}`;
+    }
+
+    return `${sourceId} --> ${targetId}`;
+}
+
+/**
+ * Sanitize node ID for Mermaid (remove special characters)
+ */
+function sanitizeMermaidId(id: string): string {
+    return id
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+}
+
+/**
+ * Escape label text for Mermaid
+ */
+function escapeMermaidLabel(label: string): string {
+    return label
+        .replace(/"/g, "'")
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, ' ')
+        .substring(0, 50);
+}
+
+/**
+ * Generate class assignments for node styling
+ */
+function generateStyleAssignments(nodes: FlowNode[]): string[] {
+    const assignments: string[] = [];
+    const typeToClass: Record<string, string> = {
+        'table': 'tableStyle',
+        'filter': 'filterStyle',
+        'join': 'joinStyle',
+        'aggregate': 'aggregateStyle',
+        'sort': 'sortStyle',
+        'result': 'resultStyle',
+        'cte': 'cteStyle',
+        'union': 'unionStyle'
+    };
+
+    // Group nodes by type
+    const nodesByType = new Map<string, string[]>();
+
+    nodes.forEach(node => {
+        const className = typeToClass[node.type] || 'defaultStyle';
+        if (!nodesByType.has(className)) {
+            nodesByType.set(className, []);
+        }
+        nodesByType.get(className)!.push(sanitizeMermaidId(node.id));
+    });
+
+    // Generate class assignments
+    nodesByType.forEach((nodeIds, className) => {
+        if (nodeIds.length > 0) {
+            assignments.push(`class ${nodeIds.join(',')} ${className}`);
+        }
+    });
+
+    return assignments;
 }
 
 export function copyToClipboard(): void {
@@ -4250,6 +4545,126 @@ export function toggleLegend(show?: boolean): void {
     legendPanel.style.display = state.legendVisible ? 'block' : 'none';
 }
 
+let statsVisible = true;
+
+export function toggleStats(show?: boolean): void {
+    if (!statsPanel) return;
+    statsVisible = show ?? !statsVisible;
+    statsPanel.style.display = statsVisible ? 'block' : 'none';
+}
+
+let hintsVisible = true;
+
+export function toggleHints(show?: boolean): void {
+    if (!hintsPanel) return;
+    hintsVisible = show ?? !hintsVisible;
+    hintsPanel.style.display = hintsVisible ? 'block' : 'none';
+}
+
+export function toggleLayout(): void {
+    if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
+        return;
+    }
+
+    // Toggle between vertical (TB) and horizontal (LR) layouts
+    const newLayout: LayoutType = state.layoutType === 'vertical' ? 'horizontal' : 'vertical';
+    state.layoutType = newLayout;
+
+    // Re-run layout with new algorithm
+    if (newLayout === 'horizontal') {
+        // Use horizontal (left-to-right) layout
+        layoutGraphHorizontal(currentNodes, currentEdges);
+    } else {
+        // Use vertical (top-to-bottom) dagre layout
+        const g = new dagre.graphlib.Graph();
+        g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 });
+        g.setDefaultEdgeLabel(() => ({}));
+
+        currentNodes.forEach(node => {
+            g.setNode(node.id, { width: node.width, height: node.height });
+        });
+
+        currentEdges.forEach(edge => {
+            g.setEdge(edge.source, edge.target);
+        });
+
+        dagre.layout(g);
+
+        currentNodes.forEach(node => {
+            const nodeWithPos = g.node(node.id);
+            if (nodeWithPos && nodeWithPos.x !== undefined && nodeWithPos.y !== undefined) {
+                node.x = nodeWithPos.x - node.width / 2;
+                node.y = nodeWithPos.y - node.height / 2;
+            }
+        });
+    }
+
+    // Update node positions in DOM
+    // Nodes use x/y attributes on rect elements, so we need to calculate delta from original position
+    currentNodes.forEach(node => {
+        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+        if (nodeGroup) {
+            const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+            if (rect) {
+                // Get original position from rect attributes
+                const origX = parseFloat(rect.getAttribute('x') || '0');
+                const origY = parseFloat(rect.getAttribute('y') || '0');
+                // Calculate delta from original to new position
+                const deltaX = node.x - origX;
+                const deltaY = node.y - origY;
+                // Apply transform as delta
+                nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+            }
+        }
+    });
+
+    // First, show all edges (reset any that were hidden)
+    const allEdges = mainGroup!.querySelectorAll('.edge');
+    allEdges.forEach(edgeEl => {
+        (edgeEl as SVGPathElement).style.display = '';
+    });
+
+    // Update edge paths - only for main edges (not column flows or other overlays)
+    const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+    edgeElements.forEach(edgeEl => {
+        const sourceId = edgeEl.getAttribute('data-source');
+        const targetId = edgeEl.getAttribute('data-target');
+        if (sourceId && targetId) {
+            const sourceNode = currentNodes.find(n => n.id === sourceId);
+            const targetNode = currentNodes.find(n => n.id === targetId);
+            if (sourceNode && targetNode) {
+                // Calculate edge path based on layout type
+                let path: string;
+                if (newLayout === 'horizontal') {
+                    // For horizontal: curved lines from right to left
+                    const sx = sourceNode.x + sourceNode.width;
+                    const sy = sourceNode.y + sourceNode.height / 2;
+                    const tx = targetNode.x;
+                    const ty = targetNode.y + targetNode.height / 2;
+                    const midX = (sx + tx) / 2;
+                    path = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+                } else {
+                    // For vertical: curved lines from bottom to top
+                    const sx = sourceNode.x + sourceNode.width / 2;
+                    const sy = sourceNode.y + sourceNode.height;
+                    const tx = targetNode.x + targetNode.width / 2;
+                    const ty = targetNode.y;
+                    const midY = (sy + ty) / 2;
+                    path = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+                }
+                edgeEl.setAttribute('d', path);
+                (edgeEl as SVGPathElement).style.display = '';
+            } else {
+                // Hide edges where source or target node not found
+                (edgeEl as SVGPathElement).style.display = 'none';
+            }
+        }
+    });
+
+    // Fit view to show all nodes
+    fitView();
+}
+
 // ============================================================
 // FEATURE: Focus Mode
 // ============================================================
@@ -4308,8 +4723,27 @@ function clearFocusMode(): void {
     });
 }
 
+export function setFocusMode(mode: FocusMode): void {
+    state.focusMode = mode;
+
+    // Re-apply focus mode if enabled and a node is selected
+    if (state.focusModeEnabled && state.selectedNodeId) {
+        applyFocusMode(state.selectedNodeId);
+    }
+
+    // Also re-apply if zoomed to a node
+    if (state.zoomedNodeId && state.selectedNodeId) {
+        // Will be handled by zoom module
+    }
+}
+
+export function getFocusMode(): FocusMode {
+    return state.focusMode;
+}
+
 function getConnectedNodes(nodeId: string): Set<string> {
     const connected = new Set<string>();
+    const mode = state.focusMode;
 
     // Find upstream nodes (sources that flow into this node)
     function findUpstream(id: string) {
@@ -4331,8 +4765,13 @@ function getConnectedNodes(nodeId: string): Set<string> {
         }
     }
 
-    findUpstream(nodeId);
-    findDownstream(nodeId);
+    // Apply based on focus mode
+    if (mode === 'upstream' || mode === 'all') {
+        findUpstream(nodeId);
+    }
+    if (mode === 'downstream' || mode === 'all') {
+        findDownstream(nodeId);
+    }
 
     return connected;
 }
@@ -4537,6 +4976,110 @@ export function toggleNodeCollapse(nodeId: string): void {
         tableUsage: currentTableUsage
     };
     render(result);
+}
+
+/**
+ * Calculate stacked cloud offsets to prevent overlap when expanding all.
+ * Clouds are positioned vertically from top to bottom with spacing.
+ */
+function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
+    const cloudGap = 30;
+    const cloudPadding = 15;
+    const verticalSpacing = 20; // Space between stacked clouds
+
+    // Sort nodes by their Y position (top to bottom)
+    const sortedNodes = [...expandableNodes].sort((a, b) => a.y - b.y);
+
+    // Track the bottom edge of the last placed cloud
+    let nextCloudY = -Infinity;
+
+    for (const node of sortedNodes) {
+        // Calculate cloud dimensions
+        const childEdges = currentEdges.filter(e =>
+            node.children?.some(c => c.id === e.source || c.id === e.target)
+        );
+        const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
+        const cloudWidth = layoutSize.width + cloudPadding * 2;
+        const cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+
+        // Default X position: left of the node
+        const offsetX = -cloudWidth - cloudGap;
+
+        // Calculate Y position to avoid overlap
+        // Start at node's Y position, but ensure no overlap with previous clouds
+        const idealCloudY = node.y - (cloudHeight - node.height) / 2;
+        const cloudY = Math.max(idealCloudY, nextCloudY + verticalSpacing);
+        const offsetY = cloudY - node.y;
+
+        cloudOffsets.set(node.id, { offsetX, offsetY });
+
+        // Update next available Y position
+        nextCloudY = cloudY + cloudHeight;
+    }
+}
+
+/**
+ * Toggle expand/collapse all CTE and subquery nodes.
+ * When expanding, clouds are stacked vertically to prevent overlap.
+ */
+export function toggleExpandAll(): void {
+    // Find all expandable nodes (CTE/subquery with children)
+    const expandableNodes = currentNodes.filter(
+        n => (n.type === 'cte' || n.type === 'subquery') && n.collapsible && n.children && n.children.length > 0
+    );
+
+    if (expandableNodes.length === 0) return;
+
+    // Determine if we should expand or collapse (toggle based on majority state)
+    const expandedCount = expandableNodes.filter(n => n.expanded).length;
+    const shouldExpand = expandedCount < expandableNodes.length / 2;
+
+    // Set all expandable nodes to the target state
+    for (const node of expandableNodes) {
+        node.expanded = shouldExpand;
+        // Initialize cloud view state if expanding
+        if (shouldExpand && !cloudViewStates.has(node.id)) {
+            cloudViewStates.set(node.id, {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                dragStartX: 0,
+                dragStartY: 0
+            });
+        }
+    }
+
+    // Calculate stacked cloud offsets to prevent overlap
+    if (shouldExpand) {
+        calculateStackedCloudOffsets(expandableNodes);
+    } else {
+        // Clear cloud offsets on collapse
+        for (const node of expandableNodes) {
+            cloudOffsets.delete(node.id);
+        }
+    }
+
+    // Re-render and fit view
+    const result: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage,
+        tableUsage: currentTableUsage
+    };
+
+    const wasHorizontal = state.layoutType === 'horizontal';
+    render(result);
+    if (wasHorizontal) {
+        state.layoutType = 'vertical';
+        toggleLayout();
+    }
+
+    // Fit view to show all clouds after a brief delay for render to complete
+    setTimeout(() => fitView(), 100);
 }
 
 export function getFormattedSql(): string {
@@ -5546,9 +6089,15 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'R', description: 'Reset view' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
-        { key: 'L', description: 'Toggle legend' },
+        { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column flows' },
+        { key: 'Q', description: 'Toggle query stats' },
+        { key: 'O', description: 'Toggle optimization hints' },
+        { key: 'U', description: 'Focus upstream nodes' },
+        { key: 'D', description: 'Focus downstream nodes' },
+        { key: 'A', description: 'Focus all connected nodes' },
+        { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' }
     ];
