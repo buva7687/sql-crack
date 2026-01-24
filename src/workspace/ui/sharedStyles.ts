@@ -103,7 +103,7 @@ export function getBaseStyles(): string {
 
         /* ========== Header ========== */
         .header {
-            display: flex; align-items: center; justify-content: space-between;
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
             padding: 12px 16px; background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
         }
@@ -167,6 +167,21 @@ export function getBaseStyles(): string {
             background: var(--accent); color: white;
         }
         .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
+
+        /* ========== Graph Mode Switcher ========== */
+        /* Segmented control for switching between Files/Tables/Hybrid graph modes */
+        .graph-mode-switcher {
+            display: flex; align-items: center; gap: 2px;
+            background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);
+            flex-shrink: 0;
+        }
+        .graph-mode-btn {
+            padding: 4px 10px; border: none; background: transparent;
+            color: var(--text-muted); font-size: 11px; font-weight: 500;
+            border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
+        }
+        .graph-mode-btn:hover { color: var(--text-secondary); background: var(--bg-tertiary); }
+        .graph-mode-btn.active { background: var(--accent); color: white; }
     `;
 }
 
@@ -226,6 +241,14 @@ export function getLineagePanelStyles(): string {
             position: relative;
             flex: 1;
             overflow: hidden;
+            min-height: 0; /* Important for flex children to shrink */
+        }
+        .graph-area {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            min-height: 0; /* Important for flex children to shrink */
         }
         .lineage-panel.visible { display: flex; }
         .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
@@ -2535,8 +2558,8 @@ export function getGraphStyles(): string {
         .issue-banner-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         /* ========== Main Layout ========== */
-        .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; }
-        .graph-area { flex: 1; position: relative; overflow: hidden; }
+        .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; min-height: 0; }
+        .graph-area { flex: 1; position: relative; overflow: hidden; min-height: 0; width: 100%; height: 100%; }
 
         /* ========== Sidebar ========== */
         .sidebar {
@@ -2648,10 +2671,11 @@ export function getGraphStyles(): string {
         .export-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
 
         /* ========== Zoom Toolbar ========== */
+        /* Positioned top-right to match common UI patterns and avoid content overlap */
         .zoom-toolbar {
-            position: absolute; bottom: 16px; left: 16px;
+            position: absolute; top: 16px; right: 16px;
             display: flex; align-items: center; gap: 4px;
-            background: var(--bg-secondary); padding: 6px 8px;
+            background: var(--bg-secondary); padding: 6px 10px;
             border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);
             box-shadow: var(--shadow-md); z-index: 10;
         }
@@ -2669,8 +2693,19 @@ export function getGraphStyles(): string {
             text-align: center; font-family: monospace;
         }
 
+        /* ========== Graph Container ========== */
+        /* Container for the graph SVG - matches Lineage view structure */
+        #graph-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: var(--bg-primary);
+        }
+
         /* ========== SVG Container ========== */
-        #graph-svg { width: 100%; height: 100%; cursor: grab; }
+        /* SVG without viewBox - uses manual transforms for zoom/pan (matches Lineage approach) */
+        #graph-svg { width: 100%; height: 100%; cursor: grab; overflow: visible; }
         #graph-svg:active { cursor: grabbing; }
 
         /* ========== Node Styles ========== */

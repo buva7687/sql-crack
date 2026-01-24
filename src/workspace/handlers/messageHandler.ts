@@ -2,7 +2,7 @@
 // Extracted from workspacePanel.ts for modularity
 
 import * as vscode from 'vscode';
-import { SearchFilter } from '../types';
+import { SearchFilter, GraphMode } from '../types';
 import {
     LineageGraph,
     LineageNode,
@@ -33,6 +33,8 @@ export interface MessageHandlerContext {
     setCurrentView: (view: ViewMode | 'graph' | 'issues') => void;
     getCurrentSearchFilter: () => SearchFilter;
     setCurrentSearchFilter: (filter: SearchFilter) => void;
+    getCurrentGraphMode: () => GraphMode;
+    setCurrentGraphMode: (mode: GraphMode) => void;
     getShowHelp: () => boolean;
     setShowHelp: (show: boolean) => void;
 
@@ -93,6 +95,10 @@ export class MessageHandler {
 
             case 'refresh':
                 await this.handleRefresh();
+                break;
+
+            case 'switchGraphMode':
+                await this.handleSwitchGraphMode(message.mode);
                 break;
 
             case 'search':
@@ -222,6 +228,17 @@ export class MessageHandler {
 
     private async handleRefresh(): Promise<void> {
         await this._context.buildIndexWithProgress();
+        await this._context.rebuildAndRenderGraph();
+    }
+
+    /**
+     * Handle graph mode switch (Files/Tables/Hybrid).
+     * Validates mode and rebuilds graph with new mode.
+     */
+    private async handleSwitchGraphMode(mode: string): Promise<void> {
+        const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
+        const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
+        this._context.setCurrentGraphMode(m);
         await this._context.rebuildAndRenderGraph();
     }
 

@@ -150,6 +150,17 @@
           "maximum": 500,
           "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
         },
+        "sqlCrack.workspaceGraphDefaultMode": {
+          "type": "string",
+          "default": "tables",
+          "enum": ["files", "tables", "hybrid"],
+          "enumDescriptions": [
+            "File-level dependency graph. Nodes are SQL files; edges show which files reference tables defined in other files.",
+            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.).",
+            "Files plus prominent tables (referenced 3+ times). Mix of file and table nodes."
+          ],
+          "description": "Default mode for the Workspace Dependencies Graph tab. Used when the panel loads or when you refresh the index."
+        },
         "sqlCrack.advanced.cacheTTLHours": {
           "type": "number",
           "default": 24,

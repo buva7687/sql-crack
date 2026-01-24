@@ -511,10 +511,14 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
     // Calculate canvas dimensions
     const canvasWidth = 3200;
 
-    // Dynamic spacing based on node count - more space for fewer nodes
+    /**
+     * Dynamic spacing based on node count to better utilize available screen space.
+     * Increased vertical spacing (150-220px) helps spread out the graph vertically,
+     * making better use of the viewport and reducing wasted empty space.
+     */
     const nodeCount = nodes.length;
     const horizontalGap = nodeCount > 25 ? 40 : nodeCount > 15 ? 60 : 80;
-    const verticalGap = nodeCount > 25 ? 100 : nodeCount > 15 ? 120 : 140;
+    const verticalGap = nodeCount > 25 ? 150 : nodeCount > 15 ? 180 : 220;
     const padding = 60;
 
     // Build adjacency lists (both directions)

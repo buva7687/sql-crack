@@ -37,6 +37,17 @@ import { MessageHandler, MessageHandlerContext } from './handlers';
 
 const AUTO_INDEX_THRESHOLD = 50;
 
+const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
+
+/**
+ * Get graph mode from VS Code settings with validation.
+ * Falls back to 'tables' if setting is invalid or missing.
+ */
+function getGraphModeFromConfig(): GraphMode {
+    const raw = vscode.workspace.getConfiguration('sqlCrack').get<string>('workspaceGraphDefaultMode', 'tables');
+    return VALID_GRAPH_MODES.includes(raw as GraphMode) ? (raw as GraphMode) : 'tables';
+}
+
 /**
  * Manages the workspace dependency visualization webview panel
  */
@@ -50,6 +61,8 @@ export class WorkspacePanel {
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
+    /** Current graph mode (files/tables/hybrid) - persists across refresh, initialized from settings */
+    private _currentGraphMode: GraphMode = 'tables';
     private _currentSearchFilter: SearchFilter = {
         query: '',
         nodeTypes: undefined,
@@ -194,6 +207,8 @@ export class WorkspacePanel {
             }
         }
 
+        // Initialize graph mode from settings
+        this._currentGraphMode = getGraphModeFromConfig();
         // Build and render graph
         await this.rebuildAndRenderGraph();
     }
@@ -233,6 +248,8 @@ export class WorkspacePanel {
             setCurrentView: (view) => { this._currentView = view; },
             getCurrentSearchFilter: () => this._currentSearchFilter,
             setCurrentSearchFilter: (filter) => { this._currentSearchFilter = filter; },
+            getCurrentGraphMode: () => this._currentGraphMode,
+            setCurrentGraphMode: (mode) => { this._currentGraphMode = mode; },
             getShowHelp: () => this._showHelp,
             setShowHelp: (show) => { this._showHelp = show; },
 
@@ -292,7 +309,7 @@ export class WorkspacePanel {
         this._impactAnalyzer = null;
         this._columnLineageTracker = null;
 
-        this._currentGraph = buildDependencyGraph(index, 'tables'); // Table-first graph by default
+        this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
         this.renderCurrentView();
     }
 
@@ -1024,12 +1041,13 @@ export class WorkspacePanel {
             nonce,
             graphData,
             searchFilterQuery: searchFilter.query || '',
-            initialView: this._currentView === 'issues' ? 'graph' : this._currentView
+            initialView: this._currentView === 'issues' ? 'graph' : this._currentView,
+            currentGraphMode: this._currentGraphMode
         };
         const script = getWebviewScript(scriptParams);
 
         // Generate HTML body content
-        const bodyContent = this.generateGraphBody(graph, searchFilter, detailedStats, totalIssues, script);
+        const bodyContent = this.generateGraphBody(graph, searchFilter, detailedStats, totalIssues, script, this._currentGraphMode);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1054,10 +1072,14 @@ ${bodyContent}
         searchFilter: SearchFilter,
         detailedStats: DetailedWorkspaceStats,
         totalIssues: number,
-        script: string
+        script: string,
+        currentGraphMode: GraphMode
     ): string {
         const statsHtml = this.generateStatsHtml(graph, detailedStats, totalIssues);
         const graphHtml = this.generateGraphAreaHtml(graph, searchFilter);
+        const filesActive = currentGraphMode === 'files';
+        const tablesActive = currentGraphMode === 'tables';
+        const hybridActive = currentGraphMode === 'hybrid';
 
         return `<body>
     <div id="app">
@@ -1070,31 +1092,38 @@ ${bodyContent}
 
             <!-- View Mode Tabs -->
             <div class="view-tabs">
-                <button class="view-tab active" data-view="graph" title="Dependency Graph">
+                <button class="view-tab active" data-view="graph" title="Dependency overview: file- or table-level graph of workspace dependencies. Switch mode (Files/Tables/Hybrid) to change what nodes represent.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
                         <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
                     </svg>
                     Graph
                 </button>
-                <button class="view-tab" data-view="lineage" title="Data Lineage">
+                <button class="view-tab" data-view="lineage" title="Data lineage: search for a table, view, or CTE to see its upstream sources and downstream dependencies.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 12h4l3 9 4-18 3 9h4"/>
                     </svg>
                     Lineage
                 </button>
-                <button class="view-tab" data-view="tableExplorer" title="Table Explorer">
+                <button class="view-tab" data-view="tableExplorer" title="Table explorer: browse all tables, views, and CTEs with schema details and connection counts.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                     </svg>
                     Tables
                 </button>
-                <button class="view-tab" data-view="impact" title="Impact Analysis">
+                <button class="view-tab" data-view="impact" title="Impact analysis: select a table or view and a change type (MODIFY/RENAME/DROP) to see affected dependencies.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                     </svg>
                     Impact
                 </button>
+            </div>
+
+            <!-- Graph mode switcher (visible only when Graph tab is active) -->
+            <div id="graph-mode-switcher" class="graph-mode-switcher" title="Switch what the graph displays: files, tables, or both">
+                <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" title="File-level dependency graph">Files</button>
+                <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" title="Table-level dependency graph">Tables</button>
+                <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" title="Files plus prominent tables">Hybrid</button>
             </div>
 
             <div class="header-right">
@@ -1473,10 +1502,12 @@ ${bodyContent}
     }
 
     /**
-     * Render the graph SVG with improved edge styling
+     * Render the graph SVG with improved edge styling.
+     * Note: Bounds calculation is kept for export functionality, but the main SVG
+     * doesn't use viewBox - it uses manual transforms for zoom/pan (see renderGraph method).
      */
     private renderGraph(graph: WorkspaceDependencyGraph): string {
-        // Calculate bounds
+        // Calculate bounds (used for export, not for main SVG rendering)
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const node of graph.nodes) {
             minX = Math.min(minX, node.x);
@@ -1485,6 +1516,7 @@ ${bodyContent}
             maxY = Math.max(maxY, node.y + node.height);
         }
 
+        // These dimensions are only used for export, not for the interactive SVG
         const width = Math.max(1200, maxX + 150);
         const height = Math.max(800, maxY + 150);
 
@@ -1575,8 +1607,13 @@ ${bodyContent}
             `;
         }).join('');
 
+        /**
+         * Render SVG without viewBox to match Lineage view approach.
+         * This allows manual transform management for better zoom control and prevents content clipping.
+         * The container (.graph-area) handles sizing, and we apply transforms to the main-group.
+         */
         return `
-            <svg id="graph-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+            <svg id="graph-svg" style="width: 100%; height: 100%; overflow: visible;" xmlns="http://www.w3.org/2000/svg">
                 <defs>
                     ${arrowMarkers}
                     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">

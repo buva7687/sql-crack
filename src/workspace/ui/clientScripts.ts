@@ -9,19 +9,21 @@ export interface WebviewScriptParams {
     graphData: string;
     searchFilterQuery: string;
     initialView?: string;
+    currentGraphMode?: 'files' | 'tables' | 'hybrid';
 }
 
 /**
  * Generate the complete client script for main webview
  */
 export function getWebviewScript(params: WebviewScriptParams): string {
-    const { nonce, graphData, searchFilterQuery, initialView = 'graph' } = params;
+    const { nonce, graphData, searchFilterQuery, initialView = 'graph', currentGraphMode = 'tables' } = params;
 
     return `
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
+        let currentGraphMode = '${currentGraphMode}';
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -68,30 +70,107 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             updateTransform();
         }
 
+        /**
+         * Fit graph to screen using the same approach as Lineage view.
+         * Uses .graph-area as the viewport container (not svg.parentElement) to get correct dimensions.
+         * Uses getBBox() to get actual rendered bounds for accurate fitting.
+         * Allows expansion up to 150% for small graphs to better utilize available space.
+         */
         function fitToScreen() {
-            if (!svg || !mainGroup || graphData.nodes.length === 0) return;
-
-            const container = svg.parentElement;
-            const containerWidth = container.clientWidth;
-            const containerHeight = container.clientHeight;
-
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const node of graphData.nodes) {
-                minX = Math.min(minX, node.x);
-                minY = Math.min(minY, node.y);
-                maxX = Math.max(maxX, node.x + node.width);
-                maxY = Math.max(maxY, node.y + node.height);
+            if (!svg || !mainGroup) {
+                if (zoomLevel) zoomLevel.textContent = '100%';
+                return;
             }
 
-            const graphWidth = maxX - minX + 100;
-            const graphHeight = maxY - minY + 100;
+            // Use .graph-area as the viewport container (matches Lineage's lineage-graph-container approach)
+            // Query it each time to ensure we get the current element
+            const container = document.querySelector('.graph-area');
+            if (!container) {
+                if (zoomLevel) zoomLevel.textContent = '100%';
+                return;
+            }
 
-            // Cap auto-fit at 100% to prevent zooming in too much for small graphs
-            scale = Math.min(containerWidth / graphWidth, containerHeight / graphHeight, 1.0);
-            scale = Math.max(0.3, Math.min(scale, 1.0));
+            // Use getBBox() to get actual rendered bounds of the SVG group (same as Lineage view)
+            let bbox;
+            try {
+                bbox = mainGroup.getBBox();
+            } catch (e) {
+                // Fallback to node-based calculation if getBBox fails
+                if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+                    scale = 1;
+                    offsetX = 50;
+                    offsetY = 50;
+                    updateTransform();
+                    return;
+                }
 
-            offsetX = (containerWidth - graphWidth * scale) / 2 - minX * scale + 50;
-            offsetY = (containerHeight - graphHeight * scale) / 2 - minY * scale + 50;
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const node of graphData.nodes) {
+                    if (node && typeof node.x === 'number' && typeof node.y === 'number') {
+                        minX = Math.min(minX, node.x);
+                        minY = Math.min(minY, node.y);
+                        maxX = Math.max(maxX, node.x + (node.width || 200));
+                        maxY = Math.max(maxY, node.y + (node.height || 80));
+                    }
+                }
+
+                if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+                    scale = 1;
+                    offsetX = 50;
+                    offsetY = 50;
+                    updateTransform();
+                    return;
+                }
+
+                bbox = {
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX,
+                    height: maxY - minY
+                };
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            if (bbox.width <= 0 || bbox.height <= 0 || containerRect.width <= 0 || containerRect.height <= 0) {
+                scale = 1;
+                offsetX = 50;
+                offsetY = 50;
+                updateTransform();
+                return;
+            }
+
+            // Work in pixel coordinates (no viewBox transformation) - same as Lineage
+            const padding = 60;
+            const availableWidth = containerRect.width - padding * 2;
+            const availableHeight = containerRect.height - padding * 2;
+
+            const scaleX = availableWidth / bbox.width;
+            const scaleY = availableHeight / bbox.height;
+
+            // Use the smaller scale to fit both dimensions
+            // For small graphs, allow expansion up to 150% to better use available space
+            // For large graphs, cap at 100% to prevent zooming in too much
+            scale = Math.min(scaleX, scaleY);
+            if (scale > 1.0) {
+                // Graph is smaller than container - allow expansion up to 150%
+                scale = Math.min(scale, 1.5);
+            } else {
+                // Graph is larger than container - cap at 100% (don't zoom in)
+                scale = Math.min(scale, 1.0);
+            }
+            scale = Math.max(0.3, scale); // Minimum 30% to prevent too small
+
+            // Calculate bbox center
+            const bboxCenterX = bbox.x + bbox.width / 2;
+            const bboxCenterY = bbox.y + bbox.height / 2;
+
+            // Container center
+            const containerCenterX = containerRect.width / 2;
+            const containerCenterY = containerRect.height / 2;
+
+            // Offset to center the scaled bbox in the container (same as Lineage)
+            offsetX = containerCenterX - bboxCenterX * scale;
+            offsetY = containerCenterY - bboxCenterY * scale;
 
             updateTransform();
         }
@@ -135,6 +214,16 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         document.getElementById('btn-zoom-out')?.addEventListener('click', zoomOut);
         document.getElementById('btn-zoom-reset')?.addEventListener('click', resetView);
         document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToScreen);
+
+        // Auto-fit graph to screen on initial load to use available space
+        // Use requestAnimationFrame and setTimeout to ensure DOM and container are fully rendered
+        if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    fitToScreen();
+                }, 200);
+            });
+        }
 
         // ========== Search Functions ==========
         function performSearch() {
@@ -256,6 +345,7 @@ function getViewModeScript(): string {
         const lineageTitle = document.getElementById('lineage-title');
         const lineageBackBtn = document.getElementById('lineage-back-btn');
         const graphArea = document.querySelector('.graph-area');
+        const graphModeSwitcher = document.getElementById('graph-mode-switcher');
 
         const viewTitles = {
             lineage: 'Data Lineage',
@@ -284,8 +374,10 @@ function getViewModeScript(): string {
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
+                if (graphModeSwitcher) graphModeSwitcher.style.display = 'flex';
             } else {
                 if (graphArea) graphArea.style.display = 'none';
+                if (graphModeSwitcher) graphModeSwitcher.style.display = 'none';
                 lineagePanel?.classList.add('visible');
 
                 if (lineageTitle) {
@@ -314,6 +406,23 @@ function getViewModeScript(): string {
                 e.stopPropagation();
                 const view = tab.getAttribute('data-view');
                 switchToView(view);
+            });
+        });
+
+        /**
+         * Graph mode switcher (Files / Tables / Hybrid)
+         * Prevents navigation to Lineage tab when clicking the already-active mode button.
+         */
+        document.querySelectorAll('.graph-mode-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const mode = btn.getAttribute('data-mode');
+                // Don't do anything if clicking the already-active mode (prevents bug where it navigated to Lineage)
+                if (mode && mode !== currentGraphMode) {
+                    currentGraphMode = mode;
+                    vscode.postMessage({ command: 'switchGraphMode', mode });
+                }
             });
         });
 
@@ -379,13 +488,39 @@ function getContextMenuScript(): string {
             contextMenu.style.top = e.clientY + 'px';
             contextMenu.classList.add('visible');
 
-            const exploreItem = contextMenu.querySelector('[data-action="exploreTable"]');
-            if (exploreItem) {
-                if (nodeData.type === 'file') {
-                    exploreItem.classList.add('disabled');
+            /**
+             * Dynamically show/hide context menu items based on graph mode and node type.
+             * This ensures users only see relevant options for the current context.
+             */
+            const graphMode = typeof currentGraphMode !== 'undefined' ? currentGraphMode : 'tables';
+            const isFileNode = nodeData.type === 'file';
+            const isTableNode = nodeData.type === 'table' || nodeData.type === 'view' || nodeData.type === 'external';
+
+            const upstreamItem = contextMenu.querySelector('[data-action="showUpstream"]');
+            const downstreamItem = contextMenu.querySelector('[data-action="showDownstream"]');
+            const openFileItem = contextMenu.querySelector('[data-action="openFile"]');
+            const visualizeItem = contextMenu.querySelector('[data-action="visualize"]');
+
+            // In Files mode, hide upstream/downstream for file nodes (graph already shows file dependencies)
+            // In Tables/Hybrid mode, show upstream/downstream for table nodes
+            if (upstreamItem && downstreamItem) {
+                if (graphMode === 'files' && isFileNode) {
+                    upstreamItem.style.display = 'none';
+                    downstreamItem.style.display = 'none';
                 } else {
-                    exploreItem.classList.remove('disabled');
+                    upstreamItem.style.display = '';
+                    downstreamItem.style.display = '';
                 }
+            }
+
+            // Open File only makes sense for file nodes
+            if (openFileItem) {
+                openFileItem.style.display = isFileNode ? '' : 'none';
+            }
+
+            // Visualize Dependencies only makes sense for file nodes
+            if (visualizeItem) {
+                visualizeItem.style.display = isFileNode ? '' : 'none';
             }
         }
 
@@ -409,7 +544,7 @@ function getContextMenuScript(): string {
         contextMenu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (!contextMenuTarget || item.classList.contains('disabled')) return;
+                if (!contextMenuTarget || item.classList.contains('disabled') || item.style.display === 'none') return;
 
                 const action = item.getAttribute('data-action');
                 const nodeName = contextMenuTarget.label || contextMenuTarget.id;
