@@ -944,25 +944,18 @@ export class WorkspacePanel {
      * Handle column selection - trace column lineage
      */
     private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
-        console.log(`[Column Lineage] Selecting column: ${tableId}.${columnName}`);
-
         await this.buildLineageGraph();
         if (!this._lineageGraph || !this._columnLineageTracker) {
-            console.log('[Column Lineage] Graph or tracker not available');
             return;
         }
 
-        // Log column edge stats for debugging
         const columnEdgeCount = this._lineageGraph.columnEdges?.length || 0;
-        console.log(`[Column Lineage] Graph has ${columnEdgeCount} column edges`);
 
         const lineage = this._columnLineageTracker.getFullColumnLineage(
             this._lineageGraph,
             tableId,
             columnName
         );
-
-        console.log(`[Column Lineage] Found ${lineage.upstream.length} upstream paths, ${lineage.downstream.length} downstream paths`);
 
         // Send result back to webview
         this._panel.webview.postMessage({

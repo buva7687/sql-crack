@@ -96,9 +96,6 @@ export function selectNode(nodeId: string | null): void {
                         command: 'goToLine',
                         line: lineNumber
                     });
-                } else {
-                    // Debug: log when line number is missing
-                    console.log('No line number found for node:', node.label, node.type, 'startLine:', node.startLine, 'currentSql length:', currentSql?.length);
                 }
             }
         }

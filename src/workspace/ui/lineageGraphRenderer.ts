@@ -272,15 +272,9 @@ export class LineageGraphRenderer {
     private getNodeColumns(node: LineageNode): ColumnData[] {
         const columns: ColumnData[] = [];
 
-        // Debug: Log how many nodes we're searching through
-        let totalNodes = 0;
-        let columnNodes = 0;
-
         // Find column nodes that belong to this table
         for (const [id, potentialColumn] of this.lineageGraph.nodes) {
-            totalNodes++;
             if (potentialColumn.type === 'column') {
-                columnNodes++;
                 if (potentialColumn.parentId === node.id) {
                     columns.push({
                         name: potentialColumn.name,
@@ -290,11 +284,6 @@ export class LineageGraphRenderer {
                     });
                 }
             }
-        }
-
-        // Log for debugging
-        if (columns.length === 0 && node.metadata?.columnCount > 0) {
-            console.log(`[Column Debug] Node ${node.id} (${node.name}): Expected ${node.metadata.columnCount} columns, found ${columns.length}. Total nodes: ${totalNodes}, Column nodes: ${columnNodes}`);
         }
 
         return columns;

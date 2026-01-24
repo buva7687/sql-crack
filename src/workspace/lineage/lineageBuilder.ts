@@ -116,12 +116,10 @@ export class LineageBuilder implements LineageGraph {
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
-            console.log(`[LineageBuilder] Adding column nodes from ${index.definitionMap.size} definition groups`);
             for (const [key, defs] of index.definitionMap.entries()) {
                 for (const def of defs) {
                     const tableKey = getQualifiedKey(def.name, def.schema);
                     const nodeId = this.getTableNodeId(def.type, tableKey);
-                    console.log(`[LineageBuilder] Definition ${def.name}: ${def.columns?.length || 0} columns, nodeId=${nodeId}, exists=${this.nodes.has(nodeId)}`);
                     if (!this.nodes.has(nodeId)) {continue;}
                     this.addColumnNodes(tableKey, def.columns, def.type);
                 }
@@ -169,11 +167,8 @@ export class LineageBuilder implements LineageGraph {
         const tableNodeId = this.getTableNodeId(nodeType, tableKey);
         const tableNode = this.nodes.get(tableNodeId);
         if (!tableNode) {
-            console.log(`[Column Nodes] Table node not found: ${tableNodeId}`);
             return;
         }
-
-        console.log(`[Column Nodes] Adding ${columns.length} columns to ${tableKey} (${tableNodeId})`);
 
         for (const column of columns) {
             const columnId = this.getColumnNodeId(tableKey, column.name);
@@ -422,7 +417,6 @@ export class LineageBuilder implements LineageGraph {
         }
 
         if (edgesAdded > 0) {
-            console.log(`[Column Lineage] Added ${edgesAdded} column edges from ${fileName}`);
         }
     }
 

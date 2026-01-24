@@ -65,7 +65,6 @@ export class SchemaExtractor {
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
-            console.log(`[Schema Extractor] AST parse failed, using regex fallback:`, error);
             definitions.push(...this.extractWithRegex(sql, filePath));
         }
 
@@ -195,12 +194,6 @@ export class SchemaExtractor {
         const columns: ColumnInfo[] = [];
         const createDefinitions = stmt.create_definitions || stmt.columns || [];
 
-        // Debug: Log the structure
-        console.log(`[Schema Extractor] extractColumns: create_definitions=${stmt.create_definitions?.length}, columns=${stmt.columns?.length}, total=${createDefinitions.length}`);
-        if (createDefinitions.length > 0) {
-            console.log(`[Schema Extractor] First column def:`, JSON.stringify(createDefinitions[0], null, 2).substring(0, 500));
-        }
-
         for (const colDef of createDefinitions) {
             if (colDef.resource === 'column' || colDef.column) {
                 const column = this.parseColumnDefinition(colDef);
@@ -208,7 +201,6 @@ export class SchemaExtractor {
             }
         }
 
-        console.log(`[Schema Extractor] Extracted ${columns.length} columns`);
         return columns;
     }
 
@@ -339,7 +331,6 @@ export class SchemaExtractor {
 
             // Skip if table name is a SQL reserved word
             if (this.isReservedWord(tableName)) {
-                console.log(`[Schema Extractor Regex] Skipping reserved word as table name: ${tableName}`);
                 continue;
             }
 
@@ -354,8 +345,6 @@ export class SchemaExtractor {
                 const bodyStart = startIndex + parenStart + 1;
                 const tableBody = this.extractBalancedParens(sqlNoComments, bodyStart);
                 const columns = this.extractColumnsFromBody(tableBody);
-
-                console.log(`[Schema Extractor Regex] Table ${tableName}: found ${columns.length} columns`);
 
                 // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
                 // Previous bug: used match.index from sqlNoComments with getLineNumberAtIndex(originalSql, ...)
@@ -372,7 +361,6 @@ export class SchemaExtractor {
                 });
             } else {
                 // No parenthesis - might be CREATE TABLE AS SELECT
-                console.log(`[Schema Extractor Regex] Table ${tableName}: no column definitions (CTAS?)`);
                 // Use findCreateStatementLocation on ORIGINAL sql to get correct line number and char index
                 const loc = this.findCreateStatementLocation(sql, tableName, 'table');
                 definitions.push({
@@ -394,7 +382,6 @@ export class SchemaExtractor {
 
             // Skip if view name is a SQL reserved word
             if (this.isReservedWord(viewName)) {
-                console.log(`[Schema Extractor Regex] Skipping reserved word as view name: ${viewName}`);
                 continue;
             }
 

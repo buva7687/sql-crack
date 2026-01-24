@@ -562,7 +562,6 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'lineageGraphResult':
                     if (lineageSetupInProgress) {
-                        console.log('[Lineage] Ignoring lineageGraphResult during setup');
                         break;
                     }
                     if (lineageContent && message.data?.html) {

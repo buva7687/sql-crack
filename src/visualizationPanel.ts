@@ -335,8 +335,6 @@ export class VisualizationPanel {
      * @param line - Line number (1-indexed) to navigate to
      */
     private async _goToLine(line: number) {
-        console.log('_goToLine called with line:', line, 'sourceDocumentUri:', this._sourceDocumentUri?.toString());
-        
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
         
@@ -348,7 +346,6 @@ export class VisualizationPanel {
                 const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-                console.log('Successfully navigated to line', line, 'in document:', targetUri.toString());
                 return;
             } catch (error) {
                 console.error('Failed to open document:', error);
@@ -361,7 +358,6 @@ export class VisualizationPanel {
             const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-            console.log('Navigated to line', line, 'in active editor');
         } else {
             console.warn('No active editor found, cannot navigate to line', line);
             vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);

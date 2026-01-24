@@ -755,28 +755,21 @@ export class MessageHandler {
     }
 
     private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
-        console.log(`[Column Lineage] Selecting column: ${tableId}.${columnName}`);
-
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
         const columnLineageTracker = this._context.getColumnLineageTracker();
 
         if (!lineageGraph || !columnLineageTracker) {
-            console.log('[Column Lineage] Graph or tracker not available');
             return;
         }
 
-        // Log column edge stats for debugging
         const columnEdgeCount = lineageGraph.columnEdges?.length || 0;
-        console.log(`[Column Lineage] Graph has ${columnEdgeCount} column edges`);
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
             tableId,
             columnName
         );
-
-        console.log(`[Column Lineage] Found ${lineage.upstream.length} upstream paths, ${lineage.downstream.length} downstream paths`);
 
         // Send result back to webview
         this._context.panel.webview.postMessage({
