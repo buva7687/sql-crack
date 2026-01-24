@@ -359,6 +359,13 @@ function getViewModeScript(): string {
             impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
+        function updateSidebarSectionsForView() {
+            const show = currentViewMode === 'graph';
+            document.querySelectorAll('[data-sidebar-section]').forEach(el => {
+                el.style.display = show ? '' : 'none';
+            });
+        }
+
         function switchToView(view, skipMessage = false) {
             if (view === currentViewMode) return;
 
@@ -374,10 +381,30 @@ function getViewModeScript(): string {
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
-                if (graphModeSwitcher) graphModeSwitcher.style.display = 'flex';
+                if (graphModeSwitcher) {
+                    // Use visibility (not display) so switcher always reserves space in layout.
+                    // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
+                    // when switching between tabs, ensuring good UX (mouse stays over clicked tab).
+                    graphModeSwitcher.style.visibility = 'visible';
+                    graphModeSwitcher.style.pointerEvents = 'auto';
+                }
+                // Reset zoom and fit graph when switching back to Graph tab.
+                // This ensures proper view after returning from other tabs (fixes zoom state persistence bug).
+                if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            fitToScreen();
+                        }, 100);
+                    });
+                }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
-                if (graphModeSwitcher) graphModeSwitcher.style.display = 'none';
+                if (graphModeSwitcher) {
+                    // Hide switcher but keep it in layout (visibility: hidden) so main tabs don't shift.
+                    // pointer-events: none prevents clicks when hidden.
+                    graphModeSwitcher.style.visibility = 'hidden';
+                    graphModeSwitcher.style.pointerEvents = 'none';
+                }
                 lineagePanel?.classList.add('visible');
 
                 if (lineageTitle) {
@@ -399,6 +426,7 @@ function getViewModeScript(): string {
                     }
                 }
             }
+            updateSidebarSectionsForView();
         }
 
         viewTabs.forEach(tab => {
@@ -411,12 +439,36 @@ function getViewModeScript(): string {
 
         /**
          * Graph mode switcher (Files / Tables / Hybrid)
-         * Prevents navigation to Lineage tab when clicking the already-active mode button.
+         * Uses event delegation on the switcher container to handle button clicks.
+         * This prevents duplicate listeners and ensures buttons work after tab switches.
+         * 
+         * Fix: If user clicks mode button while on non-Graph tab, switch to Graph first,
+         * then change mode. This prevents navigation to wrong tab after mode switch.
          */
-        document.querySelectorAll('.graph-mode-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+        const graphModeSwitcherContainer = document.getElementById('graph-mode-switcher');
+        if (graphModeSwitcherContainer) {
+            // Use event delegation - attach listener once to the container
+            graphModeSwitcherContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.graph-mode-btn');
+                if (!btn) return;
+                
                 e.stopPropagation();
                 e.preventDefault();
+                
+                // Ensure we're on Graph tab - if not, switch to it first
+                if (currentViewMode !== 'graph') {
+                    switchToView('graph', false);
+                    // After switching to Graph, trigger the mode change
+                    setTimeout(() => {
+                        const mode = btn.getAttribute('data-mode');
+                        if (mode && mode !== currentGraphMode) {
+                            currentGraphMode = mode;
+                            vscode.postMessage({ command: 'switchGraphMode', mode });
+                        }
+                    }, 100);
+                    return;
+                }
+                
                 const mode = btn.getAttribute('data-mode');
                 // Don't do anything if clicking the already-active mode (prevents bug where it navigated to Lineage)
                 if (mode && mode !== currentGraphMode) {
@@ -424,7 +476,21 @@ function getViewModeScript(): string {
                     vscode.postMessage({ command: 'switchGraphMode', mode });
                 }
             });
-        });
+        }
+
+        updateSidebarSectionsForView();
+
+        // Set initial graph-mode-switcher visibility (always in layout; visibility reserves space).
+        // This ensures main tabs are in the same position on initial load regardless of active tab.
+        if (graphModeSwitcher) {
+            if (currentViewMode === 'graph') {
+                graphModeSwitcher.style.visibility = 'visible';
+                graphModeSwitcher.style.pointerEvents = 'auto';
+            } else {
+                graphModeSwitcher.style.visibility = 'hidden';
+                graphModeSwitcher.style.pointerEvents = 'none';
+            }
+        }
 
         // Restore initial view if not graph (e.g., after theme change)
         if (typeof initialViewMode !== 'undefined' && initialViewMode !== 'graph') {
@@ -769,17 +835,6 @@ function getEventDelegationScript(): string {
                 }
             });
         }
-
-        // ========== Issue Item Clicks ==========
-        document.querySelectorAll('.issue-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const filePath = item.getAttribute('data-filepath');
-                const line = item.getAttribute('data-line');
-                if (filePath) {
-                    openFileAtLine(filePath, parseInt(line) || 0);
-                }
-            });
-        });
     `;
 }
 

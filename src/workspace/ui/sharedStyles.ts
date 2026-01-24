@@ -106,10 +106,22 @@ export function getBaseStyles(): string {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
             padding: 12px 16px; background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
+            position: relative;
+            height: 48px; /* Fixed height to prevent vertical shift */
+            box-sizing: border-box;
         }
         .header-left { display: flex; align-items: center; gap: 12px; }
         .header-icon { font-size: 18px; }
         .header-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+        /* Header center: Contains view tabs and graph mode switcher.
+         * Absolutely positioned and centered to keep tabs in fixed position.
+         * Graph mode switcher uses visibility (not display) to always reserve space,
+         * preventing tabs from shifting when switching between Graph and other tabs. */
+        .header-center {
+            position: absolute; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: 12px;
+            height: 100%; /* Match header height */
+        }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
         /* ========== Icon Button ========== */
@@ -175,6 +187,9 @@ export function getBaseStyles(): string {
             background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);
             flex-shrink: 0;
         }
+        /* Graph mode switcher always in layout (uses visibility, not display).
+         * When hidden, visibility: hidden + pointer-events: none keeps it in layout
+         * but invisible/unclickable. This prevents main tabs from shifting position. */
         .graph-mode-btn {
             padding: 4px 10px; border: none; background: transparent;
             color: var(--text-muted); font-size: 11px; font-weight: 500;

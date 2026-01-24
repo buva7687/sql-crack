@@ -234,11 +234,15 @@ export class MessageHandler {
     /**
      * Handle graph mode switch (Files/Tables/Hybrid).
      * Validates mode and rebuilds graph with new mode.
+     * Ensures view stays on Graph tab (not Lineage/Tables/Impact).
      */
     private async handleSwitchGraphMode(mode: string): Promise<void> {
         const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
         const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
         this._context.setCurrentGraphMode(m);
+        // Ensure we're on Graph view when switching modes (not Lineage/Tables/Impact)
+        // This prevents the view from switching to the wrong tab after mode change
+        this._context.setCurrentView('graph');
         await this._context.rebuildAndRenderGraph();
     }
 

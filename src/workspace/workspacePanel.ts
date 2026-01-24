@@ -1075,7 +1075,7 @@ ${bodyContent}
         script: string,
         currentGraphMode: GraphMode
     ): string {
-        const statsHtml = this.generateStatsHtml(graph, detailedStats, totalIssues);
+        const statsHtml = this.generateStatsHtml();
         const graphHtml = this.generateGraphAreaHtml(graph, searchFilter);
         const filesActive = currentGraphMode === 'files';
         const tablesActive = currentGraphMode === 'tables';
@@ -1090,56 +1090,59 @@ ${bodyContent}
                 <h1 class="header-title">Workspace Dependencies</h1>
             </div>
 
-            <!-- View Mode Tabs -->
-            <div class="view-tabs">
-                <button class="view-tab active" data-view="graph" 
-                    title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables."
-                    aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables.">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
-                        <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
-                    </svg>
-                    Graph
-                </button>
-                <button class="view-tab" data-view="lineage" 
-                    title="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
-                    aria-label="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 12h4l3 9 4-18 3 9h4"/>
-                    </svg>
-                    Lineage
-                </button>
-                <button class="view-tab" data-view="tableExplorer" 
-                    title="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model."
-                    aria-label="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model.">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
-                    </svg>
-                    Tables
-                </button>
-                <button class="view-tab" data-view="impact" 
-                    title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."
-                    aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes.">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                    </svg>
-                    Impact
-                </button>
-            </div>
-
-            <!-- Graph mode switcher (visible only when Graph tab is active) -->
-            <div id="graph-mode-switcher" class="graph-mode-switcher" 
-                title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables."
-                aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
-                <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
-                    title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
-                    aria-label="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files.">Files</button>
-                <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
-                    title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
-                    aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
-                <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
-                    title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
-                    aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
+            <!-- Header Center: View tabs (always in same position) and graph mode switcher (below when Graph active) -->
+            <div class="header-center">
+                <!-- View Mode Tabs -->
+                <div class="view-tabs">
+                    <button class="view-tab active" data-view="graph" 
+                        title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables."
+                        aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables.">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
+                            <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
+                        </svg>
+                        Graph
+                    </button>
+                    <button class="view-tab" data-view="lineage" 
+                        title="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
+                        aria-label="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 12h4l3 9 4-18 3 9h4"/>
+                        </svg>
+                        Lineage
+                    </button>
+                    <button class="view-tab" data-view="tableExplorer" 
+                        title="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model."
+                        aria-label="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model.">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                        </svg>
+                        Tables
+                    </button>
+                    <button class="view-tab" data-view="impact" 
+                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."
+                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes.">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                        </svg>
+                        Impact
+                    </button>
+                </div>
+                
+                <!-- Graph mode switcher (visible only when Graph tab is active, appears below view tabs) -->
+                <div id="graph-mode-switcher" class="graph-mode-switcher" 
+                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables."
+                    aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
+                    <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
+                        title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
+                        aria-label="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files.">Files</button>
+                    <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
+                        title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
+                        aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
+                    <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
+                        title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
+                        aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
+                </div>
             </div>
 
             <div class="header-right">
@@ -1297,13 +1300,10 @@ ${bodyContent}
     }
 
     /**
-     * Generate statistics HTML for sidebar
+     * Generate sidebar HTML (Legend + Export). Issues are shown in the top banner only;
+     * "View Details" opens the full Issues view.
      */
-    private generateStatsHtml(
-        graph: WorkspaceDependencyGraph,
-        detailedStats: DetailedWorkspaceStats,
-        totalIssues: number
-    ): string {
+    private generateStatsHtml(): string {
         return `
         <div class="sidebar-header">
             <span class="sidebar-title">Panel</span>
@@ -1314,8 +1314,8 @@ ${bodyContent}
             </button>
         </div>
         <div class="sidebar-content">
-            <!-- Legend Section -->
-            <div class="sidebar-section">
+            <!-- Legend Section (Graph tab only) -->
+            <div class="sidebar-section" data-sidebar-section="legend">
                 <div class="section-header expanded" data-section="legend">
                     <span class="section-title">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1346,56 +1346,8 @@ ${bodyContent}
                 </div>
             </div>
 
-            <!-- Issues Section -->
-            ${totalIssues > 0 ? `
-            <div class="sidebar-section">
-                <div class="section-header expanded" data-section="issues">
-                    <span class="section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                        Issues
-                        <span class="section-badge">${totalIssues}</span>
-                    </span>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-content">
-                    <div class="issue-list">
-                        ${detailedStats.orphanedDetails.slice(0, 5).map(item => `
-                        <div class="issue-item" data-filepath="${this.escapeHtml(item.filePath)}" data-line="${item.lineNumber}">
-                            <span class="issue-type ${item.type}">${item.type}</span>
-                            <div class="issue-info">
-                                <div class="issue-name">${this.escapeHtml(item.name)}</div>
-                                <div class="issue-path" title="${this.escapeHtml(item.filePath)}">${this.escapeHtml(item.filePath.split('/').pop() || item.filePath)}</div>
-                            </div>
-                            <span class="issue-line">:${item.lineNumber}</span>
-                        </div>
-                        `).join('')}
-                        ${detailedStats.missingDetails.slice(0, 5).map(item => `
-                        <div class="issue-item" data-missing="${this.escapeHtml(item.tableName)}">
-                            <span class="issue-type missing">missing</span>
-                            <div class="issue-info">
-                                <div class="issue-name">${this.escapeHtml(item.tableName)}</div>
-                                <div class="issue-path">${item.referenceCount} reference${item.referenceCount !== 1 ? 's' : ''}</div>
-                            </div>
-                        </div>
-                        `).join('')}
-                        ${totalIssues > 10 ? `<div class="issue-more">+ ${totalIssues - 10} more issues</div>` : ''}
-                        <button class="export-btn" id="btn-all-issues-sidebar" style="margin-top: 8px;">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            View All Issues
-                        </button>
-                    </div>
-                </div>
-            </div>
-            ` : ''}
-
-            <!-- Export Section -->
-            <div class="sidebar-section">
+            <!-- Export Section (Graph tab only) -->
+            <div class="sidebar-section" data-sidebar-section="export">
                 <div class="section-header" data-section="export">
                     <span class="section-title">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
