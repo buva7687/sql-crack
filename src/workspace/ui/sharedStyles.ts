@@ -583,6 +583,94 @@ export function getSharedViewStyles(): string {
             height: 16px;
         }
 
+        /* Lineage Tables Grid */
+        .lineage-tables-section {
+            margin-top: 8px;
+        }
+        .lineage-tables-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 4px;
+        }
+        .lineage-table-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            width: 100%;
+        }
+        .lineage-table-item:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--accent);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+        .table-item-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .table-item-name {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .table-item-name mark {
+            background: var(--accent);
+            color: white;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        .table-item-type {
+            font-size: 11px;
+            padding: 2px 6px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+        .table-item-connections {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+        .conn-badge {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .conn-badge:first-child {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success-light);
+        }
+        .conn-badge:last-child {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent);
+        }
+        .lineage-empty-filter {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .view-results-info {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
         /* View Empty State */
         .view-empty {
             text-align: center;

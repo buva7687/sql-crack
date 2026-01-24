@@ -1211,73 +1211,90 @@ function getTableSearchScript(): string {
 function getVisualLineageSearchScript(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
-        let lineageSearchData = [];
         let lineageTypeFilter = 'all';
-        let lineageSearchTimeout = null;
 
         function setupVisualLineageSearch() {
             const searchInput = document.getElementById('lineage-search-input');
             const searchClear = document.getElementById('lineage-search-clear');
-            const searchResults = document.getElementById('lineage-search-results');
             const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
-            const popularItems = document.querySelectorAll('.popular-item[data-action="select-node"]');
-            const recentItems = document.querySelectorAll('.recent-item[data-action="select-node"]');
-            const dataScript = document.getElementById('lineage-searchable-nodes');
-            const popularList = document.querySelector('.popular-list');
+            const tablesGrid = document.getElementById('lineage-tables-grid');
+            const emptyFilter = document.getElementById('lineage-empty-filter');
+            const resultsInfo = document.getElementById('lineage-results-info');
+            const resultsCount = document.getElementById('lineage-results-count');
 
-            if (dataScript) {
-                try {
-                    lineageSearchData = JSON.parse(dataScript.textContent || '[]');
-                } catch (e) {
-                    lineageSearchData = [];
-                }
-            }
+            function filterLineageTables() {
+                if (!tablesGrid) return;
 
-            function filterPopularTables(typeFilter) {
-                if (!popularList) return;
-                const items = popularList.querySelectorAll('.popular-item');
+                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const items = Array.from(tablesGrid.querySelectorAll('.lineage-table-item'));
+                let visibleCount = 0;
+
                 items.forEach(item => {
-                    const nodeType = item.getAttribute('data-node-type');
-                    if (typeFilter === 'all' || nodeType === typeFilter) {
-                        item.classList.remove('filtered-out');
+                    const name = item.getAttribute('data-name') || '';
+                    const type = item.getAttribute('data-type') || '';
+
+                    const matchesSearch = !searchQuery || name.includes(searchQuery);
+                    const matchesType = lineageTypeFilter === 'all' || type === lineageTypeFilter;
+
+                    if (matchesSearch && matchesType) {
+                        item.style.display = '';
+                        visibleCount++;
+
+                        // Highlight matching text
+                        const nameEl = item.querySelector('.table-item-name');
+                        if (nameEl && searchQuery) {
+                            const originalName = nameEl.textContent || '';
+                            const lowerName = originalName.toLowerCase();
+                            const idx = lowerName.indexOf(searchQuery);
+                            if (idx >= 0) {
+                                const before = originalName.slice(0, idx);
+                                const match = originalName.slice(idx, idx + searchQuery.length);
+                                const after = originalName.slice(idx + searchQuery.length);
+                                nameEl.innerHTML = escapeHtml(before) + '<mark>' + escapeHtml(match) + '</mark>' + escapeHtml(after);
+                            } else {
+                                nameEl.textContent = originalName;
+                            }
+                        } else if (nameEl) {
+                            // Remove highlighting when no search
+                            const text = nameEl.textContent || '';
+                            nameEl.textContent = text;
+                        }
                     } else {
-                        item.classList.add('filtered-out');
+                        item.style.display = 'none';
                     }
                 });
+
+                // Show/hide empty state and results count
+                if (emptyFilter) {
+                    emptyFilter.style.display = visibleCount === 0 ? 'block' : 'none';
+                }
+                if (resultsInfo && resultsCount) {
+                    if (searchQuery || lineageTypeFilter !== 'all') {
+                        resultsInfo.style.display = 'inline';
+                        resultsCount.textContent = visibleCount;
+                    } else {
+                        resultsInfo.style.display = 'none';
+                    }
+                }
             }
 
             searchInput?.addEventListener('input', () => {
                 const query = searchInput.value.trim();
                 if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
-
-                clearTimeout(lineageSearchTimeout);
-                lineageSearchTimeout = setTimeout(() => {
-                    if (query.length >= 1) {
-                        const results = searchLineageLocal(query);
-                        showLineageSearchResults(results);
-                        vscode.postMessage({ command: 'searchLineageTables', query, typeFilter: lineageTypeFilter });
-                    } else {
-                        hideLineageSearchResults();
-                    }
-                }, 150);
-            });
-
-            searchInput?.addEventListener('focus', () => {
-                const query = searchInput.value.trim();
-                if (query.length >= 1) {
-                    const results = searchLineageLocal(query);
-                    showLineageSearchResults(results);
-                }
+                filterLineageTables();
             });
 
             searchInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
-                    hideLineageSearchResults();
+                    searchInput.value = '';
+                    if (searchClear) searchClear.style.display = 'none';
+                    filterLineageTables();
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
-                    const firstResult = searchResults?.querySelector('.search-result-item');
-                    if (firstResult) {
-                        firstResult.click();
+                    // Select the first visible item
+                    const firstVisible = tablesGrid?.querySelector('.lineage-table-item:not([style*="display: none"])');
+                    if (firstVisible) {
+                        firstVisible.click();
                     }
                 }
             });
@@ -1285,7 +1302,7 @@ function getVisualLineageSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
-                hideLineageSearchResults();
+                filterLineageTables();
                 searchInput?.focus();
             });
 
@@ -1294,96 +1311,20 @@ function getVisualLineageSearchScript(): string {
                     filterChips.forEach(c => c.classList.remove('active'));
                     chip.classList.add('active');
                     lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
-
-                    filterPopularTables(lineageTypeFilter);
-
-                    const query = searchInput?.value.trim();
-                    if (query) {
-                        const results = searchLineageLocal(query);
-                        showLineageSearchResults(results);
-                    }
+                    filterLineageTables();
                 });
             });
 
-            popularItems.forEach(item => {
+            // Setup click handlers for table items
+            tablesGrid?.querySelectorAll('.lineage-table-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
-                    e.stopPropagation();
                     const nodeId = item.getAttribute('data-node-id');
                     if (nodeId) {
                         selectLineageNode(nodeId);
                     }
                 });
             });
-
-            recentItems.forEach(item => {
-                item.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const nodeId = item.getAttribute('data-node-id');
-                    if (nodeId) {
-                        selectLineageNode(nodeId);
-                    }
-                });
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.search-form')) {
-                    hideLineageSearchResults();
-                }
-            });
-        }
-
-        function searchLineageLocal(query) {
-            const queryLower = query.toLowerCase();
-            return lineageSearchData
-                .filter(node => {
-                    const matchesQuery = node.name.toLowerCase().includes(queryLower);
-                    const matchesType = lineageTypeFilter === 'all' || node.type === lineageTypeFilter;
-                    return matchesQuery && matchesType;
-                })
-                .slice(0, 10);
-        }
-
-        function showLineageSearchResults(results) {
-            const searchResults = document.getElementById('lineage-search-results');
-            if (!searchResults) return;
-
-            if (!results || results.length === 0) {
-                searchResults.innerHTML = '<div class="search-result-item" style="justify-content: center; color: var(--text-dim);">No results found</div>';
-                searchResults.style.display = 'block';
-                return;
-            }
-
-            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
-            searchResults.innerHTML = results.map(node => {
-                const fileName = node.filePath ? node.filePath.split('/').pop() : '';
-                return '<div class="search-result-item" data-node-id="' + escapeHtmlAttr(node.id) + '">' +
-                    '<span class="result-icon">' + (icons[node.type] || '📦') + '</span>' +
-                    '<span class="result-name">' + escapeHtml(node.name) + '</span>' +
-                    '<span class="result-type">' + node.type + '</span>' +
-                    (fileName ? '<span class="result-file">' + escapeHtml(fileName) + '</span>' : '') +
-                '</div>';
-            }).join('');
-
-            searchResults.style.display = 'block';
-
-            searchResults.querySelectorAll('.search-result-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const nodeId = item.getAttribute('data-node-id');
-                    if (nodeId) {
-                        selectLineageNode(nodeId);
-                        hideLineageSearchResults();
-                    }
-                });
-            });
-        }
-
-        function hideLineageSearchResults() {
-            const searchResults = document.getElementById('lineage-search-results');
-            if (searchResults) {
-                searchResults.style.display = 'none';
-            }
         }
 
         function selectLineageNode(nodeId) {
