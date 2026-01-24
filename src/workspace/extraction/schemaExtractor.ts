@@ -576,7 +576,15 @@ export class SchemaExtractor {
     }
 
     /**
-     * Get line number at character index
+     * Get line number at character index.
+     * 
+     * IMPORTANT: The charIndex must be from the SAME sql string passed to this method.
+     * Do NOT use charIndex from a comment-stripped or modified version of the SQL
+     * with the original SQL string, as this will cause incorrect line numbers.
+     * 
+     * @param sql The SQL string to search in
+     * @param charIndex Character index (0-based) in the sql string
+     * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
         return sql.substring(0, charIndex).split('\n').length;
