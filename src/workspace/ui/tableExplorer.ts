@@ -335,6 +335,7 @@ export class TableExplorer {
         }
 
         // Deduplicate nodes by ID and separate internal vs external
+        // Only include tables, views, CTEs - skip column nodes
         const internalNodes: Array<{ node: LineageNode; edges: any[] }> = [];
         const externalMap = new Map<string, any[]>(); // name -> edges
         const seenIds = new Set<string>();
@@ -342,6 +343,9 @@ export class TableExplorer {
         for (const node of flow.nodes) {
             if (seenIds.has(node.id)) {continue;}
             seenIds.add(node.id);
+
+            // Skip column nodes - only show tables, views, CTEs, external
+            if (node.type === 'column') {continue;}
 
             const edges = nodeToEdges.get(node.id) || [];
 

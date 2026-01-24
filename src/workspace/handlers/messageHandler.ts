@@ -160,7 +160,7 @@ export class MessageHandler {
                 break;
 
             case 'exploreTable':
-                await this.handleExploreTable(message.tableName);
+                await this.handleExploreTable(message.tableName, message.nodeId);
                 break;
 
             case 'getColumnLineage':
@@ -471,14 +471,22 @@ export class MessageHandler {
         });
     }
 
-    private async handleExploreTable(tableName: string): Promise<void> {
+    private async handleExploreTable(tableName: string, providedNodeId?: string): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {return;}
 
-        const nodeId = `table:${tableName.toLowerCase()}`;
-        const node = lineageGraph.nodes.get(nodeId);
+        // Use provided nodeId if available, otherwise try to find the node
+        let node = providedNodeId ? lineageGraph.nodes.get(providedNodeId) : null;
+
+        // Fallback: try different node types if not found
+        if (!node) {
+            const nameLower = tableName.toLowerCase();
+            node = lineageGraph.nodes.get(`table:${nameLower}`) ||
+                   lineageGraph.nodes.get(`view:${nameLower}`) ||
+                   lineageGraph.nodes.get(`cte:${nameLower}`);
+        }
 
         if (!node) {
             this._context.panel.webview.postMessage({

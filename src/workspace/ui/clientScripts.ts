@@ -353,6 +353,8 @@ function getViewModeScript(): string {
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
         let lineageDetailView = false;
+        let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
+        let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
@@ -535,17 +537,29 @@ function getViewModeScript(): string {
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (lineageDetailView && currentViewMode !== 'graph') {
-                lineageDetailView = false;
-                updateBackButtonText();
-                if (currentViewMode === 'lineage') {
-                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'tableExplorer') {
-                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
-                } else if (currentViewMode === 'impact') {
-                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                // Check if we have history to go back to (for table explorer)
+                if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
+                    const prev = tableExplorerHistory.pop();
+                    if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
+                    lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                    vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
+                    updateBackButtonText();
+                } else {
+                    // No history, go back to main view
+                    lineageDetailView = false;
+                    tableExplorerHistory = [];
+                    currentExploredTable = null;
+                    updateBackButtonText();
+                    if (currentViewMode === 'lineage') {
+                        if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                        vscode.postMessage({ command: 'switchToLineageView' });
+                    } else if (currentViewMode === 'tableExplorer') {
+                        if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                        vscode.postMessage({ command: 'switchToTableExplorer' });
+                    } else if (currentViewMode === 'impact') {
+                        if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                        vscode.postMessage({ command: 'switchToImpactView' });
+                    }
                 }
             } else {
                 switchToView('graph');
@@ -839,9 +853,15 @@ function getEventDelegationScript(): string {
 
                 switch (action) {
                     case 'explore-table':
+                        // Push current table to history before navigating (for back button)
+                        if (currentViewMode === 'tableExplorer' && currentExploredTable) {
+                            tableExplorerHistory.push(currentExploredTable);
+                        }
+                        currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
                         lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
-                        vscode.postMessage({ command: 'exploreTable', tableName: tableName });
+                        // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
+                        vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
                         break;
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
