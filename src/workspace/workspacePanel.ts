@@ -1092,26 +1092,34 @@ ${bodyContent}
 
             <!-- View Mode Tabs -->
             <div class="view-tabs">
-                <button class="view-tab active" data-view="graph" title="Dependency overview: file- or table-level graph of workspace dependencies. Switch mode (Files/Tables/Hybrid) to change what nodes represent.">
+                <button class="view-tab active" data-view="graph" 
+                    title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables."
+                    aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
                         <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
                     </svg>
                     Graph
                 </button>
-                <button class="view-tab" data-view="lineage" title="Data lineage: search for a table, view, or CTE to see its upstream sources and downstream dependencies.">
+                <button class="view-tab" data-view="lineage" 
+                    title="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
+                    aria-label="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 12h4l3 9 4-18 3 9h4"/>
                     </svg>
                     Lineage
                 </button>
-                <button class="view-tab" data-view="tableExplorer" title="Table explorer: browse all tables, views, and CTEs with schema details and connection counts.">
+                <button class="view-tab" data-view="tableExplorer" 
+                    title="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model."
+                    aria-label="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                     </svg>
                     Tables
                 </button>
-                <button class="view-tab" data-view="impact" title="Impact analysis: select a table or view and a change type (MODIFY/RENAME/DROP) to see affected dependencies.">
+                <button class="view-tab" data-view="impact" 
+                    title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."
+                    aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes.">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                     </svg>
@@ -1120,10 +1128,18 @@ ${bodyContent}
             </div>
 
             <!-- Graph mode switcher (visible only when Graph tab is active) -->
-            <div id="graph-mode-switcher" class="graph-mode-switcher" title="Switch what the graph displays: files, tables, or both">
-                <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" title="File-level dependency graph">Files</button>
-                <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" title="Table-level dependency graph">Tables</button>
-                <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" title="Files plus prominent tables">Hybrid</button>
+            <div id="graph-mode-switcher" class="graph-mode-switcher" 
+                title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables."
+                aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
+                <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
+                    title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
+                    aria-label="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files.">Files</button>
+                <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
+                    title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
+                    aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
+                <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
+                    title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
+                    aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
             </div>
 
             <div class="header-right">
