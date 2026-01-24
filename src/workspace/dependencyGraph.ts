@@ -112,6 +112,13 @@ function buildFileGraph(
 
         for (const ref of analysis.references) {
             const defs = getDefinitionCandidates(index, ref);
+            // Fix false-positive edges: If a reference is satisfied by a definition in the same file,
+            // don't create edges to other files that define the same name (name collision).
+            // This prevents incorrect edges when multiple files define views/tables with the same name.
+            const sameFileDef = defs.some(d => d.filePath === filePath);
+            if (sameFileDef) {
+                continue;
+            }
             for (const def of defs) {
                 if (def.filePath === filePath) {continue;}
                 const targetId = nodeIdMap.get(def.filePath);

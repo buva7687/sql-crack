@@ -2736,13 +2736,16 @@ export function getGraphStyles(): string {
         .node-sublabel { fill: rgba(255,255,255,0.75); font-size: 10px; }
 
         /* ========== Edge Styles ========== */
-        .edge { fill: none; stroke-width: 2; }
+        .edge { fill: none; stroke-width: 2; cursor: pointer; }
         .edge-select { stroke: #64748b; }
         .edge-join { stroke: #a78bfa; }
         .edge-insert { stroke: #10b981; }
         .edge-update { stroke: #fbbf24; }
         .edge-delete { stroke: #f87171; }
         .edge-label { fill: var(--text-muted); font-size: 10px; }
+        /* Edge highlight/dim styles for click-to-highlight feature */
+        .edge.edge-highlighted path { opacity: 1; stroke-width: 3; }
+        .edge.edge-dimmed path { opacity: 0.2; }
 
         /* ========== Tooltip ========== */
         .tooltip {

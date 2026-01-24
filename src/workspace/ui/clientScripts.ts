@@ -180,7 +180,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             updateTransform();
 
             svg.addEventListener('mousedown', (e) => {
-                if (e.target === svg || e.target.closest('.edge')) {
+                if (e.target === svg) {
                     isDragging = true;
                     dragStartX = e.clientX - offsetX;
                     dragStartY = e.clientY - offsetY;
@@ -695,6 +695,13 @@ function getContextMenuScript(): string {
                             openFile(contextMenuTarget.filePath);
                         }
                         break;
+                    case 'visualize':
+                        // Handle "Visualize Dependencies" context menu action
+                        // Opens the visualization panel for the selected file node
+                        if (contextMenuTarget.filePath) {
+                            visualizeFile(contextMenuTarget.filePath);
+                        }
+                        break;
                 }
                 hideContextMenu();
             });
@@ -856,19 +863,36 @@ function getNodeInteractionsScript(): string {
     return `
         // ========== Node Interactions ==========
         if (svg) {
+            var nodeClickTimeout = null;
+            
             svg.addEventListener('click', (e) => {
-                const node = e.target.closest('.node');
-                if (node) {
-                    const filePath = node.getAttribute('data-filepath');
-                    if (filePath) openFile(filePath);
-                }
+                var node = e.target.closest('.node');
+                if (!node) return;
+                
+                var filePath = node.getAttribute('data-filepath');
+                if (!filePath) return;
+                
+                // Delay single-click so double-click can cancel it
+                nodeClickTimeout = window.setTimeout(function() {
+                    openFile(filePath);
+                    nodeClickTimeout = null;
+                }, 300);
             });
 
             svg.addEventListener('dblclick', (e) => {
-                const node = e.target.closest('.node');
-                if (node) {
-                    const filePath = node.getAttribute('data-filepath');
-                    if (filePath) visualizeFile(filePath);
+                var node = e.target.closest('.node');
+                if (!node) return;
+                
+                if (nodeClickTimeout) {
+                    clearTimeout(nodeClickTimeout);
+                    nodeClickTimeout = null;
+                }
+                
+                var filePath = node.getAttribute('data-filepath');
+                if (filePath) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    visualizeFile(filePath);
                 }
             });
 
@@ -903,6 +927,55 @@ function getNodeInteractionsScript(): string {
                         filePath: filePath
                     });
                 }
+            });
+
+            // Edge click-to-highlight functionality:
+            // - Click an edge to highlight it (opacity 1, stroke-width 3) and dim all others (opacity 0.2)
+            // - Click on empty graph area, double-click anywhere, or click outside graph to clear highlight
+            function clearEdgeHighlight() {
+                var edges = document.querySelectorAll('.edge');
+                edges.forEach(function(el) {
+                    el.classList.remove('edge-highlighted', 'edge-dimmed');
+                    var path = el.querySelector('path');
+                    if (path) {
+                        path.style.opacity = '0.7';
+                        path.style.strokeWidth = '2';
+                    }
+                });
+            }
+
+            svg.addEventListener('click', (e) => {
+                var edge = e.target.closest('.edge');
+                if (edge) {
+                    e.stopPropagation();
+                    clearEdgeHighlight();
+                    edge.classList.add('edge-highlighted');
+                    var path = edge.querySelector('path');
+                    if (path) {
+                        path.style.opacity = '1';
+                        path.style.strokeWidth = '3';
+                    }
+                    var all = document.querySelectorAll('.edge');
+                    all.forEach(function(el) {
+                        if (el !== edge) {
+                            el.classList.add('edge-dimmed');
+                            var p = el.querySelector('path');
+                            if (p) p.style.opacity = '0.2';
+                        }
+                    });
+                    return;
+                }
+                if (e.target === svg || !e.target.closest('.node')) {
+                    clearEdgeHighlight();
+                }
+            });
+
+            svg.addEventListener('dblclick', (e) => {
+                clearEdgeHighlight();
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.graph-area')) clearEdgeHighlight();
             });
         }
     `;

@@ -1518,8 +1518,10 @@ ${bodyContent}
             };
             const edgeColor = edgeColors[edge.referenceType] || '#64748b';
 
+            // Add edge ID for click-to-highlight functionality
+            const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
             return `
-                <g class="edge edge-${edge.referenceType}"
+                <g class="edge edge-${edge.referenceType}" data-edge-id="${this.escapeHtml(edgeId)}"
                    onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>')"
                    onmouseleave="hideTooltip()">
                     <path d="${path}"
