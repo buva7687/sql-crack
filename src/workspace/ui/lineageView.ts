@@ -31,15 +31,13 @@ export class LineageView {
         options: {
             selectedNodeId?: string;
             recentSelections?: RecentSelection[];
-            fileFilter?: string[];
         } = {}
     ): string {
-        const { selectedNodeId, recentSelections = [], fileFilter = [] } = options;
+        const { selectedNodeId, recentSelections = [] } = options;
 
         // Get all searchable nodes
         const renderer = new LineageGraphRenderer(graph);
         const searchableNodes = renderer.getSearchableNodes();
-        const filePaths = renderer.getFilePaths();
 
         // Stats
         const stats = this.collectStats(graph);
@@ -110,22 +108,6 @@ export class LineageView {
                             <button class="view-filter-chip" data-filter="view">Views</button>
                             <button class="view-filter-chip" data-filter="cte">CTEs</button>
                         </div>
-                        <div class="view-filter-group">
-                            <label class="view-filter-label">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                    <polyline points="14 2 14 8 20 8"/>
-                                </svg>
-                                Filter by file
-                            </label>
-                            <select id="lineage-file-filter" class="view-filter-select" multiple>
-                                ${filePaths.map(fp => `
-                                    <option value="${this.escapeHtml(fp)}" ${fileFilter.includes(fp) ? 'selected' : ''}>
-                                        ${this.escapeHtml(fp.split('/').pop() || fp)}
-                                    </option>
-                                `).join('')}
-                            </select>
-                        </div>
                     </div>
                 </div>
 
@@ -160,7 +142,6 @@ export class LineageView {
             depth?: number;
             direction?: 'both' | 'upstream' | 'downstream';
             expandedNodes?: Set<string>;
-            fileFilter?: string[];
             focusedNodeId?: string;
         } = {}
     ): string {
@@ -168,7 +149,6 @@ export class LineageView {
             depth = 5,
             direction = 'both',
             expandedNodes = new Set(),
-            fileFilter = [],
             focusedNodeId
         } = options;
 
@@ -177,7 +157,6 @@ export class LineageView {
             centerNodeId,
             depth,
             direction,
-            fileFilter: fileFilter.length > 0 ? fileFilter : undefined,
             expandedNodes,
             includeExternal: true
         });

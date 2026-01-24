@@ -1219,7 +1219,7 @@ function getVisualLineageSearchScript(): string {
             const searchInput = document.getElementById('lineage-search-input');
             const searchClear = document.getElementById('lineage-search-clear');
             const searchResults = document.getElementById('lineage-search-results');
-            const filterChips = document.querySelectorAll('.quick-filters .filter-chip');
+            const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
             const popularItems = document.querySelectorAll('.popular-item[data-action="select-node"]');
             const recentItems = document.querySelectorAll('.recent-item[data-action="select-node"]');
             const dataScript = document.getElementById('lineage-searchable-nodes');
@@ -1623,11 +1623,13 @@ function getLineageGraphScript(): string {
                     const direction = btn.getAttribute('data-direction');
                     const nodeId = btn.getAttribute('data-node-id');
                     if (direction && nodeId) {
+                        lineageCurrentDirection = direction;
                         vscode.postMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5
+                            depth: 5,
+                            expandedNodes: Array.from(lineageExpandedNodes)
                         });
                     }
                 });
@@ -2285,11 +2287,13 @@ function getDirectionButtonsScript(): string {
                         if (lineageContent) {
                             lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
                         }
+                        lineageCurrentDirection = direction;
                         vscode.postMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5
+                            depth: 5,
+                            expandedNodes: lineageExpandedNodes ? Array.from(lineageExpandedNodes) : []
                         });
                     }
                 });

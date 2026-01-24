@@ -476,11 +476,6 @@ export function getSharedViewStyles(): string {
             flex-wrap: wrap;
             align-items: center;
         }
-        .view-filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
         .view-filter-label {
             display: flex;
             align-items: center;
@@ -492,24 +487,6 @@ export function getSharedViewStyles(): string {
         .view-filter-label svg {
             width: 14px;
             height: 14px;
-        }
-        .view-filter-select {
-            background: var(--bg-primary);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-secondary);
-            font-size: 13px;
-            padding: 8px 12px;
-            border-radius: var(--radius-md);
-            outline: none;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .view-filter-select:hover {
-            border-color: var(--border-color);
-        }
-        .view-filter-select:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
         }
 
         /* Quick Filter Chips */

@@ -500,7 +500,6 @@ export class WorkspacePanel {
                     message.nodeId,
                     message.depth || 5,
                     message.direction || 'both',
-                    message.fileFilter,
                     message.expandedNodes
                 );
                 break;
@@ -900,7 +899,6 @@ export class WorkspacePanel {
         nodeId: string,
         depth: number,
         direction: 'both' | 'upstream' | 'downstream',
-        fileFilter?: string[],
         expandedNodes?: string[]
     ): Promise<void> {
         await this.buildLineageGraph();
@@ -919,8 +917,7 @@ export class WorkspacePanel {
             {
                 depth,
                 direction,
-                expandedNodes: new Set(expandedNodes || []),
-                fileFilter
+                expandedNodes: new Set(expandedNodes || [])
             }
         );
 
