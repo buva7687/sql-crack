@@ -215,13 +215,27 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         document.getElementById('btn-zoom-reset')?.addEventListener('click', resetView);
         document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToScreen);
 
-        // Auto-fit graph to screen on initial load to use available space
-        // Use requestAnimationFrame and setTimeout to ensure DOM and container are fully rendered
+        // Auto-fit graph to screen on initial load to use available space.
+        // Hide graph during transition to prevent flickering (zoom change from 100% to fitted).
         if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+            const graphArea = document.querySelector('.graph-area');
+            if (graphArea) {
+                // Hide graph during fit calculation to prevent flicker
+                graphArea.style.opacity = '0';
+                graphArea.style.transition = 'opacity 0.2s ease-in';
+            }
+            
+            // Use requestAnimationFrame to ensure DOM is ready, then fit immediately
             requestAnimationFrame(() => {
-                setTimeout(() => {
-                    fitToScreen();
-                }, 200);
+                // Fit to screen synchronously (no setTimeout delay to reduce flicker)
+                fitToScreen();
+                
+                // Show graph after fitting is complete (next frame)
+                if (graphArea) {
+                    requestAnimationFrame(() => {
+                        graphArea.style.opacity = '1';
+                    });
+                }
             });
         }
 
