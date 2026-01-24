@@ -357,26 +357,32 @@ export class SchemaExtractor {
 
                 console.log(`[Schema Extractor Regex] Table ${tableName}: found ${columns.length} columns`);
 
+                // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
+                // Previous bug: used match.index from sqlNoComments with getLineNumberAtIndex(originalSql, ...)
+                // causing character index misalignment and wrong line numbers
+                const loc = this.findCreateStatementLocation(sql, tableName, 'table');
                 definitions.push({
                     type: 'table',
                     name: tableName,
                     schema: match[1],
                     columns,
                     filePath,
-                    lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                    sql: this.extractStatementFromIndex(sql, match.index)
+                    lineNumber: loc.lineNumber,
+                    sql: this.extractStatementFromIndex(sql, loc.charIndex)
                 });
             } else {
                 // No parenthesis - might be CREATE TABLE AS SELECT
                 console.log(`[Schema Extractor Regex] Table ${tableName}: no column definitions (CTAS?)`);
+                // Use findCreateStatementLocation on ORIGINAL sql to get correct line number and char index
+                const loc = this.findCreateStatementLocation(sql, tableName, 'table');
                 definitions.push({
                     type: 'table',
                     name: tableName,
                     schema: match[1],
                     columns: [],
                     filePath,
-                    lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                    sql: this.extractStatementFromIndex(sql, match.index)
+                    lineNumber: loc.lineNumber,
+                    sql: this.extractStatementFromIndex(sql, loc.charIndex)
                 });
             }
         }
@@ -392,14 +398,16 @@ export class SchemaExtractor {
                 continue;
             }
 
+            // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
+            const loc = this.findCreateStatementLocation(sql, viewName, 'view');
             definitions.push({
                 type: 'view',
                 name: viewName,
                 schema: match[1],
                 columns: [],
                 filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                sql: this.extractStatementFromIndex(sql, match.index)
+                lineNumber: loc.lineNumber,
+                sql: this.extractStatementFromIndex(sql, loc.charIndex)
             });
         }
 
@@ -517,31 +525,54 @@ export class SchemaExtractor {
     }
 
     /**
-     * Find line number where a table/view is defined
+     * Find line number and character index where a table/view is defined.
+     * 
+     * This method fixes incorrect line number issues by:
+     * 1. Searching the ORIGINAL SQL (not comment-stripped) to ensure character indices align correctly
+     * 2. Using an exact pattern match: "CREATE TABLE <identifier>" or "CREATE VIEW <identifier>"
+     *    This avoids false matches from partial identifier occurrences (e.g., "2024" in "EXTRACT(...) = 2024")
+     * 3. Skipping comment lines (lines starting with '--') to avoid matching CREATE statements in comments
+     * 
+     * Previous issues:
+     * - Used match.index from comment-stripped SQL with getLineNumberAtIndex(originalSql, ...) 
+     *   causing index misalignment and wrong line numbers
+     * - Fallback to "first occurrence of identifier" matched unrelated text (e.g., "2024" in CASE statements)
+     * - Could match CREATE TABLE in comments (e.g., "-- 8. CREATE TABLE AS SELECT (CTAS)")
+     * 
+     * @param sql The original SQL content (with comments intact)
+     * @param identifier The table/view name to find
+     * @param type Whether to search for 'table' or 'view'
+     * @returns Object with lineNumber (1-based) and charIndex (0-based) of the CREATE statement
      */
-    private findLineNumber(sql: string, identifier: string, type: 'table' | 'view'): number {
-        const lines = sql.split('\n');
+    private findCreateStatementLocation(
+        sql: string,
+        identifier: string,
+        type: 'table' | 'view'
+    ): { lineNumber: number; charIndex: number } {
         const keyword = type === 'table' ? 'TABLE' : 'VIEW';
-        const regex = new RegExp(
-            `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}`,
-            'i'
+        // Escape special regex characters in identifier to prevent injection or false matches
+        const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match exact pattern: CREATE [OR REPLACE] [TEMP] [MATERIALIZED] TABLE/VIEW [IF NOT EXISTS] [schema.]identifier
+        const re = new RegExp(
+            `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:\\w+\\.)?["'\`]?${escaped}["'\`]?`,
+            'gi'
         );
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (regex.test(line) && line.toLowerCase().includes(identifier.toLowerCase())) {
-                return i + 1;
+        const lines = sql.split('\n');
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(sql)) !== null) {
+            const lineNum = this.getLineNumberAtIndex(sql, m.index);
+            const lineContent = lines[lineNum - 1] ?? '';
+            // Skip matches in comment lines (e.g., "-- CREATE TABLE example")
+            if (!lineContent.trimStart().startsWith('--')) {
+                return { lineNumber: lineNum, charIndex: m.index };
             }
         }
+        // Fallback: return line 1 if not found (should rarely happen)
+        return { lineNumber: 1, charIndex: 0 };
+    }
 
-        // Fallback: find first occurrence of identifier
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].toLowerCase().includes(identifier.toLowerCase())) {
-                return i + 1;
-            }
-        }
-
-        return 1;
+    private findLineNumber(sql: string, identifier: string, type: 'table' | 'view'): number {
+        return this.findCreateStatementLocation(sql, identifier, type).lineNumber;
     }
 
     /**
