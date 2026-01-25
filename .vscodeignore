@@ -1,11 +1,43 @@
 .vscode/**
 .vscode-test/**
-src/**
+.git/**
 .gitignore
-.yarnrc
-webpack.config.js
+.github/**
+.claude/**
+.factory/**
+.DS_Store
+
+# Source files (dist is bundled)
+src/**
+out/**
+**/*.ts
+**/*.map
 **/tsconfig.json
 **/.eslintrc.json
-**/*.map
-**/*.ts
+
+# Build config
+webpack.config.js
+jest.config.js
+.yarnrc
+.eslintrc.json
+
+# Dependencies (bundled into dist)
 node_modules/**
+
+# Test and archive files
+sql/**
+archive/**
+test-*.js
+
+# Python virtual env
+sql_crack_venv/**
+venv/**
+**/__pycache__/**
+*.pyc
+
+# Package artifacts
+*.vsix
+
+# Misc
+*.log
+.npmrc
