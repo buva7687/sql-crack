@@ -8,6 +8,7 @@
     "type": "git",
     "url": "https://github.com/buva7687/sql-crack.git"
   },
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
