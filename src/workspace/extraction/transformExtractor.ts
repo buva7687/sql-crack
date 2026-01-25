@@ -58,7 +58,7 @@ export class TransformExtractor {
         col: any,
         tableAliases: Map<string, string>
     ): Transformation | null {
-        if (!col || !col.expr) return null;
+        if (!col || !col.expr) {return null;}
 
         const expr = col.expr;
         const alias = col.as;
@@ -93,7 +93,7 @@ export class TransformExtractor {
         expr: any,
         tableAliases: Map<string, string>
     ): ColumnReference[] {
-        if (!expr) return [];
+        if (!expr) {return [];}
 
         const columns: ColumnReference[] = [];
 
@@ -110,7 +110,7 @@ export class TransformExtractor {
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
-        if (!expr) return;
+        if (!expr) {return;}
 
         // Direct column reference
         if (expr.type === 'column_ref') {
@@ -186,7 +186,7 @@ export class TransformExtractor {
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
-        if (!func.args) return;
+        if (!func.args) {return;}
 
         const args = Array.isArray(func.args.expr)
             ? func.args.expr
@@ -235,7 +235,7 @@ export class TransformExtractor {
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
-        if (!caseExpr.args) return;
+        if (!caseExpr.args) {return;}
 
         for (const caseArg of caseExpr.args) {
             // CASE WHEN condition THEN result
@@ -370,7 +370,7 @@ export class TransformExtractor {
      * Classify function
      */
     private classifyFunction(func: any): TransformationType {
-        if (!func.name) return 'scalar';
+        if (!func.name) {return 'scalar';}
 
         const name = func.name.toUpperCase();
 
@@ -414,7 +414,7 @@ export class TransformExtractor {
      * Extract column name from column reference
      */
     private extractColumnName(column: any): string {
-        if (!column) return '';
+        if (!column) {return '';}
 
         if (column.column) {
             return column.column;
@@ -434,7 +434,7 @@ export class TransformExtractor {
         tableRef: any,
         tableAliases: Map<string, string>
     ): string | undefined {
-        if (!tableRef) return undefined;
+        if (!tableRef) {return undefined;}
 
         const alias = tableRef.alias || tableRef;
 
@@ -454,7 +454,7 @@ export class TransformExtractor {
      * Generate output column name for expressions
      */
     private generateOutputName(expr: any): string {
-        if (!expr) return 'expr';
+        if (!expr) {return 'expr';}
 
         const type = expr.type || '';
 
@@ -480,7 +480,7 @@ export class TransformExtractor {
      * Convert expression to string representation
      */
     private expressionToString(expr: any): string {
-        if (!expr) return '';
+        if (!expr) {return '';}
 
         try {
             const sql = this.parser.sqlify(expr);

@@ -117,7 +117,7 @@ export class LayoutEngine {
         const { width = 1200, height = 800, levelSpacing = 150 } = options;
         const focusNode = nodes.find(n => n.id === focusId);
 
-        if (!focusNode) return;
+        if (!focusNode) {return;}
 
         // Position focus node in center
         focusNode.x = width / 2;
@@ -167,7 +167,7 @@ export class LayoutEngine {
             const centerY = height / 2;
 
             levelNodes.forEach((node, i) => {
-                if (level === 0) return; // Skip focus node
+                if (level === 0) {return;} // Skip focus node
 
                 const angle = (2 * Math.PI * i) / levelNodes.length;
                 node.x = centerX + radius * Math.cos(angle);

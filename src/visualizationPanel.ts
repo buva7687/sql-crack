@@ -118,7 +118,7 @@ export class VisualizationPanel {
     }
 
     private static savePinnedTab(pin: PinnedVisualization) {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
         const existingIndex = pinnedTabs.findIndex(t => t.id === pin.id);
@@ -133,7 +133,7 @@ export class VisualizationPanel {
     }
 
     private static removePinnedTab(pinId: string) {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
         const filtered = pinnedTabs.filter(t => t.id !== pinId);
@@ -141,7 +141,7 @@ export class VisualizationPanel {
     }
 
     private static restorePinnedTabs() {
-        if (!VisualizationPanel._context) return;
+        if (!VisualizationPanel._context) {return;}
 
         const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
 
@@ -151,7 +151,7 @@ export class VisualizationPanel {
     }
 
     public static getPinnedTabs(): PinnedVisualization[] {
-        if (!VisualizationPanel._context) return [];
+        if (!VisualizationPanel._context) {return [];}
         return VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
     }
 
@@ -313,6 +313,9 @@ export class VisualizationPanel {
                             VisualizationPanel.sendViewLocationOptions();
                         }
                         return;
+                    case 'savePng':
+                        this._savePngFile(message.data, message.filename);
+                        return;
                 }
             },
             null,
@@ -335,8 +338,6 @@ export class VisualizationPanel {
      * @param line - Line number (1-indexed) to navigate to
      */
     private async _goToLine(line: number) {
-        console.log('_goToLine called with line:', line, 'sourceDocumentUri:', this._sourceDocumentUri?.toString());
-        
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
         
@@ -348,7 +349,6 @@ export class VisualizationPanel {
                 const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-                console.log('Successfully navigated to line', line, 'in document:', targetUri.toString());
                 return;
             } catch (error) {
                 console.error('Failed to open document:', error);
@@ -361,7 +361,6 @@ export class VisualizationPanel {
             const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-            console.log('Navigated to line', line, 'in active editor');
         } else {
             console.warn('No active editor found, cannot navigate to line', line);
             vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);
@@ -370,6 +369,30 @@ export class VisualizationPanel {
 
     private _postMessage(message: any) {
         this._panel.webview.postMessage(message);
+    }
+
+    /**
+     * Save PNG data to file using VS Code's save dialog
+     */
+    private async _savePngFile(base64Data: string, suggestedFilename: string) {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(suggestedFilename),
+                filters: {
+                    'PNG Images': ['png']
+                },
+                saveLabel: 'Save PNG'
+            });
+
+            if (uri) {
+                const buffer = Buffer.from(base64Data, 'base64');
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
+            }
+        } catch (error) {
+            console.error('Failed to save PNG:', error);
+            vscode.window.showErrorMessage('Failed to save PNG file');
+        }
     }
 
     private _update(sqlCode: string, options: VisualizationOptions) {
@@ -405,7 +428,8 @@ export class VisualizationPanel {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <!-- CSP: Allow img-src for data: and blob: URLs to enable PNG export and clipboard copy -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data: blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Visualization</title>
     <style>

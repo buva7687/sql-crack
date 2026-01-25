@@ -1,6 +1,7 @@
 // Window, aggregate, and case function extraction utilities
 
-import { WindowFunctionDetail, AggregateFunctionDetail, CaseDetail } from '../../types';
+import { WindowFunctionDetail, AggregateFunctionDetail, CaseDetail, SqlDialect } from '../../types';
+import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 
 export function extractWindowFunctions(columns: any): string[] {
     if (!columns || !Array.isArray(columns)) { return []; }
@@ -29,17 +30,17 @@ export function extractWindowFunctions(columns: any): string[] {
     return windowFuncs;
 }
 
-export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail[] {
+export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): WindowFunctionDetail[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
     const details: WindowFunctionDetail[] = [];
-    const WINDOW_FUNCS = ['LAG', 'LEAD', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE',
-        'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+    // Get dialect-specific window functions
+    const windowFuncList = getWindowFunctions(dialect);
 
     const getStringName = (obj: any): string | null => {
-        if (typeof obj === 'string') return obj;
-        if (obj && typeof obj.name === 'string') return obj.name;
-        if (obj && typeof obj.value === 'string') return obj.value;
+        if (typeof obj === 'string') {return obj;}
+        if (obj && typeof obj.name === 'string') {return obj.name;}
+        if (obj && typeof obj.value === 'string') {return obj.value;}
         return null;
     };
 
@@ -53,26 +54,26 @@ export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail
                 funcName = nameFromExpr;
             } else if (expr.type === 'aggr_func' || expr.type === 'function') {
                 const aggName = getStringName(expr.name);
-                if (aggName) funcName = aggName;
+                if (aggName) {funcName = aggName;}
             } else if (expr.args?.expr) {
                 const argsName = getStringName(expr.args.expr.name) || getStringName(expr.args.expr);
-                if (argsName) funcName = argsName;
+                if (argsName) {funcName = argsName;}
             }
 
             if (funcName === 'WINDOW' && col.as) {
                 const alias = String(col.as).toLowerCase();
-                if (alias.includes('prev') || alias.includes('lag')) funcName = 'LAG';
-                else if (alias.includes('next') || alias.includes('lead')) funcName = 'LEAD';
-                else if (alias.includes('rank')) funcName = 'RANK';
-                else if (alias.includes('row_num')) funcName = 'ROW_NUMBER';
-                else if (alias.includes('running') || alias.includes('total')) funcName = 'SUM';
-                else if (alias.includes('avg') || alias.includes('average')) funcName = 'AVG';
+                if (alias.includes('prev') || alias.includes('lag')) {funcName = 'LAG';}
+                else if (alias.includes('next') || alias.includes('lead')) {funcName = 'LEAD';}
+                else if (alias.includes('rank')) {funcName = 'RANK';}
+                else if (alias.includes('row_num')) {funcName = 'ROW_NUMBER';}
+                else if (alias.includes('running') || alias.includes('total')) {funcName = 'SUM';}
+                else if (alias.includes('avg') || alias.includes('average')) {funcName = 'AVG';}
             }
 
             if (funcName === 'WINDOW') {
                 try {
                     const exprStr = JSON.stringify(expr).toUpperCase();
-                    for (const wf of WINDOW_FUNCS) {
+                    for (const wf of windowFuncList) {
                         if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
                             funcName = wf;
                             break;
@@ -113,26 +114,28 @@ export function extractWindowFunctionDetails(columns: any): WindowFunctionDetail
     return details;
 }
 
-export function extractAggregateFunctionDetails(columns: any): AggregateFunctionDetail[] {
+export function extractAggregateFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): AggregateFunctionDetail[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
-    const aggregateFuncs = ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN', 'GROUP_CONCAT', 'STRING_AGG', 'ARRAY_AGG'];
+    // Get dialect-specific aggregate functions
+    const aggregateFuncSet = new Set(getAggregateFunctions(dialect));
     const details: AggregateFunctionDetail[] = [];
 
     function extractAggregatesFromExpr(expr: any): void {
-        if (!expr) return;
+        if (!expr) {return;}
 
-        if (expr.type === 'aggr_func' || (expr.name && aggregateFuncs.includes(String(expr.name).toUpperCase()))) {
-            const funcName = String(expr.name || 'AGG').toUpperCase();
+        const exprFuncName = String(expr.name || '').toUpperCase();
+        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+            const funcName = exprFuncName || 'AGG';
 
             let expression = funcName + '()';
             if (expr.args) {
                 const args = expr.args.value || expr.args;
                 if (Array.isArray(args)) {
                     const argStrs = args.map((arg: any) => {
-                        if (arg.column) return arg.column;
-                        if (arg.value) return String(arg.value);
-                        if (arg.expr?.column) return arg.expr.column;
+                        if (arg.column) {return arg.column;}
+                        if (arg.value) {return String(arg.value);}
+                        if (arg.expr?.column) {return arg.expr.column;}
                         return '?';
                     });
                     expression = funcName + '(' + argStrs.join(', ') + ')';
@@ -157,8 +160,8 @@ export function extractAggregateFunctionDetails(columns: any): AggregateFunction
                 extractAggregatesFromExpr(args);
             }
         }
-        if (expr.left) extractAggregatesFromExpr(expr.left);
-        if (expr.right) extractAggregatesFromExpr(expr.right);
+        if (expr.left) {extractAggregatesFromExpr(expr.left);}
+        if (expr.right) {extractAggregatesFromExpr(expr.right);}
     }
 
     for (const col of columns) {
@@ -179,9 +182,9 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
     const caseDetails: CaseDetail[] = [];
 
     function formatExpr(expr: any): string {
-        if (!expr) return '?';
-        if (expr.column) return expr.column;
-        if (expr.value) return String(expr.value);
+        if (!expr) {return '?';}
+        if (expr.column) {return expr.column;}
+        if (expr.value) {return String(expr.value);}
         if (expr.type === 'binary_expr') {
             const left = formatExpr(expr.left);
             const right = formatExpr(expr.right);

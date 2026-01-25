@@ -96,7 +96,7 @@ export class ReferenceExtractor {
             // First pass: collect all CTE names from WITH clauses across all statements
             const globalCteNames = new Set<string>();
             for (const stmt of statements) {
-                if (!stmt) continue;
+                if (!stmt) {continue;}
                 this.collectCTENames(stmt, globalCteNames);
             }
 
@@ -152,7 +152,7 @@ export class ReferenceExtractor {
             // Second pass: extract references with CTE names available
             for (let stmtIndex = 0; stmtIndex < statements.length; stmtIndex++) {
                 const stmt = statements[stmtIndex];
-                if (!stmt) continue;
+                if (!stmt) {continue;}
                 const aliasMap = this.createAliasMap();
                 // Add globally collected CTE names to the alias map
                 for (const cteName of globalCteNames) {
@@ -195,7 +195,7 @@ export class ReferenceExtractor {
      * Recursively collect all CTE names from a statement tree
      */
     private collectCTENames(stmt: any, cteNames: Set<string>): void {
-        if (!stmt || typeof stmt !== 'object') return;
+        if (!stmt || typeof stmt !== 'object') {return;}
 
         // Check for WITH clause
         if (stmt.with) {
@@ -305,8 +305,8 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!stmt) return;
-        if (depth > this.options.maxSubqueryDepth) return;
+        if (!stmt) {return;}
+        if (depth > this.options.maxSubqueryDepth) {return;}
 
         // Check for WITH clause at the top level (before statement type)
         // Some parsers structure WITH clauses separately from the main statement
@@ -382,7 +382,7 @@ export class ReferenceExtractor {
             return;
         }
 
-        if (!stmt.type) return;
+        if (!stmt.type) {return;}
         const stmtType = stmt.type.toLowerCase();
 
         switch (stmtType) {
@@ -745,7 +745,7 @@ export class ReferenceExtractor {
         statementIndex: number = 0,
         parentStmt?: any
     ): void {
-        if (!item) return;
+        if (!item) {return;}
 
         // Determine reference type (join or select)
         const refType: ReferenceType = item.join ? 'join' : defaultType;
@@ -825,7 +825,7 @@ export class ReferenceExtractor {
         statementIndex: number = 0
     ): TableReference | null {
         const tableName = this.getTableName(item);
-        if (!tableName) return null;
+        if (!tableName) {return null;}
 
         return {
             tableName,
@@ -851,10 +851,10 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!Array.isArray(columns)) return;
+        if (!Array.isArray(columns)) {return;}
 
         for (const col of columns) {
-            if (!col) continue;
+            if (!col) {continue;}
 
             // Scalar subquery in column
             if (col.expr?.type === 'select') {
@@ -888,8 +888,8 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        if (!expr) return;
-        if (depth > this.options.maxSubqueryDepth) return;
+        if (!expr) {return;}
+        if (depth > this.options.maxSubqueryDepth) {return;}
 
         // Check for column references with table qualifiers (e.g., customer_totals.customer_id)
         // These should NOT create table references if the table name is a known alias/CTE
@@ -952,29 +952,77 @@ export class ReferenceExtractor {
      * Get table name from AST item
      */
     private getTableName(item: any): string | null {
-        if (!item) return null;
-        if (typeof item === 'string') return item;
+        if (!item) {return null;}
+        if (typeof item === 'string') {return item;}
 
         if (item.table) {
-            if (typeof item.table === 'string') return item.table;
-            if (item.table.table) return item.table.table;
-            if (item.table.name) return item.table.name;
+            if (typeof item.table === 'string') {return item.table;}
+            if (item.table.table) {return item.table.table;}
+            if (item.table.name) {return item.table.name;}
         }
 
-        if (item.name) return item.name;
+        if (item.name) {return item.name;}
 
         return null;
     }
 
     /**
-     * Find line number where table is referenced
+     * Find line number where table is referenced in the correct SQL context.
+     * 
+     * This method fixes incorrect line number issues by:
+     * 1. Searching for the table name in the correct SQL context (FROM, JOIN, INSERT INTO, UPDATE, DELETE FROM)
+     *    instead of just any occurrence of the table name
+     * 2. Skipping comment lines to avoid false matches
+     * 3. Using word boundaries to prevent partial matches
+     * 
+     * Previous issues:
+     * - Matched first occurrence of table name anywhere (including comments or wrong contexts)
+     * - Could match table name in comments (e.g., "-- FROM employees")
+     * - Could match table name in wrong contexts (e.g., column names containing the table name)
+     * 
+     * @param sql The original SQL content (with comments intact)
+     * @param tableName The table name to find
+     * @returns Line number (1-based) where the table is referenced, or 1 if not found
      */
     private findTableLine(sql: string, tableName: string): number {
+        const escaped = this.escapeRegex(tableName);
         const lines = sql.split('\n');
-        const regex = new RegExp(`\\b${this.escapeRegex(tableName)}\\b`, 'i');
+        
+        // Patterns to match table references in correct SQL contexts
+        const patterns = [
+            // FROM table
+            new RegExp(`\\bFROM\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
+            // JOIN table
+            new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
+            // INSERT INTO table
+            new RegExp(`\\bINSERT\\s+INTO\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
+            // UPDATE table
+            new RegExp(`\\bUPDATE\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
+            // DELETE FROM table
+            new RegExp(`\\bDELETE\\s+FROM\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
+        ];
 
         for (let i = 0; i < lines.length; i++) {
-            if (regex.test(lines[i])) {
+            const line = lines[i];
+            // Skip comment lines
+            if (line.trimStart().startsWith('--')) {
+                continue;
+            }
+            
+            // Check if any pattern matches this line
+            for (const pattern of patterns) {
+                if (pattern.test(line)) {
+                    return i + 1;
+                }
+            }
+        }
+
+        // Fallback: if no context match found, search for table name with word boundaries
+        // (but still skip comments)
+        const fallbackRegex = new RegExp(`\\b${escaped}\\b`, 'i');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.trimStart().startsWith('--') && fallbackRegex.test(line)) {
                 return i + 1;
             }
         }
@@ -1026,6 +1074,9 @@ export class ReferenceExtractor {
         }
 
         // Helper to find statement index for a given character position
+        // NOTE: charIndex should be from sqlNoComments (comment-stripped SQL) since
+        // statementBoundaries are calculated from sqlNoComments. This is fine for statementIndex
+        // (used for grouping), but NOT for line numbers (which must use original SQL).
         const getStatementIndex = (charIndex: number): number => {
             for (let i = statementBoundaries.length - 1; i >= 0; i--) {
                 if (charIndex >= statementBoundaries[i]) {
@@ -1045,11 +1096,11 @@ export class ReferenceExtractor {
 
             for (const fn of functionFromKeywords) {
                 const fnIndex = lowerLine.lastIndexOf(fn, fromPos);
-                if (fnIndex === -1) continue;
+                if (fnIndex === -1) {continue;}
                 const parenIndex = lowerLine.indexOf('(', fnIndex + fn.length);
-                if (parenIndex === -1 || parenIndex > fromPos) continue;
+                if (parenIndex === -1 || parenIndex > fromPos) {continue;}
                 const closeParenIndex = lowerLine.indexOf(')', parenIndex + 1);
-                if (closeParenIndex !== -1 && closeParenIndex < fromPos) continue;
+                if (closeParenIndex !== -1 && closeParenIndex < fromPos) {continue;}
                 return true;
             }
 
@@ -1068,16 +1119,20 @@ export class ReferenceExtractor {
             if (this.isReservedWord(tableName)) {
                 continue;
             }
-            references.push({
-                tableName,
-                alias: match[3],
-                schema: match[1],
-                referenceType: 'select',
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                context: 'FROM',
-                statementIndex: getStatementIndex(match.index)
-            });
+            // Find the reference in original SQL to get correct line number
+            const loc = this.findTableReferenceLocation(sql, tableName, 'FROM', match[1]);
+            if (loc) {
+                references.push({
+                    tableName,
+                    alias: match[3],
+                    schema: match[1],
+                    referenceType: 'select',
+                    filePath,
+                    lineNumber: loc.lineNumber,
+                    context: 'FROM',
+                    statementIndex: getStatementIndex(match.index)
+                });
+            }
         }
 
         // JOIN pattern
@@ -1088,16 +1143,20 @@ export class ReferenceExtractor {
             if (this.isReservedWord(tableName)) {
                 continue;
             }
-            references.push({
-                tableName,
-                alias: match[3],
-                schema: match[1],
-                referenceType: 'join',
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                context: 'JOIN',
-                statementIndex: getStatementIndex(match.index)
-            });
+            // Find the reference in original SQL to get correct line number
+            const loc = this.findTableReferenceLocation(sql, tableName, 'JOIN', match[1]);
+            if (loc) {
+                references.push({
+                    tableName,
+                    alias: match[3],
+                    schema: match[1],
+                    referenceType: 'join',
+                    filePath,
+                    lineNumber: loc.lineNumber,
+                    context: 'JOIN',
+                    statementIndex: getStatementIndex(match.index)
+                });
+            }
         }
 
         // INSERT INTO pattern
@@ -1108,15 +1167,19 @@ export class ReferenceExtractor {
             if (this.isReservedWord(tableName)) {
                 continue;
             }
-            references.push({
-                tableName,
-                schema: match[1],
-                referenceType: 'insert',
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                context: 'INSERT INTO',
-                statementIndex: getStatementIndex(match.index)
-            });
+            // Find the reference in original SQL to get correct line number
+            const loc = this.findTableReferenceLocation(sql, tableName, 'INSERT INTO', match[1]);
+            if (loc) {
+                references.push({
+                    tableName,
+                    schema: match[1],
+                    referenceType: 'insert',
+                    filePath,
+                    lineNumber: loc.lineNumber,
+                    context: 'INSERT INTO',
+                    statementIndex: getStatementIndex(match.index)
+                });
+            }
         }
 
         // UPDATE pattern
@@ -1127,15 +1190,19 @@ export class ReferenceExtractor {
             if (this.isReservedWord(tableName)) {
                 continue;
             }
-            references.push({
-                tableName,
-                schema: match[1],
-                referenceType: 'update',
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                context: 'UPDATE',
-                statementIndex: getStatementIndex(match.index)
-            });
+            // Find the reference in original SQL to get correct line number
+            const loc = this.findTableReferenceLocation(sql, tableName, 'UPDATE', match[1]);
+            if (loc) {
+                references.push({
+                    tableName,
+                    schema: match[1],
+                    referenceType: 'update',
+                    filePath,
+                    lineNumber: loc.lineNumber,
+                    context: 'UPDATE',
+                    statementIndex: getStatementIndex(match.index)
+                });
+            }
         }
 
         // DELETE FROM pattern
@@ -1146,22 +1213,91 @@ export class ReferenceExtractor {
             if (this.isReservedWord(tableName)) {
                 continue;
             }
-            references.push({
-                tableName,
-                schema: match[1],
-                referenceType: 'delete',
-                filePath,
-                lineNumber: this.getLineNumberAtIndex(sql, match.index),
-                context: 'DELETE FROM',
-                statementIndex: getStatementIndex(match.index)
-            });
+            // Find the reference in original SQL to get correct line number
+            const loc = this.findTableReferenceLocation(sql, tableName, 'DELETE FROM', match[1]);
+            if (loc) {
+                references.push({
+                    tableName,
+                    schema: match[1],
+                    referenceType: 'delete',
+                    filePath,
+                    lineNumber: loc.lineNumber,
+                    context: 'DELETE FROM',
+                    statementIndex: getStatementIndex(match.index)
+                });
+            }
         }
 
         return references;
     }
 
     /**
-     * Get line number at character index
+     * Find table reference location in original SQL (not comment-stripped).
+     * Searches for the table name in the correct SQL context and returns both line number and char index.
+     * 
+     * This fixes the bug where match.index from sqlNoComments was used with getLineNumberAtIndex(originalSql, ...)
+     * causing character index misalignment and wrong line numbers.
+     * 
+     * @param sql The original SQL content (with comments intact)
+     * @param tableName The table name to find
+     * @param context The SQL context ('FROM', 'JOIN', 'INSERT INTO', 'UPDATE', 'DELETE FROM')
+     * @param schema Optional schema name
+     * @returns Object with lineNumber (1-based) and charIndex (0-based), or null if not found
+     */
+    private findTableReferenceLocation(
+        sql: string,
+        tableName: string,
+        context: string,
+        schema?: string
+    ): { lineNumber: number; charIndex: number } | null {
+        const escaped = this.escapeRegex(tableName);
+        const schemaPart = schema ? `${this.escapeRegex(schema)}\\.` : '(?:\\w+\\.)?';
+        const lines = sql.split('\n');
+        
+        let pattern: RegExp;
+        switch (context) {
+            case 'FROM':
+                pattern = new RegExp(`\\bFROM\\s+${schemaPart}["'\`]?${escaped}["'\`]?\\b`, 'gi');
+                break;
+            case 'JOIN':
+                pattern = new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+${schemaPart}["'\`]?${escaped}["'\`]?\\b`, 'gi');
+                break;
+            case 'INSERT INTO':
+                pattern = new RegExp(`\\bINSERT\\s+INTO\\s+${schemaPart}["'\`]?${escaped}["'\`]?\\b`, 'gi');
+                break;
+            case 'UPDATE':
+                pattern = new RegExp(`\\bUPDATE\\s+${schemaPart}["'\`]?${escaped}["'\`]?\\b`, 'gi');
+                break;
+            case 'DELETE FROM':
+                pattern = new RegExp(`\\bDELETE\\s+FROM\\s+${schemaPart}["'\`]?${escaped}["'\`]?\\b`, 'gi');
+                break;
+            default:
+                return null;
+        }
+
+        let m: RegExpExecArray | null;
+        while ((m = pattern.exec(sql)) !== null) {
+            const lineNum = this.getLineNumberAtIndex(sql, m.index);
+            const lineContent = lines[lineNum - 1] ?? '';
+            // Skip matches in comment lines
+            if (!lineContent.trimStart().startsWith('--')) {
+                return { lineNumber: lineNum, charIndex: m.index };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get line number at character index.
+     * 
+     * IMPORTANT: The charIndex must be from the SAME sql string passed to this method.
+     * Do NOT use charIndex from a comment-stripped or modified version of the SQL
+     * with the original SQL string, as this will cause incorrect line numbers.
+     * 
+     * @param sql The SQL string to search in
+     * @param charIndex Character index (0-based) in the sql string
+     * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
         return sql.substring(0, charIndex).split('\n').length;
@@ -1269,7 +1405,7 @@ export class ReferenceExtractor {
         tableAliases: Map<string, string>,
         context: string
     ): any[] {
-        if (!expr) return [];
+        if (!expr) {return [];}
 
         const columns: any[] = [];
 
@@ -1308,7 +1444,7 @@ export class ReferenceExtractor {
         tableAlias: string | undefined,
         tableAliases: Map<string, string>
     ): boolean {
-        if (!tableName) return true; // If no table specified, include all columns
+        if (!tableName) {return true;} // If no table specified, include all columns
 
         // Check if column explicitly references this table
         if (col.tableName === tableName) {
@@ -1340,7 +1476,7 @@ export class ReferenceExtractor {
      * Get table name from AST item
      */
     private getTableNameFromItem(item: any): string | undefined {
-        if (!item) return undefined;
+        if (!item) {return undefined;}
 
         if (item.table) {
             return this.getTableNameFromItem(item.table);
@@ -1364,7 +1500,7 @@ export class ReferenceExtractor {
         const seen = new Set<string>();
         return columns.filter(col => {
             const key = `${col.columnName}|${col.usedIn}`;
-            if (seen.has(key)) return false;
+            if (seen.has(key)) {return false;}
             seen.add(key);
             return true;
         });
@@ -1392,7 +1528,7 @@ export class ReferenceExtractor {
             }
 
             const key = `${ref.tableName.toLowerCase()}|${ref.referenceType}|${ref.lineNumber}`;
-            if (seen.has(key)) return false;
+            if (seen.has(key)) {return false;}
             seen.add(key);
             return true;
         });
@@ -1423,7 +1559,7 @@ export class ReferenceExtractor {
             let closeParenIndex = -1;
             const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
             for (let i = openParenIndex; i < maxSearchLength; i++) {
-                if (sql[i] === '(') parenCount++;
+                if (sql[i] === '(') {parenCount++;}
                 else if (sql[i] === ')') {
                     parenCount--;
                     if (parenCount === 0) {

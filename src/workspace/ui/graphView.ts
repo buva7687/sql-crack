@@ -190,7 +190,7 @@ function generateSVGContent(graph: WorkspaceDependencyGraph): string {
     for (const edge of graph.edges) {
         const sourceNode = graph.nodes.find(n => n.id === edge.source);
         const targetNode = graph.nodes.find(n => n.id === edge.target);
-        if (!sourceNode || !targetNode) continue;
+        if (!sourceNode || !targetNode) {continue;}
 
         svgContent += generateEdge(edge, sourceNode, targetNode);
     }
@@ -258,7 +258,7 @@ function getNodeIcon(type: string): string {
  * Truncate label to fit in node
  */
 function truncateLabel(label: string, maxLength: number): string {
-    if (label.length <= maxLength) return label;
+    if (label.length <= maxLength) {return label;}
     return label.substring(0, maxLength - 3) + '...';
 }
 

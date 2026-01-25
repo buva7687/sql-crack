@@ -253,8 +253,8 @@ function splitByComma(text: string): string[] {
         }
 
         if (!inString) {
-            if (char === '(') depth++;
-            if (char === ')') depth--;
+            if (char === '(') {depth++;}
+            if (char === ')') {depth--;}
 
             if (char === ',' && depth === 0) {
                 parts.push(current.trim());
@@ -278,7 +278,7 @@ function splitByComma(text: string): string[] {
  * Uses a token-based approach to avoid HTML escaping issues
  */
 export function highlightSql(sql: string): string {
-    if (!sql) return '';
+    if (!sql) {return '';}
 
     const tokens: Array<{ type: string; value: string }> = [];
     let i = 0;
@@ -304,7 +304,7 @@ export function highlightSql(sql: string): string {
                 }
                 str += sql[i++];
             }
-            if (i < sql.length) str += sql[i++];
+            if (i < sql.length) {str += sql[i++];}
             tokens.push({ type: 'string', value: str });
             continue;
         }
@@ -328,7 +328,7 @@ export function highlightSql(sql: string): string {
 
             // Check if it's followed by ( - it's a function
             let j = i;
-            while (j < sql.length && /\s/.test(sql[j])) j++;
+            while (j < sql.length && /\s/.test(sql[j])) {j++;}
 
             if (sql[j] === '(') {
                 tokens.push({ type: 'function', value: word });

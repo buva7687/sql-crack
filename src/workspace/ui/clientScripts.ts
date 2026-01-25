@@ -8,18 +8,22 @@ export interface WebviewScriptParams {
     nonce: string;
     graphData: string;
     searchFilterQuery: string;
+    initialView?: string;
+    currentGraphMode?: 'files' | 'tables' | 'hybrid';
 }
 
 /**
  * Generate the complete client script for main webview
  */
 export function getWebviewScript(params: WebviewScriptParams): string {
-    const { nonce, graphData, searchFilterQuery } = params;
+    const { nonce, graphData, searchFilterQuery, initialView = 'graph', currentGraphMode = 'tables' } = params;
 
     return `
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         const graphData = ${graphData};
+        const initialViewMode = '${initialView}';
+        let currentGraphMode = '${currentGraphMode}';
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -66,30 +70,107 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             updateTransform();
         }
 
+        /**
+         * Fit graph to screen using the same approach as Lineage view.
+         * Uses .graph-area as the viewport container (not svg.parentElement) to get correct dimensions.
+         * Uses getBBox() to get actual rendered bounds for accurate fitting.
+         * Allows expansion up to 150% for small graphs to better utilize available space.
+         */
         function fitToScreen() {
-            if (!svg || !mainGroup || graphData.nodes.length === 0) return;
-
-            const container = svg.parentElement;
-            const containerWidth = container.clientWidth;
-            const containerHeight = container.clientHeight;
-
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const node of graphData.nodes) {
-                minX = Math.min(minX, node.x);
-                minY = Math.min(minY, node.y);
-                maxX = Math.max(maxX, node.x + node.width);
-                maxY = Math.max(maxY, node.y + node.height);
+            if (!svg || !mainGroup) {
+                if (zoomLevel) zoomLevel.textContent = '100%';
+                return;
             }
 
-            const graphWidth = maxX - minX + 100;
-            const graphHeight = maxY - minY + 100;
+            // Use .graph-area as the viewport container (matches Lineage's lineage-graph-container approach)
+            // Query it each time to ensure we get the current element
+            const container = document.querySelector('.graph-area');
+            if (!container) {
+                if (zoomLevel) zoomLevel.textContent = '100%';
+                return;
+            }
 
-            // Cap auto-fit at 100% to prevent zooming in too much for small graphs
-            scale = Math.min(containerWidth / graphWidth, containerHeight / graphHeight, 1.0);
-            scale = Math.max(0.3, Math.min(scale, 1.0));
+            // Use getBBox() to get actual rendered bounds of the SVG group (same as Lineage view)
+            let bbox;
+            try {
+                bbox = mainGroup.getBBox();
+            } catch (e) {
+                // Fallback to node-based calculation if getBBox fails
+                if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+                    scale = 1;
+                    offsetX = 50;
+                    offsetY = 50;
+                    updateTransform();
+                    return;
+                }
 
-            offsetX = (containerWidth - graphWidth * scale) / 2 - minX * scale + 50;
-            offsetY = (containerHeight - graphHeight * scale) / 2 - minY * scale + 50;
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const node of graphData.nodes) {
+                    if (node && typeof node.x === 'number' && typeof node.y === 'number') {
+                        minX = Math.min(minX, node.x);
+                        minY = Math.min(minY, node.y);
+                        maxX = Math.max(maxX, node.x + (node.width || 200));
+                        maxY = Math.max(maxY, node.y + (node.height || 80));
+                    }
+                }
+
+                if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+                    scale = 1;
+                    offsetX = 50;
+                    offsetY = 50;
+                    updateTransform();
+                    return;
+                }
+
+                bbox = {
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX,
+                    height: maxY - minY
+                };
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            if (bbox.width <= 0 || bbox.height <= 0 || containerRect.width <= 0 || containerRect.height <= 0) {
+                scale = 1;
+                offsetX = 50;
+                offsetY = 50;
+                updateTransform();
+                return;
+            }
+
+            // Work in pixel coordinates (no viewBox transformation) - same as Lineage
+            const padding = 60;
+            const availableWidth = containerRect.width - padding * 2;
+            const availableHeight = containerRect.height - padding * 2;
+
+            const scaleX = availableWidth / bbox.width;
+            const scaleY = availableHeight / bbox.height;
+
+            // Use the smaller scale to fit both dimensions
+            // For small graphs, allow expansion up to 150% to better use available space
+            // For large graphs, cap at 100% to prevent zooming in too much
+            scale = Math.min(scaleX, scaleY);
+            if (scale > 1.0) {
+                // Graph is smaller than container - allow expansion up to 150%
+                scale = Math.min(scale, 1.5);
+            } else {
+                // Graph is larger than container - cap at 100% (don't zoom in)
+                scale = Math.min(scale, 1.0);
+            }
+            scale = Math.max(0.3, scale); // Minimum 30% to prevent too small
+
+            // Calculate bbox center
+            const bboxCenterX = bbox.x + bbox.width / 2;
+            const bboxCenterY = bbox.y + bbox.height / 2;
+
+            // Container center
+            const containerCenterX = containerRect.width / 2;
+            const containerCenterY = containerRect.height / 2;
+
+            // Offset to center the scaled bbox in the container (same as Lineage)
+            offsetX = containerCenterX - bboxCenterX * scale;
+            offsetY = containerCenterY - bboxCenterY * scale;
 
             updateTransform();
         }
@@ -99,7 +180,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             updateTransform();
 
             svg.addEventListener('mousedown', (e) => {
-                if (e.target === svg || e.target.closest('.edge')) {
+                if (e.target === svg) {
                     isDragging = true;
                     dragStartX = e.clientX - offsetX;
                     dragStartY = e.clientY - offsetY;
@@ -133,6 +214,30 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         document.getElementById('btn-zoom-out')?.addEventListener('click', zoomOut);
         document.getElementById('btn-zoom-reset')?.addEventListener('click', resetView);
         document.getElementById('btn-zoom-fit')?.addEventListener('click', fitToScreen);
+
+        // Auto-fit graph to screen on initial load to use available space.
+        // Hide graph during transition to prevent flickering (zoom change from 100% to fitted).
+        if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+            const graphArea = document.querySelector('.graph-area');
+            if (graphArea) {
+                // Hide graph during fit calculation to prevent flicker
+                graphArea.style.opacity = '0';
+                graphArea.style.transition = 'opacity 0.2s ease-in';
+            }
+            
+            // Use requestAnimationFrame to ensure DOM is ready, then fit immediately
+            requestAnimationFrame(() => {
+                // Fit to screen synchronously (no setTimeout delay to reduce flicker)
+                fitToScreen();
+                
+                // Show graph after fitting is complete (next frame)
+                if (graphArea) {
+                    requestAnimationFrame(() => {
+                        graphArea.style.opacity = '1';
+                    });
+                }
+            });
+        }
 
         // ========== Search Functions ==========
         function performSearch() {
@@ -209,6 +314,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         function visualizeFile(filePath) { vscode.postMessage({ command: 'visualizeFile', filePath }); }
 
         document.getElementById('btn-refresh')?.addEventListener('click', refresh);
+        document.getElementById('btn-theme')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'toggleTheme' });
+        });
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
@@ -245,12 +353,15 @@ function getViewModeScript(): string {
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
         let lineageDetailView = false;
+        let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
+        let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
         const lineageTitle = document.getElementById('lineage-title');
         const lineageBackBtn = document.getElementById('lineage-back-btn');
         const graphArea = document.querySelector('.graph-area');
+        const graphModeSwitcher = document.getElementById('graph-mode-switcher');
 
         const viewTitles = {
             lineage: 'Data Lineage',
@@ -264,7 +375,14 @@ function getViewModeScript(): string {
             impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
         };
 
-        function switchToView(view) {
+        function updateSidebarSectionsForView() {
+            const show = currentViewMode === 'graph';
+            document.querySelectorAll('[data-sidebar-section]').forEach(el => {
+                el.style.display = show ? '' : 'none';
+            });
+        }
+
+        function switchToView(view, skipMessage = false) {
             if (view === currentViewMode) return;
 
             viewTabs.forEach(t => {
@@ -279,8 +397,30 @@ function getViewModeScript(): string {
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
+                if (graphModeSwitcher) {
+                    // Use visibility (not display) so switcher always reserves space in layout.
+                    // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
+                    // when switching between tabs, ensuring good UX (mouse stays over clicked tab).
+                    graphModeSwitcher.style.visibility = 'visible';
+                    graphModeSwitcher.style.pointerEvents = 'auto';
+                }
+                // Reset zoom and fit graph when switching back to Graph tab.
+                // This ensures proper view after returning from other tabs (fixes zoom state persistence bug).
+                if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            fitToScreen();
+                        }, 100);
+                    });
+                }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
+                if (graphModeSwitcher) {
+                    // Hide switcher but keep it in layout (visibility: hidden) so main tabs don't shift.
+                    // pointer-events: none prevents clicks when hidden.
+                    graphModeSwitcher.style.visibility = 'hidden';
+                    graphModeSwitcher.style.pointerEvents = 'none';
+                }
                 lineagePanel?.classList.add('visible');
 
                 if (lineageTitle) {
@@ -291,14 +431,18 @@ function getViewModeScript(): string {
                     lineageContent.innerHTML = viewEmptyStates[view] || '';
                 }
 
-                if (view === 'lineage') {
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (view === 'tableExplorer') {
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
-                } else if (view === 'impact') {
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                // Only send message if not restoring view (skipMessage = false by default)
+                if (!skipMessage) {
+                    if (view === 'lineage') {
+                        vscode.postMessage({ command: 'switchToLineageView' });
+                    } else if (view === 'tableExplorer') {
+                        vscode.postMessage({ command: 'switchToTableExplorer' });
+                    } else if (view === 'impact') {
+                        vscode.postMessage({ command: 'switchToImpactView' });
+                    }
                 }
             }
+            updateSidebarSectionsForView();
         }
 
         viewTabs.forEach(tab => {
@@ -308,6 +452,77 @@ function getViewModeScript(): string {
                 switchToView(view);
             });
         });
+
+        /**
+         * Graph mode switcher (Files / Tables / Hybrid)
+         * Uses event delegation on the switcher container to handle button clicks.
+         * This prevents duplicate listeners and ensures buttons work after tab switches.
+         * 
+         * Fix: If user clicks mode button while on non-Graph tab, switch to Graph first,
+         * then change mode. This prevents navigation to wrong tab after mode switch.
+         */
+        const graphModeSwitcherContainer = document.getElementById('graph-mode-switcher');
+        if (graphModeSwitcherContainer) {
+            // Use event delegation - attach listener once to the container
+            graphModeSwitcherContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.graph-mode-btn');
+                if (!btn) return;
+                
+                e.stopPropagation();
+                e.preventDefault();
+                
+                // Ensure we're on Graph tab - if not, switch to it first
+                if (currentViewMode !== 'graph') {
+                    switchToView('graph', false);
+                    // After switching to Graph, trigger the mode change
+                    setTimeout(() => {
+                        const mode = btn.getAttribute('data-mode');
+                        if (mode && mode !== currentGraphMode) {
+                            currentGraphMode = mode;
+                            vscode.postMessage({ command: 'switchGraphMode', mode });
+                        }
+                    }, 100);
+                    return;
+                }
+                
+                const mode = btn.getAttribute('data-mode');
+                // Don't do anything if clicking the already-active mode (prevents bug where it navigated to Lineage)
+                if (mode && mode !== currentGraphMode) {
+                    currentGraphMode = mode;
+                    vscode.postMessage({ command: 'switchGraphMode', mode });
+                }
+            });
+        }
+
+        updateSidebarSectionsForView();
+
+        // Set initial graph-mode-switcher visibility (always in layout; visibility reserves space).
+        // This ensures main tabs are in the same position on initial load regardless of active tab.
+        if (graphModeSwitcher) {
+            if (currentViewMode === 'graph') {
+                graphModeSwitcher.style.visibility = 'visible';
+                graphModeSwitcher.style.pointerEvents = 'auto';
+            } else {
+                graphModeSwitcher.style.visibility = 'hidden';
+                graphModeSwitcher.style.pointerEvents = 'none';
+            }
+        }
+
+        // Restore initial view if not graph (e.g., after theme change)
+        if (typeof initialViewMode !== 'undefined' && initialViewMode !== 'graph') {
+            // Use setTimeout to ensure DOM is ready and to avoid blocking
+            setTimeout(() => {
+                switchToView(initialViewMode, true);
+                // Re-request the view content from server
+                if (initialViewMode === 'lineage') {
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (initialViewMode === 'tableExplorer') {
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (initialViewMode === 'impact') {
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+            }, 0);
+        }
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
@@ -322,17 +537,29 @@ function getViewModeScript(): string {
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (lineageDetailView && currentViewMode !== 'graph') {
-                lineageDetailView = false;
-                updateBackButtonText();
-                if (currentViewMode === 'lineage') {
-                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'tableExplorer') {
-                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
-                } else if (currentViewMode === 'impact') {
-                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                // Check if we have history to go back to (for table explorer)
+                if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
+                    const prev = tableExplorerHistory.pop();
+                    if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
+                    lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                    vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
+                    updateBackButtonText();
+                } else {
+                    // No history, go back to main view
+                    lineageDetailView = false;
+                    tableExplorerHistory = [];
+                    currentExploredTable = null;
+                    updateBackButtonText();
+                    if (currentViewMode === 'lineage') {
+                        if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                        vscode.postMessage({ command: 'switchToLineageView' });
+                    } else if (currentViewMode === 'tableExplorer') {
+                        if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                        vscode.postMessage({ command: 'switchToTableExplorer' });
+                    } else if (currentViewMode === 'impact') {
+                        if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                        vscode.postMessage({ command: 'switchToImpactView' });
+                    }
                 }
             } else {
                 switchToView('graph');
@@ -355,13 +582,39 @@ function getContextMenuScript(): string {
             contextMenu.style.top = e.clientY + 'px';
             contextMenu.classList.add('visible');
 
-            const exploreItem = contextMenu.querySelector('[data-action="exploreTable"]');
-            if (exploreItem) {
-                if (nodeData.type === 'file') {
-                    exploreItem.classList.add('disabled');
+            /**
+             * Dynamically show/hide context menu items based on graph mode and node type.
+             * This ensures users only see relevant options for the current context.
+             */
+            const graphMode = typeof currentGraphMode !== 'undefined' ? currentGraphMode : 'tables';
+            const isFileNode = nodeData.type === 'file';
+            const isTableNode = nodeData.type === 'table' || nodeData.type === 'view' || nodeData.type === 'external';
+
+            const upstreamItem = contextMenu.querySelector('[data-action="showUpstream"]');
+            const downstreamItem = contextMenu.querySelector('[data-action="showDownstream"]');
+            const openFileItem = contextMenu.querySelector('[data-action="openFile"]');
+            const visualizeItem = contextMenu.querySelector('[data-action="visualize"]');
+
+            // In Files mode, hide upstream/downstream for file nodes (graph already shows file dependencies)
+            // In Tables/Hybrid mode, show upstream/downstream for table nodes
+            if (upstreamItem && downstreamItem) {
+                if (graphMode === 'files' && isFileNode) {
+                    upstreamItem.style.display = 'none';
+                    downstreamItem.style.display = 'none';
                 } else {
-                    exploreItem.classList.remove('disabled');
+                    upstreamItem.style.display = '';
+                    downstreamItem.style.display = '';
                 }
+            }
+
+            // Open File only makes sense for file nodes
+            if (openFileItem) {
+                openFileItem.style.display = isFileNode ? '' : 'none';
+            }
+
+            // Visualize Dependencies only makes sense for file nodes
+            if (visualizeItem) {
+                visualizeItem.style.display = isFileNode ? '' : 'none';
             }
         }
 
@@ -385,7 +638,7 @@ function getContextMenuScript(): string {
         contextMenu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (!contextMenuTarget || item.classList.contains('disabled')) return;
+                if (!contextMenuTarget || item.classList.contains('disabled') || item.style.display === 'none') return;
 
                 const action = item.getAttribute('data-action');
                 const nodeName = contextMenuTarget.label || contextMenuTarget.id;
@@ -454,6 +707,13 @@ function getContextMenuScript(): string {
                     case 'openFile':
                         if (contextMenuTarget.filePath) {
                             openFile(contextMenuTarget.filePath);
+                        }
+                        break;
+                    case 'visualize':
+                        // Handle "Visualize Dependencies" context menu action
+                        // Opens the visualization panel for the selected file node
+                        if (contextMenuTarget.filePath) {
+                            visualizeFile(contextMenuTarget.filePath);
                         }
                         break;
                 }
@@ -538,7 +798,6 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'lineageGraphResult':
                     if (lineageSetupInProgress) {
-                        console.log('[Lineage] Ignoring lineageGraphResult during setup');
                         break;
                     }
                     if (lineageContent && message.data?.html) {
@@ -594,9 +853,15 @@ function getEventDelegationScript(): string {
 
                 switch (action) {
                     case 'explore-table':
+                        // Push current table to history before navigating (for back button)
+                        if (currentViewMode === 'tableExplorer' && currentExploredTable) {
+                            tableExplorerHistory.push(currentExploredTable);
+                        }
+                        currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
                         lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
-                        vscode.postMessage({ command: 'exploreTable', tableName: tableName });
+                        // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
+                        vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
                         break;
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
@@ -611,17 +876,6 @@ function getEventDelegationScript(): string {
                 }
             });
         }
-
-        // ========== Issue Item Clicks ==========
-        document.querySelectorAll('.issue-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const filePath = item.getAttribute('data-filepath');
-                const line = item.getAttribute('data-line');
-                if (filePath) {
-                    openFileAtLine(filePath, parseInt(line) || 0);
-                }
-            });
-        });
     `;
 }
 
@@ -629,19 +883,36 @@ function getNodeInteractionsScript(): string {
     return `
         // ========== Node Interactions ==========
         if (svg) {
+            var nodeClickTimeout = null;
+            
             svg.addEventListener('click', (e) => {
-                const node = e.target.closest('.node');
-                if (node) {
-                    const filePath = node.getAttribute('data-filepath');
-                    if (filePath) openFile(filePath);
-                }
+                var node = e.target.closest('.node');
+                if (!node) return;
+                
+                var filePath = node.getAttribute('data-filepath');
+                if (!filePath) return;
+                
+                // Delay single-click so double-click can cancel it
+                nodeClickTimeout = window.setTimeout(function() {
+                    openFile(filePath);
+                    nodeClickTimeout = null;
+                }, 300);
             });
 
             svg.addEventListener('dblclick', (e) => {
-                const node = e.target.closest('.node');
-                if (node) {
-                    const filePath = node.getAttribute('data-filepath');
-                    if (filePath) visualizeFile(filePath);
+                var node = e.target.closest('.node');
+                if (!node) return;
+                
+                if (nodeClickTimeout) {
+                    clearTimeout(nodeClickTimeout);
+                    nodeClickTimeout = null;
+                }
+                
+                var filePath = node.getAttribute('data-filepath');
+                if (filePath) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    visualizeFile(filePath);
                 }
             });
 
@@ -676,6 +947,55 @@ function getNodeInteractionsScript(): string {
                         filePath: filePath
                     });
                 }
+            });
+
+            // Edge click-to-highlight functionality:
+            // - Click an edge to highlight it (opacity 1, stroke-width 3) and dim all others (opacity 0.2)
+            // - Click on empty graph area, double-click anywhere, or click outside graph to clear highlight
+            function clearEdgeHighlight() {
+                var edges = document.querySelectorAll('.edge');
+                edges.forEach(function(el) {
+                    el.classList.remove('edge-highlighted', 'edge-dimmed');
+                    var path = el.querySelector('path');
+                    if (path) {
+                        path.style.opacity = '0.7';
+                        path.style.strokeWidth = '2';
+                    }
+                });
+            }
+
+            svg.addEventListener('click', (e) => {
+                var edge = e.target.closest('.edge');
+                if (edge) {
+                    e.stopPropagation();
+                    clearEdgeHighlight();
+                    edge.classList.add('edge-highlighted');
+                    var path = edge.querySelector('path');
+                    if (path) {
+                        path.style.opacity = '1';
+                        path.style.strokeWidth = '3';
+                    }
+                    var all = document.querySelectorAll('.edge');
+                    all.forEach(function(el) {
+                        if (el !== edge) {
+                            el.classList.add('edge-dimmed');
+                            var p = el.querySelector('path');
+                            if (p) p.style.opacity = '0.2';
+                        }
+                    });
+                    return;
+                }
+                if (e.target === svg || !e.target.closest('.node')) {
+                    clearEdgeHighlight();
+                }
+            });
+
+            svg.addEventListener('dblclick', (e) => {
+                clearEdgeHighlight();
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.graph-area')) clearEdgeHighlight();
             });
         }
     `;
@@ -911,73 +1231,90 @@ function getTableSearchScript(): string {
 function getVisualLineageSearchScript(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
-        let lineageSearchData = [];
         let lineageTypeFilter = 'all';
-        let lineageSearchTimeout = null;
 
         function setupVisualLineageSearch() {
             const searchInput = document.getElementById('lineage-search-input');
             const searchClear = document.getElementById('lineage-search-clear');
-            const searchResults = document.getElementById('lineage-search-results');
-            const filterChips = document.querySelectorAll('.quick-filters .filter-chip');
-            const popularItems = document.querySelectorAll('.popular-item[data-action="select-node"]');
-            const recentItems = document.querySelectorAll('.recent-item[data-action="select-node"]');
-            const dataScript = document.getElementById('lineage-searchable-nodes');
-            const popularList = document.querySelector('.popular-list');
+            const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
+            const tablesGrid = document.getElementById('lineage-tables-grid');
+            const emptyFilter = document.getElementById('lineage-empty-filter');
+            const resultsInfo = document.getElementById('lineage-results-info');
+            const resultsCount = document.getElementById('lineage-results-count');
 
-            if (dataScript) {
-                try {
-                    lineageSearchData = JSON.parse(dataScript.textContent || '[]');
-                } catch (e) {
-                    lineageSearchData = [];
-                }
-            }
+            function filterLineageTables() {
+                if (!tablesGrid) return;
 
-            function filterPopularTables(typeFilter) {
-                if (!popularList) return;
-                const items = popularList.querySelectorAll('.popular-item');
+                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const items = Array.from(tablesGrid.querySelectorAll('.lineage-table-item'));
+                let visibleCount = 0;
+
                 items.forEach(item => {
-                    const nodeType = item.getAttribute('data-node-type');
-                    if (typeFilter === 'all' || nodeType === typeFilter) {
-                        item.classList.remove('filtered-out');
+                    const name = item.getAttribute('data-name') || '';
+                    const type = item.getAttribute('data-type') || '';
+
+                    const matchesSearch = !searchQuery || name.includes(searchQuery);
+                    const matchesType = lineageTypeFilter === 'all' || type === lineageTypeFilter;
+
+                    if (matchesSearch && matchesType) {
+                        item.style.display = '';
+                        visibleCount++;
+
+                        // Highlight matching text
+                        const nameEl = item.querySelector('.table-item-name');
+                        if (nameEl && searchQuery) {
+                            const originalName = nameEl.textContent || '';
+                            const lowerName = originalName.toLowerCase();
+                            const idx = lowerName.indexOf(searchQuery);
+                            if (idx >= 0) {
+                                const before = originalName.slice(0, idx);
+                                const match = originalName.slice(idx, idx + searchQuery.length);
+                                const after = originalName.slice(idx + searchQuery.length);
+                                nameEl.innerHTML = escapeHtml(before) + '<mark>' + escapeHtml(match) + '</mark>' + escapeHtml(after);
+                            } else {
+                                nameEl.textContent = originalName;
+                            }
+                        } else if (nameEl) {
+                            // Remove highlighting when no search
+                            const text = nameEl.textContent || '';
+                            nameEl.textContent = text;
+                        }
                     } else {
-                        item.classList.add('filtered-out');
+                        item.style.display = 'none';
                     }
                 });
+
+                // Show/hide empty state and results count
+                if (emptyFilter) {
+                    emptyFilter.style.display = visibleCount === 0 ? 'block' : 'none';
+                }
+                if (resultsInfo && resultsCount) {
+                    if (searchQuery || lineageTypeFilter !== 'all') {
+                        resultsInfo.style.display = 'inline';
+                        resultsCount.textContent = visibleCount;
+                    } else {
+                        resultsInfo.style.display = 'none';
+                    }
+                }
             }
 
             searchInput?.addEventListener('input', () => {
                 const query = searchInput.value.trim();
                 if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
-
-                clearTimeout(lineageSearchTimeout);
-                lineageSearchTimeout = setTimeout(() => {
-                    if (query.length >= 1) {
-                        const results = searchLineageLocal(query);
-                        showLineageSearchResults(results);
-                        vscode.postMessage({ command: 'searchLineageTables', query, typeFilter: lineageTypeFilter });
-                    } else {
-                        hideLineageSearchResults();
-                    }
-                }, 150);
-            });
-
-            searchInput?.addEventListener('focus', () => {
-                const query = searchInput.value.trim();
-                if (query.length >= 1) {
-                    const results = searchLineageLocal(query);
-                    showLineageSearchResults(results);
-                }
+                filterLineageTables();
             });
 
             searchInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
-                    hideLineageSearchResults();
+                    searchInput.value = '';
+                    if (searchClear) searchClear.style.display = 'none';
+                    filterLineageTables();
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
-                    const firstResult = searchResults?.querySelector('.search-result-item');
-                    if (firstResult) {
-                        firstResult.click();
+                    // Select the first visible item
+                    const firstVisible = tablesGrid?.querySelector('.lineage-table-item:not([style*="display: none"])');
+                    if (firstVisible) {
+                        firstVisible.click();
                     }
                 }
             });
@@ -985,7 +1322,7 @@ function getVisualLineageSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
-                hideLineageSearchResults();
+                filterLineageTables();
                 searchInput?.focus();
             });
 
@@ -994,96 +1331,20 @@ function getVisualLineageSearchScript(): string {
                     filterChips.forEach(c => c.classList.remove('active'));
                     chip.classList.add('active');
                     lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
-
-                    filterPopularTables(lineageTypeFilter);
-
-                    const query = searchInput?.value.trim();
-                    if (query) {
-                        const results = searchLineageLocal(query);
-                        showLineageSearchResults(results);
-                    }
+                    filterLineageTables();
                 });
             });
 
-            popularItems.forEach(item => {
+            // Setup click handlers for table items
+            tablesGrid?.querySelectorAll('.lineage-table-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
-                    e.stopPropagation();
                     const nodeId = item.getAttribute('data-node-id');
                     if (nodeId) {
                         selectLineageNode(nodeId);
                     }
                 });
             });
-
-            recentItems.forEach(item => {
-                item.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const nodeId = item.getAttribute('data-node-id');
-                    if (nodeId) {
-                        selectLineageNode(nodeId);
-                    }
-                });
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.search-form')) {
-                    hideLineageSearchResults();
-                }
-            });
-        }
-
-        function searchLineageLocal(query) {
-            const queryLower = query.toLowerCase();
-            return lineageSearchData
-                .filter(node => {
-                    const matchesQuery = node.name.toLowerCase().includes(queryLower);
-                    const matchesType = lineageTypeFilter === 'all' || node.type === lineageTypeFilter;
-                    return matchesQuery && matchesType;
-                })
-                .slice(0, 10);
-        }
-
-        function showLineageSearchResults(results) {
-            const searchResults = document.getElementById('lineage-search-results');
-            if (!searchResults) return;
-
-            if (!results || results.length === 0) {
-                searchResults.innerHTML = '<div class="search-result-item" style="justify-content: center; color: var(--text-dim);">No results found</div>';
-                searchResults.style.display = 'block';
-                return;
-            }
-
-            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
-            searchResults.innerHTML = results.map(node => {
-                const fileName = node.filePath ? node.filePath.split('/').pop() : '';
-                return '<div class="search-result-item" data-node-id="' + escapeHtmlAttr(node.id) + '">' +
-                    '<span class="result-icon">' + (icons[node.type] || '📦') + '</span>' +
-                    '<span class="result-name">' + escapeHtml(node.name) + '</span>' +
-                    '<span class="result-type">' + node.type + '</span>' +
-                    (fileName ? '<span class="result-file">' + escapeHtml(fileName) + '</span>' : '') +
-                '</div>';
-            }).join('');
-
-            searchResults.style.display = 'block';
-
-            searchResults.querySelectorAll('.search-result-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const nodeId = item.getAttribute('data-node-id');
-                    if (nodeId) {
-                        selectLineageNode(nodeId);
-                        hideLineageSearchResults();
-                    }
-                });
-            });
-        }
-
-        function hideLineageSearchResults() {
-            const searchResults = document.getElementById('lineage-search-results');
-            if (searchResults) {
-                searchResults.style.display = 'none';
-            }
         }
 
         function selectLineageNode(nodeId) {
@@ -1323,11 +1584,13 @@ function getLineageGraphScript(): string {
                     const direction = btn.getAttribute('data-direction');
                     const nodeId = btn.getAttribute('data-node-id');
                     if (direction && nodeId) {
+                        lineageCurrentDirection = direction;
                         vscode.postMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5
+                            depth: 5,
+                            expandedNodes: Array.from(lineageExpandedNodes)
                         });
                     }
                 });
@@ -1985,11 +2248,13 @@ function getDirectionButtonsScript(): string {
                         if (lineageContent) {
                             lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
                         }
+                        lineageCurrentDirection = direction;
                         vscode.postMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5
+                            depth: 5,
+                            expandedNodes: lineageExpandedNodes ? Array.from(lineageExpandedNodes) : []
                         });
                     }
                 });

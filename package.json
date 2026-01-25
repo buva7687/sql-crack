@@ -3,6 +3,11 @@
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
   "version": "0.0.1",
+  "publisher": "buvan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buva7687/sql-crack.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -150,6 +155,21 @@
           "maximum": 500,
           "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
         },
+        "sqlCrack.workspaceGraphDefaultMode": {
+          "type": "string",
+          "default": "tables",
+          "enum": [
+            "files",
+            "tables",
+            "hybrid"
+          ],
+          "enumDescriptions": [
+            "File-level dependency graph. Nodes are SQL files; edges show which files reference tables defined in other files.",
+            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.).",
+            "Files plus prominent tables (referenced 3+ times). Mix of file and table nodes."
+          ],
+          "description": "Default mode for the Workspace Dependencies Graph tab. Used when the panel loads or when you refresh the index."
+        },
         "sqlCrack.advanced.cacheTTLHours": {
           "type": "number",
           "default": 24,
@@ -161,6 +181,22 @@
           "type": "boolean",
           "default": false,
           "description": "Always rebuild index when VS Code opens the workspace. Overrides cache TTL. (Advanced)"
+        },
+        "sqlCrack.customAggregateFunctions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional aggregate function names to recognize (e.g., [\"MY_CUSTOM_AGG\", \"COMPANY_SUM\"]). These are added to the built-in dialect functions."
+        },
+        "sqlCrack.customWindowFunctions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional window function names to recognize (e.g., [\"MY_CUSTOM_RANK\"]). These are added to the built-in dialect functions."
         }
       }
     }
@@ -190,6 +226,6 @@
     "@types/dagre": "^0.7.53",
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
-    "node-sql-parser": "^5.3.1"
+    "node-sql-parser": "5.4.0"
   }
 }

@@ -3,45 +3,87 @@
 
 /**
  * CSS Variables - Design tokens shared across all views
+ * Supports both dark and light themes
  */
-export function getCssVariables(): string {
-    return `
-        :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-tertiary: #334155;
-            --bg-hover: #475569;
-            --border-color: #475569;
-            --border-subtle: #334155;
-            --text-primary: #f1f5f9;
-            --text-secondary: #e2e8f0;
-            --text-muted: #94a3b8;
-            --text-dim: #64748b;
-            --accent: #6366f1;
-            --accent-hover: #818cf8;
-            --success: #10b981;
-            --success-light: #34d399;
-            --warning: #f59e0b;
-            --warning-light: #fbbf24;
-            --error: #ef4444;
-            --error-light: #f87171;
-            --node-file: #3b82f6;
-            --node-file-border: #60a5fa;
-            --node-table: #10b981;
-            --node-table-border: #34d399;
-            --node-view: #8b5cf6;
-            --node-view-border: #a78bfa;
-            --node-external: #475569;
-            --node-external-border: #64748b;
-            --radius-sm: 4px;
-            --radius-md: 6px;
-            --radius-lg: 8px;
-            --radius-xl: 12px;
-            --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
-            --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
-            --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
-        }
-    `;
+export function getCssVariables(dark: boolean = true): string {
+    if (dark) {
+        return `
+            :root {
+                --bg-primary: #0f172a;
+                --bg-secondary: #1e293b;
+                --bg-tertiary: #334155;
+                --bg-hover: #475569;
+                --border-color: #475569;
+                --border-subtle: #334155;
+                --text-primary: #f1f5f9;
+                --text-secondary: #e2e8f0;
+                --text-muted: #94a3b8;
+                --text-dim: #64748b;
+                --accent: #6366f1;
+                --accent-hover: #818cf8;
+                --success: #10b981;
+                --success-light: #34d399;
+                --warning: #f59e0b;
+                --warning-light: #fbbf24;
+                --error: #ef4444;
+                --error-light: #f87171;
+                --node-file: #3b82f6;
+                --node-file-border: #60a5fa;
+                --node-table: #10b981;
+                --node-table-border: #34d399;
+                --node-view: #8b5cf6;
+                --node-view-border: #a78bfa;
+                --node-external: #475569;
+                --node-external-border: #64748b;
+                --radius-sm: 4px;
+                --radius-md: 6px;
+                --radius-lg: 8px;
+                --radius-xl: 12px;
+                --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+                --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+                --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
+            }
+        `;
+    } else {
+        // Light theme
+        return `
+            :root {
+                --bg-primary: #ffffff;
+                --bg-secondary: #f8fafc;
+                --bg-tertiary: #f1f5f9;
+                --bg-hover: #e2e8f0;
+                --border-color: #cbd5e1;
+                --border-subtle: #e2e8f0;
+                --text-primary: #0f172a;
+                --text-secondary: #1e293b;
+                --text-muted: #64748b;
+                --text-dim: #94a3b8;
+                --accent: #4f46e5;
+                --accent-hover: #6366f1;
+                --success: #059669;
+                --success-light: #10b981;
+                --warning: #d97706;
+                --warning-light: #f59e0b;
+                --error: #dc2626;
+                --error-light: #ef4444;
+                --node-file: #2563eb;
+                --node-file-border: #3b82f6;
+                --node-table: #059669;
+                --node-table-border: #10b981;
+                --node-view: #7c3aed;
+                --node-view-border: #8b5cf6;
+                --node-external: #64748b;
+                --node-external-border: #94a3b8;
+                --radius-sm: 4px;
+                --radius-md: 6px;
+                --radius-lg: 8px;
+                --radius-xl: 12px;
+                --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+                --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+                --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
+            }
+        `;
+    }
 }
 
 /**
@@ -61,13 +103,25 @@ export function getBaseStyles(): string {
 
         /* ========== Header ========== */
         .header {
-            display: flex; align-items: center; justify-content: space-between;
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
             padding: 12px 16px; background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
+            position: relative;
+            height: 48px; /* Fixed height to prevent vertical shift */
+            box-sizing: border-box;
         }
         .header-left { display: flex; align-items: center; gap: 12px; }
         .header-icon { font-size: 18px; }
         .header-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+        /* Header center: Contains view tabs and graph mode switcher.
+         * Absolutely positioned and centered to keep tabs in fixed position.
+         * Graph mode switcher uses visibility (not display) to always reserve space,
+         * preventing tabs from shifting when switching between Graph and other tabs. */
+        .header-center {
+            position: absolute; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: 12px;
+            height: 100%; /* Match header height */
+        }
         .header-right { display: flex; align-items: center; gap: 8px; }
 
         /* ========== Icon Button ========== */
@@ -125,6 +179,24 @@ export function getBaseStyles(): string {
             background: var(--accent); color: white;
         }
         .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
+
+        /* ========== Graph Mode Switcher ========== */
+        /* Segmented control for switching between Files/Tables/Hybrid graph modes */
+        .graph-mode-switcher {
+            display: flex; align-items: center; gap: 2px;
+            background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);
+            flex-shrink: 0;
+        }
+        /* Graph mode switcher always in layout (uses visibility, not display).
+         * When hidden, visibility: hidden + pointer-events: none keeps it in layout
+         * but invisible/unclickable. This prevents main tabs from shifting position. */
+        .graph-mode-btn {
+            padding: 4px 10px; border: none; background: transparent;
+            color: var(--text-muted); font-size: 11px; font-weight: 500;
+            border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
+        }
+        .graph-mode-btn:hover { color: var(--text-secondary); background: var(--bg-tertiary); }
+        .graph-mode-btn.active { background: var(--accent); color: white; }
     `;
 }
 
@@ -184,6 +256,14 @@ export function getLineagePanelStyles(): string {
             position: relative;
             flex: 1;
             overflow: hidden;
+            min-height: 0; /* Important for flex children to shrink */
+        }
+        .graph-area {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            min-height: 0; /* Important for flex children to shrink */
         }
         .lineage-panel.visible { display: flex; }
         .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
@@ -396,11 +476,6 @@ export function getSharedViewStyles(): string {
             flex-wrap: wrap;
             align-items: center;
         }
-        .view-filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
         .view-filter-label {
             display: flex;
             align-items: center;
@@ -412,24 +487,6 @@ export function getSharedViewStyles(): string {
         .view-filter-label svg {
             width: 14px;
             height: 14px;
-        }
-        .view-filter-select {
-            background: var(--bg-primary);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-secondary);
-            font-size: 13px;
-            padding: 8px 12px;
-            border-radius: var(--radius-md);
-            outline: none;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .view-filter-select:hover {
-            border-color: var(--border-color);
-        }
-        .view-filter-select:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
         }
 
         /* Quick Filter Chips */
@@ -524,6 +581,94 @@ export function getSharedViewStyles(): string {
         .view-card-arrow svg {
             width: 16px;
             height: 16px;
+        }
+
+        /* Lineage Tables Grid */
+        .lineage-tables-section {
+            margin-top: 8px;
+        }
+        .lineage-tables-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 4px;
+        }
+        .lineage-table-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            width: 100%;
+        }
+        .lineage-table-item:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--accent);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+        .table-item-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .table-item-name {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .table-item-name mark {
+            background: var(--accent);
+            color: white;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        .table-item-type {
+            font-size: 11px;
+            padding: 2px 6px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+        .table-item-connections {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+        .conn-badge {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .conn-badge:first-child {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success-light);
+        }
+        .conn-badge:last-child {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent);
+        }
+        .lineage-empty-filter {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .view-results-info {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: auto;
         }
 
         /* View Empty State */
@@ -2493,8 +2638,8 @@ export function getGraphStyles(): string {
         .issue-banner-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         /* ========== Main Layout ========== */
-        .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; }
-        .graph-area { flex: 1; position: relative; overflow: hidden; }
+        .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; min-height: 0; }
+        .graph-area { flex: 1; position: relative; overflow: hidden; min-height: 0; width: 100%; height: 100%; }
 
         /* ========== Sidebar ========== */
         .sidebar {
@@ -2606,10 +2751,11 @@ export function getGraphStyles(): string {
         .export-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
 
         /* ========== Zoom Toolbar ========== */
+        /* Positioned top-right to match common UI patterns and avoid content overlap */
         .zoom-toolbar {
-            position: absolute; bottom: 16px; left: 16px;
+            position: absolute; top: 16px; right: 16px;
             display: flex; align-items: center; gap: 4px;
-            background: var(--bg-secondary); padding: 6px 8px;
+            background: var(--bg-secondary); padding: 6px 10px;
             border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);
             box-shadow: var(--shadow-md); z-index: 10;
         }
@@ -2627,8 +2773,19 @@ export function getGraphStyles(): string {
             text-align: center; font-family: monospace;
         }
 
+        /* ========== Graph Container ========== */
+        /* Container for the graph SVG - matches Lineage view structure */
+        #graph-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: var(--bg-primary);
+        }
+
         /* ========== SVG Container ========== */
-        #graph-svg { width: 100%; height: 100%; cursor: grab; }
+        /* SVG without viewBox - uses manual transforms for zoom/pan (matches Lineage approach) */
+        #graph-svg { width: 100%; height: 100%; cursor: grab; overflow: visible; }
         #graph-svg:active { cursor: grabbing; }
 
         /* ========== Node Styles ========== */
@@ -2644,13 +2801,16 @@ export function getGraphStyles(): string {
         .node-sublabel { fill: rgba(255,255,255,0.75); font-size: 10px; }
 
         /* ========== Edge Styles ========== */
-        .edge { fill: none; stroke-width: 2; }
+        .edge { fill: none; stroke-width: 2; cursor: pointer; }
         .edge-select { stroke: #64748b; }
         .edge-join { stroke: #a78bfa; }
         .edge-insert { stroke: #10b981; }
         .edge-update { stroke: #fbbf24; }
         .edge-delete { stroke: #f87171; }
         .edge-label { fill: var(--text-muted); font-size: 10px; }
+        /* Edge highlight/dim styles for click-to-highlight feature */
+        .edge.edge-highlighted path { opacity: 1; stroke-width: 3; }
+        .edge.edge-dimmed path { opacity: 0.2; }
 
         /* ========== Tooltip ========== */
         .tooltip {
@@ -2844,25 +3004,58 @@ export function getIssuesPanelStyles(): string {
 
 /**
  * State page styles (loading, empty, error, manual index)
+ * @param dark - Whether to use dark theme (default: true)
  */
-export function getStateStyles(): string {
+export function getStateStyles(dark: boolean = true): string {
+    const colors = dark ? {
+        bg: '#0f172a',
+        text: '#e2e8f0',
+        textMuted: '#94a3b8',
+        border: '#334155',
+        accent: '#6366f1',
+        accentHover: '#818cf8',
+        accentBg: 'rgba(99, 102, 241, 0.1)',
+        mutedBg: 'rgba(100, 116, 139, 0.1)',
+        muted: '#64748b',
+        errorBg: 'rgba(239, 68, 68, 0.1)',
+        error: '#ef4444',
+        errorLight: '#f87171',
+        secondary: '#334155',
+        secondaryHover: '#475569'
+    } : {
+        bg: '#ffffff',
+        text: '#1e293b',
+        textMuted: '#64748b',
+        border: '#e2e8f0',
+        accent: '#4f46e5',
+        accentHover: '#6366f1',
+        accentBg: 'rgba(79, 70, 229, 0.1)',
+        mutedBg: 'rgba(100, 116, 139, 0.08)',
+        muted: '#94a3b8',
+        errorBg: 'rgba(220, 38, 38, 0.1)',
+        error: '#dc2626',
+        errorLight: '#ef4444',
+        secondary: '#f1f5f9',
+        secondaryHover: '#e2e8f0'
+    };
+
     return `
         /* State Page Styles - for loading, empty, error, manual index */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             display: flex; justify-content: center; align-items: center;
-            height: 100vh; background: #0f172a; color: #e2e8f0;
+            height: 100vh; background: ${colors.bg}; color: ${colors.text};
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .loader-container { text-align: center; }
         .loader {
-            width: 48px; height: 48px; border: 3px solid #334155;
-            border-top-color: #6366f1; border-radius: 50%;
+            width: 48px; height: 48px; border: 3px solid ${colors.border};
+            border-top-color: ${colors.accent}; border-radius: 50%;
             animation: spin 1s linear infinite; margin: 0 auto 24px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         .loader-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
-        .loader-subtitle { color: #94a3b8; font-size: 14px; }
+        .loader-subtitle { color: ${colors.textMuted}; font-size: 14px; }
 
         .container { text-align: center; max-width: 400px; padding: 20px; }
         .icon {
@@ -2871,36 +3064,38 @@ export function getStateStyles(): string {
             display: flex; align-items: center; justify-content: center;
         }
         .icon svg { width: 32px; height: 32px; }
-        .icon.accent { background: rgba(99, 102, 241, 0.1); }
-        .icon.accent svg { color: #6366f1; }
-        .icon.muted { background: rgba(100, 116, 139, 0.1); }
-        .icon.muted svg { color: #64748b; }
-        .icon.error { background: rgba(239, 68, 68, 0.1); }
-        .icon.error svg { color: #ef4444; }
+        .icon.accent { background: ${colors.accentBg}; }
+        .icon.accent svg { color: ${colors.accent}; }
+        .icon.muted { background: ${colors.mutedBg}; }
+        .icon.muted svg { color: ${colors.muted}; }
+        .icon.error { background: ${colors.errorBg}; }
+        .icon.error svg { color: ${colors.error}; }
         .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-        .title.error { color: #f87171; }
-        .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-        .message { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
-        .file-count { font-size: 32px; font-weight: 700; color: #6366f1; margin-bottom: 8px; }
+        .title.error { color: ${colors.errorLight}; }
+        .subtitle { color: ${colors.textMuted}; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+        .message { color: ${colors.textMuted}; font-size: 14px; margin-bottom: 24px; }
+        .file-count { font-size: 32px; font-weight: 700; color: ${colors.accent}; margin-bottom: 8px; }
         .btn {
-            padding: 12px 28px; background: #6366f1; border: none;
+            padding: 12px 28px; background: ${colors.accent}; border: none;
             border-radius: 8px; color: white; font-size: 14px; font-weight: 500;
             cursor: pointer; transition: all 0.15s;
         }
-        .btn:hover { background: #818cf8; transform: translateY(-1px); }
+        .btn:hover { background: ${colors.accentHover}; transform: translateY(-1px); }
         .btn.secondary {
-            background: #334155;
+            background: ${colors.secondary};
+            color: ${dark ? 'white' : colors.text};
         }
-        .btn.secondary:hover { background: #475569; }
+        .btn.secondary:hover { background: ${colors.secondaryHover}; }
     `;
 }
 
 /**
  * Combined styles for main webview
+ * @param dark - Whether to use dark theme (default: true)
  */
-export function getWebviewStyles(): string {
+export function getWebviewStyles(dark: boolean = true): string {
     return [
-        getCssVariables(),
+        getCssVariables(dark),
         getBaseStyles(),
         getContextMenuStyles(),
         getLineagePanelStyles(),
@@ -2916,10 +3111,11 @@ export function getWebviewStyles(): string {
 
 /**
  * Combined styles for issues webview (with CSS variables)
+ * @param dark - Whether to use dark theme (default: true)
  */
-export function getIssuesStyles(): string {
+export function getIssuesStyles(dark: boolean = true): string {
     return [
-        getCssVariables(),
+        getCssVariables(dark),
         getIssuesPanelStyles()
     ].join('\n');
 }

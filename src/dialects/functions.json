@@ -1,0 +1,162 @@
+{
+  "$schema": "./functions.schema.json",
+  "version": "1.0.0",
+  "description": "SQL dialect-specific function definitions for SQL Crack",
+  "common": {
+    "aggregates": [
+      "SUM", "COUNT", "AVG", "MAX", "MIN", "COUNT_DISTINCT"
+    ],
+    "window": [
+      "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
+      "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+      "CUME_DIST", "PERCENT_RANK"
+    ]
+  },
+  "dialects": {
+    "mysql": {
+      "aggregates": [
+        "GROUP_CONCAT", "JSON_ARRAYAGG", "JSON_OBJECTAGG",
+        "BIT_AND", "BIT_OR", "BIT_XOR",
+        "STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VAR_POP", "VAR_SAMP", "VARIANCE"
+      ],
+      "window": []
+    },
+    "postgresql": {
+      "aggregates": [
+        "STRING_AGG", "ARRAY_AGG", "JSON_AGG", "JSONB_AGG",
+        "JSON_OBJECT_AGG", "JSONB_OBJECT_AGG",
+        "BOOL_AND", "BOOL_OR", "EVERY",
+        "XMLAGG", "MODE", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP"
+      ],
+      "window": []
+    },
+    "transactsql": {
+      "aggregates": [
+        "STRING_AGG", "APPROX_COUNT_DISTINCT",
+        "GROUPING", "GROUPING_ID",
+        "STDEV", "STDEVP", "VAR", "VARP",
+        "CHECKSUM_AGG", "COUNT_BIG"
+      ],
+      "window": [
+        "PERCENTILE_CONT", "PERCENTILE_DISC"
+      ]
+    },
+    "snowflake": {
+      "aggregates": [
+        "LISTAGG", "ARRAY_AGG", "OBJECT_AGG",
+        "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K",
+        "HLL", "HLL_ACCUMULATE", "HLL_COMBINE", "HLL_ESTIMATE", "HLL_EXPORT", "HLL_IMPORT",
+        "MINHASH", "MINHASH_COMBINE", "APPROXIMATE_JACCARD_INDEX", "APPROXIMATE_SIMILARITY",
+        "BITAND_AGG", "BITOR_AGG", "BITXOR_AGG",
+        "BOOLAND_AGG", "BOOLOR_AGG",
+        "HASH_AGG",
+        "KURTOSIS", "SKEW",
+        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY"
+      ],
+      "window": [
+        "CONDITIONAL_CHANGE_EVENT", "CONDITIONAL_TRUE_EVENT",
+        "RATIO_TO_REPORT", "WIDTH_BUCKET"
+      ]
+    },
+    "bigquery": {
+      "aggregates": [
+        "STRING_AGG", "ARRAY_AGG", "ARRAY_CONCAT_AGG",
+        "ANY_VALUE", "COUNTIF",
+        "LOGICAL_AND", "LOGICAL_OR",
+        "APPROX_COUNT_DISTINCT", "APPROX_QUANTILES", "APPROX_TOP_COUNT", "APPROX_TOP_SUM",
+        "HLL_COUNT.INIT", "HLL_COUNT.MERGE", "HLL_COUNT.MERGE_PARTIAL", "HLL_COUNT.EXTRACT",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP"
+      ],
+      "window": [
+        "PERCENTILE_CONT", "PERCENTILE_DISC"
+      ]
+    },
+    "redshift": {
+      "aggregates": [
+        "LISTAGG", "APPROXIMATE", "APPROXIMATE_COUNT", "APPROXIMATE_PERCENTILE_DISC",
+        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "BOOL_AND", "BOOL_OR"
+      ],
+      "window": [
+        "RATIO_TO_REPORT"
+      ]
+    },
+    "hive": {
+      "aggregates": [
+        "COLLECT_LIST", "COLLECT_SET",
+        "HISTOGRAM_NUMERIC", "NTILE",
+        "PERCENTILE", "PERCENTILE_APPROX",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY"
+      ],
+      "window": []
+    },
+    "athena": {
+      "aggregates": [
+        "ARRAY_AGG", "APPROX_DISTINCT", "APPROX_PERCENTILE",
+        "ARBITRARY", "BOOL_AND", "BOOL_OR",
+        "CHECKSUM", "EVERY",
+        "GEOMETRIC_MEAN", "HISTOGRAM",
+        "MAP_AGG", "MAP_UNION", "MULTIMAP_AGG",
+        "REDUCE_AGG", "SET_AGG", "SET_UNION",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_INTERCEPT", "REGR_SLOPE"
+      ],
+      "window": []
+    },
+    "trino": {
+      "aggregates": [
+        "ARRAY_AGG", "APPROX_DISTINCT", "APPROX_MOST_FREQUENT", "APPROX_PERCENTILE", "APPROX_SET",
+        "ARBITRARY", "BOOL_AND", "BOOL_OR",
+        "CHECKSUM", "EVERY",
+        "GEOMETRIC_MEAN", "HISTOGRAM",
+        "MAP_AGG", "MAP_UNION", "MAP_UNION_SUM", "MULTIMAP_AGG",
+        "REDUCE_AGG", "SET_AGG", "SET_UNION",
+        "LISTAGG",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_INTERCEPT", "REGR_SLOPE",
+        "KURTOSIS", "SKEWNESS"
+      ],
+      "window": []
+    },
+    "mariadb": {
+      "aggregates": [
+        "GROUP_CONCAT", "JSON_ARRAYAGG", "JSON_OBJECTAGG",
+        "BIT_AND", "BIT_OR", "BIT_XOR",
+        "STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VAR_POP", "VAR_SAMP", "VARIANCE"
+      ],
+      "window": [
+        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC"
+      ]
+    },
+    "sqlite": {
+      "aggregates": [
+        "GROUP_CONCAT", "TOTAL"
+      ],
+      "window": []
+    }
+  }
+}

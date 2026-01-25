@@ -156,7 +156,7 @@ export class TableExplorer {
         tablesWithCounts.sort((a, b) => {
             const totalA = a.upstreamCount + a.downstreamCount;
             const totalB = b.upstreamCount + b.downstreamCount;
-            if (totalB !== totalA) return totalB - totalA;
+            if (totalB !== totalA) {return totalB - totalA;}
             return a.table.name.localeCompare(b.table.name);
         });
 
@@ -335,13 +335,17 @@ export class TableExplorer {
         }
 
         // Deduplicate nodes by ID and separate internal vs external
+        // Only include tables, views, CTEs - skip column nodes
         const internalNodes: Array<{ node: LineageNode; edges: any[] }> = [];
         const externalMap = new Map<string, any[]>(); // name -> edges
         const seenIds = new Set<string>();
 
         for (const node of flow.nodes) {
-            if (seenIds.has(node.id)) continue;
+            if (seenIds.has(node.id)) {continue;}
             seenIds.add(node.id);
+
+            // Skip column nodes - only show tables, views, CTEs, external
+            if (node.type === 'column') {continue;}
 
             const edges = nodeToEdges.get(node.id) || [];
 
@@ -358,7 +362,7 @@ export class TableExplorer {
 
         // Sort internal nodes by type then name
         internalNodes.sort((a, b) => {
-            if (a.node.type !== b.node.type) return a.node.type.localeCompare(b.node.type);
+            if (a.node.type !== b.node.type) {return a.node.type.localeCompare(b.node.type);}
             return a.node.name.localeCompare(b.node.name);
         });
 

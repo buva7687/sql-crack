@@ -79,7 +79,6 @@ export interface GraphRenderOptions {
     centerNodeId: string;
     depth: number;
     direction: 'both' | 'upstream' | 'downstream';
-    fileFilter?: string[];
     expandedNodes?: Set<string>;
     includeExternal?: boolean;
 }
@@ -112,7 +111,6 @@ export class LineageGraphRenderer {
             centerNodeId,
             depth,
             direction,
-            fileFilter,
             expandedNodes = new Set(),
             includeExternal = true
         } = options;
@@ -128,7 +126,7 @@ export class LineageGraphRenderer {
         }
 
         // Add center node
-        this.addNodeToMap(nodeMap, centerNode, 0, expandedNodes, includeExternal, fileFilter);
+        this.addNodeToMap(nodeMap, centerNode, 0, expandedNodes, includeExternal);
 
         // Get upstream nodes
         if (direction === 'both' || direction === 'upstream') {
@@ -136,7 +134,7 @@ export class LineageGraphRenderer {
                 maxDepth: depth,
                 excludeExternal: !includeExternal
             });
-            this.addFlowNodesToMap(nodeMap, upstream.nodes, -1, expandedNodes, includeExternal, fileFilter);
+            this.addFlowNodesToMap(nodeMap, upstream.nodes, -1, expandedNodes, includeExternal);
         }
 
         // Get downstream nodes
@@ -145,22 +143,13 @@ export class LineageGraphRenderer {
                 maxDepth: depth,
                 excludeExternal: !includeExternal
             });
-            this.addFlowNodesToMap(nodeMap, downstream.nodes, 1, expandedNodes, includeExternal, fileFilter);
-        }
-
-        // Filter by files if specified
-        if (fileFilter && fileFilter.length > 0) {
-            for (const [id, node] of nodeMap) {
-                if (id !== centerNodeId && node.filePath && !fileFilter.includes(node.filePath)) {
-                    nodeMap.delete(id);
-                }
-            }
+            this.addFlowNodesToMap(nodeMap, downstream.nodes, 1, expandedNodes, includeExternal);
         }
 
         // Build edges between visible nodes
         for (const edge of this.lineageGraph.edges) {
             // Skip column edges (table -> column)
-            if (edge.metadata?.relationship === 'contains') continue;
+            if (edge.metadata?.relationship === 'contains') {continue;}
 
             if (nodeMap.has(edge.sourceId) && nodeMap.has(edge.targetId)) {
                 edges.push({
@@ -210,16 +199,10 @@ export class LineageGraphRenderer {
         node: LineageNode,
         depth: number,
         expandedNodes: Set<string>,
-        includeExternal: boolean,
-        fileFilter?: string[]
+        includeExternal: boolean
     ): void {
-        if (!includeExternal && node.type === 'external') return;
-        if (node.type === 'column') return; // Skip column nodes
-
-        // Filter by file if specified
-        if (fileFilter && fileFilter.length > 0 && node.filePath) {
-            if (!fileFilter.includes(node.filePath)) return;
-        }
+        if (!includeExternal && node.type === 'external') {return;}
+        if (node.type === 'column') {return;} // Skip column nodes
 
         const isExpanded = expandedNodes.has(node.id);
         const columns = this.getNodeColumns(node);
@@ -253,15 +236,14 @@ export class LineageGraphRenderer {
         nodes: LineageNode[],
         depthSign: number,
         expandedNodes: Set<string>,
-        includeExternal: boolean,
-        fileFilter?: string[]
+        includeExternal: boolean
     ): void {
         for (let i = 0; i < nodes.length; i++) {
             const node = nodes[i];
             if (!nodeMap.has(node.id)) {
                 // Calculate depth based on position in BFS order (simplified)
                 const depth = depthSign * (i + 1);
-                this.addNodeToMap(nodeMap, node, depth, expandedNodes, includeExternal, fileFilter);
+                this.addNodeToMap(nodeMap, node, depth, expandedNodes, includeExternal);
             }
         }
     }
@@ -272,15 +254,9 @@ export class LineageGraphRenderer {
     private getNodeColumns(node: LineageNode): ColumnData[] {
         const columns: ColumnData[] = [];
 
-        // Debug: Log how many nodes we're searching through
-        let totalNodes = 0;
-        let columnNodes = 0;
-
         // Find column nodes that belong to this table
         for (const [id, potentialColumn] of this.lineageGraph.nodes) {
-            totalNodes++;
             if (potentialColumn.type === 'column') {
-                columnNodes++;
                 if (potentialColumn.parentId === node.id) {
                     columns.push({
                         name: potentialColumn.name,
@@ -290,11 +266,6 @@ export class LineageGraphRenderer {
                     });
                 }
             }
-        }
-
-        // Log for debugging
-        if (columns.length === 0 && node.metadata?.columnCount > 0) {
-            console.log(`[Column Debug] Node ${node.id} (${node.name}): Expected ${node.metadata.columnCount} columns, found ${columns.length}. Total nodes: ${totalNodes}, Column nodes: ${columnNodes}`);
         }
 
         return columns;
@@ -550,7 +521,7 @@ export class LineageGraphRenderer {
      * Render an edge as SVG path
      */
     private renderEdge(edge: GraphEdge, isHighlighted: boolean): string {
-        if (edge.points.length < 2) return '';
+        if (edge.points.length < 2) {return '';}
 
         const classes = [
             'lineage-edge',
@@ -645,7 +616,7 @@ export class LineageGraphRenderer {
      * Truncate name to fit in node
      */
     private truncateName(name: string, maxLength: number): string {
-        if (name.length <= maxLength) return name;
+        if (name.length <= maxLength) {return name;}
         return name.substring(0, maxLength - 3) + '...';
     }
 
@@ -691,20 +662,5 @@ export class LineageGraphRenderer {
         return nodes
             .filter(n => n.name.toLowerCase().includes(queryLower))
             .slice(0, limit);
-    }
-
-    /**
-     * Get all unique file paths in the graph
-     */
-    getFilePaths(): string[] {
-        const files = new Set<string>();
-
-        for (const [id, node] of this.lineageGraph.nodes) {
-            if (node.filePath) {
-                files.add(node.filePath);
-            }
-        }
-
-        return Array.from(files).sort();
     }
 }

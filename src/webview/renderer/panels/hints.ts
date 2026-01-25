@@ -150,7 +150,7 @@ export function updateHintsPanel(): void {
         <!-- Hints List -->
         <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
             ${Object.entries(hintsByCategory).map(([category, hints]) => {
-                if (hints.length === 0) return '';
+                if (hints.length === 0) {return '';}
 
                 const categoryLabels: Record<string, string> = {
                     'performance': '⚡ Performance',
@@ -209,7 +209,7 @@ export function updateHintsPanel(): void {
 }
 
 function setupHintFilters(): void {
-    if (!hintsPanel) return;
+    if (!hintsPanel) {return;}
 
     const filterButtons = hintsPanel.querySelectorAll('.hint-filter-btn');
     const severityButtons = hintsPanel.querySelectorAll('.hint-severity-btn');

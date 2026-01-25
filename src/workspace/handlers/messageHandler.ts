@@ -2,7 +2,7 @@
 // Extracted from workspacePanel.ts for modularity
 
 import * as vscode from 'vscode';
-import { SearchFilter } from '../types';
+import { SearchFilter, GraphMode } from '../types';
 import {
     LineageGraph,
     LineageNode,
@@ -33,6 +33,8 @@ export interface MessageHandlerContext {
     setCurrentView: (view: ViewMode | 'graph' | 'issues') => void;
     getCurrentSearchFilter: () => SearchFilter;
     setCurrentSearchFilter: (filter: SearchFilter) => void;
+    getCurrentGraphMode: () => GraphMode;
+    setCurrentGraphMode: (mode: GraphMode) => void;
     getShowHelp: () => boolean;
     setShowHelp: (show: boolean) => void;
 
@@ -58,6 +60,10 @@ export interface MessageHandlerContext {
     getTableExplorer: () => TableExplorer;
     getLineageView: () => LineageView;
     getImpactView: () => ImpactView;
+
+    // Theme state
+    getIsDarkTheme: () => boolean;
+    setIsDarkTheme: (dark: boolean) => void;
 
     // Callbacks
     renderCurrentView: () => void;
@@ -91,6 +97,10 @@ export class MessageHandler {
                 await this.handleRefresh();
                 break;
 
+            case 'switchGraphMode':
+                await this.handleSwitchGraphMode(message.mode);
+                break;
+
             case 'search':
                 this.handleSearch(message.filter);
                 break;
@@ -101,6 +111,10 @@ export class MessageHandler {
 
             case 'toggleHelp':
                 this.handleToggleHelp();
+                break;
+
+            case 'toggleTheme':
+                this.handleToggleTheme();
                 break;
 
             case 'export':
@@ -146,7 +160,7 @@ export class MessageHandler {
                 break;
 
             case 'exploreTable':
-                await this.handleExploreTable(message.tableName);
+                await this.handleExploreTable(message.tableName, message.nodeId);
                 break;
 
             case 'getColumnLineage':
@@ -175,7 +189,6 @@ export class MessageHandler {
                     message.nodeId,
                     message.depth || 5,
                     message.direction || 'both',
-                    message.fileFilter,
                     message.expandedNodes
                 );
                 break;
@@ -217,6 +230,21 @@ export class MessageHandler {
         await this._context.rebuildAndRenderGraph();
     }
 
+    /**
+     * Handle graph mode switch (Files/Tables/Hybrid).
+     * Validates mode and rebuilds graph with new mode.
+     * Ensures view stays on Graph tab (not Lineage/Tables/Impact).
+     */
+    private async handleSwitchGraphMode(mode: string): Promise<void> {
+        const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
+        const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
+        this._context.setCurrentGraphMode(m);
+        // Ensure we're on Graph view when switching modes (not Lineage/Tables/Impact)
+        // This prevents the view from switching to the wrong tab after mode change
+        this._context.setCurrentView('graph');
+        await this._context.rebuildAndRenderGraph();
+    }
+
     private handleSearch(filter: SearchFilter): void {
         this._context.setCurrentSearchFilter(filter);
         const graph = this._context.getCurrentGraph();
@@ -242,6 +270,12 @@ export class MessageHandler {
     private handleToggleHelp(): void {
         const currentHelp = this._context.getShowHelp();
         this._context.setShowHelp(!currentHelp);
+        this._context.renderCurrentView();
+    }
+
+    private handleToggleTheme(): void {
+        const currentTheme = this._context.getIsDarkTheme();
+        this._context.setIsDarkTheme(!currentTheme);
         this._context.renderCurrentView();
     }
 
@@ -345,7 +379,7 @@ export class MessageHandler {
         const flowAnalyzer = this._context.getFlowAnalyzer();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!flowAnalyzer || !lineageGraph) return;
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
         let result: FlowResult | null = null;
 
@@ -394,7 +428,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const impactAnalyzer = this._context.getImpactAnalyzer();
 
-        if (!impactAnalyzer) return;
+        if (!impactAnalyzer) {return;}
 
         let report: ImpactReport;
         if (type === 'table') {
@@ -437,14 +471,22 @@ export class MessageHandler {
         });
     }
 
-    private async handleExploreTable(tableName: string): Promise<void> {
+    private async handleExploreTable(tableName: string, providedNodeId?: string): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
-        const nodeId = `table:${tableName.toLowerCase()}`;
-        const node = lineageGraph.nodes.get(nodeId);
+        // Use provided nodeId if available, otherwise try to find the node
+        let node = providedNodeId ? lineageGraph.nodes.get(providedNodeId) : null;
+
+        // Fallback: try different node types if not found
+        if (!node) {
+            const nameLower = tableName.toLowerCase();
+            node = lineageGraph.nodes.get(`table:${nameLower}`) ||
+                   lineageGraph.nodes.get(`view:${nameLower}`) ||
+                   lineageGraph.nodes.get(`cte:${nameLower}`);
+        }
 
         if (!node) {
             this._context.panel.webview.postMessage({
@@ -481,7 +523,7 @@ export class MessageHandler {
         const columnLineageTracker = this._context.getColumnLineageTracker();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!columnLineageTracker || !lineageGraph) return;
+        if (!columnLineageTracker || !lineageGraph) {return;}
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
@@ -511,7 +553,7 @@ export class MessageHandler {
 
     private handleSelectLineageNode(nodeId: string): void {
         const lineageGraph = this._context.getLineageGraph();
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
         const node = lineageGraph.nodes.get(nodeId);
         if (node) {
@@ -528,7 +570,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) return;
+        if (!flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their upstream
         let nodeIds: string[] = [];
@@ -580,7 +622,7 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) return;
+        if (!flowAnalyzer) {return;}
 
         // For file nodes, get all tables defined in the file and aggregate their downstream
         let nodeIds: string[] = [];
@@ -641,10 +683,10 @@ export class MessageHandler {
 
         for (const [id, node] of lineageGraph.nodes) {
             // Skip columns and external tables in search
-            if (node.type === 'column') continue;
+            if (node.type === 'column') {continue;}
 
             // Apply type filter
-            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
 
             // Match by name
             if (node.name.toLowerCase().includes(queryLower)) {
@@ -661,8 +703,8 @@ export class MessageHandler {
         results.sort((a, b) => {
             const aExact = a.name.toLowerCase() === queryLower;
             const bExact = b.name.toLowerCase() === queryLower;
-            if (aExact && !bExact) return -1;
-            if (!aExact && bExact) return 1;
+            if (aExact && !bExact) {return -1;}
+            if (!aExact && bExact) {return 1;}
             return a.name.localeCompare(b.name);
         });
 
@@ -676,7 +718,6 @@ export class MessageHandler {
         nodeId: string,
         depth: number,
         direction: 'both' | 'upstream' | 'downstream',
-        fileFilter?: string[],
         expandedNodes?: string[]
     ): Promise<void> {
         await this._context.buildLineageGraph();
@@ -697,8 +738,7 @@ export class MessageHandler {
             {
                 depth,
                 direction,
-                expandedNodes: new Set(expandedNodes || []),
-                fileFilter
+                expandedNodes: new Set(expandedNodes || [])
             }
         );
 
@@ -712,10 +752,10 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
-        if (!lineageGraph) return;
+        if (!lineageGraph) {return;}
 
         const node = lineageGraph.nodes.get(nodeId);
-        if (!node) return;
+        if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
         this._context.panel.webview.postMessage({
@@ -741,28 +781,21 @@ export class MessageHandler {
     }
 
     private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
-        console.log(`[Column Lineage] Selecting column: ${tableId}.${columnName}`);
-
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
         const columnLineageTracker = this._context.getColumnLineageTracker();
 
         if (!lineageGraph || !columnLineageTracker) {
-            console.log('[Column Lineage] Graph or tracker not available');
             return;
         }
 
-        // Log column edge stats for debugging
         const columnEdgeCount = lineageGraph.columnEdges?.length || 0;
-        console.log(`[Column Lineage] Graph has ${columnEdgeCount} column edges`);
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
             tableId,
             columnName
         );
-
-        console.log(`[Column Lineage] Found ${lineage.upstream.length} upstream paths, ${lineage.downstream.length} downstream paths`);
 
         // Send result back to webview
         this._context.panel.webview.postMessage({

@@ -43,8 +43,8 @@ export class FlowAnalyzer {
         const resultEdges: any[] = [];
 
         const traverse = (currentId: string, currentDepth: number): void => {
-            if (maxDepth !== -1 && currentDepth >= maxDepth) return;
-            if (visited.has(currentId)) return;
+            if (maxDepth !== -1 && currentDepth >= maxDepth) {return;}
+            if (visited.has(currentId)) {return;}
 
             visited.add(currentId);
 
@@ -54,9 +54,9 @@ export class FlowAnalyzer {
             for (const edge of incomingEdges) {
                 const sourceNode = this.graph.nodes.get(edge.sourceId);
 
-                if (!sourceNode) continue;
-                if (excludeExternal && sourceNode.type === 'external') continue;
-                if (filterTypes && !filterTypes.includes(sourceNode.type)) continue;
+                if (!sourceNode) {continue;}
+                if (excludeExternal && sourceNode.type === 'external') {continue;}
+                if (filterTypes && !filterTypes.includes(sourceNode.type)) {continue;}
 
                 if (!visited.has(sourceNode.id)) {
                     resultNodes.push(sourceNode);
@@ -91,8 +91,8 @@ export class FlowAnalyzer {
         const resultEdges: any[] = [];
 
         const traverse = (currentId: string, currentDepth: number): void => {
-            if (maxDepth !== -1 && currentDepth >= maxDepth) return;
-            if (visited.has(currentId)) return;
+            if (maxDepth !== -1 && currentDepth >= maxDepth) {return;}
+            if (visited.has(currentId)) {return;}
 
             visited.add(currentId);
 
@@ -102,9 +102,9 @@ export class FlowAnalyzer {
             for (const edge of outgoingEdges) {
                 const targetNode = this.graph.nodes.get(edge.targetId);
 
-                if (!targetNode) continue;
-                if (excludeExternal && targetNode.type === 'external') continue;
-                if (filterTypes && !filterTypes.includes(targetNode.type)) continue;
+                if (!targetNode) {continue;}
+                if (excludeExternal && targetNode.type === 'external') {continue;}
+                if (filterTypes && !filterTypes.includes(targetNode.type)) {continue;}
 
                 if (!visited.has(targetNode.id)) {
                     resultNodes.push(targetNode);
@@ -146,10 +146,10 @@ export class FlowAnalyzer {
             const outgoingEdges = this.graph.edges.filter(e => e.sourceId === currentId);
 
             for (const edge of outgoingEdges) {
-                if (visited.has(edge.targetId)) continue;
+                if (visited.has(edge.targetId)) {continue;}
 
                 const targetNode = this.graph.nodes.get(edge.targetId);
-                if (!targetNode) continue;
+                if (!targetNode) {continue;}
 
                 dfs(
                     edge.targetId,
@@ -176,7 +176,7 @@ export class FlowAnalyzer {
         const roots: LineageNode[] = [];
 
         for (const [id, node] of this.graph.nodes) {
-            if (node.type === 'external') continue;
+            if (node.type === 'external') {continue;}
 
             const hasIncoming = this.graph.edges.some(e => e.targetId === id);
             if (!hasIncoming) {
@@ -194,7 +194,7 @@ export class FlowAnalyzer {
         const terminals: LineageNode[] = [];
 
         for (const [id, node] of this.graph.nodes) {
-            if (node.type === 'external') continue;
+            if (node.type === 'external') {continue;}
 
             const hasOutgoing = this.graph.edges.some(e => e.sourceId === id);
             if (!hasOutgoing) {
@@ -221,7 +221,7 @@ export class FlowAnalyzer {
 
             for (const edge of outgoingEdges) {
                 const targetNode = this.graph.nodes.get(edge.targetId);
-                if (!targetNode) continue;
+                if (!targetNode) {continue;}
 
                 if (recStack.has(edge.targetId)) {
                     // Found a cycle
@@ -265,7 +265,7 @@ export class FlowAnalyzer {
 
         for (const edge of edges) {
             const pathKey = `${edge.sourceId}->${edge.targetId}`;
-            if (processed.has(pathKey)) continue;
+            if (processed.has(pathKey)) {continue;}
 
             const sourceNode = this.graph.nodes.get(edge.sourceId);
             const targetNode = this.graph.nodes.get(edge.targetId);
