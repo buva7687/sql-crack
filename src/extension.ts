@@ -44,29 +44,39 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Command: Visualize SQL
-    let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', () => {
-        const editor = vscode.window.activeTextEditor;
+    let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
+        let document: vscode.TextDocument;
+        let sqlCode: string;
 
-        if (!editor) {
-            vscode.window.showErrorMessage('No active editor found');
-            return;
-        }
+        // If URI is provided (from explorer context menu), open the file
+        if (uri) {
+            document = await vscode.workspace.openTextDocument(uri);
+            sqlCode = document.getText();
+        } else {
+            // Otherwise use active editor
+            const editor = vscode.window.activeTextEditor;
 
-        const document = editor.document;
+            if (!editor) {
+                vscode.window.showErrorMessage('No active editor found');
+                return;
+            }
 
-        if (document.languageId !== 'sql') {
-            vscode.window.showWarningMessage('Please open a SQL file to visualize');
-            return;
+            document = editor.document;
+
+            if (document.languageId !== 'sql') {
+                vscode.window.showWarningMessage('Please open a SQL file to visualize');
+                return;
+            }
+
+            // Get selected text or entire document
+            const selection = editor.selection;
+            sqlCode = selection.isEmpty
+                ? document.getText()
+                : document.getText(selection);
         }
 
         // Track this document
         lastActiveSqlDocument = document;
-
-        // Get selected text or entire document
-        const selection = editor.selection;
-        const sqlCode = selection.isEmpty
-            ? document.getText()
-            : document.getText(selection);
 
         if (!sqlCode.trim()) {
             vscode.window.showWarningMessage('No SQL code found to visualize');
