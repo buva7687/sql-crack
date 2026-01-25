@@ -3,6 +3,7 @@
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
   "version": "0.0.1",
+  "publisher": "buvan",
   "repository": {
     "type": "git",
     "url": "https://github.com/buva7687/sql-crack.git"
