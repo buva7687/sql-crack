@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/VS%20Code-1.85+-blue?logo=visualstudiocode" alt="VS Code">
+  <a href="https://marketplace.visualstudio.com/items?itemName=buvan.sql-crack"><img src="https://img.shields.io/visual-studio-marketplace/v/buvan.sql-crack?label=VS%20Code%20Marketplace&logo=visualstudiocode" alt="VS Code Marketplace"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=buvan.sql-crack"><img src="https://img.shields.io/visual-studio-marketplace/i/buvan.sql-crack?label=Installs" alt="Installs"></a>
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen" alt="PRs Welcome">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
 </p>
 
@@ -118,6 +118,15 @@ MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • Big
 ---
 
 ## Installation
+
+### From VS Code Marketplace (Recommended)
+
+1. Open VS Code
+2. Go to Extensions (`Cmd+Shift+X` / `Ctrl+Shift+X`)
+3. Search for **"SQL Crack"**
+4. Click **Install**
+
+Or install directly: [SQL Crack on Marketplace](https://marketplace.visualstudio.com/items?itemName=buvan.sql-crack)
 
 ### From Source
 
