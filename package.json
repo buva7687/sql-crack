@@ -3,6 +3,11 @@
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
   "version": "0.0.1",
+  "publisher": "buvan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buva7687/sql-crack.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -153,7 +158,11 @@
         "sqlCrack.workspaceGraphDefaultMode": {
           "type": "string",
           "default": "tables",
-          "enum": ["files", "tables", "hybrid"],
+          "enum": [
+            "files",
+            "tables",
+            "hybrid"
+          ],
           "enumDescriptions": [
             "File-level dependency graph. Nodes are SQL files; edges show which files reference tables defined in other files.",
             "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.).",
@@ -217,6 +226,6 @@
     "@types/dagre": "^0.7.53",
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
-    "node-sql-parser": "^5.3.1"
+    "node-sql-parser": "5.4.0"
   }
 }

@@ -313,6 +313,9 @@ export class VisualizationPanel {
                             VisualizationPanel.sendViewLocationOptions();
                         }
                         return;
+                    case 'savePng':
+                        this._savePngFile(message.data, message.filename);
+                        return;
                 }
             },
             null,
@@ -366,6 +369,30 @@ export class VisualizationPanel {
 
     private _postMessage(message: any) {
         this._panel.webview.postMessage(message);
+    }
+
+    /**
+     * Save PNG data to file using VS Code's save dialog
+     */
+    private async _savePngFile(base64Data: string, suggestedFilename: string) {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(suggestedFilename),
+                filters: {
+                    'PNG Images': ['png']
+                },
+                saveLabel: 'Save PNG'
+            });
+
+            if (uri) {
+                const buffer = Buffer.from(base64Data, 'base64');
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
+            }
+        } catch (error) {
+            console.error('Failed to save PNG:', error);
+            vscode.window.showErrorMessage('Failed to save PNG file');
+        }
     }
 
     private _update(sqlCode: string, options: VisualizationOptions) {

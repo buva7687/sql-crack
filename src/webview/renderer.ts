@@ -4153,78 +4153,42 @@ export function exportToPng(): void {
         canvas.height = height * scale;
         ctx.scale(scale, scale);
 
-        // Helper function to trigger download (adds link to DOM for webview compatibility)
-        const triggerDownload = (dataUrl: string) => {
-            const a = document.createElement('a');
-            a.download = `sql-flow-${Date.now()}.png`;
-            a.href = dataUrl;
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                if (a.parentNode) {
-                    document.body.removeChild(a);
-                }
-            }, 100);
-        };
+        // Use blob URL for loading SVG (more reliable in VS Code webviews)
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
 
-        // Fallback: try blob URL if base64 data URL fails (CSP or browser compatibility)
-        const tryBlobUrlFallback = () => {
-            try {
-                const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const img2 = new Image();
-                img2.crossOrigin = 'anonymous';
-                img2.onload = () => {
-                    try {
-                        ctx.drawImage(img2, 0, 0);
-                        const dataUrl = canvas.toDataURL('image/png');
-                        triggerDownload(dataUrl);
-                        URL.revokeObjectURL(url);
-                    } catch (e) {
-                        console.log('PNG export failed in fallback:', e);
-                        URL.revokeObjectURL(url);
-                    }
-                };
-                img2.onerror = (e) => {
-                    console.log('Failed to render PNG from blob URL. Try SVG export instead.', e);
-                    URL.revokeObjectURL(url);
-                };
-                img2.src = url;
-            } catch (e) {
-                console.log('Blob fallback failed:', e);
-            }
-        };
-
-        // Load SVG as image for canvas conversion
-        // Set crossOrigin to avoid CORS issues with data/blob URLs
         const img = new Image();
-        img.crossOrigin = 'anonymous';
-        
         img.onload = () => {
             try {
                 ctx.drawImage(img, 0, 0);
-                const dataUrl = canvas.toDataURL('image/png');
-                triggerDownload(dataUrl);
+                URL.revokeObjectURL(svgUrl);
+                const pngDataUrl = canvas.toDataURL('image/png');
+
+                // Send to VS Code extension for saving (webview downloads are blocked)
+                const vscodeApi = (window as any).vscodeApi;
+                if (vscodeApi && vscodeApi.postMessage) {
+                    // Extract base64 data (remove data:image/png;base64, prefix)
+                    const base64Data = pngDataUrl.split(',')[1];
+                    vscodeApi.postMessage({
+                        command: 'savePng',
+                        data: base64Data,
+                        filename: `sql-flow-${Date.now()}.png`
+                    });
+                } else {
+                    console.log('VS Code API not available for PNG export');
+                }
             } catch (e) {
                 console.log('PNG export error:', e);
-                // Fallback: try with blob URL
-                tryBlobUrlFallback();
+                URL.revokeObjectURL(svgUrl);
             }
         };
-        
+
         img.onerror = (e) => {
-            console.log('Image load error, trying blob URL fallback:', e);
-            tryBlobUrlFallback();
+            console.log('Failed to load SVG for PNG export:', e);
+            URL.revokeObjectURL(svgUrl);
         };
-        
-        // Try base64 first
-        try {
-            img.src = 'data:image/svg+xml;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-        } catch (e) {
-            console.log('Failed to create base64 data URL, trying blob URL:', e);
-            tryBlobUrlFallback();
-        }
+
+        img.src = svgUrl;
     } catch (e) {
         console.log('PNG export failed: ' + e);
     }

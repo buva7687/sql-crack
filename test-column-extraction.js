@@ -23,8 +23,10 @@ try {
         table: c.expr?.table?.[0]?.table || c.expr?.table,
         alias: c.expr?.table?.[0]?.alias || c.expr?.table?.as
     })));
-    console.log('  FROM:', ast1.from.map(f => ({ table: f.table[0]?.table, alias: f.as })));
-    console.log('  JOIN:', ast1.join.map(j => ({ table: j.table?.table?.[0]?.table, alias: j.as })));
+    console.log('  FROM:', ast1.from.map(f => ({ table: f.table?.[0]?.table || f.table, alias: f.as })));
+    // JOINs may be in from array or separate join property
+    const joins = ast1.from?.filter(f => f.join) || [];
+    console.log('  JOIN count:', joins.length);
     console.log('  WHERE:', ast1.where ? 'present' : 'none');
 } catch (e) {
     console.log('❌ Failed:', e.message);
@@ -46,7 +48,11 @@ try {
         name: c.expr?.name || c.expr?.column,
         alias: c.as
     })));
-    console.log('  GROUP BY:', ast2.groupby?.map(g => g.expr?.column));
+    // groupby may be array or object with columns property
+    const groupByColumns = Array.isArray(ast2.groupby)
+        ? ast2.groupby.map(g => g.expr?.column || g.column)
+        : ast2.groupby?.columns?.map(g => g.expr?.column || g.column) || [];
+    console.log('  GROUP BY:', groupByColumns);
 } catch (e) {
     console.log('❌ Failed:', e.message);
 }
