@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "buvan",
   "repository": {
     "type": "git",
@@ -48,6 +48,11 @@
         }
       ],
       "explorer/context": [
+        {
+          "command": "sql-crack.visualize",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
         {
           "command": "sql-crack.analyzeWorkspace",
           "when": "explorerResourceIsFolder",
