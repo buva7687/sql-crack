@@ -63,15 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             document = editor.document;
 
-            // Check for SQL language ID (including dialect variants) or .sql file extension
-            const sqlLanguageIds = ['sql', 'mysql', 'postgres', 'pgsql', 'plpgsql', 'tsql', 'mssql', 'sqlite', 'hive', 'bigquery'];
-            const isSqlLanguage = sqlLanguageIds.includes(document.languageId);
-            const isSqlExtension = document.fileName.toLowerCase().endsWith('.sql');
-
-            if (!isSqlLanguage && !isSqlExtension) {
-                vscode.window.showWarningMessage('Please open a SQL file to visualize');
-                return;
-            }
+            // Allow visualization from any file - user may have SQL in non-.sql files
+            // The parser will handle invalid SQL gracefully with an error message
 
             // Get selected text or entire document
             const selection = editor.selection;
