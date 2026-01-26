@@ -230,6 +230,75 @@ function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult |
     return null;
 }
 
+/**
+ * Check if a SQL statement is a session/utility command (without parsing it).
+ * Returns the matched command info or null if not a session command.
+ */
+function getSessionCommandInfo(sql: string): { type: string; description: string } | null {
+    const trimmedSql = sql.trim();
+
+    for (const cmd of SESSION_COMMAND_PATTERNS) {
+        const match = trimmedSql.match(cmd.pattern);
+        if (match) {
+            return {
+                type: cmd.type,
+                description: cmd.description(match)
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Create a merged ParseResult for multiple consecutive session commands.
+ * Shows them as a single "Session Setup" block with all commands listed.
+ */
+function createMergedSessionResult(
+    commands: Array<{ sql: string; type: string; description: string }>,
+    dialect: SqlDialect
+): ParseResult {
+    resetStats();
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+
+    // Create a single node with all session commands
+    const nodeId = genId('session');
+    const descriptions = commands.map(c => `• ${c.description}`).join('\n');
+
+    nodes.push({
+        id: nodeId,
+        type: 'operation' as NodeType,
+        label: 'Session Setup',
+        description: descriptions,
+        x: 0,
+        y: 0,
+        width: 220,
+        height: Math.max(60, 30 + commands.length * 20),
+    });
+
+    // Set minimal stats
+    stats.complexity = 'Simple';
+    stats.complexityScore = 1;
+
+    // Combine all SQL statements
+    const combinedSql = commands.map(c => c.sql).join(';\n');
+
+    return {
+        nodes,
+        edges,
+        stats: { ...stats },
+        hints: [{
+            type: 'info',
+            message: `${commands.length} session command${commands.length > 1 ? 's' : ''}`,
+            suggestion: 'These are session/utility commands that set database context or configuration.'
+        }],
+        sql: combinedSql,
+        columnLineage: [],
+        tableUsage: new Map(),
+    };
+}
+
 // Split SQL into individual statements
 export function splitSqlStatements(sql: string): string[] {
     const statements: string[] = [];
@@ -289,6 +358,40 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     let currentLine = 1;
     const lines = sql.split('\n');
 
+    // Collect consecutive session commands to merge them
+    let pendingSessionCommands: Array<{
+        sql: string;
+        type: string;
+        description: string;
+        startLine: number;
+        endLine: number;
+    }> = [];
+
+    // Helper to flush pending session commands as a single merged result
+    const flushSessionCommands = () => {
+        if (pendingSessionCommands.length === 0) return;
+
+        const mergedResult = createMergedSessionResult(
+            pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
+            dialect
+        );
+
+        // Set line range for the merged result
+        const startLine = pendingSessionCommands[0].startLine;
+        const endLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
+
+        // Assign line numbers to the merged node
+        for (const node of mergedResult.nodes) {
+            node.startLine = startLine;
+            node.endLine = endLine;
+        }
+
+        queries.push(mergedResult);
+        queryLineRanges.push({ startLine, endLine });
+
+        pendingSessionCommands = [];
+    };
+
     for (const stmt of statements) {
         // Find the starting line of this statement in the original SQL
         let stmtStartLine = currentLine;
@@ -300,37 +403,57 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
             }
         }
 
-        const result = parseSql(stmt, dialect);
-
-        // Adjust line numbers by adding the offset
-        const lineOffset = stmtStartLine - 1;
-        for (const node of result.nodes) {
-            if (node.startLine) {
-                node.startLine += lineOffset;
-            }
-            if (node.endLine) {
-                node.endLine += lineOffset;
-            }
-        }
-        // Also adjust line numbers for edges
-        for (const edge of result.edges) {
-            if (edge.startLine) {
-                edge.startLine += lineOffset;
-            }
-            if (edge.endLine) {
-                edge.endLine += lineOffset;
-            }
-        }
-
-        queries.push(result);
-
-        // Calculate end line for this statement
         const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
-        queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+
+        // Check if this is a session command
+        const sessionInfo = getSessionCommandInfo(stmt);
+
+        if (sessionInfo) {
+            // Add to pending session commands
+            pendingSessionCommands.push({
+                sql: stmt,
+                type: sessionInfo.type,
+                description: sessionInfo.description,
+                startLine: stmtStartLine,
+                endLine: stmtEndLine,
+            });
+        } else {
+            // Flush any pending session commands before processing a regular statement
+            flushSessionCommands();
+
+            // Parse the regular statement
+            const result = parseSql(stmt, dialect);
+
+            // Adjust line numbers by adding the offset
+            const lineOffset = stmtStartLine - 1;
+            for (const node of result.nodes) {
+                if (node.startLine) {
+                    node.startLine += lineOffset;
+                }
+                if (node.endLine) {
+                    node.endLine += lineOffset;
+                }
+            }
+            // Also adjust line numbers for edges
+            for (const edge of result.edges) {
+                if (edge.startLine) {
+                    edge.startLine += lineOffset;
+                }
+                if (edge.endLine) {
+                    edge.endLine += lineOffset;
+                }
+            }
+
+            queries.push(result);
+            queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+        }
 
         // Update current line past this statement
         currentLine = stmtStartLine + stmt.split('\n').length;
     }
+
+    // Flush any remaining session commands at the end
+    flushSessionCommands();
 
     // Calculate total stats
     const totalStats: QueryStats = {
