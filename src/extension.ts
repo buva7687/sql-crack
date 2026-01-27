@@ -63,10 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             document = editor.document;
 
-            if (document.languageId !== 'sql') {
-                vscode.window.showWarningMessage('Please open a SQL file to visualize');
-                return;
-            }
+            // Allow visualization from any file - user may have SQL in non-.sql files
+            // The parser will handle invalid SQL gracefully with an error message
 
             // Get selected text or entire document
             const selection = editor.selection;

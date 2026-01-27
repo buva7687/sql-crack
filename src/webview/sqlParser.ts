@@ -102,6 +102,238 @@ function genId(prefix: string): string {
     return `${prefix}_${nodeCounter++}`;
 }
 
+/**
+ * Session/utility command patterns that node-sql-parser doesn't support.
+ * These are dialect-specific commands for setting context, session variables, etc.
+ */
+const SESSION_COMMAND_PATTERNS: Array<{
+    pattern: RegExp;
+    type: string;
+    description: (match: RegExpMatchArray) => string;
+    dialects?: string[];
+}> = [
+    // Snowflake session commands
+    { pattern: /^USE\s+WAREHOUSE\s+(\S+)/i, type: 'USE WAREHOUSE', description: (m) => `Switch to warehouse: ${m[1]}`, dialects: ['Snowflake'] },
+    { pattern: /^USE\s+DATABASE\s+(\S+)/i, type: 'USE DATABASE', description: (m) => `Switch to database: ${m[1]}` },
+    { pattern: /^USE\s+SCHEMA\s+(\S+)/i, type: 'USE SCHEMA', description: (m) => `Switch to schema: ${m[1]}` },
+    { pattern: /^USE\s+ROLE\s+(\S+)/i, type: 'USE ROLE', description: (m) => `Switch to role: ${m[1]}`, dialects: ['Snowflake'] },
+    { pattern: /^USE\s+SECONDARY\s+ROLES\s+(\S+)/i, type: 'USE SECONDARY ROLES', description: (m) => `Set secondary roles: ${m[1]}`, dialects: ['Snowflake'] },
+    { pattern: /^USE\s+(\S+)/i, type: 'USE', description: (m) => `Use: ${m[1]}` },
+
+    // SET commands (various dialects)
+    { pattern: /^SET\s+(\w+)\s*=\s*(.+)/i, type: 'SET', description: (m) => `Set ${m[1]} = ${m[2]}` },
+    { pattern: /^SET\s+(TRANSACTION|SESSION|LOCAL|GLOBAL)\s+(.+)/i, type: 'SET', description: (m) => `Set ${m[1]} ${m[2]}` },
+
+    // Snowflake ALTER SESSION
+    { pattern: /^ALTER\s+SESSION\s+SET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Alter session: ${m[1]}`, dialects: ['Snowflake'] },
+    { pattern: /^ALTER\s+SESSION\s+UNSET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Unset session param: ${m[1]}`, dialects: ['Snowflake'] },
+
+    // SQL Server / T-SQL specific
+    { pattern: /^EXEC(?:UTE)?\s+(.+)/i, type: 'EXECUTE', description: (m) => `Execute: ${m[1]}`, dialects: ['TransactSQL'] },
+    { pattern: /^PRINT\s+(.+)/i, type: 'PRINT', description: (m) => `Print: ${m[1]}`, dialects: ['TransactSQL'] },
+    { pattern: /^DECLARE\s+(.+)/i, type: 'DECLARE', description: (m) => `Declare: ${m[1]}` },
+    { pattern: /^GO\s*$/i, type: 'GO', description: () => `Batch separator`, dialects: ['TransactSQL'] },
+
+    // PostgreSQL specific
+    { pattern: /^\\(\w+)\s*(.*)/i, type: 'PSQL COMMAND', description: (m) => `psql: \\${m[1]} ${m[2]}`, dialects: ['PostgreSQL'] },
+    { pattern: /^COPY\s+(.+)/i, type: 'COPY', description: (m) => `Copy: ${m[1]}`, dialects: ['PostgreSQL'] },
+    { pattern: /^LISTEN\s+(\S+)/i, type: 'LISTEN', description: (m) => `Listen to channel: ${m[1]}`, dialects: ['PostgreSQL'] },
+    { pattern: /^NOTIFY\s+(\S+)/i, type: 'NOTIFY', description: (m) => `Notify channel: ${m[1]}`, dialects: ['PostgreSQL'] },
+    { pattern: /^VACUUM\s*(.*)/i, type: 'VACUUM', description: (m) => `Vacuum${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
+    { pattern: /^ANALYZE\s*(.*)/i, type: 'ANALYZE', description: (m) => `Analyze${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
+    { pattern: /^REINDEX\s*(.*)/i, type: 'REINDEX', description: (m) => `Reindex${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
+    { pattern: /^CLUSTER\s*(.*)/i, type: 'CLUSTER', description: (m) => `Cluster${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
+
+    // MySQL specific
+    { pattern: /^SHOW\s+(.+)/i, type: 'SHOW', description: (m) => `Show: ${m[1]}` },
+    { pattern: /^DESCRIBE\s+(\S+)/i, type: 'DESCRIBE', description: (m) => `Describe table: ${m[1]}` },
+    { pattern: /^DESC\s+(\S+)/i, type: 'DESCRIBE', description: (m) => `Describe table: ${m[1]}` },
+    { pattern: /^EXPLAIN\s+(.+)/i, type: 'EXPLAIN', description: (m) => `Explain: ${m[1].substring(0, 50)}...` },
+    { pattern: /^FLUSH\s+(.+)/i, type: 'FLUSH', description: (m) => `Flush: ${m[1]}`, dialects: ['MySQL', 'MariaDB'] },
+    { pattern: /^RESET\s+(.+)/i, type: 'RESET', description: (m) => `Reset: ${m[1]}` },
+    { pattern: /^PURGE\s+(.+)/i, type: 'PURGE', description: (m) => `Purge: ${m[1]}`, dialects: ['MySQL', 'MariaDB'] },
+
+    // BigQuery specific
+    { pattern: /^ASSERT\s+(.+)/i, type: 'ASSERT', description: (m) => `Assert: ${m[1]}`, dialects: ['BigQuery'] },
+    { pattern: /^EXPORT\s+DATA\s+(.+)/i, type: 'EXPORT DATA', description: (m) => `Export data: ${m[1]}`, dialects: ['BigQuery'] },
+    { pattern: /^LOAD\s+DATA\s+(.+)/i, type: 'LOAD DATA', description: (m) => `Load data: ${m[1]}` },
+
+    // Hive/Databricks specific
+    { pattern: /^ADD\s+(JAR|FILE|ARCHIVE)\s+(.+)/i, type: 'ADD RESOURCE', description: (m) => `Add ${m[1]}: ${m[2]}`, dialects: ['Hive'] },
+    { pattern: /^MSCK\s+REPAIR\s+TABLE\s+(\S+)/i, type: 'MSCK REPAIR', description: (m) => `Repair table: ${m[1]}`, dialects: ['Hive'] },
+    { pattern: /^REFRESH\s+TABLE\s+(\S+)/i, type: 'REFRESH TABLE', description: (m) => `Refresh table: ${m[1]}`, dialects: ['Hive'] },
+    { pattern: /^INVALIDATE\s+METADATA\s*(.*)/i, type: 'INVALIDATE METADATA', description: (m) => `Invalidate metadata${m[1] ? ': ' + m[1] : ''}`, dialects: ['Hive'] },
+
+    // Generic transaction commands
+    { pattern: /^BEGIN(\s+TRANSACTION|\s+WORK|\s+TRAN)?/i, type: 'BEGIN', description: () => `Begin transaction` },
+    { pattern: /^START\s+TRANSACTION/i, type: 'START TRANSACTION', description: () => `Start transaction` },
+    { pattern: /^COMMIT(\s+TRANSACTION|\s+WORK|\s+TRAN)?/i, type: 'COMMIT', description: () => `Commit transaction` },
+    { pattern: /^ROLLBACK(\s+TRANSACTION|\s+WORK|\s+TRAN)?(\s+TO\s+SAVEPOINT\s+\S+)?/i, type: 'ROLLBACK', description: (m) => `Rollback transaction${m[2] || ''}` },
+    { pattern: /^SAVEPOINT\s+(\S+)/i, type: 'SAVEPOINT', description: (m) => `Create savepoint: ${m[1]}` },
+    { pattern: /^RELEASE\s+SAVEPOINT\s+(\S+)/i, type: 'RELEASE SAVEPOINT', description: (m) => `Release savepoint: ${m[1]}` },
+
+    // Access control (common across dialects)
+    { pattern: /^GRANT\s+(.+)/i, type: 'GRANT', description: (m) => `Grant: ${m[1].substring(0, 50)}...` },
+    { pattern: /^REVOKE\s+(.+)/i, type: 'REVOKE', description: (m) => `Revoke: ${m[1].substring(0, 50)}...` },
+
+    // Comment (single statement)
+    { pattern: /^--.*$/i, type: 'COMMENT', description: (m) => `SQL comment` },
+    { pattern: /^\/\*[\s\S]*\*\/$/i, type: 'COMMENT', description: () => `SQL block comment` },
+];
+
+/**
+ * Check if SQL is a session/utility command that node-sql-parser doesn't support.
+ * Returns a ParseResult if handled, or null if the SQL should be parsed normally.
+ */
+function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult | null {
+    // Strip leading comments so patterns can match at start of actual SQL
+    const trimmedSql = stripLeadingComments(sql);
+
+    for (const cmd of SESSION_COMMAND_PATTERNS) {
+        const match = trimmedSql.match(cmd.pattern);
+        if (match) {
+            // Create a simple visualization for the session command
+            const nodes: FlowNode[] = [];
+            const edges: FlowEdge[] = [];
+
+            const nodeId = genId('session');
+            nodes.push({
+                id: nodeId,
+                type: 'operation' as NodeType,
+                label: cmd.type,
+                description: cmd.description(match),
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 60,
+            });
+
+            // Set minimal stats for session commands
+            stats.complexity = 'Simple';
+            stats.complexityScore = 1;
+
+            return {
+                nodes,
+                edges,
+                stats: { ...stats },
+                hints: [{
+                    type: 'info',
+                    message: `${cmd.type} statement`,
+                    suggestion: 'This is a session/utility command that sets database context or configuration.'
+                }],
+                sql,
+                columnLineage: [],
+                tableUsage: new Map(),
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Strip leading SQL comments (both -- line comments and /* block comments *\/)
+ * Returns the SQL with leading comments removed.
+ */
+function stripLeadingComments(sql: string): string {
+    let result = sql.trim();
+    let changed = true;
+
+    while (changed) {
+        changed = false;
+        // Strip leading single-line comments (-- ...)
+        while (result.startsWith('--')) {
+            const newlineIdx = result.indexOf('\n');
+            if (newlineIdx === -1) {
+                // Entire string is a comment
+                return '';
+            }
+            result = result.substring(newlineIdx + 1).trim();
+            changed = true;
+        }
+        // Strip leading block comments (/* ... */)
+        if (result.startsWith('/*')) {
+            const endIdx = result.indexOf('*/');
+            if (endIdx !== -1) {
+                result = result.substring(endIdx + 2).trim();
+                changed = true;
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Check if a SQL statement is a session/utility command (without parsing it).
+ * Returns the matched command info or null if not a session command.
+ */
+function getSessionCommandInfo(sql: string): { type: string; description: string } | null {
+    // Strip leading comments so patterns can match at start of actual SQL
+    const trimmedSql = stripLeadingComments(sql);
+
+    for (const cmd of SESSION_COMMAND_PATTERNS) {
+        const match = trimmedSql.match(cmd.pattern);
+        if (match) {
+            return {
+                type: cmd.type,
+                description: cmd.description(match)
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Create a merged ParseResult for multiple consecutive session commands.
+ * Shows them as a single "Session Setup" block with all commands listed.
+ */
+function createMergedSessionResult(
+    commands: Array<{ sql: string; type: string; description: string }>,
+    dialect: SqlDialect
+): ParseResult {
+    resetStats();
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+
+    // Create a single node with all session commands
+    const nodeId = genId('session');
+    const descriptions = commands.map(c => `• ${c.description}`).join('\n');
+
+    nodes.push({
+        id: nodeId,
+        type: 'operation' as NodeType,
+        label: 'Session Setup',
+        description: descriptions,
+        x: 0,
+        y: 0,
+        width: 220,
+        height: Math.max(60, 30 + commands.length * 20),
+    });
+
+    // Set minimal stats
+    stats.complexity = 'Simple';
+    stats.complexityScore = 1;
+
+    // Combine all SQL statements
+    const combinedSql = commands.map(c => c.sql).join(';\n');
+
+    return {
+        nodes,
+        edges,
+        stats: { ...stats },
+        hints: [{
+            type: 'info',
+            message: `${commands.length} session command${commands.length > 1 ? 's' : ''}`,
+            suggestion: 'These are session/utility commands that set database context or configuration.'
+        }],
+        sql: combinedSql,
+        columnLineage: [],
+        tableUsage: new Map(),
+    };
+}
+
 // Split SQL into individual statements
 export function splitSqlStatements(sql: string): string[] {
     const statements: string[] = [];
@@ -161,6 +393,40 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     let currentLine = 1;
     const lines = sql.split('\n');
 
+    // Collect consecutive session commands to merge them
+    let pendingSessionCommands: Array<{
+        sql: string;
+        type: string;
+        description: string;
+        startLine: number;
+        endLine: number;
+    }> = [];
+
+    // Helper to flush pending session commands as a single merged result
+    const flushSessionCommands = () => {
+        if (pendingSessionCommands.length === 0) return;
+
+        const mergedResult = createMergedSessionResult(
+            pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
+            dialect
+        );
+
+        // Set line range for the merged result
+        const startLine = pendingSessionCommands[0].startLine;
+        const endLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
+
+        // Assign line numbers to the merged node
+        for (const node of mergedResult.nodes) {
+            node.startLine = startLine;
+            node.endLine = endLine;
+        }
+
+        queries.push(mergedResult);
+        queryLineRanges.push({ startLine, endLine });
+
+        pendingSessionCommands = [];
+    };
+
     for (const stmt of statements) {
         // Find the starting line of this statement in the original SQL
         let stmtStartLine = currentLine;
@@ -172,37 +438,57 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
             }
         }
 
-        const result = parseSql(stmt, dialect);
-
-        // Adjust line numbers by adding the offset
-        const lineOffset = stmtStartLine - 1;
-        for (const node of result.nodes) {
-            if (node.startLine) {
-                node.startLine += lineOffset;
-            }
-            if (node.endLine) {
-                node.endLine += lineOffset;
-            }
-        }
-        // Also adjust line numbers for edges
-        for (const edge of result.edges) {
-            if (edge.startLine) {
-                edge.startLine += lineOffset;
-            }
-            if (edge.endLine) {
-                edge.endLine += lineOffset;
-            }
-        }
-
-        queries.push(result);
-
-        // Calculate end line for this statement
         const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
-        queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+
+        // Check if this is a session command
+        const sessionInfo = getSessionCommandInfo(stmt);
+
+        if (sessionInfo) {
+            // Add to pending session commands (store stripped SQL without leading comments)
+            pendingSessionCommands.push({
+                sql: stripLeadingComments(stmt),
+                type: sessionInfo.type,
+                description: sessionInfo.description,
+                startLine: stmtStartLine,
+                endLine: stmtEndLine,
+            });
+        } else {
+            // Flush any pending session commands before processing a regular statement
+            flushSessionCommands();
+
+            // Parse the regular statement
+            const result = parseSql(stmt, dialect);
+
+            // Adjust line numbers by adding the offset
+            const lineOffset = stmtStartLine - 1;
+            for (const node of result.nodes) {
+                if (node.startLine) {
+                    node.startLine += lineOffset;
+                }
+                if (node.endLine) {
+                    node.endLine += lineOffset;
+                }
+            }
+            // Also adjust line numbers for edges
+            for (const edge of result.edges) {
+                if (edge.startLine) {
+                    edge.startLine += lineOffset;
+                }
+                if (edge.endLine) {
+                    edge.endLine += lineOffset;
+                }
+            }
+
+            queries.push(result);
+            queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+        }
 
         // Update current line past this statement
         currentLine = stmtStartLine + stmt.split('\n').length;
     }
+
+    // Flush any remaining session commands at the end
+    flushSessionCommands();
 
     // Calculate total stats
     const totalStats: QueryStats = {
@@ -405,6 +691,12 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
     if (!sql || !sql.trim()) {
         return { nodes, edges, stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
+    }
+
+    // Check if this is a session/utility command that node-sql-parser doesn't support
+    const sessionResult = tryParseSessionCommand(sql, dialect);
+    if (sessionResult) {
+        return sessionResult;
     }
 
     const parser = new Parser();
