@@ -186,7 +186,8 @@ const SESSION_COMMAND_PATTERNS: Array<{
  * Returns a ParseResult if handled, or null if the SQL should be parsed normally.
  */
 function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult | null {
-    const trimmedSql = sql.trim();
+    // Strip leading comments so patterns can match at start of actual SQL
+    const trimmedSql = stripLeadingComments(sql);
 
     for (const cmd of SESSION_COMMAND_PATTERNS) {
         const match = trimmedSql.match(cmd.pattern);
@@ -231,11 +232,45 @@ function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult |
 }
 
 /**
+ * Strip leading SQL comments (both -- line comments and /* block comments *\/)
+ * Returns the SQL with leading comments removed.
+ */
+function stripLeadingComments(sql: string): string {
+    let result = sql.trim();
+    let changed = true;
+
+    while (changed) {
+        changed = false;
+        // Strip leading single-line comments (-- ...)
+        while (result.startsWith('--')) {
+            const newlineIdx = result.indexOf('\n');
+            if (newlineIdx === -1) {
+                // Entire string is a comment
+                return '';
+            }
+            result = result.substring(newlineIdx + 1).trim();
+            changed = true;
+        }
+        // Strip leading block comments (/* ... */)
+        if (result.startsWith('/*')) {
+            const endIdx = result.indexOf('*/');
+            if (endIdx !== -1) {
+                result = result.substring(endIdx + 2).trim();
+                changed = true;
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
  * Check if a SQL statement is a session/utility command (without parsing it).
  * Returns the matched command info or null if not a session command.
  */
 function getSessionCommandInfo(sql: string): { type: string; description: string } | null {
-    const trimmedSql = sql.trim();
+    // Strip leading comments so patterns can match at start of actual SQL
+    const trimmedSql = stripLeadingComments(sql);
 
     for (const cmd of SESSION_COMMAND_PATTERNS) {
         const match = trimmedSql.match(cmd.pattern);
@@ -409,9 +444,9 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         const sessionInfo = getSessionCommandInfo(stmt);
 
         if (sessionInfo) {
-            // Add to pending session commands
+            // Add to pending session commands (store stripped SQL without leading comments)
             pendingSessionCommands.push({
-                sql: stmt,
+                sql: stripLeadingComments(stmt),
                 type: sessionInfo.type,
                 description: sessionInfo.description,
                 startLine: stmtStartLine,
