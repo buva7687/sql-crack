@@ -313,6 +313,10 @@ function createMergedSessionResult(
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
 
+    // Combine all SQL statements
+    const combinedSql = commands.map(c => c.sql).join(';\n');
+    const combinedLineCount = combinedSql.split('\n').length;
+
     // Create a single node with all session commands
     const nodeId = genId('session');
     const descriptions = commands.map(c => `• ${c.description}`).join('\n');
@@ -326,14 +330,14 @@ function createMergedSessionResult(
         y: 0,
         width: 220,
         height: Math.max(60, 30 + commands.length * 20),
+        // Use relative line numbers (1-based) for the combined SQL
+        startLine: 1,
+        endLine: combinedLineCount,
     });
 
     // Set minimal stats
     stats.complexity = 'Simple';
     stats.complexityScore = 1;
-
-    // Combine all SQL statements
-    const combinedSql = commands.map(c => c.sql).join(';\n');
 
     return {
         nodes,
@@ -427,18 +431,15 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
             dialect
         );
 
-        // Set line range for the merged result
-        const startLine = pendingSessionCommands[0].startLine;
-        const endLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
+        // Get line range for tracking (absolute lines in original file)
+        const absoluteStartLine = pendingSessionCommands[0].startLine;
+        const absoluteEndLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
 
-        // Assign line numbers to the merged node
-        for (const node of mergedResult.nodes) {
-            node.startLine = startLine;
-            node.endLine = endLine;
-        }
+        // Note: Node line numbers are already set relative to the combined SQL in createMergedSessionResult
+        // Don't override them here
 
         queries.push(mergedResult);
-        queryLineRanges.push({ startLine, endLine });
+        queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
         pendingSessionCommands = [];
     };
@@ -460,12 +461,17 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         const sessionInfo = getSessionCommandInfo(stmt);
 
         if (sessionInfo) {
+            // Calculate actual start line by counting lines in leading comments
+            const strippedSql = stripLeadingComments(stmt);
+            const leadingLinesCount = stmt.split('\n').length - strippedSql.split('\n').length;
+            const actualStartLine = stmtStartLine + leadingLinesCount;
+
             // Add to pending session commands (store stripped SQL without leading comments)
             pendingSessionCommands.push({
-                sql: stripLeadingComments(stmt),
+                sql: strippedSql,
                 type: sessionInfo.type,
                 description: sessionInfo.description,
-                startLine: stmtStartLine,
+                startLine: actualStartLine,
                 endLine: stmtEndLine,
             });
         } else {

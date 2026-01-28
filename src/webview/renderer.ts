@@ -5751,9 +5751,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     white-space: pre-wrap;
                     word-break: break-all;
                     max-width: 300px;
-                ">
-                    ${escapeHtml(displayFragment)}
-                </div>
+                ">${escapeHtml(displayFragment)}</div>
             `;
 
             // Add line number reference
