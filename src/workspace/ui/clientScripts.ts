@@ -690,7 +690,7 @@ function getContextMenuScript(): string {
                         if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Analyzing impact...</p></div>';
                         vscode.postMessage({
                             command: 'analyzeImpact',
-                            type: contextMenuTarget.type === 'file' ? 'table' : 'table',
+                            type: 'table',
                             name: nodeName,
                             changeType: 'modify'
                         });
@@ -1141,7 +1141,7 @@ function getImpactFormScript(): string {
 
                     vscode.postMessage({
                         command: 'analyzeImpact',
-                        type: tableType === 'view' ? 'table' : 'table',
+                        type: 'table',
                         name: tableName,
                         changeType: changeType
                     });
