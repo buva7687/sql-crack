@@ -41,7 +41,8 @@ import {
     switchToTab,
     getActiveTabId,
     setActiveTabId,
-    ToolbarCallbacks
+    ToolbarCallbacks,
+    ToolbarCleanup
 } from './ui';
 
 // Global type declarations
@@ -67,6 +68,7 @@ let currentDialect: SqlDialect = (window.defaultDialect as SqlDialect) || 'MySQL
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
+let toolbarCleanup: ToolbarCleanup | null = null;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -154,13 +156,14 @@ function init(): void {
     initRenderer(container);
 
     // Create toolbar with callbacks
-    createToolbar(container, createToolbarCallbacks(), {
+    const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
         currentDialect,
         isPinnedView: window.isPinnedView || false,
         pinId: window.pinId || null,
         viewLocation: window.viewLocation || 'beside',
         persistedPinnedTabs: window.persistedPinnedTabs || []
     });
+    toolbarCleanup = toolbarResult.cleanup;
 
     // Create batch tabs
     createBatchTabs(container, {

@@ -6,7 +6,8 @@ export {
     showKeyboardShortcutsHelp,
     markRefreshButtonStale,
     clearRefreshButtonStale,
-    ToolbarCallbacks
+    ToolbarCallbacks,
+    ToolbarCleanup
 } from './toolbar';
 
 export {

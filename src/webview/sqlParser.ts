@@ -38,68 +38,93 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 
-// Stats tracking during parsing
-let stats: QueryStats;
-let hints: OptimizationHint[];
-let nodeCounter = 0;
-let hasSelectStar = false;
-let hasNoLimit = false;
-let statementType = '';
-let tableUsageMap: Map<string, number> = new Map();
-let currentDialect: SqlDialect = 'MySQL';
+/**
+ * Parser context holds all mutable state for a single parse operation.
+ * Using a context object instead of scattered module-level variables improves
+ * code organization and makes state management more explicit.
+ *
+ * Note: For true thread-safety in async contexts, this context should be
+ * passed as a parameter through all functions. In the current synchronous
+ * webview context, the atomic reset pattern is sufficient.
+ */
+interface ParserContext {
+    stats: QueryStats;
+    hints: OptimizationHint[];
+    nodeCounter: number;
+    hasSelectStar: boolean;
+    hasNoLimit: boolean;
+    statementType: string;
+    tableUsageMap: Map<string, number>;
+    dialect: SqlDialect;
+}
 
-function resetStats(): void {
-    stats = {
-        tables: 0,
-        joins: 0,
-        subqueries: 0,
-        ctes: 0,
-        aggregations: 0,
-        windowFunctions: 0,
-        unions: 0,
-        conditions: 0,
-        complexity: 'Simple',
-        complexityScore: 0
+/**
+ * Current parser context. All parser state is consolidated here rather than
+ * in scattered module-level variables. This context is reset atomically at
+ * the start of each parseSql call.
+ */
+let ctx: ParserContext = createFreshContext('MySQL');
+
+/**
+ * Create a fresh parser context with default values.
+ * Called at the start of each parse operation to ensure clean state.
+ */
+function createFreshContext(dialect: SqlDialect): ParserContext {
+    return {
+        stats: {
+            tables: 0,
+            joins: 0,
+            subqueries: 0,
+            ctes: 0,
+            aggregations: 0,
+            windowFunctions: 0,
+            unions: 0,
+            conditions: 0,
+            complexity: 'Simple',
+            complexityScore: 0
+        },
+        hints: [],
+        nodeCounter: 0,
+        hasSelectStar: false,
+        hasNoLimit: true,
+        statementType: '',
+        tableUsageMap: new Map(),
+        dialect
     };
-    hints = [];
-    hasSelectStar = false;
-    hasNoLimit = true;
-    statementType = '';
-    tableUsageMap = new Map();
 }
 
 // Track table usage
 function trackTableUsage(tableName: string): void {
     const normalizedName = tableName.toLowerCase();
-    tableUsageMap.set(normalizedName, (tableUsageMap.get(normalizedName) || 0) + 1);
+    ctx.tableUsageMap.set(normalizedName, (ctx.tableUsageMap.get(normalizedName) || 0) + 1);
 }
 
 function calculateComplexity(): void {
     const score =
-        stats.tables * 1 +
-        stats.joins * 3 +
-        stats.subqueries * 5 +
-        stats.ctes * 4 +
-        stats.aggregations * 2 +
-        stats.windowFunctions * 4 +
-        stats.unions * 3 +
-        stats.conditions * 0.5;
+        ctx.stats.tables * 1 +
+        ctx.stats.joins * 3 +
+        ctx.stats.subqueries * 5 +
+        ctx.stats.ctes * 4 +
+        ctx.stats.aggregations * 2 +
+        ctx.stats.windowFunctions * 4 +
+        ctx.stats.unions * 3 +
+        ctx.stats.conditions * 0.5;
 
-    stats.complexityScore = Math.round(score);
+    ctx.stats.complexityScore = Math.round(score);
 
     if (score < 5) {
-        stats.complexity = 'Simple';
+        ctx.stats.complexity = 'Simple';
     } else if (score < 15) {
-        stats.complexity = 'Moderate';
+        ctx.stats.complexity = 'Moderate';
     } else if (score < 30) {
-        stats.complexity = 'Complex';
+        ctx.stats.complexity = 'Complex';
     } else {
-        stats.complexity = 'Very Complex';
+        ctx.stats.complexity = 'Very Complex';
     }
 }
 
 function genId(prefix: string): string {
-    return `${prefix}_${nodeCounter++}`;
+    return `${prefix}_${ctx.nodeCounter++}`;
 }
 
 /**
@@ -225,13 +250,13 @@ function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult |
             });
 
             // Set minimal stats for session commands
-            stats.complexity = 'Simple';
-            stats.complexityScore = 1;
+            ctx.stats.complexity = 'Simple';
+            ctx.stats.complexityScore = 1;
 
             return {
                 nodes,
                 edges,
-                stats: { ...stats },
+                stats: { ...ctx.stats },
                 hints: [{
                     type: 'info',
                     message: `${cmd.type} statement`,
@@ -309,7 +334,7 @@ function createMergedSessionResult(
     commands: Array<{ sql: string; type: string; description: string }>,
     dialect: SqlDialect
 ): ParseResult {
-    resetStats();
+    ctx = createFreshContext(dialect);
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
 
@@ -336,13 +361,13 @@ function createMergedSessionResult(
     });
 
     // Set minimal stats
-    stats.complexity = 'Simple';
-    stats.complexityScore = 1;
+    ctx.stats.complexity = 'Simple';
+    ctx.stats.complexityScore = 1;
 
     return {
         nodes,
         edges,
-        stats: { ...stats },
+        stats: { ...ctx.stats },
         hints: [{
             type: 'info',
             message: `${commands.length} session command${commands.length > 1 ? 's' : ''}`,
@@ -715,14 +740,13 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
 }
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
-    nodeCounter = 0;
-    currentDialect = dialect;
-    resetStats();
+    // Reset all parser state atomically by creating a fresh context
+    ctx = createFreshContext(dialect);
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
 
     if (!sql || !sql.trim()) {
-        return { nodes, edges, stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
+        return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
     }
 
     // Check if this is a session/utility command that node-sql-parser doesn't support
@@ -757,32 +781,32 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Pass existing hints so performance analyzer can merge overlapping hints
         // (e.g., duplicate subquery hints + repeated table scan hints)
         if (statements[0]) {
-            const perfAnalysis = analyzePerformance(statements[0], nodes, edges, tableUsageMap, hints);
-            hints.push(...perfAnalysis.hints);
+            const perfAnalysis = analyzePerformance(statements[0], nodes, edges, ctx.tableUsageMap, ctx.hints);
+            ctx.hints.push(...perfAnalysis.hints);
 
             // Filter out hints that were merged into performance hints
             // (marked with _merged flag by detectRepeatedScans)
-            const mergedCount = hints.filter(h => (h as any)._merged).length;
+            const mergedCount = ctx.hints.filter(h => (h as any)._merged).length;
             if (mergedCount > 0) {
-                hints = hints.filter(h => !(h as any)._merged);
+                ctx.hints = ctx.hints.filter(h => !(h as any)._merged);
             }
         }
 
         // Calculate performance score after all hints are collected (0-100, higher is better)
-        const perfHints = hints.filter(h => h.category === 'performance');
+        const perfHints = ctx.hints.filter(h => h.category === 'performance');
         if (perfHints.length > 0) {
             const highSeverityCount = perfHints.filter(h => h.severity === 'high').length;
             const mediumSeverityCount = perfHints.filter(h => h.severity === 'medium').length;
             const lowSeverityCount = perfHints.filter(h => h.severity === 'low').length;
-            
+
             // Start with 100 and deduct points for issues
             let score = 100;
             score -= highSeverityCount * 15;  // High severity issues cost 15 points
             score -= mediumSeverityCount * 8; // Medium severity issues cost 8 points
             score -= lowSeverityCount * 3;    // Low severity issues cost 3 points
-            
-            stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
-            stats.performanceIssues = perfHints.length;
+
+            ctx.stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
+            ctx.stats.performanceIssues = perfHints.length;
         }
 
         // Use dagre for layout
@@ -801,9 +825,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         calculateColumnPositions(nodes);
 
         // Update stats.tables to reflect the actual number of unique tables (including from CTEs and subqueries)
-        stats.tables = tableUsageMap.size;
+        ctx.stats.tables = ctx.tableUsageMap.size;
 
-        return { nodes, edges, stats, hints, sql, columnLineage, columnFlows, tableUsage: tableUsageMap };
+        return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage, columnFlows, tableUsage: ctx.tableUsageMap };
     } catch (err) {
         let message = err instanceof Error ? err.message : 'Parse error';
 
@@ -814,7 +838,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
 
         if (message.includes('found') || message.includes('Expected')) {
-            if (currentDialect === 'MySQL') {
+            if (ctx.dialect === 'MySQL') {
                 // MySQL-specific issues - check in order of likelihood
                 if (hasParenthesizedUnion && hasIntervalQuoted) {
                     message = `This query uses PostgreSQL syntax (INTERVAL '...' and parenthesized UNION). Try PostgreSQL dialect.`;
@@ -829,21 +853,21 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
             else if (upperSql.includes('INTERSECT') || upperSql.includes('EXCEPT')) {
                 const dialectsWithSupport = ['MySQL', 'PostgreSQL'];
-                if (!dialectsWithSupport.includes(currentDialect)) {
-                    message = `INTERSECT/EXCEPT not supported in ${currentDialect}. Try MySQL or PostgreSQL dialect.`;
+                if (!dialectsWithSupport.includes(ctx.dialect)) {
+                    message = `INTERSECT/EXCEPT not supported in ${ctx.dialect}. Try MySQL or PostgreSQL dialect.`;
                 }
             }
             // Check for recursive CTE
-            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(currentDialect)) {
-                message = `RECURSIVE CTE not supported in ${currentDialect}. Try PostgreSQL or MySQL dialect.`;
+            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(ctx.dialect)) {
+                message = `RECURSIVE CTE not supported in ${ctx.dialect}. Try PostgreSQL or MySQL dialect.`;
             }
             // Generic parse error - make it more user-friendly
             else {
-                message = `SQL syntax not recognized by ${currentDialect} parser. Try PostgreSQL dialect (most compatible).`;
+                message = `SQL syntax not recognized by ${ctx.dialect} parser. Try PostgreSQL dialect (most compatible).`;
             }
         }
 
-        return { nodes: [], edges: [], stats, hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
+        return { nodes: [], edges: [], stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
     }
 }
 
@@ -853,8 +877,8 @@ function generateHints(stmt: any): void {
     const type = stmt.type?.toLowerCase() || '';
 
     // SELECT * warning
-    if (hasSelectStar) {
-        hints.push({
+    if (ctx.hasSelectStar) {
+        ctx.hints.push({
             type: 'warning',
             message: 'SELECT * detected',
             suggestion: 'Specify only needed columns to reduce data transfer and improve performance'
@@ -862,8 +886,8 @@ function generateHints(stmt: any): void {
     }
 
     // Missing LIMIT on SELECT
-    if (type === 'select' && hasNoLimit && stats.tables > 0) {
-        hints.push({
+    if (type === 'select' && ctx.hasNoLimit && ctx.stats.tables > 0) {
+        ctx.hints.push({
             type: 'info',
             message: 'No LIMIT clause',
             suggestion: 'Consider adding LIMIT to prevent fetching large result sets'
@@ -872,7 +896,7 @@ function generateHints(stmt: any): void {
 
     // Missing WHERE on UPDATE/DELETE
     if ((type === 'update' || type === 'delete') && !stmt.where) {
-        hints.push({
+        ctx.hints.push({
             type: 'error',
             message: `${type.toUpperCase()} without WHERE clause`,
             suggestion: 'This will affect ALL rows in the table. Add a WHERE clause to limit scope'
@@ -880,26 +904,26 @@ function generateHints(stmt: any): void {
     }
 
     // Too many JOINs
-    if (stats.joins > 5) {
-        hints.push({
+    if (ctx.stats.joins > 5) {
+        ctx.hints.push({
             type: 'warning',
-            message: `High number of JOINs (${stats.joins})`,
+            message: `High number of JOINs (${ctx.stats.joins})`,
             suggestion: 'Consider breaking into smaller queries or using CTEs for clarity'
         });
     }
 
     // Deeply nested subqueries
-    if (stats.subqueries > 3) {
-        hints.push({
+    if (ctx.stats.subqueries > 3) {
+        ctx.hints.push({
             type: 'warning',
-            message: `Multiple subqueries detected (${stats.subqueries})`,
+            message: `Multiple subqueries detected (${ctx.stats.subqueries})`,
             suggestion: 'Consider using CTEs (WITH clause) for better readability'
         });
     }
 
     // Cartesian product (no join condition)
-    if (stats.tables > 1 && stats.joins === 0 && stats.conditions === 0) {
-        hints.push({
+    if (ctx.stats.tables > 1 && ctx.stats.joins === 0 && ctx.stats.conditions === 0) {
+        ctx.hints.push({
             type: 'error',
             message: 'Possible Cartesian product',
             suggestion: 'Multiple tables without JOIN conditions will produce all row combinations',
@@ -960,7 +984,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 message: 'This CTE is never referenced in the query'
             });
 
-            hints.push({
+            ctx.hints.push({
                 type: 'warning',
                 message: `Unused CTE: "${cteNode.label}"`,
                 suggestion: 'Remove this CTE as it is not used anywhere in the query',
@@ -1169,7 +1193,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
             }
         });
         
-            hints.push({
+            ctx.hints.push({
                 type: 'info',
             message: `${group.length} similar subqueries detected`,
                 suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
@@ -1218,7 +1242,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
             });
             
             // Add hint
-            hints.push({
+            ctx.hints.push({
                 type: 'info',
                 message: `${group.length} similar subqueries detected`,
                 suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
@@ -1401,7 +1425,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 return match ? match[1] : '';
             }).filter(Boolean);
             
-            hints.push({
+            ctx.hints.push({
                 type: 'info',
                 message: `${deadColumns.length} dead column${deadColumns.length > 1 ? 's' : ''} detected: ${deadColNames.slice(0, 3).join(', ')}${deadColNames.length > 3 ? ` and ${deadColNames.length - 3} more` : ''}`,
                 suggestion: 'Remove unused columns from SELECT clause to improve query clarity and reduce data transfer',
@@ -1433,7 +1457,7 @@ function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string)
                 });
             });
 
-            hints.push({
+            ctx.hints.push({
                 type: 'warning',
                 message: `Table "${tableName}" scanned ${usages.length} times`,
                 suggestion: 'Consider using a CTE or subquery to scan the table once',
@@ -1453,7 +1477,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
             maxDepth = Math.max(maxDepth, node.depth);
         }
     });
-    stats.maxCteDepth = maxDepth;
+    ctx.stats.maxCteDepth = maxDepth;
 
     // Calculate max fan-out (number of outgoing edges per node)
     const fanOutMap = new Map<string, number>();
@@ -1461,7 +1485,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
         const count = fanOutMap.get(edge.source) || 0;
         fanOutMap.set(edge.source, count + 1);
     });
-    stats.maxFanOut = Math.max(0, ...Array.from(fanOutMap.values()));
+    ctx.stats.maxFanOut = Math.max(0, ...Array.from(fanOutMap.values()));
 
     // Calculate critical path length (longest path from source to result)
     const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
@@ -1481,18 +1505,18 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
     const nodesWithIncoming = new Set(edges.map(e => e.target));
     const rootNodes = nodes.filter(n => !nodesWithIncoming.has(n.id));
 
-    stats.criticalPathLength = Math.max(
+    ctx.stats.criticalPathLength = Math.max(
         0,
         ...rootNodes.map(node => calculatePathLength(node.id, new Set()))
     );
 
     // Complexity breakdown
-    stats.complexityBreakdown = {
-        joins: stats.joins * 3,           // Joins add significant complexity
-        subqueries: stats.subqueries * 2,
-        ctes: stats.ctes * 2,
-        aggregations: stats.aggregations * 1,
-        windowFunctions: stats.windowFunctions * 2
+    ctx.stats.complexityBreakdown = {
+        joins: ctx.stats.joins * 3,           // Joins add significant complexity
+        subqueries: ctx.stats.subqueries * 2,
+        ctes: ctx.stats.ctes * 2,
+        aggregations: ctx.stats.aggregations * 1,
+        windowFunctions: ctx.stats.windowFunctions * 2
     };
 
     // Identify bottlenecks (nodes with high fan-out or in critical path)
@@ -1508,7 +1532,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
         }
 
         // Mark nodes with high complexity
-        if ((node.type === 'join' && stats.joins > 3) ||
+        if ((node.type === 'join' && ctx.stats.joins > 3) ||
             (node.type === 'aggregate' && node.aggregateDetails && node.aggregateDetails.functions.length > 3)) {
             if (!node.warnings) {node.warnings = [];}
             node.warnings.push({
@@ -1522,12 +1546,12 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
     // Assign complexity levels to nodes
     nodes.forEach(node => {
         if (node.type === 'join') {
-            node.complexityLevel = stats.joins > 5 ? 'high' : stats.joins > 2 ? 'medium' : 'low';
+            node.complexityLevel = ctx.stats.joins > 5 ? 'high' : ctx.stats.joins > 2 ? 'medium' : 'low';
         } else if (node.type === 'aggregate') {
             const funcCount = node.aggregateDetails?.functions.length || 0;
             node.complexityLevel = funcCount > 4 ? 'high' : funcCount > 2 ? 'medium' : 'low';
         } else if (node.type === 'subquery') {
-            node.complexityLevel = stats.subqueries > 2 ? 'high' : 'low';
+            node.complexityLevel = ctx.stats.subqueries > 2 ? 'high' : 'low';
         }
     });
 }
@@ -1535,9 +1559,9 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
     if (!stmt || !stmt.type) { return null; }
 
-    statementType = stmt.type.toLowerCase();
+    ctx.statementType = stmt.type.toLowerCase();
 
-    if (statementType === 'select') {
+    if (ctx.statementType === 'select') {
         return processSelect(stmt, nodes, edges);
     }
 
@@ -1557,11 +1581,11 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
     if (stmt.table) {
         const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
         // Determine operation type and access mode for write operations
-        const opType = statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+        const opType = ctx.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
         const accessMode: 'write' = 'write';
-        
+
         for (const t of tables) {
-            stats.tables++;
+            ctx.stats.tables++;
             const tableId = genId('table');
             const tableName = t.table || t.name || t;
             nodes.push({
@@ -1598,7 +1622,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     // Process CTEs first - with nested sub-graph
     if (stmt.with && Array.isArray(stmt.with)) {
         for (const cte of stmt.with) {
-            stats.ctes++;
+            ctx.stats.ctes++;
             const cteId = genId('cte');
             const cteName = cte.name?.value || cte.name || 'CTE';
 
@@ -1665,7 +1689,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 }
             } else {
                 // Create table node for join tables too
-                stats.tables++;
+                ctx.stats.tables++;
                 const tableName = getTableName(fromItem);
                 trackTableUsage(tableName);
                 const tableId = genId('table');
@@ -1695,7 +1719,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
         for (let i = 0; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
             if (fromItem.join) {
-                stats.joins++;
+                ctx.stats.joins++;
                 const joinId = genId('join');
                 const joinType = fromItem.join || 'JOIN';
                 const joinTable = getTableName(fromItem);
@@ -1769,7 +1793,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     if (stmt.where) {
         const whereId = genId('filter');
         const conditions = extractConditions(stmt.where);
-        stats.conditions += conditions.length;
+        ctx.stats.conditions += conditions.length;
         nodes.push({
             id: whereId,
             type: 'filter',
@@ -1798,7 +1822,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
     // Process GROUP BY
     if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
-        stats.aggregations++;
+        ctx.stats.aggregations++;
         const groupId = genId('agg');
         const groupCols = stmt.groupby.map((g: any) => g.column || g.expr?.column || '?').join(', ');
         nodes.push({
@@ -1904,7 +1928,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     // Check for window functions in columns - with detailed breakdown
     const windowFuncDetails = extractWindowFunctionDetails(stmt.columns);
     if (windowFuncDetails.length > 0) {
-        stats.windowFunctions += windowFuncDetails.length;
+        ctx.stats.windowFunctions += windowFuncDetails.length;
         const windowId = genId('window');
 
         // Calculate height based on number of functions
@@ -1982,7 +2006,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
     // Process LIMIT
     if (stmt.limit) {
-        hasNoLimit = false;
+        ctx.hasNoLimit = false;
         const limitId = genId('limit');
         const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
         nodes.push({
@@ -2020,7 +2044,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
     // Handle UNION/INTERSECT/EXCEPT
     if (stmt._next) {
-        stats.unions++;
+        ctx.stats.unions++;
         const nextResultId = processStatement(stmt._next, nodes, edges);
         if (nextResultId) {
             const unionId = genId('union');
@@ -2066,7 +2090,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
-        stats.subqueries++;
+        ctx.stats.subqueries++;
         const subqueryId = genId('subquery');
         const alias = fromItem.as || 'subquery';
 
@@ -2101,7 +2125,7 @@ function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], ct
     const tableName = getTableName(fromItem);
     if (!tableName || fromItem.join) { return null; } // Skip join tables, handled separately
 
-    stats.tables++;
+    ctx.stats.tables++;
     trackTableUsage(tableName);
     const tableId = genId('table');
     // Determine if this is a CTE reference
@@ -2138,14 +2162,14 @@ function getTableName(item: any): string {
 
 function extractColumns(columns: any): string[] {
     if (!columns || columns === '*') {
-        hasSelectStar = true;
+        ctx.hasSelectStar = true;
         return ['*'];
     }
     if (!Array.isArray(columns)) { return ['*']; }
 
     return columns.map((col: any) => {
         if (col === '*' || col.expr?.column === '*') {
-            hasSelectStar = true;
+            ctx.hasSelectStar = true;
             return '*';
         }
         if (col.as) { return col.as; }
@@ -2273,7 +2297,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
     }> = [];
 
     // Get dialect-specific window functions
-    const windowFuncList = getWindowFunctions(currentDialect);
+    const windowFuncList = getWindowFunctions(ctx.dialect);
 
     for (const col of columns) {
         if (col.expr?.over) {
@@ -2370,7 +2394,7 @@ function extractAggregateFunctionDetails(columns: any): Array<{
     if (!columns || !Array.isArray(columns)) { return []; }
 
     // Get dialect-specific aggregate functions
-    const aggregateFuncSet = new Set(getAggregateFunctions(currentDialect));
+    const aggregateFuncSet = new Set(getAggregateFunctions(ctx.dialect));
     const details: Array<{ name: string; expression: string; alias?: string }> = [];
 
     function extractAggregatesFromExpr(expr: any): void {
@@ -2499,7 +2523,7 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
         for (const fromItem of stmt.from) {
             // Check for nested subqueries in FROM clause
             if (fromItem.expr && fromItem.expr.ast) {
-                stats.subqueries++; // Count nested subqueries
+                ctx.stats.subqueries++; // Count nested subqueries
                 // Recursively parse the nested subquery
                 parseCteOrSubqueryInternals(fromItem.expr.ast, nodes, edges, parentId, depth + 1);
             } else if (!fromItem.join) {
@@ -2530,7 +2554,7 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             if (fromItem.join) {
                 // Check for nested subqueries in JOIN
                 if (fromItem.expr && fromItem.expr.ast) {
-                    stats.subqueries++; // Count nested subqueries in joins
+                    ctx.stats.subqueries++; // Count nested subqueries in joins
                     // Recursively parse the nested subquery
                     parseCteOrSubqueryInternals(fromItem.expr.ast, nodes, edges, parentId, depth + 1);
                 } else {
@@ -2561,14 +2585,14 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     // Check for subqueries in WHERE clause
     if (stmt.where) {
         const whereSubqueries = findSubqueriesInExpression(stmt.where);
-        stats.subqueries += whereSubqueries.length;
+        ctx.stats.subqueries += whereSubqueries.length;
     }
 
     // Check for subqueries in SELECT clause (scalar subqueries)
     if (stmt.columns && Array.isArray(stmt.columns)) {
         for (const col of stmt.columns) {
             if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
-                stats.subqueries++; // Count scalar subqueries
+                ctx.stats.subqueries++; // Count scalar subqueries
                 // Recursively parse the nested subquery
                 parseCteOrSubqueryInternals(col.expr.ast, nodes, edges, parentId, depth + 1);
             }

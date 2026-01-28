@@ -28,11 +28,39 @@ export class WorkspaceScanner {
     }
 
     /**
-     * Find all SQL files in the workspace
+     * Get the list of file extensions to scan, including .sql and any
+     * additional extensions configured in settings.
+     */
+    private getSqlExtensions(): string[] {
+        const extensions = ['sql']; // Always include .sql
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
+
+        for (const ext of additionalExtensions) {
+            // Normalize: remove leading dot if present, convert to lowercase
+            const normalized = ext.toLowerCase().trim().replace(/^\./, '');
+            if (normalized && !extensions.includes(normalized)) {
+                extensions.push(normalized);
+            }
+        }
+
+        return extensions;
+    }
+
+    /**
+     * Find all SQL files in the workspace, including files with extensions
+     * configured in additionalFileExtensions setting.
      */
     async findSqlFiles(): Promise<vscode.Uri[]> {
+        const extensions = this.getSqlExtensions();
+
+        // Build glob pattern: **/*.{sql,hql,bteq,...}
+        const pattern = extensions.length === 1
+            ? `**/*.${extensions[0]}`
+            : `**/*.{${extensions.join(',')}}`;
+
         const files = await vscode.workspace.findFiles(
-            '**/*.sql',
+            pattern,
             '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**}'
         );
         return files;

@@ -47,6 +47,11 @@ const btnStyle = `
     transition: background 0.2s;
 `;
 
+/**
+ * Cleanup function type for removing event listeners
+ */
+export type ToolbarCleanup = () => void;
+
 export function createToolbar(
     container: HTMLElement,
     callbacks: ToolbarCallbacks,
@@ -57,7 +62,9 @@ export function createToolbar(
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
     }
-): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement } {
+): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement; cleanup: ToolbarCleanup } {
+    // Store event listeners for cleanup
+    const documentListeners: Array<{ type: string; handler: EventListener }> = [];
     const toolbar = document.createElement('div');
     toolbar.id = 'sql-crack-toolbar';
     toolbar.style.cssText = `
@@ -121,7 +128,7 @@ export function createToolbar(
     container.appendChild(toolbar);
 
     // Action buttons (top right)
-    const actions = createActionButtons(container, callbacks, options);
+    const actions = createActionButtons(container, callbacks, options, documentListeners);
     container.appendChild(actions);
 
     // Set initial dialect value
@@ -134,12 +141,22 @@ export function createToolbar(
     }
 
     // Listen for theme change events
-    document.addEventListener('theme-change', ((e: CustomEvent) => {
+    const themeChangeHandler = ((e: CustomEvent) => {
         const dark = e.detail.dark;
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
-    }) as EventListener);
+    }) as EventListener;
+    document.addEventListener('theme-change', themeChangeHandler);
+    documentListeners.push({ type: 'theme-change', handler: themeChangeHandler });
 
-    return { toolbar, actions, searchContainer };
+    // Cleanup function to remove all document event listeners
+    const cleanup: ToolbarCleanup = () => {
+        documentListeners.forEach(({ type, handler }) => {
+            document.removeEventListener(type, handler);
+        });
+        documentListeners.length = 0;
+    };
+
+    return { toolbar, actions, searchContainer, cleanup };
 }
 
 function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
@@ -212,7 +229,8 @@ function createActionButtons(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
-    }
+    },
+    documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const actions = document.createElement('div');
     actions.id = 'sql-crack-actions';
@@ -232,7 +250,7 @@ function createActionButtons(
     actions.appendChild(createExportGroup(callbacks));
 
     // Feature buttons
-    actions.appendChild(createFeatureGroup(callbacks, options));
+    actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
 
     return actions;
 }
@@ -310,7 +328,8 @@ function createFeatureGroup(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
-    }
+    },
+    documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const featureGroup = document.createElement('div');
     featureGroup.style.cssText = `
@@ -340,7 +359,7 @@ function createFeatureGroup(
         featureGroup.appendChild(pinBtn);
 
         // View location button with dropdown
-        const viewLocBtn = createViewLocationButton(callbacks, options.viewLocation);
+        const viewLocBtn = createViewLocationButton(callbacks, options.viewLocation, documentListeners);
         featureGroup.appendChild(viewLocBtn);
 
         // Pinned tabs button
@@ -407,7 +426,7 @@ function createFeatureGroup(
     featureGroup.appendChild(focusBtn);
 
     // Focus Mode Direction selector
-    const focusModeSelector = createFocusModeSelector(callbacks);
+    const focusModeSelector = createFocusModeSelector(callbacks, documentListeners);
     featureGroup.appendChild(focusModeSelector);
 
     // SQL Preview button
@@ -455,9 +474,11 @@ function createFeatureGroup(
     fullscreenBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(fullscreenBtn);
 
-    document.addEventListener('fullscreenchange', () => {
+    const fullscreenHandler = () => {
         fullscreenBtn.style.background = callbacks.isFullscreen() ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-    });
+    };
+    document.addEventListener('fullscreenchange', fullscreenHandler);
+    documentListeners.push({ type: 'fullscreenchange', handler: fullscreenHandler });
 
     // Help button
     const helpBtn = createButton('?', () => {
@@ -485,7 +506,10 @@ function createButton(label: string, onClick: () => void): HTMLButtonElement {
     return btn;
 }
 
-function createFocusModeSelector(callbacks: ToolbarCallbacks): HTMLElement {
+function createFocusModeSelector(
+    callbacks: ToolbarCallbacks,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
     const container = document.createElement('div');
     container.style.cssText = `position: relative; display: flex; align-items: center;`;
 
@@ -591,9 +615,11 @@ function createFocusModeSelector(callbacks: ToolbarCallbacks): HTMLElement {
         }
     });
 
-    document.addEventListener('click', () => {
+    const focusModeClickHandler = () => {
         dropdown.style.display = 'none';
-    });
+    };
+    document.addEventListener('click', focusModeClickHandler);
+    documentListeners.push({ type: 'click', handler: focusModeClickHandler });
 
     container.appendChild(btn);
     container.appendChild(dropdown);
@@ -621,7 +647,11 @@ function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode): 
     });
 }
 
-function createViewLocationButton(callbacks: ToolbarCallbacks, currentLocation: string): HTMLElement {
+function createViewLocationButton(
+    callbacks: ToolbarCallbacks,
+    currentLocation: string,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
     const viewLocBtn = document.createElement('button');
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
@@ -636,9 +666,11 @@ function createViewLocationButton(callbacks: ToolbarCallbacks, currentLocation: 
         dropdown.style.display = isVisible ? 'none' : 'block';
     });
 
-    document.addEventListener('click', () => {
+    const viewLocClickHandler = () => {
         dropdown.style.display = 'none';
-    });
+    };
+    document.addEventListener('click', viewLocClickHandler);
+    documentListeners.push({ type: 'click', handler: viewLocClickHandler });
 
     viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     viewLocBtn.addEventListener('mouseleave', () => {
@@ -668,8 +700,7 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
 
     const locations = [
         { id: 'beside', label: 'Side by Side', icon: '⫝', desc: 'Next to SQL file' },
-        { id: 'tab', label: 'New Tab', icon: '⊟', desc: 'As editor tab' },
-        { id: 'secondary-sidebar', label: 'Secondary Sidebar', icon: '⫿', desc: 'Right sidebar' }
+        { id: 'tab', label: 'New Tab', icon: '⊟', desc: 'As editor tab' }
     ];
 
     const header = document.createElement('div');

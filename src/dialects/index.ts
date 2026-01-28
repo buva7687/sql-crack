@@ -12,6 +12,5 @@ export {
     getWindowFunctions,
     getFunctionsForDialect,
     getSupportedDialects,
-    clearFunctionCache,
     setCustomFunctions
 } from './functionRegistry';

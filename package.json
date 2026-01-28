@@ -72,8 +72,8 @@
     "keybindings": [
       {
         "command": "sql-crack.visualize",
-        "key": "ctrl+shift+v",
-        "mac": "cmd+shift+v",
+        "key": "ctrl+shift+q",
+        "mac": "cmd+shift+q",
         "when": "resourceExtname == .sql"
       }
     ],
@@ -121,13 +121,11 @@
           "default": "beside",
           "enum": [
             "beside",
-            "tab",
-            "secondary-sidebar"
+            "tab"
           ],
           "enumDescriptions": [
             "Opens beside the SQL file (like Markdown preview)",
-            "Opens as a new tab in the editor area",
-            "Opens in the secondary side bar (right side)"
+            "Opens as a new tab in the editor area"
           ],
           "description": "Where to display the SQL visualization panel"
         },

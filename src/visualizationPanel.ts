@@ -6,7 +6,7 @@ interface VisualizationOptions {
     documentUri?: vscode.Uri; // Store the document URI for navigation
 }
 
-export type ViewLocation = 'beside' | 'tab' | 'secondary-sidebar';
+export type ViewLocation = 'beside' | 'tab';
 
 interface PinnedVisualization {
     id: string;
@@ -46,8 +46,6 @@ export class VisualizationPanel {
         switch (location) {
             case 'tab':
                 return vscode.ViewColumn.Active;
-            case 'secondary-sidebar':
-                return vscode.ViewColumn.Beside; // Will be moved to secondary sidebar
             case 'beside':
             default:
                 return vscode.ViewColumn.Beside;
@@ -404,9 +402,25 @@ export class VisualizationPanel {
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
     }
 
-    private _escapeForInlineScript(sqlCode: string): string {
-        const json = JSON.stringify(sqlCode);
-        return json.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+    /**
+     * Safely escape a string for embedding in an inline script tag.
+     * Uses JSON.stringify for base escaping, then handles HTML-specific sequences
+     * that could break out of the script context.
+     */
+    private _escapeForInlineScript(str: string): string {
+        // JSON.stringify handles quotes, backslashes, control chars, and unicode
+        const json = JSON.stringify(str);
+
+        // Escape HTML-specific sequences that could break script context:
+        // 1. </script - could close the script tag (case-insensitive)
+        // 2. <!-- - HTML comment start
+        // 3. --> - HTML comment end
+        // 4. ]]> - CDATA section end
+        return json
+            .replace(/<\/script/gi, '<\\/script')
+            .replace(/<!--/g, '<\\!--')
+            .replace(/-->/g, '--\\>')
+            .replace(/\]\]>/g, ']\\]>');
     }
 
     private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string, options: VisualizationOptions) {

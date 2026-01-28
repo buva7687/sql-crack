@@ -21,9 +21,6 @@ interface FunctionsConfig {
 // Type assertion for the imported JSON
 const builtInFunctions = functionsData as unknown as FunctionsConfig;
 
-// Cache for merged function sets per dialect
-const functionCache = new Map<string, { aggregates: Set<string>; window: Set<string> }>();
-
 // Custom functions injected from extension context
 let customAggregateFunctions: string[] = [];
 let customWindowFunctions: string[] = [];
@@ -35,8 +32,6 @@ let customWindowFunctions: string[] = [];
 export function setCustomFunctions(aggregates: string[], window: string[]): void {
     customAggregateFunctions = aggregates.map(f => f.toUpperCase());
     customWindowFunctions = window.map(f => f.toUpperCase());
-    // Clear cache when custom functions change
-    functionCache.clear();
 }
 
 /**
@@ -71,9 +66,6 @@ function getCustomFunctions(): { aggregates: string[]; window: string[] } {
  */
 export function getFunctionsForDialect(dialect: string): { aggregates: Set<string>; window: Set<string> } {
     const normalizedDialect = normalizeDialect(dialect);
-
-    // Check cache first (but invalidate if settings might have changed)
-    // For simplicity, we rebuild on each call - this is fast enough
     const customFunctions = getCustomFunctions();
 
     // Get common functions
@@ -138,9 +130,3 @@ export function getSupportedDialects(): string[] {
     return Object.keys(builtInFunctions.dialects);
 }
 
-/**
- * Clears the function cache (useful for testing or when settings change)
- */
-export function clearFunctionCache(): void {
-    functionCache.clear();
-}
