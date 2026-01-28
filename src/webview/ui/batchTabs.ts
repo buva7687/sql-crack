@@ -4,11 +4,22 @@ import { BatchParseResult } from '../sqlParser';
 
 export interface BatchTabsCallbacks {
     onQuerySelect: (index: number) => void;
+    isDarkTheme: () => boolean;
 }
 
-export function createBatchTabs(container: HTMLElement): void {
+// Store current state for re-rendering on theme change
+let currentBatchResult: BatchParseResult | null = null;
+let currentQueryIdx: number = 0;
+let currentCallbacks: BatchTabsCallbacks | null = null;
+
+export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCallbacks): void {
     const tabsContainer = document.createElement('div');
     tabsContainer.id = 'batch-tabs';
+
+    const isDark = callbacks.isDarkTheme();
+    const bgColor = isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
     tabsContainer.style.cssText = `
         position: absolute;
         top: 60px;
@@ -17,13 +28,33 @@ export function createBatchTabs(container: HTMLElement): void {
         display: none;
         align-items: center;
         gap: 4px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${bgColor};
+        border: 1px solid ${borderColor};
         border-radius: 8px;
         padding: 6px 12px;
         z-index: 100;
     `;
     container.appendChild(tabsContainer);
+
+    // Listen for theme changes
+    document.addEventListener('theme-change', ((e: CustomEvent) => {
+        updateBatchTabsTheme(e.detail.dark);
+        // Re-render tabs if they exist
+        if (currentBatchResult && currentCallbacks) {
+            updateBatchTabs(currentBatchResult, currentQueryIdx, currentCallbacks);
+        }
+    }) as EventListener);
+}
+
+function updateBatchTabsTheme(dark: boolean): void {
+    const tabsContainer = document.getElementById('batch-tabs');
+    if (!tabsContainer) { return; }
+
+    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
+    tabsContainer.style.background = bgColor;
+    tabsContainer.style.borderColor = borderColor;
 }
 
 export function updateBatchTabs(
@@ -31,6 +62,11 @@ export function updateBatchTabs(
     currentQueryIndex: number,
     callbacks: BatchTabsCallbacks
 ): void {
+    // Store for theme change re-renders
+    currentBatchResult = batchResult;
+    currentQueryIdx = currentQueryIndex;
+    currentCallbacks = callbacks;
+
     const tabsContainer = document.getElementById('batch-tabs');
     if (!tabsContainer || !batchResult) { return; }
 
@@ -41,13 +77,22 @@ export function updateBatchTabs(
         return;
     }
 
+    // Theme-aware colors
+    const isDark = callbacks.isDarkTheme();
+    const textColor = isDark ? '#f1f5f9' : '#1e293b';
+    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
+    const textColorDim = isDark ? '#475569' : '#94a3b8';
+    const activeColor = isDark ? '#a5b4fc' : '#4f46e5';
+    const errorColor = isDark ? '#f87171' : '#dc2626';
+    const counterColor = isDark ? '#64748b' : '#94a3b8';
+
     tabsContainer.style.display = 'flex';
     tabsContainer.innerHTML = '';
 
     const navBtnStyle = (enabled: boolean) => `
         background: transparent;
         border: none;
-        color: ${enabled ? '#f1f5f9' : '#475569'};
+        color: ${enabled ? textColor : textColorDim};
         cursor: ${enabled ? 'pointer' : 'default'};
         padding: 4px 8px;
         font-size: 12px;
@@ -94,9 +139,9 @@ export function updateBatchTabs(
         tab.title = truncateSql(query.sql, 100);
         tab.style.cssText = `
             background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-            border: 1px solid ${isActive ? '#6366f1' : hasError ? '#ef4444' : 'transparent'};
+            border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : 'transparent'};
             border-radius: 4px;
-            color: ${hasError ? '#f87171' : isActive ? '#a5b4fc' : '#94a3b8'};
+            color: ${hasError ? errorColor : isActive ? activeColor : textColorMuted};
             cursor: pointer;
             padding: 4px 10px;
             font-size: 11px;
@@ -152,7 +197,7 @@ export function updateBatchTabs(
     // Query counter
     const counter = document.createElement('span');
     counter.style.cssText = `
-        color: #64748b;
+        color: ${counterColor};
         font-size: 11px;
         margin-left: 8px;
         padding-left: 8px;

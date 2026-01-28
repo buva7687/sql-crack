@@ -2151,17 +2151,36 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
     }
     if (!Array.isArray(columns)) { return []; }
 
+    // Helper to safely extract string from AST nodes that may be objects
+    const getStringValue = (val: any): string | null => {
+        if (val === null || val === undefined) {return null;}
+        if (typeof val === 'string') {return val;}
+        if (typeof val === 'number') {return String(val);}
+        // Handle objects with nested name/value properties
+        if (typeof val === 'object') {
+            if (typeof val.name === 'string') {return val.name;}
+            if (typeof val.value === 'string') {return val.value;}
+            if (typeof val.column === 'string') {return val.column;}
+        }
+        return null;
+    };
+
     return columns.map((col: any): ColumnInfo => {
         // Extract column name - prioritize alias, then column name, then expression
         let name: string;
-        if (col.as) {
-            name = String(col.as);
-        } else if (col.expr?.column) {
-            name = String(col.expr.column);
-        } else if (col.expr?.name) {
-            name = String(col.expr.name);
-        } else if (col.expr?.value) {
-            name = String(col.expr.value);
+        const aliasName = getStringValue(col.as);
+        const exprColumn = getStringValue(col.expr?.column);
+        const exprName = getStringValue(col.expr?.name);
+        const exprValue = getStringValue(col.expr?.value);
+
+        if (aliasName) {
+            name = aliasName;
+        } else if (exprColumn) {
+            name = exprColumn;
+        } else if (exprName) {
+            name = exprName;
+        } else if (exprValue) {
+            name = exprValue;
         } else if (typeof col === 'string') {
             name = col;
         } else {
@@ -2169,15 +2188,18 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
         }
         
         const expression = col.expr ? JSON.stringify(col.expr) : name;
-        
+        const sourceColName = getStringValue(col.expr?.column);
+        const sourceTableName = getStringValue(col.expr?.table) ||
+            (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined);
+
         return {
-            name: String(name),
+            name: name,
             expression: expression,
-            sourceColumn: col.expr?.column ? String(col.expr.column) : undefined,
-            sourceTable: col.expr?.table ? (typeof col.expr.table === 'string' ? col.expr.table : String(col.expr.table.table || col.expr.table.name || '')) : undefined,
+            sourceColumn: sourceColName || undefined,
+            sourceTable: sourceTableName || undefined,
             isAggregate: col.expr?.type === 'aggr_func' || false,
             isWindowFunc: !!col.expr?.over,
-            transformationType: col.as && col.expr?.column ? 'renamed' : 
+            transformationType: col.as && col.expr?.column ? 'renamed' :
                                col.expr?.type === 'aggr_func' ? 'aggregated' :
                                col.expr?.over ? 'calculated' : 'passthrough'
         };

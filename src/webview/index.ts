@@ -163,7 +163,14 @@ function init(): void {
     });
 
     // Create batch tabs
-    createBatchTabs(container);
+    createBatchTabs(container, {
+        onQuerySelect: (index: number) => {
+            currentQueryIndex = index;
+            renderCurrentQuery();
+            updateBatchTabsUI();
+        },
+        isDarkTheme
+    });
 
     // Parse and render initial SQL
     const sql = window.initialSqlCode || '';
@@ -277,7 +284,8 @@ function updateBatchTabsUI(): void {
             currentQueryIndex = index;
             renderCurrentQuery();
             updateBatchTabsUI();
-        }
+        },
+        isDarkTheme
     });
 }
 

@@ -3443,6 +3443,22 @@ function updateHintsPanel(): void {
 
     hintsPanel.style.display = 'block';
 
+    // Theme-aware colors
+    const isDark = state.isDarkTheme;
+    const textColor = isDark ? '#f1f5f9' : '#1e293b';
+    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
+    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+
+    // Theme-aware button/badge colors - darker versions for light theme
+    const colors = {
+        blue: isDark ? '#60a5fa' : '#2563eb',
+        amber: isDark ? '#fbbf24' : '#d97706',
+        green: isDark ? '#4ade80' : '#16a34a',
+        violet: isDark ? '#a78bfa' : '#7c3aed',
+        red: isDark ? '#f87171' : '#dc2626',
+        slate: isDark ? '#cbd5e1' : '#64748b'
+    };
+
     const hintColors: Record<string, { bg: string; border: string; icon: string }> = {
         'error': { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', icon: '⚠' },
         'warning': { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', icon: '⚡' },
@@ -3481,22 +3497,22 @@ function updateHintsPanel(): void {
 
     hintsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-            <span style="font-weight: 600; color: #f1f5f9;">Optimization Hints</span>
+            <span style="font-weight: 600; color: ${textColor};">Optimization Hints</span>
             <span style="
                 background: rgba(245, 158, 11, 0.2);
-                color: #fbbf24;
+                color: ${colors.amber};
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-size: 10px;
             ">${currentHints.length}</span>
         </div>
-        
+
         <!-- Category Filters -->
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
             ${perfCount > 0 ? `
                 <button class="hint-filter-btn" data-category="performance" style="
                     background: rgba(59, 130, 246, 0.2);
-                    color: #60a5fa;
+                    color: ${colors.blue};
                     border: 1px solid rgba(59, 130, 246, 0.3);
                     padding: 4px 8px;
                     border-radius: 4px;
@@ -3507,7 +3523,7 @@ function updateHintsPanel(): void {
             ${qualityCount > 0 ? `
                 <button class="hint-filter-btn" data-category="quality" style="
                     background: rgba(245, 158, 11, 0.2);
-                    color: #fbbf24;
+                    color: ${colors.amber};
                     border: 1px solid rgba(245, 158, 11, 0.3);
                     padding: 4px 8px;
                     border-radius: 4px;
@@ -3518,7 +3534,7 @@ function updateHintsPanel(): void {
             ${bestPracticeCount > 0 ? `
                 <button class="hint-filter-btn" data-category="best-practice" style="
                     background: rgba(34, 197, 94, 0.2);
-                    color: #4ade80;
+                    color: ${colors.green};
                     border: 1px solid rgba(34, 197, 94, 0.3);
                     padding: 4px 8px;
                     border-radius: 4px;
@@ -3529,7 +3545,7 @@ function updateHintsPanel(): void {
             ${complexityCount > 0 ? `
                 <button class="hint-filter-btn" data-category="complexity" style="
                     background: rgba(139, 92, 246, 0.2);
-                    color: #a78bfa;
+                    color: ${colors.violet};
                     border: 1px solid rgba(139, 92, 246, 0.3);
                     padding: 4px 8px;
                     border-radius: 4px;
@@ -3541,11 +3557,11 @@ function updateHintsPanel(): void {
 
         <!-- Severity Filters -->
         ${(highCount > 0 || mediumCount > 0 || lowCount > 0) ? `
-            <div style="display: flex; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+            <div style="display: flex; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
                 ${highCount > 0 ? `
                     <button class="hint-severity-btn" data-severity="high" style="
                         background: rgba(239, 68, 68, 0.2);
-                        color: #f87171;
+                        color: ${colors.red};
                         border: 1px solid rgba(239, 68, 68, 0.3);
                         padding: 4px 8px;
                         border-radius: 4px;
@@ -3556,7 +3572,7 @@ function updateHintsPanel(): void {
                 ${mediumCount > 0 ? `
                     <button class="hint-severity-btn" data-severity="medium" style="
                         background: rgba(245, 158, 11, 0.2);
-                        color: #fbbf24;
+                        color: ${colors.amber};
                         border: 1px solid rgba(245, 158, 11, 0.3);
                         padding: 4px 8px;
                         border-radius: 4px;
@@ -3567,7 +3583,7 @@ function updateHintsPanel(): void {
                 ${lowCount > 0 ? `
                     <button class="hint-severity-btn" data-severity="low" style="
                         background: rgba(148, 163, 184, 0.2);
-                        color: #cbd5e1;
+                        color: ${colors.slate};
                         border: 1px solid rgba(148, 163, 184, 0.3);
                         padding: 4px 8px;
                         border-radius: 4px;
@@ -3582,7 +3598,7 @@ function updateHintsPanel(): void {
         <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
             ${Object.entries(hintsByCategory).map(([category, hints]) => {
                 if (hints.length === 0) {return '';}
-                
+
                 const categoryLabels: Record<string, string> = {
                     'performance': '⚡ Performance',
                     'quality': '🔍 Quality',
@@ -3590,10 +3606,10 @@ function updateHintsPanel(): void {
                     'complexity': '📊 Complexity',
                     'other': '📝 Other'
                 };
-                
+
                 return `
                     <div class="hint-category" data-category="${category}" style="margin-bottom: 12px;">
-                        <div style="font-size: 10px; color: #94a3b8; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+                        <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
                             ${categoryLabels[category] || category} (${hints.length})
                         </div>
                         ${hints.map(hint => {
@@ -3601,7 +3617,7 @@ function updateHintsPanel(): void {
                             const severityBadge = hint.severity ? `
                                 <span style="
                                     background: ${hint.severity === 'high' ? 'rgba(239, 68, 68, 0.2)' : hint.severity === 'medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
-                                    color: ${hint.severity === 'high' ? '#f87171' : hint.severity === 'medium' ? '#fbbf24' : '#cbd5e1'};
+                                    color: ${hint.severity === 'high' ? colors.red : hint.severity === 'medium' ? colors.amber : colors.slate};
                                     padding: 2px 6px;
                                     border-radius: 4px;
                                     font-size: 9px;
@@ -3609,7 +3625,7 @@ function updateHintsPanel(): void {
                                     text-transform: uppercase;
                                 ">${hint.severity}</span>
                             ` : '';
-                            
+
                             return `
                                 <div class="hint-item" data-category="${hint.category || 'other'}" data-severity="${hint.severity || ''}" style="
                                     background: ${style.bg};
@@ -3618,11 +3634,11 @@ function updateHintsPanel(): void {
                                     margin-bottom: 8px;
                                     border-radius: 0 4px 4px 0;
                                 ">
-                                    <div style="color: #f1f5f9; font-size: 12px; margin-bottom: 4px; display: flex; align-items: center;">
+                                    <div style="color: ${textColor}; font-size: 12px; margin-bottom: 4px; display: flex; align-items: center;">
                                         ${style.icon} ${hint.message}${severityBadge}
                                     </div>
                                     ${hint.suggestion ? `
-                                        <div style="color: #94a3b8; font-size: 11px;">
+                                        <div style="color: ${textColorMuted}; font-size: 11px;">
                                             ${hint.suggestion}
                                         </div>
                                     ` : ''}

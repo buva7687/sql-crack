@@ -83,11 +83,15 @@ export function createToolbar(
         align-items: center;
         gap: 12px;
     `;
+    const isDark = callbacks.isDarkTheme();
+    const selectBg = isDark ? '#1e293b' : '#f1f5f9';
+    const selectColor = isDark ? '#f1f5f9' : '#1e293b';
+
     title.innerHTML = `
         <span>SQL Flow</span>
         <select id="dialect-select" style="
-            background: #1e293b;
-            color: #f1f5f9;
+            background: ${selectBg};
+            color: ${selectColor};
             border: 1px solid rgba(148, 163, 184, 0.2);
             border-radius: 4px;
             padding: 4px 8px;
@@ -925,6 +929,19 @@ export function updateToolbarTheme(
 
     const titleSpan = toolbar.querySelector('span');
     if (titleSpan) {titleSpan.style.color = textColor;}
+
+    // Update dialect select colors
+    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+    if (dialectSelect) {
+        dialectSelect.style.background = dark ? '#1e293b' : '#f1f5f9';
+        dialectSelect.style.color = textColor;
+    }
+
+    // Update search input colors
+    const searchInput = searchContainer.querySelector('input');
+    if (searchInput) {
+        searchInput.style.color = textColor;
+    }
 
     searchContainer.style.background = bgColor;
     searchContainer.style.borderColor = borderColor;
