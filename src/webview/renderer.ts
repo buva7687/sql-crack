@@ -5899,24 +5899,24 @@ function showColumnLineagePanel(): void {
         transform: translateY(-50%);
         background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
-        border-radius: 12px;
-        padding: 16px;
+        border-radius: 8px;
+        padding: 12px;
         max-height: 70vh;
         overflow-y: auto;
         z-index: 1000;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        min-width: 220px;
-        max-width: 280px;
+        min-width: 200px;
+        max-width: 260px;
     `;
 
     // Header
     const header = document.createElement('div');
     header.style.cssText = `
         font-weight: 600;
-        font-size: 13px;
+        font-size: 12px;
         color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
-        margin-bottom: 12px;
-        padding-bottom: 8px;
+        margin-bottom: 8px;
+        padding-bottom: 6px;
         border-bottom: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
         display: flex;
         justify-content: space-between;
@@ -5924,13 +5924,13 @@ function showColumnLineagePanel(): void {
     `;
     header.innerHTML = `
         <span>Column Lineage</span>
-        <span style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+        <span style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
     `;
     columnLineagePanel.appendChild(header);
 
     // List output columns
     const columnList = document.createElement('div');
-    columnList.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    columnList.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
 
     for (const flow of currentColumnFlows) {
         const columnItem = createColumnItem(flow);
@@ -5947,9 +5947,9 @@ function showColumnLineagePanel(): void {
 function createColumnItem(flow: ColumnFlow): HTMLElement {
     const item = document.createElement('div');
     item.style.cssText = `
-        padding: 10px 12px;
+        padding: 8px 10px;
         background: ${state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)'};
-        border-radius: 8px;
+        border-radius: 6px;
         cursor: pointer;
         transition: all 0.15s ease;
         border: 2px solid transparent;
@@ -5978,20 +5978,20 @@ function createColumnItem(flow: ColumnFlow): HTMLElement {
     }
 
     item.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-            <span style="font-weight: 600; font-size: 12px; color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};">
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+            <span style="font-weight: 600; font-size: 11px; color: ${state.isDarkTheme ? '#e2e8f0' : '#1e293b'};">
                 ${escapeHtml(flow.outputColumn)}
             </span>
             ${badge ? `<span style="
                 background: ${badgeColor};
                 color: white;
-                font-size: 9px;
+                font-size: 8px;
                 font-weight: 600;
-                padding: 2px 5px;
+                padding: 2px 4px;
                 border-radius: 3px;
             ">${badge}</span>` : ''}
         </div>
-        <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
+        <div style="font-size: 9px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
             ${firstStep ? escapeHtml(firstStep.nodeName) + '.' + escapeHtml(firstStep.columnName) : 'Unknown source'}
         </div>
     `;
