@@ -24,14 +24,42 @@ export function updateStatsPanel(): void {
     let tableListHtml = '';
     if (currentTableUsage && currentTableUsage.size > 0) {
         const sortedTables = Array.from(currentTableUsage.entries())
-            .sort((a, b) => b[1] - a[1]) // Sort by usage count descending
-            .slice(0, 8); // Show top 8 tables
+            .sort((a, b) => b[1] - a[1]); // Sort by usage count descending
+        
+        const allTableNames = sortedTables.map(([name]) => name).join(', ');
+        const displayTables = sortedTables.slice(0, 10); // Show top 10 tables
 
         tableListHtml = `
             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor};">
-                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 6px; font-weight: 600;">Tables Used:</div>
-                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;">
-                    ${sortedTables.map(([tableName, count]) => `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600;">Tables Used (${currentTableUsage.size}):</div>
+                    <button id="copy-tables-btn" 
+                            style="
+                                background: ${isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)'};
+                                border: 1px solid ${isDark ? 'rgba(99, 102, 241, 0.4)' : 'rgba(99, 102, 241, 0.3)'};
+                                color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                                padding: 2px 8px;
+                                border-radius: 4px;
+                                font-size: 9px;
+                                font-weight: 600;
+                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                gap: 4px;
+                                transition: all 0.2s;
+                            "
+                            onmouseover="this.style.background='${isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.15)'}'"
+                            onmouseout="this.style.background='${isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)'}'"
+                            title="Copy all table names to clipboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                        Copy
+                    </button>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
+                    ${displayTables.map(([tableName, count]) => `
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
                             <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
                             <span style="
@@ -45,9 +73,9 @@ export function updateStatsPanel(): void {
                             ">${count}</span>
                         </div>
                     `).join('')}
-                    ${currentTableUsage.size > 8 ? `
-                        <div style="font-size: 9px; color: ${textColorDim}; font-style: italic;">
-                            +${currentTableUsage.size - 8} more
+                    ${currentTableUsage.size > 10 ? `
+                        <div style="font-size: 9px; color: ${textColorDim}; font-style: italic; text-align: center; padding: 4px;">
+                            +${currentTableUsage.size - 10} more (use Copy button for all)
                         </div>
                     ` : ''}
                 </div>
@@ -67,7 +95,7 @@ export function updateStatsPanel(): void {
                 font-weight: 600;
             ">${currentStats.complexity}</span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px;">
             <div style="text-align: center;">
                 <div style="color: ${textColor}; font-weight: 600;">${currentStats.tables}</div>
                 <div style="font-size: 10px; color: ${textColorMuted};">Tables</div>
@@ -80,99 +108,70 @@ export function updateStatsPanel(): void {
                 <div style="color: ${textColor}; font-weight: 600;">${currentStats.conditions}</div>
                 <div style="font-size: 10px; color: ${textColorMuted};">Filters</div>
             </div>
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.complexityScore}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Score</div>
-            </div>
         </div>
-        ${currentStats.ctes > 0 || currentStats.subqueries > 0 || currentStats.windowFunctions > 0 ? `
-            <div style="display: flex; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; color: ${textColorMuted};">
-                ${currentStats.ctes > 0 ? `<span>CTEs: ${currentStats.ctes}</span>` : ''}
-                ${currentStats.subqueries > 0 ? `<span>Subqueries: ${currentStats.subqueries}</span>` : ''}
-                ${currentStats.windowFunctions > 0 ? `<span>Window: ${currentStats.windowFunctions}</span>` : ''}
-            </div>
-        ` : ''}
-        ${(currentStats.performanceScore !== undefined || currentStats.performanceIssues !== undefined) ? `
-            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid ${borderColor};">
-                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Performance</div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-                    ${currentStats.performanceScore !== undefined ? `
-                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
-                            <div style="color: ${currentStats.performanceScore >= 80 ? '#22c55e' : currentStats.performanceScore >= 60 ? '#eab308' : '#ef4444'}; font-weight: 600; font-size: 14px;">${currentStats.performanceScore}</div>
-                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Score</div>
-                        </div>
-                    ` : ''}
-                    ${currentStats.performanceIssues !== undefined ? `
-                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
-                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.performanceIssues}</div>
-                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Issues</div>
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
-        ` : ''}
-        ${(currentStats.maxCteDepth !== undefined || currentStats.maxFanOut !== undefined || currentStats.criticalPathLength !== undefined || currentStats.complexityBreakdown) ? `
-            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid ${borderColor};">
-                <div style="font-size: 10px; color: ${textColorMuted}; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Complexity Insights</div>
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px;">
-                    ${currentStats.maxCteDepth !== undefined ? `
-                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
-                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.maxCteDepth}</div>
-                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">CTE Depth</div>
-                        </div>
-                    ` : ''}
-                    ${currentStats.maxFanOut !== undefined ? `
-                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
-                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.maxFanOut}</div>
-                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Max Fan-Out</div>
-                        </div>
-                    ` : ''}
-                    ${currentStats.criticalPathLength !== undefined ? `
-                        <div style="text-align: center; background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 6px; border-radius: 4px;">
-                            <div style="color: ${textColor}; font-weight: 600; font-size: 14px;">${currentStats.criticalPathLength}</div>
-                            <div style="font-size: 9px; color: ${textColorMuted}; margin-top: 2px;">Path Length</div>
-                        </div>
-                    ` : ''}
-                </div>
-                ${currentStats.complexityBreakdown ? `
-                    <div style="background: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.5)'}; padding: 8px; border-radius: 4px;">
-                        <div style="font-size: 9px; color: ${textColorMuted}; margin-bottom: 6px; font-weight: 600;">Complexity Breakdown:</div>
-                        <div style="display: flex; flex-direction: column; gap: 4px;">
-                            ${currentStats.complexityBreakdown.joins > 0 ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                                    <span style="color: ${textColorMuted};">Joins</span>
-                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.joins}</span>
-                                </div>
-                            ` : ''}
-                            ${currentStats.complexityBreakdown.subqueries > 0 ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                                    <span style="color: ${textColorMuted};">Subqueries</span>
-                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.subqueries}</span>
-                                </div>
-                            ` : ''}
-                            ${currentStats.complexityBreakdown.ctes > 0 ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                                    <span style="color: ${textColorMuted};">CTEs</span>
-                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.ctes}</span>
-                                </div>
-                            ` : ''}
-                            ${currentStats.complexityBreakdown.aggregations > 0 ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                                    <span style="color: ${textColorMuted};">Aggregations</span>
-                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.aggregations}</span>
-                                </div>
-                            ` : ''}
-                            ${currentStats.complexityBreakdown.windowFunctions > 0 ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
-                                    <span style="color: ${textColorMuted};">Window Functions</span>
-                                    <span style="color: ${textColor}; font-weight: 600;">${currentStats.complexityBreakdown.windowFunctions}</span>
-                                </div>
-                            ` : ''}
-                        </div>
+        ${(currentStats.ctes > 0 || currentStats.subqueries > 0) ? `
+            <div style="display: flex; gap: 12px; margin-bottom: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; justify-content: center;">
+                ${currentStats.ctes > 0 ? `
+                    <div style="text-align: center;">
+                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.ctes}</div>
+                        <div style="font-size: 9px; color: ${textColorMuted};">CTE${currentStats.ctes !== 1 ? 's' : ''}</div>
+                    </div>
+                ` : ''}
+                ${currentStats.subqueries > 0 ? `
+                    <div style="text-align: center;">
+                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.subqueries}</div>
+                        <div style="font-size: 9px; color: ${textColorMuted};">Subquer${currentStats.subqueries !== 1 ? 'ies' : 'y'}</div>
                     </div>
                 ` : ''}
             </div>
         ` : ''}
         ${tableListHtml}
     `;
+
+    // Add event listener for copy button
+    const copyBtn = statsPanel.querySelector('#copy-tables-btn') as HTMLButtonElement | null;
+    if (copyBtn && currentTableUsage && currentTableUsage.size > 0) {
+        const sortedTables = Array.from(currentTableUsage.entries())
+            .sort((a, b) => b[1] - a[1]);
+        const allTableNames = sortedTables.map(([name]) => name).join(', ');
+        
+        // Remove existing listener if any
+        const newCopyBtn = copyBtn.cloneNode(true) as HTMLButtonElement;
+        copyBtn.parentNode?.replaceChild(newCopyBtn, copyBtn);
+        
+        newCopyBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                await navigator.clipboard.writeText(allTableNames);
+                const originalText = newCopyBtn.innerHTML;
+                newCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+                newCopyBtn.style.color = isDark ? '#34d399' : '#10b981';
+                setTimeout(() => {
+                    newCopyBtn.innerHTML = originalText;
+                    newCopyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
+                }, 2000);
+            } catch (err) {
+                // Fallback for browsers that don't support clipboard API
+                const textarea = document.createElement('textarea');
+                textarea.value = allTableNames;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    const originalText = newCopyBtn.innerHTML;
+                    newCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+                    newCopyBtn.style.color = isDark ? '#34d399' : '#10b981';
+                    setTimeout(() => {
+                        newCopyBtn.innerHTML = originalText;
+                        newCopyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
+                    }, 2000);
+                } catch (fallbackErr) {
+                    console.error('Failed to copy:', fallbackErr);
+                }
+                document.body.removeChild(textarea);
+            }
+        });
+    }
 }

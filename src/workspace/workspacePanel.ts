@@ -140,8 +140,8 @@ export class WorkspacePanel {
         this._extensionUri = extensionUri;
         this._indexManager = new IndexManager(context, dialect);
 
-        // Detect VS Code theme
-        this._isDarkTheme = vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light;
+        // Detect theme from settings or VS Code theme
+        this._isDarkTheme = this.getThemeFromSettings();
 
         // Handle panel disposal
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -168,8 +168,20 @@ export class WorkspacePanel {
         // Listen for VS Code theme changes
         vscode.window.onDidChangeActiveColorTheme(
             (theme) => {
-                this._isDarkTheme = theme.kind !== vscode.ColorThemeKind.Light;
+                this._isDarkTheme = this.getThemeFromSettings();
                 this.renderCurrentView();
+            },
+            null,
+            this._disposables
+        );
+
+        // Listen for configuration changes (theme preference)
+        vscode.workspace.onDidChangeConfiguration(
+            (e) => {
+                if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
+                    this._isDarkTheme = this.getThemeFromSettings();
+                    this.renderCurrentView();
+                }
             },
             null,
             this._disposables
@@ -2052,6 +2064,23 @@ ${nodesHtml}
     <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
 </body>
 </html>`;
+    }
+
+    /**
+     * Get theme preference from settings or VS Code theme
+     */
+    private getThemeFromSettings(): boolean {
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const themePreference = config.get<string>('advanced.defaultTheme', 'auto');
+
+        if (themePreference === 'light') {
+            return false;
+        } else if (themePreference === 'dark') {
+            return true;
+        } else {
+            // 'auto' - match VS Code theme
+            return vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light;
+        }
     }
 
     /**

@@ -37,21 +37,21 @@
       "editor/title": [
         {
           "command": "sql-crack.visualize",
-          "when": "editorLangId == sql",
+          "when": "resourceExtname == .sql",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "editorLangId == sql",
+          "when": "resourceExtname == .sql",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceLangId == sql",
+          "when": "resourceExtname == .sql",
           "group": "navigation"
         },
         {
@@ -72,7 +72,7 @@
         "command": "sql-crack.visualize",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
-        "when": "editorLangId == sql"
+        "when": "resourceExtname == .sql"
       }
     ],
     "configuration": {
@@ -187,6 +187,21 @@
           "type": "boolean",
           "default": false,
           "description": "Always rebuild index when VS Code opens the workspace. Overrides cache TTL. (Advanced)"
+        },
+        "sqlCrack.advanced.defaultTheme": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
+          "enumDescriptions": [
+            "Automatically match VS Code theme (default)",
+            "Always use dark theme",
+            "Always use light theme"
+          ],
+          "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },
         "sqlCrack.customAggregateFunctions": {
           "type": "array",

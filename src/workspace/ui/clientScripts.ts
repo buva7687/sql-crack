@@ -1024,11 +1024,98 @@ function getImpactFormScript(): string {
             const tableSelect = document.getElementById('impact-table-select');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+            const searchInput = document.getElementById('impact-search-input');
+            const searchClear = document.getElementById('impact-search-clear');
+            const filterChips = document.querySelectorAll('.view-filter-chip[data-filter]');
+            const resultsInfo = document.getElementById('impact-results-info');
+            const resultsCount = document.getElementById('impact-results-count');
+
+            // Store all original options
+            const allOptions = tableSelect ? Array.from(tableSelect.options) : [];
 
             changeTypeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     changeTypeButtons.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                });
+            });
+
+            // Filter function for search and filter chips
+            function filterImpactOptions() {
+                if (!tableSelect) return;
+
+                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const activeFilter = document.querySelector('.view-filter-chip.active[data-filter]');
+                const filterValue = activeFilter?.getAttribute('data-filter') || 'all';
+
+                // Clear existing options except the first (placeholder)
+                while (tableSelect.options.length > 1) {
+                    tableSelect.remove(1);
+                }
+
+                let visibleCount = 0;
+                allOptions.forEach((option, index) => {
+                    if (index === 0) return; // Skip placeholder
+
+                    const tableName = option.getAttribute('data-name') || '';
+                    const tableType = option.getAttribute('data-type') || '';
+                    const nameLower = tableName.toLowerCase();
+
+                    const matchesSearch = !searchQuery || nameLower.includes(searchQuery);
+                    const matchesFilter = filterValue === 'all' || tableType === filterValue;
+
+                    if (matchesSearch && matchesFilter) {
+                        tableSelect.appendChild(option.cloneNode(true));
+                        visibleCount++;
+                    }
+                });
+
+                // Update results info
+                if (resultsInfo && resultsCount) {
+                    if (searchQuery || filterValue !== 'all') {
+                        resultsInfo.style.display = 'block';
+                        resultsCount.textContent = visibleCount;
+                    } else {
+                        resultsInfo.style.display = 'none';
+                    }
+                }
+
+                // Show/hide clear button
+                if (searchClear) {
+                    searchClear.style.display = searchQuery ? 'flex' : 'none';
+                }
+
+                // Update analyze button state
+                if (analyzeBtn) {
+                    analyzeBtn.disabled = !tableSelect.value;
+                }
+            }
+
+            // Search input handler
+            if (searchInput) {
+                let debounceTimeout;
+                searchInput.addEventListener('input', () => {
+                    clearTimeout(debounceTimeout);
+                    debounceTimeout = setTimeout(filterImpactOptions, 200);
+                });
+            }
+
+            // Clear search button
+            if (searchClear) {
+                searchClear.addEventListener('click', () => {
+                    if (searchInput) {
+                        searchInput.value = '';
+                        filterImpactOptions();
+                    }
+                });
+            }
+
+            // Filter chip handlers
+            filterChips.forEach(chip => {
+                chip.addEventListener('click', () => {
+                    filterChips.forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    filterImpactOptions();
                 });
             });
 
@@ -1060,6 +1147,9 @@ function getImpactFormScript(): string {
                     });
                 });
             }
+
+            // Initial filter
+            filterImpactOptions();
         }
     `;
 }

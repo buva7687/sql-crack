@@ -20,19 +20,19 @@ export const WARNING_COLORS: Record<string, string> = {
 };
 
 export const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
-    table: { color: '#3b82f6', icon: '⊞', description: 'Source table' },
-    filter: { color: '#8b5cf6', icon: '⧩', description: 'WHERE/HAVING filter' },
-    join: { color: '#ec4899', icon: '⋈', description: 'JOIN operation' },
-    aggregate: { color: '#f59e0b', icon: 'Σ', description: 'GROUP BY aggregation' },
-    sort: { color: '#10b981', icon: '↕', description: 'ORDER BY sorting' },
-    limit: { color: '#06b6d4', icon: '⊟', description: 'LIMIT clause' },
-    select: { color: '#6366f1', icon: '▤', description: 'Column projection' },
-    result: { color: '#22c55e', icon: '◉', description: 'Query output' },
-    cte: { color: '#a855f7', icon: '↻', description: 'Common Table Expression' },
-    union: { color: '#f97316', icon: '∪', description: 'Set operation' },
-    subquery: { color: '#14b8a6', icon: '⊂', description: 'Subquery/Derived table' },
-    window: { color: '#d946ef', icon: '▦', description: 'Window function' },
-    case: { color: '#eab308', icon: '?:', description: 'CASE expression' }
+    table: { color: '#93c5fd', icon: '⊞', description: 'Source table' },
+    filter: { color: '#c4b5fd', icon: '⧩', description: 'WHERE/HAVING filter' },
+    join: { color: '#f9a8d4', icon: '⋈', description: 'JOIN operation' },
+    aggregate: { color: '#fcd34d', icon: 'Σ', description: 'GROUP BY aggregation' },
+    sort: { color: '#86efac', icon: '↕', description: 'ORDER BY sorting' },
+    limit: { color: '#67e8f9', icon: '⊟', description: 'LIMIT clause' },
+    select: { color: '#a5b4fc', icon: '▤', description: 'Column projection' },
+    result: { color: '#86efac', icon: '◉', description: 'Query output' },
+    cte: { color: '#c4b5fd', icon: '↻', description: 'Common Table Expression' },
+    union: { color: '#fdba74', icon: '∪', description: 'Set operation' },
+    subquery: { color: '#7dd3fc', icon: '⊂', description: 'Subquery/Derived table' },
+    window: { color: '#f0abfc', icon: '▦', description: 'Window function' },
+    case: { color: '#fde047', icon: '?:', description: 'CASE expression' }
 };
 
 export function getWarningIcon(warningType: string): string {

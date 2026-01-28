@@ -491,8 +491,18 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     flushSessionCommands();
 
     // Calculate total stats
+    // For tables, count unique tables across all queries (not sum, as same table in multiple queries should count as 1)
+    const allUniqueTables = new Set<string>();
+    for (const q of queries) {
+        if (q.tableUsage) {
+            q.tableUsage.forEach((count, tableName) => {
+                allUniqueTables.add(tableName);
+            });
+        }
+    }
+
     const totalStats: QueryStats = {
-        tables: 0,
+        tables: allUniqueTables.size, // Use unique table count
         joins: 0,
         subqueries: 0,
         ctes: 0,
@@ -505,7 +515,7 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
     };
 
     for (const q of queries) {
-        totalStats.tables += q.stats.tables;
+        // Don't add tables here, already counted above
         totalStats.joins += q.stats.joins;
         totalStats.subqueries += q.stats.subqueries;
         totalStats.ctes += q.stats.ctes;
@@ -767,6 +777,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Calculate column positions on nodes
         calculateColumnPositions(nodes);
+
+        // Update stats.tables to reflect the actual number of unique tables (including from CTEs and subqueries)
+        stats.tables = tableUsageMap.size;
 
         return { nodes, edges, stats, hints, sql, columnLineage, columnFlows, tableUsage: tableUsageMap };
     } catch (err) {
@@ -2440,9 +2453,16 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     // Extract tables from FROM clause
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            if (!fromItem.join) {
+            // Check for nested subqueries in FROM clause
+            if (fromItem.expr && fromItem.expr.ast) {
+                stats.subqueries++; // Count nested subqueries
+                // Recursively parse the nested subquery
+                parseCteOrSubqueryInternals(fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+            } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
                 if (tableName && tableName !== 'table') {
+                    // Track table usage for stats (including tables from CTEs and subqueries)
+                    trackTableUsage(tableName);
                     const tableId = genId('child_table');
                     nodes.push({
                         id: tableId,
@@ -2461,24 +2481,52 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             }
         }
 
-        // Add joins
+        // Add joins (also check for nested subqueries in joins)
         for (const fromItem of stmt.from) {
             if (fromItem.join) {
-                const joinId = genId('child_join');
-                const joinTable = getTableName(fromItem);
-                nodes.push({
-                    id: joinId,
-                    type: 'join',
-                    label: `${fromItem.join} ${joinTable}`,
-                    description: 'Join',
-                    parentId: parentId,
-                    depth: depth + 1,
-                    x: 0, y: 0, width: 120, height: 32
-                });
-                if (previousId) {
-                    edges.push({ id: genId('ce'), source: previousId, target: joinId });
+                // Check for nested subqueries in JOIN
+                if (fromItem.expr && fromItem.expr.ast) {
+                    stats.subqueries++; // Count nested subqueries in joins
+                    // Recursively parse the nested subquery
+                    parseCteOrSubqueryInternals(fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                } else {
+                    const joinId = genId('child_join');
+                    const joinTable = getTableName(fromItem);
+                    // Track table usage for joined tables in CTEs/subqueries
+                    if (joinTable && joinTable !== 'table') {
+                        trackTableUsage(joinTable);
+                    }
+                    nodes.push({
+                        id: joinId,
+                        type: 'join',
+                        label: `${fromItem.join} ${joinTable}`,
+                        description: 'Join',
+                        parentId: parentId,
+                        depth: depth + 1,
+                        x: 0, y: 0, width: 120, height: 32
+                    });
+                    if (previousId) {
+                        edges.push({ id: genId('ce'), source: previousId, target: joinId });
+                    }
+                    previousId = joinId;
                 }
-                previousId = joinId;
+            }
+        }
+    }
+
+    // Check for subqueries in WHERE clause
+    if (stmt.where) {
+        const whereSubqueries = findSubqueriesInExpression(stmt.where);
+        stats.subqueries += whereSubqueries.length;
+    }
+
+    // Check for subqueries in SELECT clause (scalar subqueries)
+    if (stmt.columns && Array.isArray(stmt.columns)) {
+        for (const col of stmt.columns) {
+            if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
+                stats.subqueries++; // Count scalar subqueries
+                // Recursively parse the nested subquery
+                parseCteOrSubqueryInternals(col.expr.ast, nodes, edges, parentId, depth + 1);
             }
         }
     }
@@ -2545,6 +2593,36 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             edges.push({ id: genId('ce'), source: previousId, target: sortId });
         }
     }
+}
+
+// Helper function to find subqueries in expressions (for counting nested subqueries)
+function findSubqueriesInExpression(expr: any): any[] {
+    const subqueries: any[] = [];
+    if (!expr) { return subqueries; }
+
+    // Check if this expression itself is a subquery
+    if (expr.type === 'select' || (expr.ast && expr.ast.type === 'select')) {
+        subqueries.push(expr.ast || expr);
+    }
+
+    // Recursively check left and right sides of binary expressions
+    if (expr.left) {
+        subqueries.push(...findSubqueriesInExpression(expr.left));
+    }
+    if (expr.right) {
+        subqueries.push(...findSubqueriesInExpression(expr.right));
+    }
+
+    // Check function arguments
+    if (expr.args && Array.isArray(expr.args)) {
+        for (const arg of expr.args) {
+            subqueries.push(...findSubqueriesInExpression(arg));
+        }
+    } else if (expr.args && expr.args.expr) {
+        subqueries.push(...findSubqueriesInExpression(expr.args.expr));
+    }
+
+    return subqueries;
 }
 
 function extractConditions(where: any): string[] {

@@ -3,19 +3,19 @@
 import { NodeType, Severity } from '../types';
 
 export const NODE_COLORS: Record<NodeType, string> = {
-    table: '#3b82f6',      // blue
-    filter: '#8b5cf6',     // purple
-    join: '#ec4899',       // pink
-    aggregate: '#f59e0b',  // amber
-    sort: '#10b981',       // green
-    limit: '#06b6d4',      // cyan
-    select: '#6366f1',     // indigo
-    result: '#22c55e',     // green
-    cte: '#a855f7',        // purple
-    union: '#f97316',      // orange
-    subquery: '#14b8a6',   // teal
-    window: '#d946ef',     // fuchsia
-    case: '#eab308',       // yellow
+    table: '#93c5fd',      // light blue (blue-300)
+    filter: '#c4b5fd',     // light purple (purple-300)
+    join: '#f9a8d4',       // light pink (pink-300)
+    aggregate: '#fcd34d',  // light amber (amber-300)
+    sort: '#86efac',       // light green (green-300)
+    limit: '#67e8f9',      // light cyan (cyan-300)
+    select: '#a5b4fc',     // light indigo (indigo-300)
+    result: '#86efac',     // light green (green-300)
+    cte: '#c4b5fd',        // light purple (purple-300)
+    union: '#fdba74',      // light orange (orange-300)
+    subquery: '#7dd3fc',   // light teal (sky-300)
+    window: '#f0abfc',     // light fuchsia (fuchsia-300)
+    case: '#fde047',       // light yellow (yellow-300)
 };
 
 export const WARNING_COLORS: Record<Severity, string> = {
