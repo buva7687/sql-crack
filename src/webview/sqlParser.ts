@@ -124,6 +124,9 @@ const SESSION_COMMAND_PATTERNS: Array<{
     { pattern: /^SET\s+(\w+)\s*=\s*(.+)/i, type: 'SET', description: (m) => `Set ${m[1]} = ${m[2]}` },
     { pattern: /^SET\s+(TRANSACTION|SESSION|LOCAL|GLOBAL)\s+(.+)/i, type: 'SET', description: (m) => `Set ${m[1]} ${m[2]}` },
 
+    // UNSET commands (Snowflake and others)
+    { pattern: /^UNSET\s+(\w+)/i, type: 'UNSET', description: (m) => `Unset variable: ${m[1]}` },
+
     // Snowflake ALTER SESSION
     { pattern: /^ALTER\s+SESSION\s+SET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Alter session: ${m[1]}`, dialects: ['Snowflake'] },
     { pattern: /^ALTER\s+SESSION\s+UNSET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Unset session param: ${m[1]}`, dialects: ['Snowflake'] },
@@ -144,8 +147,21 @@ const SESSION_COMMAND_PATTERNS: Array<{
     { pattern: /^REINDEX\s*(.*)/i, type: 'REINDEX', description: (m) => `Reindex${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
     { pattern: /^CLUSTER\s*(.*)/i, type: 'CLUSTER', description: (m) => `Cluster${m[1] ? ': ' + m[1] : ''}`, dialects: ['PostgreSQL'] },
 
-    // MySQL specific
+    // SHOW commands (various dialects) - specific patterns first
+    { pattern: /^SHOW\s+TRANSACTIONS/i, type: 'SHOW TRANSACTIONS', description: () => `Show transactions` },
+    { pattern: /^SHOW\s+VARIABLES(\s+LIKE\s+.+)?/i, type: 'SHOW VARIABLES', description: (m) => `Show variables${m[1] || ''}` },
+    { pattern: /^SHOW\s+PARAMETERS(\s+LIKE\s+.+)?/i, type: 'SHOW PARAMETERS', description: (m) => `Show parameters${m[1] || ''}`, dialects: ['Snowflake'] },
+    { pattern: /^SHOW\s+DATABASES/i, type: 'SHOW DATABASES', description: () => `Show databases` },
+    { pattern: /^SHOW\s+SCHEMAS/i, type: 'SHOW SCHEMAS', description: () => `Show schemas` },
+    { pattern: /^SHOW\s+TABLES(\s+IN\s+\S+)?/i, type: 'SHOW TABLES', description: (m) => `Show tables${m[1] || ''}` },
+    { pattern: /^SHOW\s+VIEWS(\s+IN\s+\S+)?/i, type: 'SHOW VIEWS', description: (m) => `Show views${m[1] || ''}` },
+    { pattern: /^SHOW\s+COLUMNS\s+(IN|FROM)\s+(\S+)/i, type: 'SHOW COLUMNS', description: (m) => `Show columns in ${m[2]}` },
+    { pattern: /^SHOW\s+GRANTS(\s+.+)?/i, type: 'SHOW GRANTS', description: (m) => `Show grants${m[1] || ''}` },
+    { pattern: /^SHOW\s+ROLES/i, type: 'SHOW ROLES', description: () => `Show roles`, dialects: ['Snowflake'] },
+    { pattern: /^SHOW\s+WAREHOUSES/i, type: 'SHOW WAREHOUSES', description: () => `Show warehouses`, dialects: ['Snowflake'] },
     { pattern: /^SHOW\s+(.+)/i, type: 'SHOW', description: (m) => `Show: ${m[1]}` },
+
+    // DESCRIBE commands
     { pattern: /^DESCRIBE\s+(\S+)/i, type: 'DESCRIBE', description: (m) => `Describe table: ${m[1]}` },
     { pattern: /^DESC\s+(\S+)/i, type: 'DESCRIBE', description: (m) => `Describe table: ${m[1]}` },
     { pattern: /^EXPLAIN\s+(.+)/i, type: 'EXPLAIN', description: (m) => `Explain: ${m[1].substring(0, 50)}...` },

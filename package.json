@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "buvan",
   "repository": {
     "type": "git",
@@ -17,7 +17,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:sql"
+    "onLanguage:sql",
+    "onCommand:sql-crack.visualize",
+    "onCommand:sql-crack.analyzeWorkspace"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -218,6 +220,14 @@
           },
           "default": [],
           "description": "Additional window function names to recognize (e.g., [\"MY_CUSTOM_RANK\"]). These are added to the built-in dialect functions."
+        },
+        "sqlCrack.additionalFileExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Additional file extensions to treat as SQL files (e.g., `[\".tpt\", \".dbsql\", \".hql\", \".bteq\"]`). Extensions should include the leading dot. These files will show the SQL Crack icon in the editor title bar and can be visualized."
         }
       }
     }

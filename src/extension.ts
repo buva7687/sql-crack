@@ -9,6 +9,9 @@ let lastActiveSqlDocument: vscode.TextDocument | null = null;
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Cache of additional file extensions
+let additionalExtensions: string[] = [];
+
 /**
  * Load custom functions from VS Code settings and inject into the function registry
  */
@@ -19,11 +22,68 @@ function loadCustomFunctions(): void {
     setCustomFunctions(customAggregates, customWindow);
 }
 
+/**
+ * Load additional file extensions from settings
+ */
+function loadAdditionalExtensions(): void {
+    const config = vscode.workspace.getConfiguration('sqlCrack');
+    additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
+    // Normalize extensions to lowercase and ensure they start with a dot
+    additionalExtensions = additionalExtensions.map(ext => {
+        ext = ext.toLowerCase().trim();
+        return ext.startsWith('.') ? ext : '.' + ext;
+    });
+}
+
+/**
+ * Check if a document is SQL-like (either .sql or in additional extensions)
+ */
+function isSqlLikeDocument(document: vscode.TextDocument): boolean {
+    // Check if it's a SQL language file
+    if (document.languageId === 'sql') {
+        return true;
+    }
+
+    // Check file extension against additional extensions
+    const fileName = document.fileName.toLowerCase();
+    for (const ext of additionalExtensions) {
+        if (fileName.endsWith(ext)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Check if a file URI has a SQL-like extension
+ */
+function isSqlLikeFile(uri: vscode.Uri): boolean {
+    const fileName = uri.fsPath.toLowerCase();
+
+    // Check for .sql extension
+    if (fileName.endsWith('.sql')) {
+        return true;
+    }
+
+    // Check additional extensions
+    for (const ext of additionalExtensions) {
+        if (fileName.endsWith(ext)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
     // Load custom functions from settings
     loadCustomFunctions();
+
+    // Load additional file extensions from settings
+    loadAdditionalExtensions();
 
     // Initialize VisualizationPanel with context for persistence
     VisualizationPanel.setContext(context);
@@ -33,13 +93,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Track active SQL document
     let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && editor.document.languageId === 'sql') {
+        if (editor && isSqlLikeDocument(editor.document)) {
             lastActiveSqlDocument = editor.document;
         }
     });
 
-    // Initialize with current editor if it's SQL
-    if (vscode.window.activeTextEditor?.document.languageId === 'sql') {
+    // Initialize with current editor if it's SQL-like
+    if (vscode.window.activeTextEditor && isSqlLikeDocument(vscode.window.activeTextEditor.document)) {
         lastActiveSqlDocument = vscode.window.activeTextEditor.document;
     }
 
@@ -132,7 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
         const config = getConfig();
         const syncEnabled = config.get<boolean>('syncEditorToFlow');
 
-        if (syncEnabled && e.textEditor.document.languageId === 'sql' && VisualizationPanel.currentPanel) {
+        if (syncEnabled && isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel) {
             const line = e.selections[0].active.line + 1; // 1-indexed
             const sql = e.textEditor.document.getText();
             
@@ -228,7 +288,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for document changes with debounced auto-refresh
     let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
-        if (e.document.languageId === 'sql' && VisualizationPanel.currentPanel) {
+        if (isSqlLikeDocument(e.document) && VisualizationPanel.currentPanel) {
             const config = getConfig();
             const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
             const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
@@ -261,11 +321,14 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // Listen for configuration changes to reload custom functions
+    // Listen for configuration changes to reload custom functions and file extensions
     const configChangeListener = vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('sqlCrack.customAggregateFunctions') ||
             e.affectsConfiguration('sqlCrack.customWindowFunctions')) {
             loadCustomFunctions();
+        }
+        if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
+            loadAdditionalExtensions();
         }
     });
 
