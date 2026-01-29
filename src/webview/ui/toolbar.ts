@@ -98,7 +98,7 @@ export function createToolbar(
 
     title.innerHTML = `
         <span>SQL Flow</span>
-        <select id="dialect-select" style="
+        <select id="dialect-select" title="SQL dialect for parsing" style="
             background: ${selectBg};
             color: ${selectColor};
             border: 1px solid rgba(148, 163, 184, 0.2);
@@ -181,6 +181,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.placeholder = 'Search nodes... (Ctrl+F)';
+    searchInput.title = 'Search by table name, type, or column. Supports regex patterns.';
     searchInput.style.cssText = `
         background: transparent;
         border: none;
