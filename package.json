@@ -208,6 +208,11 @@
           "default": true,
           "markdownDescription": "Show hints for columns selected but not used in WHERE/ORDER BY/GROUP BY/HAVING/JOIN clauses. Disable if you get too many false positives (columns used by application layer). (Advanced)"
         },
+        "sqlCrack.advanced.combineDdlStatements": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Combine consecutive DDL statements (CREATE TABLE, CREATE VIEW, etc.) into a single visualization block. Useful for schema files with many DDL statements. Shows count of tables/views created. (Advanced)"
+        },
         "sqlCrack.customAggregateFunctions": {
           "type": "array",
           "items": {

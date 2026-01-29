@@ -61,6 +61,7 @@ declare global {
         viewLocation?: string;
         defaultLayout?: string;
         showDeadColumnHints?: boolean;
+        combineDdlStatements?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -308,7 +309,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 // ============================================================
 
 function visualize(sql: string): void {
-    batchResult = parseSqlBatch(sql, currentDialect);
+    batchResult = parseSqlBatch(sql, currentDialect, undefined, {
+        combineDdlStatements: window.combineDdlStatements === true
+    });
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer
