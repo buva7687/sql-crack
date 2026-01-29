@@ -67,6 +67,7 @@ let legendPanel: HTMLDivElement | null = null;
 let sqlPreviewPanel: HTMLDivElement | null = null;
 let tooltipElement: HTMLDivElement | null = null;
 let breadcrumbPanel: HTMLDivElement | null = null;
+let contextMenuElement: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let currentNodes: FlowNode[] = [];
@@ -323,6 +324,32 @@ export function initRenderer(container: HTMLElement): void {
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
     container.appendChild(tooltipElement);
+
+    // Create context menu element
+    contextMenuElement = document.createElement('div');
+    contextMenuElement.id = 'node-context-menu';
+    contextMenuElement.style.cssText = `
+        position: fixed;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 8px;
+        padding: 4px 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+        color: #e2e8f0;
+        z-index: 2000;
+        display: none;
+        min-width: 180px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    `;
+    container.appendChild(contextMenuElement);
+
+    // Hide context menu on click outside
+    document.addEventListener('click', () => {
+        if (contextMenuElement) {
+            contextMenuElement.style.display = 'none';
+        }
+    });
 
     // Store container reference
     containerElement = container;
@@ -1047,6 +1074,13 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         } else {
             zoomToNode(node);
         }
+    });
+
+    // Right-click context menu
+    group.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu(node, e);
     });
 
     // Add collapse button for CTEs and subqueries with children
@@ -5930,6 +5964,213 @@ function hideTooltip(): void {
 }
 
 // ============================================================
+// Right-click Context Menu for Nodes
+// ============================================================
+
+function showContextMenu(node: FlowNode, e: MouseEvent): void {
+    if (!contextMenuElement) { return; }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const isDark = state.isDarkTheme;
+    const menuItemStyle = `
+        padding: 8px 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: background 0.1s;
+    `;
+    const menuItemHoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.15)';
+    const separatorStyle = `
+        height: 1px;
+        background: ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
+        margin: 4px 0;
+    `;
+
+    // Build menu items based on node type
+    let menuItems = `
+        <div class="ctx-menu-item" data-action="zoom" style="${menuItemStyle}">
+            <span style="width: 16px;">🔍</span>
+            <span>Zoom to node</span>
+        </div>
+        <div class="ctx-menu-item" data-action="focus-upstream" style="${menuItemStyle}">
+            <span style="width: 16px;">↑</span>
+            <span>Focus upstream</span>
+        </div>
+        <div class="ctx-menu-item" data-action="focus-downstream" style="${menuItemStyle}">
+            <span style="width: 16px;">↓</span>
+            <span>Focus downstream</span>
+        </div>
+        <div style="${separatorStyle}"></div>
+    `;
+
+    // Add collapse/expand for CTE/subquery nodes
+    if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible && node.children && node.children.length > 0) {
+        const isExpanded = node.expanded !== false;
+        menuItems += `
+            <div class="ctx-menu-item" data-action="toggle-expand" style="${menuItemStyle}">
+                <span style="width: 16px;">${isExpanded ? '📁' : '📂'}</span>
+                <span>${isExpanded ? 'Collapse children' : 'Expand children'}</span>
+            </div>
+        `;
+    }
+
+    // Add copy options
+    menuItems += `
+        <div class="ctx-menu-item" data-action="copy-label" style="${menuItemStyle}">
+            <span style="width: 16px;">📋</span>
+            <span>Copy node name</span>
+        </div>
+    `;
+
+    // Add copy details for certain node types
+    if (node.details && node.details.length > 0) {
+        menuItems += `
+            <div class="ctx-menu-item" data-action="copy-details" style="${menuItemStyle}">
+                <span style="width: 16px;">📄</span>
+                <span>Copy details</span>
+            </div>
+        `;
+    }
+
+    contextMenuElement.innerHTML = menuItems;
+
+    // Position the menu
+    const menuWidth = 180;
+    const menuHeight = contextMenuElement.offsetHeight || 200;
+    let left = e.clientX;
+    let top = e.clientY;
+
+    // Ensure menu stays within viewport
+    if (left + menuWidth > window.innerWidth) {
+        left = window.innerWidth - menuWidth - 10;
+    }
+    if (top + menuHeight > window.innerHeight) {
+        top = window.innerHeight - menuHeight - 10;
+    }
+
+    contextMenuElement.style.left = `${left}px`;
+    contextMenuElement.style.top = `${top}px`;
+    contextMenuElement.style.display = 'block';
+
+    // Update theme colors
+    contextMenuElement.style.background = isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+    contextMenuElement.style.color = isDark ? '#e2e8f0' : '#1e293b';
+    contextMenuElement.style.borderColor = isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(148, 163, 184, 0.4)';
+
+    // Add hover effects and click handlers
+    const items = contextMenuElement.querySelectorAll('.ctx-menu-item');
+    items.forEach(item => {
+        const itemEl = item as HTMLElement;
+        itemEl.addEventListener('mouseenter', () => {
+            itemEl.style.background = menuItemHoverBg;
+        });
+        itemEl.addEventListener('mouseleave', () => {
+            itemEl.style.background = 'transparent';
+        });
+        itemEl.addEventListener('click', (clickE) => {
+            clickE.stopPropagation();
+            const action = itemEl.getAttribute('data-action');
+            handleContextMenuAction(action, node);
+            contextMenuElement!.style.display = 'none';
+        });
+    });
+}
+
+function handleContextMenuAction(action: string | null, node: FlowNode): void {
+    switch (action) {
+        case 'zoom':
+            selectNode(node.id);
+            zoomToNode(node);
+            break;
+        case 'focus-upstream':
+            selectNode(node.id);
+            setFocusMode('upstream');
+            zoomToNode(node);
+            break;
+        case 'focus-downstream':
+            selectNode(node.id);
+            setFocusMode('downstream');
+            zoomToNode(node);
+            break;
+        case 'toggle-expand':
+            if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
+                node.expanded = node.expanded === false ? true : false;
+                // Re-render to show/hide cloud
+                const result: ParseResult = {
+                    nodes: currentNodes,
+                    edges: currentEdges,
+                    stats: currentStats!,
+                    hints: currentHints,
+                    sql: currentSql,
+                    columnLineage: currentColumnLineage,
+                    tableUsage: currentTableUsage
+                };
+                render(result);
+            }
+            break;
+        case 'copy-label':
+            navigator.clipboard.writeText(node.label).then(() => {
+                showCopyFeedback('Node name copied!');
+            });
+            break;
+        case 'copy-details':
+            if (node.details && node.details.length > 0) {
+                const detailsText = node.details.join('\n');
+                navigator.clipboard.writeText(detailsText).then(() => {
+                    showCopyFeedback('Details copied!');
+                });
+            }
+            break;
+    }
+}
+
+function showCopyFeedback(message: string): void {
+    // Create a temporary feedback element
+    const feedback = document.createElement('div');
+    feedback.textContent = message;
+    feedback.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(16, 185, 129, 0.9);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        z-index: 3000;
+        animation: fadeInOut 1.5s ease forwards;
+    `;
+
+    // Add animation style if not exists
+    if (!document.getElementById('copy-feedback-style')) {
+        const style = document.createElement('style');
+        style.id = 'copy-feedback-style';
+        style.textContent = `
+            @keyframes fadeInOut {
+                0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+                15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    document.body.appendChild(feedback);
+    setTimeout(() => feedback.remove(), 1500);
+}
+
+function hideContextMenu(): void {
+    if (contextMenuElement) {
+        contextMenuElement.style.display = 'none';
+    }
+}
+
+// ============================================================
 // REDESIGNED: Column-Level Lineage Visualization
 // Click-based approach with full lineage paths
 // ============================================================
@@ -6378,7 +6619,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'T', description: 'Toggle theme' },
         { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
         { key: 'S', description: 'Toggle SQL preview' },
-        { key: 'C', description: 'Toggle column flows' },
+        { key: 'C', description: 'Toggle column lineage' },
         { key: 'Q', description: 'Toggle query stats' },
         { key: 'O', description: 'Toggle optimization hints' },
         { key: 'U', description: 'Focus upstream nodes' },

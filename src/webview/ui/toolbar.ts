@@ -449,14 +449,14 @@ function createFeatureGroup(
     sqlBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(sqlBtn);
 
-    // Column Flow toggle button
+    // Column Lineage toggle button
     let columnFlowActive = false;
     const columnFlowBtn = createButton('📊', () => {
         columnFlowActive = !columnFlowActive;
         callbacks.onToggleColumnFlows(columnFlowActive);
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
     });
-    columnFlowBtn.title = 'Toggle column flow visualization (C)';
+    columnFlowBtn.title = 'Toggle column lineage (C)';
     columnFlowBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(columnFlowBtn);
 

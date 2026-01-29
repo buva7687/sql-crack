@@ -187,7 +187,7 @@ Analyze cross-file dependencies:
 | `U` | Focus upstream only |
 | `D` | Focus downstream only |
 | `A` | Show all connections |
-| `C` | Toggle column details |
+| `C` | Toggle column lineage |
 | `Scroll` | Zoom in/out |
 | `Drag` | Pan the view |
 
