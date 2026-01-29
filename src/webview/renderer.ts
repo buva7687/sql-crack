@@ -2877,7 +2877,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             right: 8px;
             background: transparent;
             border: none;
-            color: #94a3b8;
+            color: ${UI_COLORS.textMuted};
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
@@ -2892,16 +2892,16 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 font-weight: 700;
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
-            <div style="color: #cbd5e1; font-size: 13px; font-weight: 600;">
+            <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
                 ${edge.label || 'Data Flow'}
             </div>
         </div>
         <div style="
-            background: rgba(30, 41, 59, 0.6);
-            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: ${UI_COLORS.backgroundSubtleDark};
+            border: 1px solid ${UI_COLORS.border};
             border-radius: 8px;
             padding: 12px;
-            color: #e2e8f0;
+            color: ${UI_COLORS.textBright};
             font-size: 13px;
             line-height: 1.6;
             white-space: pre-wrap;
@@ -2910,7 +2910,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             overflow-y: auto;
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
-            <div style="color: #94a3b8; font-size: 11px; margin-top: 8px;">
+            <div style="color: ${UI_COLORS.textMuted}; font-size: 11px; margin-top: 8px;">
                 📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
@@ -4895,8 +4895,8 @@ function updateLegendPanel(): void {
 
     legendPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">Node Types</span>
-            <button id="close-legend" style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 14px;">&times;</button>
+            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">Node Types</span>
+            <button id="close-legend" style="background: none; border: none; color: ${UI_COLORS.textDim}; cursor: pointer; font-size: 14px;">&times;</button>
         </div>
         <div style="display: flex; flex-direction: column; gap: 6px;">
             ${Object.entries(NODE_TYPE_INFO).map(([type, info]) => `
@@ -4913,70 +4913,70 @@ function updateLegendPanel(): void {
                         color: white;
                     ">${info.icon}</span>
                     <div style="flex: 1;">
-                        <div style="color: #e2e8f0; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                        <div style="color: #64748b; font-size: 9px;">${info.description}</div>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                        <div style="color: ${UI_COLORS.textDim}; font-size: 9px;">${info.description}</div>
                     </div>
                 </div>
             `).join('')}
         </div>
-        <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
-            <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
+        <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
+            <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
             <div style="display: flex; flex-direction: column; gap: 5px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #3b82f6;
+                        background: ${BADGE_COLORS.read};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
-                        border: 2px solid rgba(255,255,255,0.3);
+                        border: 2px solid ${UI_COLORS.borderWhite};
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">Physical Table</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Physical Table</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #3b82f6;
+                        background: ${BADGE_COLORS.read};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
-                        border: 3px dashed rgba(168, 85, 247, 0.8);
+                        border: 3px dashed ${NODE_STROKE_COLORS.cte};
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">CTE Reference</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">CTE Reference</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #14b8a6;
+                        background: ${BADGE_COLORS.derivedAlt};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
                         border: 2px dashed rgba(20, 184, 166, 0.8);
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">Derived Table</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Derived Table</div>
                 </div>
             </div>
         </div>
         ${state.showColumnFlows ? `
-            <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
-                <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
+            <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
+                <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
                 <div style="display: flex; flex-direction: column; gap: 5px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #10b981; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Source Table</div>
+                        <span style="background: ${BADGE_COLORS.orderBy}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Source Table</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #3b82f6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Renamed/Alias</div>
+                        <span style="background: ${BADGE_COLORS.read}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Renamed/Alias</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #f59e0b; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Aggregated</div>
+                        <span style="background: ${BADGE_COLORS.frame}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Aggregated</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #8b5cf6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Calculated</div>
+                        <span style="background: ${BADGE_COLORS.merge}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Calculated</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #ec4899; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Joined</div>
+                        <span style="background: ${CONDITION_COLORS.having}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Joined</div>
                     </div>
                 </div>
             </div>
