@@ -577,22 +577,32 @@ function createMergedDdlResult(
     const combinedSql = commands.map(c => c.sql).join(';\n');
     const combinedLineCount = combinedSql.split('\n').length;
 
-    // Count objects by type
-    const counts: Record<string, number> = {};
+    // Group objects by type+keyword
+    const groups: Record<string, string[]> = {};
     for (const cmd of commands) {
         const key = `${cmd.type} ${cmd.keyword}`;
-        counts[key] = (counts[key] || 0) + 1;
+        if (!groups[key]) {
+            groups[key] = [];
+        }
+        groups[key].push(cmd.objectName);
     }
 
-    // Build summary label
+    // Build summary label (counts)
     const summaryParts: string[] = [];
-    for (const [key, count] of Object.entries(counts)) {
-        summaryParts.push(`${count} ${key}${count > 1 ? 's' : ''}`);
+    for (const [key, names] of Object.entries(groups)) {
+        summaryParts.push(`${names.length} ${key}${names.length > 1 ? 's' : ''}`);
     }
     const summaryLabel = summaryParts.join(', ');
 
-    // Build detailed description
-    const descriptions = commands.map(c => `• ${c.type} ${c.keyword}: ${c.objectName}`).join('\n');
+    // Build concise description - group names by type
+    const descriptionParts: string[] = [];
+    for (const [key, names] of Object.entries(groups)) {
+        // Extract just the object type (TABLE, VIEW, etc.)
+        const objectType = key.split(' ').slice(1).join(' ');
+        const plural = names.length > 1 ? 's' : '';
+        descriptionParts.push(`${objectType}${plural}: ${names.join(', ')}`);
+    }
+    const descriptions = descriptionParts.join('\n');
 
     // Create a single node with all DDL commands
     const nodeId = genId('ddl');

@@ -134,11 +134,17 @@
           "default": "vertical",
           "enum": [
             "vertical",
-            "horizontal"
+            "horizontal",
+            "compact",
+            "force",
+            "radial"
           ],
           "enumDescriptions": [
             "Vertical layout (top-to-bottom flow)",
-            "Horizontal layout (left-to-right flow)"
+            "Horizontal layout (left-to-right flow)",
+            "Compact layout (tighter spacing)",
+            "Force-directed layout (physics-based positioning)",
+            "Radial layout (root at center, levels as rings)"
           ],
           "description": "Default graph layout direction"
         },
