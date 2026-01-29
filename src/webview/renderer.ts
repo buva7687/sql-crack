@@ -90,12 +90,14 @@ export function initRenderer(container: HTMLElement): void {
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
+    svg.setAttribute('tabindex', '-1'); // Make SVG focusable for keyboard events
     svg.style.background = '#0f172a';
     svg.style.cursor = 'grab';
     svg.style.position = 'absolute';
     svg.style.top = '0';
     svg.style.left = '0';
     svg.style.zIndex = '1';
+    svg.style.outline = 'none'; // Remove focus outline
 
     // Add defs for markers (arrows) and patterns
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -1037,6 +1039,9 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         // Single click selects the node (double-click opens cloud, X button closes)
         selectNode(node.id);
         hideTooltip();
+
+        // Focus SVG to ensure keyboard events work
+        svg?.focus();
     });
 
     // Double click to zoom to node or open cloud
@@ -1081,6 +1086,8 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         } else {
             zoomToNode(node);
         }
+        // Focus SVG to ensure keyboard events work
+        svg?.focus();
     });
 
     // Right-click context menu
@@ -1088,6 +1095,8 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         e.preventDefault();
         e.stopPropagation();
         showContextMenu(node, e);
+        // Focus SVG to ensure keyboard events work
+        svg?.focus();
     });
 
     // Add collapse button for CTEs and subqueries with children
