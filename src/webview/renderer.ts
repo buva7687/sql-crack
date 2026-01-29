@@ -6105,12 +6105,14 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
         case 'focus-upstream':
             selectNode(node.id);
             setFocusMode('upstream');
-            zoomToNode(node);
+            state.focusModeEnabled = true;
+            applyFocusMode(node.id);
             break;
         case 'focus-downstream':
             selectNode(node.id);
             setFocusMode('downstream');
-            zoomToNode(node);
+            state.focusModeEnabled = true;
+            applyFocusMode(node.id);
             break;
         case 'reset-view':
             selectNode(null);
