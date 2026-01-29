@@ -203,6 +203,11 @@
           ],
           "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },
+        "sqlCrack.advanced.showDeadColumnHints": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show hints for columns selected but not used in WHERE/ORDER BY/GROUP BY/HAVING/JOIN clauses. Disable if you get too many false positives (columns used by application layer). (Advanced)"
+        },
         "sqlCrack.customAggregateFunctions": {
           "type": "array",
           "items": {

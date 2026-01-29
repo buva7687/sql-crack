@@ -520,19 +520,21 @@ function detectNonSargableExpressions(
             
             if (args && args.type === 'column_ref') {
                 const columnName = args.column || (args.table ? `${args.table}.${args.column}` : '');
-                
-                // Common non-sargable patterns
-                if (funcName === 'YEAR' || funcName === 'MONTH' || funcName === 'DAY') {
-                    const hint: OptimizationHint = {
+
+                // Common non-sargable patterns - functions that prevent index usage
+                if (funcName === 'YEAR' || funcName === 'MONTH' || funcName === 'DAY' ||
+                    funcName === 'DATE' || funcName === 'DATEPART' || funcName === 'EXTRACT') {
+                    // Date extraction functions
+                    hints.push({
                         type: 'warning',
                         message: `Function ${funcName}() on column ${columnName} prevents index usage`,
-                        suggestion: `Rewrite as: ${columnName} >= '2024-01-01' AND ${columnName} < '2025-01-01' (for YEAR)`,
+                        suggestion: `Rewrite as range condition: ${columnName} >= '2024-01-01' AND ${columnName} < '2025-01-01'`,
                         category: 'performance',
                         severity: 'high',
                         nodeId: undefined
-                    };
-                    hints.push(hint);
-                } else if (funcName === 'UPPER' || funcName === 'LOWER') {
+                    });
+                } else if (funcName === 'UPPER' || funcName === 'LOWER' || funcName === 'UCASE' || funcName === 'LCASE') {
+                    // Case conversion functions
                     hints.push({
                         type: 'warning',
                         message: `Function ${funcName}() on column prevents index usage`,
@@ -540,15 +542,89 @@ function detectNonSargableExpressions(
                         category: 'performance',
                         severity: 'medium'
                     });
-                } else if (funcName !== 'COUNT' && funcName !== 'SUM' && funcName !== 'AVG' && funcName !== 'MAX' && funcName !== 'MIN') {
+                } else if (funcName === 'TRIM' || funcName === 'LTRIM' || funcName === 'RTRIM' ||
+                           funcName === 'SUBSTRING' || funcName === 'SUBSTR' || funcName === 'LEFT' || funcName === 'RIGHT') {
+                    // String manipulation functions
+                    hints.push({
+                        type: 'warning',
+                        message: `Function ${funcName}() on column prevents index usage`,
+                        suggestion: 'Store pre-processed values or use computed columns with indexes',
+                        category: 'performance',
+                        severity: 'medium'
+                    });
+                } else if (funcName === 'CAST' || funcName === 'CONVERT' || funcName === 'TO_CHAR' ||
+                           funcName === 'TO_NUMBER' || funcName === 'TO_DATE') {
+                    // Type conversion functions
+                    hints.push({
+                        type: 'warning',
+                        message: `${funcName}() on column prevents index usage`,
+                        suggestion: 'Ensure column types match comparison values to avoid implicit conversion',
+                        category: 'performance',
+                        severity: 'high'
+                    });
+                } else if (funcName === 'COALESCE' || funcName === 'NVL' || funcName === 'ISNULL' || funcName === 'IFNULL') {
+                    // Null handling functions in WHERE clause
+                    hints.push({
+                        type: 'info',
+                        message: `${funcName}() on column may prevent index usage`,
+                        suggestion: 'Consider IS NULL / IS NOT NULL conditions or nullable column design',
+                        category: 'performance',
+                        severity: 'medium'
+                    });
+                } else if (funcName === 'CONCAT' || funcName === 'REPLACE' || funcName === 'REVERSE') {
+                    // Other string functions
+                    hints.push({
+                        type: 'warning',
+                        message: `Function ${funcName}() on column prevents index usage`,
+                        suggestion: 'Store derived values in a computed/generated column with an index',
+                        category: 'performance',
+                        severity: 'medium'
+                    });
+                } else if (funcName !== 'COUNT' && funcName !== 'SUM' && funcName !== 'AVG' &&
+                           funcName !== 'MAX' && funcName !== 'MIN' && funcName !== 'ROW_NUMBER' &&
+                           funcName !== 'RANK' && funcName !== 'DENSE_RANK') {
+                    // Generic warning for other functions on columns
                     hints.push({
                         type: 'info',
                         message: `Function ${funcName}() on column may prevent index usage`,
                         suggestion: 'Consider rewriting to avoid function on indexed column',
                         category: 'performance',
-                        severity: 'medium'
+                        severity: 'low'
                     });
                 }
+            }
+        }
+
+        // Check for implicit type conversions (arithmetic on columns)
+        if (expr.type === 'binary_expr' && expr.left?.type === 'column_ref') {
+            const op = expr.operator;
+            const right = expr.right;
+
+            // Detect patterns like: column + 0, column * 1, column / 1, column || ''
+            if ((op === '+' || op === '-') && right?.type === 'number' && right.value === 0) {
+                hints.push({
+                    type: 'warning',
+                    message: 'Arithmetic operation on column may cause implicit type conversion',
+                    suggestion: 'Ensure proper type matching to avoid index scan',
+                    category: 'performance',
+                    severity: 'medium'
+                });
+            } else if ((op === '*' || op === '/') && right?.type === 'number' && right.value === 1) {
+                hints.push({
+                    type: 'info',
+                    message: 'Redundant arithmetic operation on column',
+                    suggestion: 'Remove unnecessary multiplication/division by 1',
+                    category: 'performance',
+                    severity: 'low'
+                });
+            } else if (op === '||' && right?.type === 'string' && right.value === '') {
+                hints.push({
+                    type: 'warning',
+                    message: 'String concatenation on column prevents index usage',
+                    suggestion: 'Remove concatenation with empty string if used for type conversion',
+                    category: 'performance',
+                    severity: 'medium'
+                });
             }
         }
         
