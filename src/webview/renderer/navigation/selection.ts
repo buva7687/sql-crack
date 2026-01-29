@@ -34,7 +34,7 @@ export function highlightConnectedEdges(nodeId: string, highlight: boolean): voi
     });
 }
 
-export function selectNode(nodeId: string | null): void {
+export function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean }): void {
     state.selectedNodeId = nodeId;
 
     // Update visual selection
@@ -68,7 +68,8 @@ export function selectNode(nodeId: string | null): void {
 
     // Phase 1 Feature: Click Node → Jump to SQL
     // Navigate to the SQL definition when a node is clicked
-    if (nodeId) {
+    // Skip navigation when zooming/focusing to keep keyboard focus in webview
+    if (nodeId && !options?.skipNavigation) {
         const node = currentNodes.find(n => n.id === nodeId);
         if (node && typeof window !== 'undefined') {
             const vscodeApi = (window as any).vscodeApi;
@@ -153,7 +154,7 @@ export function navigateToConnectedNode(direction: 'upstream' | 'downstream'): b
     const targetNode = currentNodes.find(n => n.id === targetNodeId);
 
     if (targetNode) {
-        selectNode(targetNodeId);
+        selectNode(targetNodeId, { skipNavigation: true });
         zoomToNode(targetNode);
         return true;
     }
