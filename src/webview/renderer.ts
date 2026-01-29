@@ -5504,41 +5504,112 @@ export function toggleNodeCollapse(nodeId: string): void {
 
 /**
  * Calculate stacked cloud offsets to prevent overlap when expanding all.
- * Clouds are positioned vertically from top to bottom with spacing.
+ * Uses a grid-based layout that positions clouds in rows to the left of the main diagram.
  */
 function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
-    const cloudGap = 30;
     const cloudPadding = 15;
-    const verticalSpacing = 20; // Space between stacked clouds
+    const horizontalSpacing = 40; // Space between clouds horizontally
+    const verticalSpacing = 40;   // Space between cloud rows
+    const cloudGap = 50;          // Gap between cloud area and main diagram
 
-    // Sort nodes by their Y position (top to bottom)
-    const sortedNodes = [...expandableNodes].sort((a, b) => a.y - b.y);
+    // First, calculate dimensions for all clouds
+    interface CloudInfo {
+        node: FlowNode;
+        width: number;
+        height: number;
+    }
 
-    // Track the bottom edge of the last placed cloud
-    let nextCloudY = -Infinity;
-
-    for (const node of sortedNodes) {
-        // Calculate cloud dimensions
+    const cloudInfos: CloudInfo[] = [];
+    for (const node of expandableNodes) {
         const childEdges = currentEdges.filter(e =>
             node.children?.some(c => c.id === e.source || c.id === e.target)
         );
         const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
-        const cloudWidth = layoutSize.width + cloudPadding * 2;
-        const cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+        cloudInfos.push({
+            node,
+            width: layoutSize.width + cloudPadding * 2,
+            height: layoutSize.height + cloudPadding * 2 + 30 // +30 for title
+        });
+    }
 
-        // Default X position: left of the node
-        const offsetX = -cloudWidth - cloudGap;
+    // Sort clouds by their parent node's position (left-to-right, top-to-bottom)
+    // This keeps visual association between cloud and its reference node
+    cloudInfos.sort((a, b) => {
+        const yDiff = a.node.y - b.node.y;
+        if (Math.abs(yDiff) > 50) return yDiff; // Different rows
+        return a.node.x - b.node.x; // Same row, sort by X
+    });
 
-        // Calculate Y position to avoid overlap
-        // Start at node's Y position, but ensure no overlap with previous clouds
-        const idealCloudY = node.y - (cloudHeight - node.height) / 2;
-        const cloudY = Math.max(idealCloudY, nextCloudY + verticalSpacing);
-        const offsetY = cloudY - node.y;
+    // Find the leftmost node position to place clouds to its left
+    const minNodeX = Math.min(...currentNodes.map(n => n.x));
 
-        cloudOffsets.set(node.id, { offsetX, offsetY });
+    // Calculate total width needed for all clouds in a single row
+    const totalCloudWidth = cloudInfos.reduce((sum, c) => sum + c.width, 0) +
+                           (cloudInfos.length - 1) * horizontalSpacing;
 
-        // Update next available Y position
-        nextCloudY = cloudY + cloudHeight;
+    // Determine layout strategy based on number of clouds and their sizes
+    const maxRowWidth = 800; // Max width for a row of clouds
+    const useMultipleRows = totalCloudWidth > maxRowWidth || cloudInfos.length > 3;
+
+    if (useMultipleRows) {
+        // Grid layout: arrange clouds in multiple rows
+        const rows: CloudInfo[][] = [];
+        let currentRow: CloudInfo[] = [];
+        let currentRowWidth = 0;
+
+        for (const cloud of cloudInfos) {
+            if (currentRowWidth + cloud.width > maxRowWidth && currentRow.length > 0) {
+                rows.push(currentRow);
+                currentRow = [cloud];
+                currentRowWidth = cloud.width;
+            } else {
+                currentRow.push(cloud);
+                currentRowWidth += cloud.width + horizontalSpacing;
+            }
+        }
+        if (currentRow.length > 0) {
+            rows.push(currentRow);
+        }
+
+        // Position clouds row by row
+        let currentY = 0;
+        for (const row of rows) {
+            const rowHeight = Math.max(...row.map(c => c.height));
+            let currentX = 0;
+
+            for (const cloud of row) {
+                // Calculate offset relative to the node's position
+                // Position cloud to the LEFT of the diagram
+                const cloudAbsX = minNodeX - cloudGap - totalCloudWidth + currentX;
+                const cloudAbsY = currentY;
+
+                const offsetX = cloudAbsX - cloud.node.x;
+                const offsetY = cloudAbsY - cloud.node.y;
+
+                cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
+
+                currentX += cloud.width + horizontalSpacing;
+            }
+
+            currentY += rowHeight + verticalSpacing;
+        }
+    } else {
+        // Single row layout: all clouds in one horizontal row
+        let currentX = 0;
+        const maxHeight = Math.max(...cloudInfos.map(c => c.height));
+
+        for (const cloud of cloudInfos) {
+            // Position cloud to the LEFT of the diagram, vertically centered
+            const cloudAbsX = minNodeX - cloudGap - totalCloudWidth + currentX;
+            const cloudAbsY = (maxHeight - cloud.height) / 2; // Center vertically in row
+
+            const offsetX = cloudAbsX - cloud.node.x;
+            const offsetY = cloudAbsY - cloud.node.y;
+
+            cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
+
+            currentX += cloud.width + horizontalSpacing;
+        }
     }
 }
 
