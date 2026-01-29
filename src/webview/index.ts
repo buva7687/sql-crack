@@ -176,6 +176,36 @@ function init(): void {
         isDarkTheme
     });
 
+    // Keyboard shortcuts for query navigation
+    document.addEventListener('keydown', (e) => {
+        // Don't trigger when typing in input fields
+        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
+                               document.activeElement?.tagName === 'TEXTAREA';
+        if (isInputFocused) { return; }
+
+        // Skip if modifier keys are pressed (except for these shortcuts)
+        if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+
+        // [ for previous query
+        if (e.key === '[') {
+            e.preventDefault();
+            if (batchResult && currentQueryIndex > 0) {
+                currentQueryIndex--;
+                renderCurrentQuery();
+                updateBatchTabsUI();
+            }
+        }
+        // ] for next query
+        if (e.key === ']') {
+            e.preventDefault();
+            if (batchResult && currentQueryIndex < batchResult.queries.length - 1) {
+                currentQueryIndex++;
+                renderCurrentQuery();
+                updateBatchTabsUI();
+            }
+        }
+    });
+
     // Parse and render initial SQL
     const sql = window.initialSqlCode || '';
     if (sql) {
