@@ -71,6 +71,7 @@ export {
     selectNode,
     highlightConnectedEdges,
     setSelectionCallbacks,
+    navigateToConnectedNode,
     setSearchBox,
     performSearch,
     navigateSearch,

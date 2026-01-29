@@ -618,6 +618,20 @@ function setupEventListeners(): void {
             e.preventDefault();
             searchBox?.focus();
         }
+
+        // Arrow keys to navigate between connected nodes (accessibility)
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+            if (state.selectedNodeId) {
+                e.preventDefault();
+                navigateToConnectedNode('upstream');
+            }
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+            if (state.selectedNodeId) {
+                e.preventDefault();
+                navigateToConnectedNode('downstream');
+            }
+        }
     });
 }
 
@@ -3091,6 +3105,54 @@ function selectNode(nodeId: string | null): void {
 
     // Update breadcrumb navigation
     updateBreadcrumb(nodeId);
+}
+
+/**
+ * Navigate to a connected node using arrow keys for accessibility
+ * @param direction - 'upstream' (ArrowUp/Left) or 'downstream' (ArrowDown/Right)
+ * @returns true if navigation occurred, false if no connected node found
+ */
+function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean {
+    if (!state.selectedNodeId) { return false; }
+
+    const selectedNode = currentNodes.find(n => n.id === state.selectedNodeId);
+    if (!selectedNode) { return false; }
+
+    // Find connected nodes based on direction
+    let connectedNodeIds: string[] = [];
+
+    if (direction === 'upstream') {
+        // Find nodes that are sources (edges where selected node is target)
+        connectedNodeIds = currentEdges
+            .filter(e => e.target === state.selectedNodeId)
+            .map(e => e.source);
+    } else {
+        // Find nodes that are targets (edges where selected node is source)
+        connectedNodeIds = currentEdges
+            .filter(e => e.source === state.selectedNodeId)
+            .map(e => e.target);
+    }
+
+    if (connectedNodeIds.length === 0) { return false; }
+
+    // If there are multiple connected nodes, cycle through them
+    // Track the last visited index for this direction
+    const stateKey = `lastNav_${direction}_${state.selectedNodeId}`;
+    const lastIndex = (state as any)[stateKey] || 0;
+    const nextIndex = (lastIndex + 1) % connectedNodeIds.length;
+    (state as any)[stateKey] = nextIndex;
+
+    // Navigate to the connected node
+    const targetNodeId = connectedNodeIds[nextIndex > 0 ? nextIndex - 1 : connectedNodeIds.length - 1] || connectedNodeIds[0];
+    const targetNode = currentNodes.find(n => n.id === targetNodeId);
+
+    if (targetNode) {
+        selectNode(targetNodeId);
+        zoomToNode(targetNode);
+        return true;
+    }
+
+    return false;
 }
 
 function updateDetailsPanel(nodeId: string | null): void {
@@ -6324,7 +6386,9 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'A', description: 'Focus all connected nodes' },
         { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
-        { key: 'Enter', description: 'Next search result' }
+        { key: 'Enter', description: 'Next search result' },
+        { key: '↑/←', description: 'Navigate to upstream node' },
+        { key: '↓/→', description: 'Navigate to downstream node' }
     ];
 }
 

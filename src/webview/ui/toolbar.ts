@@ -20,7 +20,7 @@ export interface ToolbarCallbacks {
     onToggleColumnFlows: (active: boolean) => void;
     onToggleTheme: () => void;
     onToggleFullscreen: () => void;
-    onSearchBoxReady: (input: HTMLInputElement) => void;
+    onSearchBoxReady: (input: HTMLInputElement, countIndicator: HTMLSpanElement) => void;
     onNextSearchResult: () => void;
     onPrevSearchResult: () => void;
     onDialectChange: (dialect: SqlDialect) => void;
@@ -190,6 +190,18 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     searchInput.id = 'search-input';
     searchContainer.appendChild(searchInput);
 
+    // Search result count indicator
+    const searchCount = document.createElement('span');
+    searchCount.id = 'search-count';
+    searchCount.style.cssText = `
+        color: #64748b;
+        font-size: 11px;
+        min-width: 32px;
+        text-align: center;
+        display: none;
+    `;
+    searchContainer.appendChild(searchCount);
+
     // Search navigation buttons
     const searchNav = document.createElement('div');
     searchNav.style.cssText = `display: flex; gap: 4px;`;
@@ -216,7 +228,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     searchContainer.appendChild(searchNav);
 
     // Notify callback when search input is ready
-    callbacks.onSearchBoxReady(searchInput);
+    callbacks.onSearchBoxReady(searchInput, searchCount);
 
     return searchContainer;
 }

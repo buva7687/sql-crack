@@ -8,8 +8,14 @@ import { selectNode } from './selection';
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
 
-export function setSearchBox(input: HTMLInputElement): void {
+// Reference to search count indicator element
+let searchCountIndicator: HTMLSpanElement | null = null;
+
+export function setSearchBox(input: HTMLInputElement, countIndicator?: HTMLSpanElement): void {
     setSearchBoxRef(input);
+    if (countIndicator) {
+        searchCountIndicator = countIndicator;
+    }
     input.addEventListener('input', () => {
         // Clear any existing debounce timer
         if (searchDebounceTimer) {
@@ -43,7 +49,10 @@ function highlightMatches(term: string): void {
         }
     });
 
-    if (!term) { return; }
+    if (!term) {
+        updateSearchCountIndicator();
+        return;
+    }
 
     // Find and highlight matching nodes
     allNodes?.forEach(g => {
@@ -59,6 +68,8 @@ function highlightMatches(term: string): void {
             }
         }
     });
+
+    updateSearchCountIndicator();
 }
 
 // Navigate to first result after debounce delay
@@ -88,6 +99,8 @@ export function navigateSearch(delta: number): void {
         zoomToNode(node);
         selectNode(nodeId);
     }
+
+    updateSearchCountIndicator();
 }
 
 export function clearSearch(): void {
@@ -104,6 +117,8 @@ export function clearSearch(): void {
             rect.removeAttribute('stroke-width');
         }
     });
+
+    updateSearchCountIndicator();
 }
 
 export function getSearchResultCount(): { current: number; total: number } {
@@ -111,6 +126,28 @@ export function getSearchResultCount(): { current: number; total: number } {
         current: state.currentSearchIndex + 1,
         total: state.searchResults.length
     };
+}
+
+// Update the search count indicator UI
+function updateSearchCountIndicator(): void {
+    if (!searchCountIndicator) { return; }
+
+    const { current, total } = getSearchResultCount();
+    if (total === 0) {
+        if (state.searchTerm) {
+            // Show "0" when there's a search term but no results
+            searchCountIndicator.textContent = '0';
+            searchCountIndicator.style.display = 'inline';
+            searchCountIndicator.style.color = '#ef4444'; // red for no results
+        } else {
+            // Hide when no search term
+            searchCountIndicator.style.display = 'none';
+        }
+    } else {
+        searchCountIndicator.textContent = `${current}/${total}`;
+        searchCountIndicator.style.display = 'inline';
+        searchCountIndicator.style.color = '#64748b'; // normal color
+    }
 }
 
 export function nextSearchResult(): void {
