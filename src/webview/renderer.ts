@@ -3219,11 +3219,30 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
 
     if (targetNode) {
         selectNode(targetNodeId, { skipNavigation: true });
-        zoomToNode(targetNode);
+        // Center on node without hiding others (don't use zoomToNode which has toggle behavior)
+        centerOnNode(targetNode);
         return true;
     }
 
     return false;
+}
+
+/**
+ * Center the view on a node without hiding other nodes
+ * Used for keyboard navigation where we want to keep all nodes visible
+ */
+function centerOnNode(node: FlowNode): void {
+    if (!svg) { return; }
+
+    const rect = svg.getBoundingClientRect();
+    const centerX = node.x + node.width / 2;
+    const centerY = node.y + node.height / 2;
+
+    // Center the node in the viewport
+    state.offsetX = rect.width / 2 - centerX * state.scale;
+    state.offsetY = rect.height / 2 - centerY * state.scale;
+
+    updateTransform();
 }
 
 function updateDetailsPanel(nodeId: string | null): void {

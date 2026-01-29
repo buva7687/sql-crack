@@ -296,3 +296,21 @@ export function zoomOut(): void {
 export function resetView(): void {
     fitView();
 }
+
+/**
+ * Center the view on a node without hiding other nodes
+ * Used for keyboard navigation where we want to keep all nodes visible
+ */
+export function centerOnNode(node: FlowNode): void {
+    if (!svg) { return; }
+
+    const rect = svg.getBoundingClientRect();
+    const centerX = node.x + node.width / 2;
+    const centerY = node.y + node.height / 2;
+
+    // Center the node in the viewport
+    state.offsetX = rect.width / 2 - centerX * state.scale;
+    state.offsetY = rect.height / 2 - centerY * state.scale;
+
+    updateTransform();
+}
