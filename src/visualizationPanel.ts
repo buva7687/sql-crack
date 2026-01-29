@@ -48,6 +48,8 @@ export class VisualizationPanel {
                 return vscode.ViewColumn.Active;
             case 'beside':
             default:
+                // Note: VS Code doesn't support programmatic panel placement in secondary sidebar.
+                // The 'beside' option opens the panel next to the SQL file in the editor area.
                 return vscode.ViewColumn.Beside;
         }
     }
@@ -464,7 +466,7 @@ export class VisualizationPanel {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">
-        window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
+        window.initialSqlCode = ${JSON.stringify(sqlCode)};
         window.vscodeTheme = ${JSON.stringify(vscodeTheme)};
         window.defaultDialect = ${JSON.stringify(options.dialect)};
         window.fileName = ${JSON.stringify(options.fileName)};
