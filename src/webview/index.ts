@@ -3,12 +3,14 @@ import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
 import { parseSqlBatch, SqlDialect, BatchParseResult } from './sqlParser';
+import { LayoutType } from './types';
 import {
     initRenderer,
     render,
     zoomIn,
     zoomOut,
     resetView,
+    getZoomLevel,
     exportToPng,
     exportToSvg,
     exportToMermaid,
@@ -24,6 +26,8 @@ import {
     toggleColumnFlows,
     toggleFullscreen,
     toggleLayout,
+    switchLayout,
+    getCurrentLayout,
     isFullscreen,
     toggleTheme,
     isDarkTheme,
@@ -57,6 +61,7 @@ declare global {
         viewLocation?: string;
         defaultLayout?: string;
         showDeadColumnHints?: boolean;
+        combineDdlStatements?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -218,6 +223,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onZoomIn: zoomIn,
         onZoomOut: zoomOut,
         onResetView: resetView,
+        getZoomLevel: getZoomLevel,
         onExportPng: exportToPng,
         onExportSvg: exportToSvg,
         onExportMermaid: exportToMermaid,
@@ -229,6 +235,10 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onToggleSqlPreview: toggleSqlPreview,
         onToggleColumnFlows: toggleColumnFlows,
         onToggleLayout: toggleLayout,
+        onLayoutChange: (layout: LayoutType) => {
+            switchLayout(layout);
+        },
+        getCurrentLayout: getCurrentLayout,
         onToggleTheme: toggleTheme,
         onToggleFullscreen: toggleFullscreen,
         onSearchBoxReady: setSearchBox,
@@ -299,7 +309,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 // ============================================================
 
 function visualize(sql: string): void {
-    batchResult = parseSqlBatch(sql, currentDialect);
+    batchResult = parseSqlBatch(sql, currentDialect, undefined, {
+        combineDdlStatements: window.combineDdlStatements === true
+    });
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer

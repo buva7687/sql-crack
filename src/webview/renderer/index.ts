@@ -108,5 +108,8 @@ export {
 // Layout switching
 export {
     switchLayout,
-    toggleLayout
+    toggleLayout,
+    getCurrentLayout,
+    getAvailableLayouts,
+    LAYOUT_NAMES
 } from './layoutSwitch';
