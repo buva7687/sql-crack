@@ -1482,7 +1482,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
         cloud.setAttribute('stroke', getNodeColor(node.type));
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('stroke-dasharray', '6,3');
@@ -1494,7 +1494,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = node.label;
@@ -1671,7 +1671,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     rect.setAttribute('width', String(nodeWidth));
     rect.setAttribute('height', String(nodeHeight));
     rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', '#1e293b');
+    rect.setAttribute('fill', UI_COLORS.backgroundDark);
     rect.setAttribute('stroke', getNodeColor(node.type));
     rect.setAttribute('stroke-width', '2');
     rect.setAttribute('stroke-dasharray', '6,3');
@@ -1703,7 +1703,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 12));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+    descText.setAttribute('fill', UI_COLORS.whiteFaint);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -1754,7 +1754,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
         cloud.setAttribute('stroke', getNodeColor(node.type));
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('filter', 'url(#shadow)');
@@ -1766,7 +1766,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = cteName;
@@ -1953,7 +1953,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 14));
     iconText.setAttribute('y', String(node.y + 26));
-    iconText.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    iconText.setAttribute('fill', UI_COLORS.whiteBright);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
     group.appendChild(iconText);
@@ -1973,7 +1973,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 14));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+    descText.setAttribute('fill', UI_COLORS.whiteDim);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -2118,7 +2118,7 @@ function renderCloudSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.4)');
+            path.setAttribute('stroke', UI_COLORS.whiteSubtle);
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2145,7 +2145,7 @@ function renderCloudSubflow(
         rect.setAttribute('height', String(child.height));
         rect.setAttribute('rx', '10');  // Match main nodes
         rect.setAttribute('fill', nodeColor);
-        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+        rect.setAttribute('stroke', UI_COLORS.borderWhite);
         rect.setAttribute('stroke-width', '2');  // Match main nodes
         rect.setAttribute('filter', 'url(#shadow)');
         childGroup.appendChild(rect);
@@ -2154,7 +2154,7 @@ function renderCloudSubflow(
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 14));
         icon.setAttribute('y', String(childY + 26));
-        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('fill', UI_COLORS.whiteBright);
         icon.setAttribute('font-size', '14');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -2175,7 +2175,7 @@ function renderCloudSubflow(
             const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             descText.setAttribute('x', String(childX + 14));
             descText.setAttribute('y', String(childY + 45));
-            descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            descText.setAttribute('fill', UI_COLORS.whiteDim);
             descText.setAttribute('font-size', '10');
             descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
             descText.textContent = truncate(child.description, 22);
@@ -2228,8 +2228,8 @@ function addCloudCloseButton(
     buttonBg.setAttribute('cx', String(buttonSize / 2));
     buttonBg.setAttribute('cy', String(buttonSize / 2));
     buttonBg.setAttribute('r', String(buttonSize / 2));
-    buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)'); // Red with transparency
-    buttonBg.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+    buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.background); // Red with transparency
+    buttonBg.setAttribute('stroke', UI_COLORS.borderWhite);
     buttonBg.setAttribute('stroke-width', '1');
     closeButtonGroup.appendChild(buttonBg);
 
@@ -2267,10 +2267,10 @@ function addCloudCloseButton(
 
     // Hover effects
     closeButtonGroup.addEventListener('mouseenter', () => {
-        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.9)');
+        buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.backgroundHover);
     });
     closeButtonGroup.addEventListener('mouseleave', () => {
-        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)');
+        buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.background);
     });
 
     cloudGroup.appendChild(closeButtonGroup);
@@ -2315,7 +2315,7 @@ function renderSubflow(
     subflowBg.setAttribute('width', String(containerWidth));
     subflowBg.setAttribute('height', String(containerHeight));
     subflowBg.setAttribute('rx', '6');
-    subflowBg.setAttribute('fill', 'rgba(0, 0, 0, 0.2)');
+    subflowBg.setAttribute('fill', UI_COLORS.backgroundOverlay);
     subflowGroup.appendChild(subflowBg);
 
     // Draw child edges first (behind nodes)
@@ -2338,7 +2338,7 @@ function renderSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            path.setAttribute('stroke', UI_COLORS.borderWhite);
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2362,7 +2362,7 @@ function renderSubflow(
         rect.setAttribute('height', String(child.height));
         rect.setAttribute('rx', '6');
         rect.setAttribute('fill', getNodeColor(child.type));
-        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
+        rect.setAttribute('stroke', UI_COLORS.borderWhiteLight);
         rect.setAttribute('stroke-width', '1');
         childGroup.appendChild(rect);
 
@@ -2370,7 +2370,7 @@ function renderSubflow(
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 8));
         icon.setAttribute('y', String(childY + child.height / 2 + 4));
-        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('fill', UI_COLORS.whiteBright);
         icon.setAttribute('font-size', '11');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -2417,7 +2417,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -2425,14 +2425,14 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     headerClip.setAttribute('y', String(node.y + headerHeight - 10));
     headerClip.setAttribute('width', String(node.width));
     headerClip.setAttribute('height', '10');
-    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    headerClip.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(headerClip);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = '▦';
     group.appendChild(icon);
@@ -2457,7 +2457,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(funcPill);
 
         // Function name
@@ -2481,7 +2481,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
             partBadge.setAttribute('width', '16');
             partBadge.setAttribute('height', '14');
             partBadge.setAttribute('rx', '3');
-            partBadge.setAttribute('fill', '#6366f1');
+            partBadge.setAttribute('fill', BADGE_COLORS.partitionBy);
             group.appendChild(partBadge);
 
             const partText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2503,7 +2503,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
             orderBadge.setAttribute('width', '16');
             orderBadge.setAttribute('height', '14');
             orderBadge.setAttribute('rx', '3');
-            orderBadge.setAttribute('fill', '#10b981');
+            orderBadge.setAttribute('fill', BADGE_COLORS.orderBy);
             group.appendChild(orderBadge);
 
             const orderText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2525,7 +2525,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${windowDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -2557,14 +2557,14 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = 'Σ';
     group.appendChild(icon);
@@ -2589,7 +2589,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(funcPill);
 
         // Function expression
@@ -2613,7 +2613,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${aggregateDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -2645,14 +2645,14 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = '?';
     group.appendChild(icon);
@@ -2677,7 +2677,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         casePill.setAttribute('width', String(node.width - padding * 2));
         casePill.setAttribute('height', String(caseHeight));
         casePill.setAttribute('rx', '4');
-        casePill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        casePill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(casePill);
 
         // CASE conditions count
@@ -2695,7 +2695,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
             const elseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             elseText.setAttribute('x', String(node.x + padding + 6));
             elseText.setAttribute('y', String(yOffset + 32));
-            elseText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            elseText.setAttribute('fill', UI_COLORS.whiteDim);
             elseText.setAttribute('font-size', '9');
             const truncatedElse = caseStmt.elseValue.length > 20 ? caseStmt.elseValue.substring(0, 17) + '...' : caseStmt.elseValue;
             elseText.textContent = 'ELSE: ' + truncatedElse;
@@ -2711,7 +2711,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${caseDetails.cases.length - 3} more`;
         group.appendChild(moreText);
@@ -3136,7 +3136,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
         const id = g.getAttribute('data-id');
         if (rect && id) {
             if (id === nodeId) {
-                rect.setAttribute('stroke', '#fff');
+                rect.setAttribute('stroke', UI_COLORS.white);
                 rect.setAttribute('stroke-width', '3');
                 rect.setAttribute('filter', 'url(#glow)');
                 highlightConnectedEdges(id, true);
@@ -4302,7 +4302,7 @@ function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGEleme
     bgRect.setAttribute('y', String(bounds.minY - padding));
     bgRect.setAttribute('width', String(width));
     bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', state.isDarkTheme ? '#0f172a' : '#f8fafc');
+    bgRect.setAttribute('fill', state.isDarkTheme ? UI_COLORS.background : UI_COLORS.backgroundLightGray);
     svgClone.insertBefore(bgRect, svgClone.firstChild);
 
     // Embed inline styles for all elements (needed for image export)
@@ -5262,7 +5262,7 @@ export function highlightColumnSources(columnName: string): void {
         if (nodeEl) {
             const rect = nodeEl.querySelector('.node-rect');
             if (rect) {
-                rect.setAttribute('stroke', '#22d3ee');
+                rect.setAttribute('stroke', EDGE_COLORS.columnLineage);
                 rect.setAttribute('stroke-width', '3');
                 rect.setAttribute('stroke-dasharray', '5,3');
             }
@@ -6639,7 +6639,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
             // Add glow effect
             const rect = nodeGroup.querySelector('rect');
             if (rect) {
-                rect.setAttribute('stroke', '#6366f1');
+                rect.setAttribute('stroke', EDGE_COLORS.focus);
                 rect.setAttribute('stroke-width', '3');
             }
         }
@@ -6654,7 +6654,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
 
         if (sourceId && targetId && lineageNodeIds.has(sourceId) && lineageNodeIds.has(targetId)) {
             edge.style.opacity = '1';
-            edge.setAttribute('stroke', '#6366f1');
+            edge.setAttribute('stroke', EDGE_COLORS.focus);
             edge.setAttribute('stroke-width', '3');
 
             // Also highlight the arrow

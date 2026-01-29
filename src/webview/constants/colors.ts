@@ -11,6 +11,8 @@ export const UI_COLORS = {
     // Backgrounds
     background: '#0f172a',
     backgroundLight: '#ffffff',
+    backgroundLightGray: '#f8fafc',  // Light theme export background
+    backgroundDark: '#1e293b',       // Dark slate for clouds/subflows
     backgroundPanel: 'rgba(15, 23, 42, 0.95)',
     backgroundPanelSolid: 'rgba(15, 23, 42, 0.98)',
     backgroundSubtle: 'rgba(30, 41, 59, 0.5)',
@@ -75,6 +77,7 @@ export const EDGE_COLORS = {
     selected: '#10b981',
     columnFlow: 'rgba(255, 255, 255, 0.4)',
     columnLineage: '#22d3ee', // Cyan for column lineage path
+    focus: '#6366f1',         // Indigo for focus mode highlights
 } as const;
 
 // ============================================================
