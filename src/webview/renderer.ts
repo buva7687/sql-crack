@@ -5367,13 +5367,13 @@ function updateSqlPreview(): void {
 
     sqlPreviewPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">SQL Query</span>
+            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">SQL Query</span>
             <div style="display: flex; gap: 8px;">
                 <button id="copy-sql" style="
                     background: rgba(99, 102, 241, 0.2);
                     border: 1px solid rgba(99, 102, 241, 0.3);
                     border-radius: 4px;
-                    color: #a5b4fc;
+                    color: ${UI_COLORS.focusText};
                     padding: 4px 10px;
                     font-size: 10px;
                     cursor: pointer;
@@ -5381,7 +5381,7 @@ function updateSqlPreview(): void {
                 <button id="close-sql-preview" style="
                     background: none;
                     border: none;
-                    color: #64748b;
+                    color: ${UI_COLORS.textDim};
                     cursor: pointer;
                     font-size: 16px;
                 ">&times;</button>
@@ -5977,7 +5977,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     border-radius: 4px;
                     font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
                     font-size: 10px;
-                    color: #e2e8f0;
+                    color: ${UI_COLORS.textBright};
                     line-height: 1.4;
                     white-space: pre-wrap;
                     word-break: break-all;
@@ -6018,7 +6018,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
     if (node.type === 'window' && node.windowDetails) {
         content += `<div style="font-size: 10px; margin-top: 6px;">
-            <span style="color: #fbbf24;">${node.windowDetails.functions.length} window function(s)</span>
+            <span style="color: ${BADGE_COLORS.functionName};">${node.windowDetails.functions.length} window function(s)</span>
         </div>`;
         node.windowDetails.functions.forEach((fn, idx) => {
             if (idx < 3) { // Show first 3
