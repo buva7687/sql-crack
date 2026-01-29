@@ -552,12 +552,15 @@ function setupEventListeners(): void {
             }
             selectNode(null);
             clearFocusMode();
-            resetView();
             hideContextMenu();
             if (searchBox) {
                 searchBox.value = '';
                 clearSearch();
             }
+            // Use requestAnimationFrame to ensure DOM updates are applied before fitView
+            requestAnimationFrame(() => {
+                resetView();
+            });
             return;
         }
 
@@ -6117,7 +6120,10 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
         case 'reset-view':
             selectNode(null);
             clearFocusMode();
-            resetView();
+            // Use requestAnimationFrame to ensure DOM updates are applied before fitView
+            requestAnimationFrame(() => {
+                resetView();
+            });
             break;
         case 'toggle-expand':
             if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
