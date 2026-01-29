@@ -16,7 +16,96 @@ import {
     BatchParseResult,
     SqlDialect,
     NodeType,
+    ValidationError,
+    ValidationLimits,
 } from './types';
+
+// ============================================================
+// Validation Constants
+// ============================================================
+
+/**
+ * Default validation limits for SQL parsing.
+ * These can be overridden by passing custom limits to validateSql.
+ */
+export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
+    maxSqlSizeBytes: 100 * 1024,  // 100KB
+    maxQueryCount: 50,             // 50 statements max
+};
+
+/**
+ * Validates SQL input against size and query count limits.
+ * Call this before parsing to prevent performance issues with large inputs.
+ *
+ * @param sql - The SQL string to validate
+ * @param limits - Optional custom limits (defaults to DEFAULT_VALIDATION_LIMITS)
+ * @returns ValidationError if validation fails, null if valid
+ */
+export function validateSql(
+    sql: string,
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
+): ValidationError | null {
+    // Check SQL size
+    const sizeBytes = new Blob([sql]).size;
+    if (sizeBytes > limits.maxSqlSizeBytes) {
+        return {
+            type: 'size_limit',
+            message: `SQL input exceeds maximum size limit of ${formatBytes(limits.maxSqlSizeBytes)}`,
+            details: {
+                actual: sizeBytes,
+                limit: limits.maxSqlSizeBytes,
+                unit: 'bytes',
+            },
+        };
+    }
+
+    // Quick estimate of statement count using semicolons (not counting those in strings/comments)
+    const estimatedStatements = countStatements(sql);
+    if (estimatedStatements > limits.maxQueryCount) {
+        return {
+            type: 'query_count_limit',
+            message: `SQL contains approximately ${estimatedStatements} statements, exceeding the limit of ${limits.maxQueryCount}`,
+            details: {
+                actual: estimatedStatements,
+                limit: limits.maxQueryCount,
+                unit: 'statements',
+            },
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Counts the approximate number of SQL statements.
+ * This is a quick heuristic that ignores semicolons inside strings and comments.
+ */
+function countStatements(sql: string): number {
+    // Remove string literals (single and double quoted)
+    let cleaned = sql.replace(/'[^']*'/g, '').replace(/"[^"]*"/g, '');
+
+    // Remove block comments
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // Remove line comments
+    cleaned = cleaned.replace(/--[^\n]*/g, '');
+
+    // Count semicolons
+    const semicolons = (cleaned.match(/;/g) || []).length;
+
+    // At minimum, there's 1 statement if there's any content
+    const hasContent = cleaned.trim().length > 0;
+    return hasContent ? Math.max(1, semicolons) : 0;
+}
+
+/**
+ * Formats bytes into human-readable string.
+ */
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} bytes`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 // Import color constants
 import { getNodeColor } from './constants';
@@ -33,6 +122,8 @@ export type {
     ParseResult,
     BatchParseResult,
     SqlDialect,
+    ValidationError,
+    ValidationLimits,
 };
 
 // Re-export getNodeColor for backward compatibility
@@ -429,7 +520,52 @@ export function splitSqlStatements(sql: string): string[] {
 }
 
 // Parse multiple SQL statements
-export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): BatchParseResult {
+export function parseSqlBatch(
+    sql: string,
+    dialect: SqlDialect = 'MySQL',
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
+): BatchParseResult {
+    // Validate SQL before parsing
+    const validationError = validateSql(sql, limits);
+    if (validationError) {
+        // Return a result with the validation error
+        const emptyStats: QueryStats = {
+            tables: 0,
+            joins: 0,
+            subqueries: 0,
+            ctes: 0,
+            aggregations: 0,
+            windowFunctions: 0,
+            unions: 0,
+            conditions: 0,
+            complexity: 'Simple',
+            complexityScore: 0,
+        };
+
+        return {
+            queries: [{
+                nodes: [],
+                edges: [],
+                stats: emptyStats,
+                hints: [{
+                    type: 'error',
+                    message: validationError.message,
+                    suggestion: validationError.type === 'size_limit'
+                        ? 'Consider splitting your SQL into smaller files or removing unnecessary whitespace/comments.'
+                        : 'Consider splitting your SQL into multiple files with fewer statements each.',
+                    category: 'performance',
+                    severity: 'high',
+                }],
+                sql: sql.substring(0, 1000) + (sql.length > 1000 ? '...' : ''), // Truncate for display
+                columnLineage: [],
+                tableUsage: new Map(),
+                error: validationError.message,
+            }],
+            totalStats: emptyStats,
+            validationError,
+        };
+    }
+
     const statements = splitSqlStatements(sql);
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];

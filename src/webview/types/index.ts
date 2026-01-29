@@ -38,6 +38,8 @@ export type {
     QueryLineRange,
     ParseResult,
     BatchParseResult,
+    ValidationError,
+    ValidationLimits,
 } from './parser';
 
 // Renderer types

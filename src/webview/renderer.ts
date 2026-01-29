@@ -15,7 +15,21 @@ import {
 } from './types';
 
 // Import color utilities
-import { getNodeColor } from './constants';
+import {
+    getNodeColor,
+    NODE_COLORS,
+    WARNING_COLORS,
+    UI_COLORS,
+    EDGE_COLORS,
+    BADGE_COLORS,
+    CONDITION_COLORS,
+    NODE_STROKE_COLORS,
+    GLOW_COLORS,
+    STATUS_COLORS,
+    CLOSE_BUTTON_COLORS,
+    COMPLEXITY_COLORS,
+    HINT_COLORS,
+} from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
@@ -93,7 +107,7 @@ export function initRenderer(container: HTMLElement): void {
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.setAttribute('tabindex', '-1'); // Make SVG focusable for keyboard events
-    svg.style.background = '#0f172a';
+    svg.style.background = UI_COLORS.background;
     svg.style.cursor = 'grab';
     svg.style.position = 'absolute';
     svg.style.top = '0';
@@ -105,10 +119,10 @@ export function initRenderer(container: HTMLElement): void {
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.default}" />
         </marker>
         <marker id="arrowhead-highlight" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.highlight}" />
         </marker>
         <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
@@ -122,8 +136,8 @@ export function initRenderer(container: HTMLElement): void {
         </filter>
         <!-- Grid pattern for light theme -->
         <pattern id="grid-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-            <rect width="20" height="20" fill="#ffffff"/>
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+            <rect width="20" height="20" fill="${UI_COLORS.gridBackground}"/>
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="${UI_COLORS.gridLine}" stroke-width="1"/>
         </pattern>
     `;
     svg.appendChild(defs);
@@ -132,7 +146,7 @@ export function initRenderer(container: HTMLElement): void {
     backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     backgroundRect.setAttribute('width', '100%');
     backgroundRect.setAttribute('height', '100%');
-    backgroundRect.setAttribute('fill', '#0f172a');
+    backgroundRect.setAttribute('fill', UI_COLORS.background);
     backgroundRect.style.pointerEvents = 'none';
     svg.appendChild(backgroundRect);
 
@@ -1154,10 +1168,10 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // But for light theme, we might need darker text on lighter backgrounds
     // Since standard nodes use colored backgrounds (blue, purple, etc.), white text should work
     // But let's be safe and use theme-aware colors for better contrast
-    const textColor = isDark ? '#ffffff' : '#ffffff'; // Keep white for colored backgrounds
-    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.9)';
-    const textColorDim = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.8)';
-    const strokeColor = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
+    const textColor = isDark ? UI_COLORS.white : UI_COLORS.white; // Keep white for colored backgrounds
+    const textColorMuted = isDark ? UI_COLORS.whiteMuted : UI_COLORS.whiteBright;
+    const textColorDim = isDark ? UI_COLORS.whiteDim : UI_COLORS.whiteMuted;
+    const strokeColor = isDark ? UI_COLORS.borderWhite : 'rgba(0, 0, 0, 0.2)';
 
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1175,20 +1189,20 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         // Access mode coloring (read/write differentiation)
         if (node.accessMode === 'write') {
             // Write operations: Red border with "WRITE" emphasis
-            rect.setAttribute('stroke', 'rgba(239, 68, 68, 0.9)'); // red for write
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.write);
             rect.setAttribute('stroke-width', '3');
         } else if (node.accessMode === 'read') {
             // Read operations: Blue border
-            rect.setAttribute('stroke', 'rgba(59, 130, 246, 0.8)'); // blue for read
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.read);
             rect.setAttribute('stroke-width', '3');
         } else if (tableCategory === 'cte_reference') {
             // CTE reference: double border effect with dashed inner
-            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.8)'); // purple for CTE
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.cte);
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('stroke-dasharray', '8,4');
         } else if (tableCategory === 'derived' || node.accessMode === 'derived') {
             // Derived table: dashed border
-            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.7)'); // purple for derived
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.derived);
             rect.setAttribute('stroke-width', '2');
             rect.setAttribute('stroke-dasharray', '5,3');
         } else {
@@ -1201,8 +1215,8 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // Add complexity indicator (colored glow for medium/high complexity)
     if (node.complexityLevel && node.complexityLevel !== 'low') {
         const complexityColor = node.complexityLevel === 'high' ?
-            'rgba(239, 68, 68, 0.4)' :    // Red glow for high complexity
-            'rgba(245, 158, 11, 0.4)';     // Orange glow for medium complexity
+            GLOW_COLORS.high :
+            GLOW_COLORS.medium;
 
         rect.setAttribute('stroke', complexityColor.replace('0.4', '0.8'));
         rect.setAttribute('stroke-width', '2');
@@ -1216,30 +1230,30 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
 
     // Access mode badges (highest priority)
     if (node.accessMode === 'read') {
-        badges.push({ text: 'READ', color: '#3b82f6' }); // Blue
+        badges.push({ text: 'READ', color: BADGE_COLORS.read });
     } else if (node.accessMode === 'write') {
-        badges.push({ text: 'WRITE', color: '#ef4444' }); // Red
+        badges.push({ text: 'WRITE', color: BADGE_COLORS.write });
     } else if (node.accessMode === 'derived') {
-        badges.push({ text: 'DERIVED', color: '#a855f7' }); // Purple
+        badges.push({ text: 'DERIVED', color: BADGE_COLORS.derived });
     }
 
     // Table category badges
     if (isTable && tableCategory === 'cte_reference' && !node.accessMode) {
-        badges.push({ text: 'CTE', color: '#a855f7' }); // Purple
+        badges.push({ text: 'CTE', color: BADGE_COLORS.cte });
     } else if (isTable && tableCategory === 'derived' && !node.accessMode) {
-        badges.push({ text: 'DERIVED', color: '#14b8a6' }); // Teal
+        badges.push({ text: 'DERIVED', color: BADGE_COLORS.derivedAlt });
     }
 
     // Operation type badges
     if (node.operationType && node.operationType !== 'SELECT') {
         const opColors: Record<string, string> = {
-            'INSERT': '#10b981', // Green
-            'UPDATE': '#f59e0b', // Amber
-            'DELETE': '#dc2626', // Dark Red
-            'MERGE': '#8b5cf6',  // Violet
-            'CREATE_TABLE_AS': '#06b6d4' // Cyan
+            'INSERT': BADGE_COLORS.insert,
+            'UPDATE': BADGE_COLORS.update,
+            'DELETE': BADGE_COLORS.delete,
+            'MERGE': BADGE_COLORS.merge,
+            'CREATE_TABLE_AS': BADGE_COLORS.createTableAs,
         };
-        const opColor = opColors[node.operationType] || '#64748b';
+        const opColor = opColors[node.operationType] || EDGE_COLORS.default;
         badges.push({ text: node.operationType, color: opColor });
     }
 
@@ -2450,7 +2464,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         const funcName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcName.setAttribute('x', String(node.x + padding + 6));
         funcName.setAttribute('y', String(yOffset + 15));
-        funcName.setAttribute('fill', '#fbbf24');
+        funcName.setAttribute('fill', BADGE_COLORS.functionName);
         funcName.setAttribute('font-size', '10');
         funcName.setAttribute('font-weight', '600');
         funcName.setAttribute('font-family', 'monospace');
@@ -2582,7 +2596,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         const funcText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcText.setAttribute('x', String(node.x + padding + 6));
         funcText.setAttribute('y', String(yOffset + 16));
-        funcText.setAttribute('fill', '#fbbf24');
+        funcText.setAttribute('fill', BADGE_COLORS.functionName);
         funcText.setAttribute('font-size', '10');
         funcText.setAttribute('font-weight', '600');
         funcText.setAttribute('font-family', 'monospace');
@@ -2670,7 +2684,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         const caseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         caseText.setAttribute('x', String(node.x + padding + 6));
         caseText.setAttribute('y', String(yOffset + 18));
-        caseText.setAttribute('fill', '#fbbf24');
+        caseText.setAttribute('fill', BADGE_COLORS.functionName);
         caseText.setAttribute('font-size', '10');
         caseText.setAttribute('font-weight', '600');
         caseText.setAttribute('font-family', 'monospace');
@@ -2736,7 +2750,7 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', '#64748b');
+    path.setAttribute('stroke', EDGE_COLORS.default);
     path.setAttribute('stroke-width', '2');
     path.setAttribute('marker-end', 'url(#arrowhead)');
     path.setAttribute('class', 'edge');
@@ -2767,14 +2781,14 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     // Hover effect for edges
     path.addEventListener('mouseenter', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', '#94a3b8');
+            path.setAttribute('stroke', EDGE_COLORS.defaultLight);
             path.setAttribute('stroke-width', '3');
         }
     });
 
     path.addEventListener('mouseleave', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', '#64748b');
+            path.setAttribute('stroke', EDGE_COLORS.default);
             path.setAttribute('stroke-width', '2');
         }
     });
@@ -2792,10 +2806,10 @@ function handleEdgeClick(edge: FlowEdge): void {
         const isConnected = state.selectedNodeId && (source === state.selectedNodeId || target === state.selectedNodeId);
 
         if (isConnected) {
-            e.setAttribute('stroke', '#fbbf24');
+            e.setAttribute('stroke', EDGE_COLORS.highlight);
             e.setAttribute('stroke-width', '3');
         } else {
-            e.setAttribute('stroke', '#64748b');
+            e.setAttribute('stroke', EDGE_COLORS.default);
             e.setAttribute('stroke-width', '2');
         }
     });
@@ -2804,7 +2818,7 @@ function handleEdgeClick(edge: FlowEdge): void {
     const clickedEdge = mainGroup?.querySelector(`[data-edge-id="${edge.id}"]`);
     if (clickedEdge) {
         clickedEdge.setAttribute('data-highlighted', 'true');
-        clickedEdge.setAttribute('stroke', '#10b981'); // Green for selected edge
+        clickedEdge.setAttribute('stroke', EDGE_COLORS.selected);
         clickedEdge.setAttribute('stroke-width', '4');
         clickedEdge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
     }
@@ -2906,14 +2920,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
 }
 
 function getClauseTypeColor(clauseType: string): string {
-    switch (clauseType) {
-        case 'join': return '#3b82f6'; // Blue
-        case 'where': return '#8b5cf6'; // Purple
-        case 'having': return '#ec4899'; // Pink
-        case 'on': return '#06b6d4'; // Cyan
-        case 'filter': return '#f59e0b'; // Amber
-        default: return '#64748b'; // Gray
-    }
+    return CONDITION_COLORS[clauseType] || CONDITION_COLORS.default;
 }
 
 function escapeHtml(text: string): string {
@@ -3045,11 +3052,11 @@ function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
         const target = edge.getAttribute('data-target');
         if (source === nodeId || target === nodeId) {
             if (highlight) {
-                edge.setAttribute('stroke', '#fbbf24');
+                edge.setAttribute('stroke', EDGE_COLORS.highlight);
                 edge.setAttribute('stroke-width', '3');
                 edge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
             } else {
-                edge.setAttribute('stroke', '#64748b');
+                edge.setAttribute('stroke', EDGE_COLORS.default);
                 edge.setAttribute('stroke-width', '2');
                 edge.setAttribute('marker-end', 'url(#arrowhead)');
             }
@@ -3076,7 +3083,7 @@ function renderError(message: string): void {
     icon.setAttribute('x', '50%');
     icon.setAttribute('y', hasSuggestion ? '45%' : '48%');
     icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('fill', '#f87171');
+    icon.setAttribute('fill', STATUS_COLORS.error);
     icon.setAttribute('font-size', '24');
     icon.textContent = '⚠';
     g.appendChild(icon);
@@ -3086,7 +3093,7 @@ function renderError(message: string): void {
     text.setAttribute('x', '50%');
     text.setAttribute('y', hasSuggestion ? '52%' : '55%');
     text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('fill', '#f87171');
+    text.setAttribute('fill', STATUS_COLORS.error);
     text.setAttribute('font-size', '14');
     text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     text.textContent = hasSuggestion ? parts[0] : `Error: ${message}`;
@@ -3098,7 +3105,7 @@ function renderError(message: string): void {
         suggestion.setAttribute('x', '50%');
         suggestion.setAttribute('y', '58%');
         suggestion.setAttribute('text-anchor', 'middle');
-        suggestion.setAttribute('fill', '#94a3b8');
+        suggestion.setAttribute('fill', UI_COLORS.textMuted);
         suggestion.setAttribute('font-size', '12');
         suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         suggestion.textContent = `💡 ${parts[1]}`;
@@ -3109,7 +3116,7 @@ function renderError(message: string): void {
         hint.setAttribute('x', '50%');
         hint.setAttribute('y', '64%');
         hint.setAttribute('text-anchor', 'middle');
-        hint.setAttribute('fill', '#64748b');
+        hint.setAttribute('fill', UI_COLORS.textDim);
         hint.setAttribute('font-size', '11');
         hint.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         hint.textContent = 'Change dialect using the dropdown in the top-left toolbar';
@@ -3145,7 +3152,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
     if (!nodeId) {
         const edges = mainGroup?.querySelectorAll('.edge');
         edges?.forEach(edge => {
-            edge.setAttribute('stroke', '#64748b');
+            edge.setAttribute('stroke', EDGE_COLORS.default);
             edge.setAttribute('stroke-width', '2');
             edge.setAttribute('marker-end', 'url(#arrowhead)');
         });
@@ -3497,18 +3504,11 @@ function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
     const isDark = state.isDarkTheme;
-    const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const textColorDim = isDark ? '#64748b' : '#94a3b8';
-    const tableTextColor = isDark ? '#cbd5e1' : '#334155';
-    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-
-    const complexityColors: Record<string, string> = {
-        'Simple': '#22c55e',
-        'Moderate': '#eab308',
-        'Complex': '#f97316',
-        'Very Complex': '#ef4444'
-    };
+    const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const textColorDim = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const tableTextColor = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
 
     // Build table list HTML
     let tableListHtml = '';
@@ -3578,7 +3578,7 @@ function updateStatsPanel(): void {
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
             <span style="
-                background: ${complexityColors[currentStats.complexity]};
+                background: ${COMPLEXITY_COLORS[currentStats.complexity]};
                 color: white;
                 padding: 2px 8px;
                 border-radius: 4px;
@@ -3674,25 +3674,22 @@ function updateHintsPanel(): void {
 
     // Theme-aware colors
     const isDark = state.isDarkTheme;
-    const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+    const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
 
     // Theme-aware button/badge colors - darker versions for light theme
     const colors = {
-        blue: isDark ? '#60a5fa' : '#2563eb',
-        amber: isDark ? '#fbbf24' : '#d97706',
-        green: isDark ? '#4ade80' : '#16a34a',
-        violet: isDark ? '#a78bfa' : '#7c3aed',
-        red: isDark ? '#f87171' : '#dc2626',
-        slate: isDark ? '#cbd5e1' : '#64748b'
+        blue: isDark ? STATUS_COLORS.info : STATUS_COLORS.infoDark,
+        amber: isDark ? STATUS_COLORS.warningLight : STATUS_COLORS.warningDark,
+        green: isDark ? STATUS_COLORS.successLight : STATUS_COLORS.successDark,
+        violet: isDark ? STATUS_COLORS.violetLight : STATUS_COLORS.violetDark,
+        red: isDark ? STATUS_COLORS.error : STATUS_COLORS.errorDark,
+        slate: isDark ? UI_COLORS.textSubtle : UI_COLORS.textDim
     };
 
-    const hintColors: Record<string, { bg: string; border: string; icon: string }> = {
-        'error': { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', icon: '⚠' },
-        'warning': { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', icon: '⚡' },
-        'info': { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: 'ℹ' }
-    };
+    // Use centralized HINT_COLORS for consistent styling
+    const hintColors = HINT_COLORS;
 
     // Group hints by category
     const hintsByCategory: Record<string, OptimizationHint[]> = {
@@ -4207,7 +4204,7 @@ function highlightMatches(term: string): void {
             g.classList.add('search-match');
             const rect = g.querySelector('.node-rect');
             if (rect) {
-                rect.setAttribute('stroke', '#fbbf24');
+                rect.setAttribute('stroke', EDGE_COLORS.highlight);
                 rect.setAttribute('stroke-width', '2');
             }
         }
@@ -4856,12 +4853,8 @@ function getWarningIcon(warningType: string): string {
 }
 
 function getWarningColor(severity: string): string {
-    const colors: Record<string, string> = {
-        'low': '#f59e0b',    // Amber
-        'medium': '#f97316', // Orange
-        'high': '#ef4444'    // Red
-    };
-    return colors[severity] || '#f59e0b';
+    const colors: Record<string, string> = WARNING_COLORS;
+    return colors[severity] || colors.low;
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -4883,18 +4876,18 @@ function lightenColor(hex: string, percent: number): string {
 // ============================================================
 
 const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
-    table: { color: '#93c5fd', icon: '⊞', description: 'Source table' },
-    filter: { color: '#c4b5fd', icon: '⧩', description: 'WHERE/HAVING filter' },
-    join: { color: '#f9a8d4', icon: '⋈', description: 'JOIN operation' },
-    aggregate: { color: '#fcd34d', icon: 'Σ', description: 'GROUP BY aggregation' },
-    sort: { color: '#86efac', icon: '↕', description: 'ORDER BY sorting' },
-    limit: { color: '#67e8f9', icon: '⊟', description: 'LIMIT clause' },
-    select: { color: '#a5b4fc', icon: '▤', description: 'Column projection' },
-    result: { color: '#86efac', icon: '◉', description: 'Query output' },
-    cte: { color: '#c4b5fd', icon: '↻', description: 'Common Table Expression' },
-    union: { color: '#fdba74', icon: '∪', description: 'Set operation' },
-    subquery: { color: '#7dd3fc', icon: '⊂', description: 'Subquery/Derived table' },
-    window: { color: '#f0abfc', icon: '▦', description: 'Window function' }
+    table: { color: NODE_COLORS.table, icon: '⊞', description: 'Source table' },
+    filter: { color: NODE_COLORS.filter, icon: '⧩', description: 'WHERE/HAVING filter' },
+    join: { color: NODE_COLORS.join, icon: '⋈', description: 'JOIN operation' },
+    aggregate: { color: NODE_COLORS.aggregate, icon: 'Σ', description: 'GROUP BY aggregation' },
+    sort: { color: NODE_COLORS.sort, icon: '↕', description: 'ORDER BY sorting' },
+    limit: { color: NODE_COLORS.limit, icon: '⊟', description: 'LIMIT clause' },
+    select: { color: NODE_COLORS.select, icon: '▤', description: 'Column projection' },
+    result: { color: NODE_COLORS.result, icon: '◉', description: 'Query output' },
+    cte: { color: NODE_COLORS.cte, icon: '↻', description: 'Common Table Expression' },
+    union: { color: NODE_COLORS.union, icon: '∪', description: 'Set operation' },
+    subquery: { color: NODE_COLORS.subquery, icon: '⊂', description: 'Subquery/Derived table' },
+    window: { color: NODE_COLORS.window, icon: '▦', description: 'Window function' },
 };
 
 function updateLegendPanel(): void {
@@ -5302,7 +5295,7 @@ function highlightPathToSelect(): void {
         const source = edgeEl.getAttribute('data-source');
         const target = edgeEl.getAttribute('data-target');
         if (source && target && pathNodeIds.has(source) && pathNodeIds.has(target)) {
-            edgeEl.setAttribute('stroke', '#22d3ee');
+            edgeEl.setAttribute('stroke', EDGE_COLORS.columnLineage);
             edgeEl.setAttribute('stroke-width', '3');
             edgeEl.setAttribute('stroke-dasharray', '5,3');
         }
@@ -5345,7 +5338,7 @@ function clearColumnHighlights(): void {
     // Restore edges
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
-        edgeEl.setAttribute('stroke', '#64748b');
+        edgeEl.setAttribute('stroke', EDGE_COLORS.default);
         edgeEl.setAttribute('stroke-width', '2');
         edgeEl.removeAttribute('stroke-dasharray');
         edgeEl.setAttribute('marker-end', 'url(#arrowhead)');
@@ -6696,7 +6689,7 @@ function clearLineageHighlights(): void {
     allEdges.forEach((edge) => {
         const edgeEl = edge as SVGElement;
         edgeEl.style.opacity = '1';
-        edgeEl.setAttribute('stroke', state.isDarkTheme ? '#64748b' : '#94a3b8');
+        edgeEl.setAttribute('stroke', state.isDarkTheme ? EDGE_COLORS.default : EDGE_COLORS.defaultLight);
         edgeEl.setAttribute('stroke-width', '1.5');
     });
 
@@ -6825,7 +6818,7 @@ export function highlightNodeAtLine(line: number): void {
         group.classList.add('cursor-highlighted');
         const rect = group.querySelector('.node-rect') as SVGRectElement;
         if (rect) {
-            rect.setAttribute('stroke', '#fbbf24');
+            rect.setAttribute('stroke', EDGE_COLORS.highlight);
             rect.setAttribute('stroke-width', '3');
         }
         highlightedLineNodeId = node.id;
