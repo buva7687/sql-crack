@@ -534,6 +534,24 @@ function setupEventListeners(): void {
         }
     });
 
+    // SVG-specific keyboard handler (for when SVG has focus after clicking nodes)
+    svg.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            selectNode(null);
+            clearFocusMode();
+            hideContextMenu();
+            if (searchBox) {
+                searchBox.value = '';
+                clearSearch();
+            }
+            requestAnimationFrame(() => {
+                resetView();
+            });
+        }
+    });
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // Don't trigger shortcuts when typing in input fields
