@@ -102,8 +102,8 @@ function countStatements(sql: string): number {
  * Formats bytes into human-readable string.
  */
 function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} bytes`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    if (bytes < 1024) {return `${bytes} bytes`;}
+    if (bytes < 1024 * 1024) {return `${(bytes / 1024).toFixed(1)}KB`;}
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
@@ -723,7 +723,7 @@ export function parseSqlBatch(
 
     // Helper to flush pending session commands as a single merged result
     const flushSessionCommands = () => {
-        if (pendingSessionCommands.length === 0) return;
+        if (pendingSessionCommands.length === 0) {return;}
 
         const mergedResult = createMergedSessionResult(
             pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
@@ -745,7 +745,7 @@ export function parseSqlBatch(
 
     // Helper to flush pending DDL commands as a single merged result
     const flushDdlCommands = () => {
-        if (pendingDdlCommands.length === 0) return;
+        if (pendingDdlCommands.length === 0) {return;}
 
         const mergedResult = createMergedDdlResult(
             pendingDdlCommands.map(c => ({ sql: c.sql, type: c.type, keyword: c.keyword, objectName: c.objectName })),

@@ -190,7 +190,7 @@ export function layoutGraphRadial(
 
     while (queue.length > 0) {
         const { id, layer } = queue.shift()!;
-        if (visited.has(id)) continue;
+        if (visited.has(id)) {continue;}
         visited.add(id);
         layers.set(id, layer);
 
@@ -252,7 +252,7 @@ export function layoutGraphRadial(
  * Normalize node positions to start from a reasonable origin
  */
 function normalizePositions(nodes: FlowNode[]): void {
-    if (nodes.length === 0) return;
+    if (nodes.length === 0) {return;}
 
     const minX = Math.min(...nodes.map(n => n.x));
     const minY = Math.min(...nodes.map(n => n.y));
