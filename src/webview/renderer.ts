@@ -147,17 +147,17 @@ export function initRenderer(container: HTMLElement): void {
     detailsPanel.className = 'details-panel';
     detailsPanel.style.cssText = `
         position: absolute;
-        right: 16px;
+        right: 12px;
         top: 50%;
-        width: 320px;
-        max-height: 70vh;
+        width: 260px;
+        max-height: 50vh;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 12px;
-        padding: 20px;
+        border-radius: 8px;
+        padding: 12px;
         box-sizing: border-box;
         overflow-y: auto;
-        transform: translate(calc(100% + 16px), -50%);
+        transform: translate(calc(100% + 12px), -50%);
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         z-index: 200;
@@ -3281,29 +3281,29 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Window function details
     if (node.windowDetails && node.windowDetails.functions.length > 0) {
         detailsSection = `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Window Functions</div>
+            <div style="margin-bottom: 10px;">
+                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map(func => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                        <div style="color: #fbbf24; font-weight: 600; font-size: 13px; font-family: monospace; margin-bottom: 6px;">
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                        <div style="color: #fbbf24; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
-                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                                <span style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">PARTITION BY</span>
-                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
+                                <span style="background: #6366f1; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
+                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
-                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                                <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">ORDER BY</span>
-                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
+                                <span style="background: #10b981; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
+                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">FRAME</span>
-                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="background: #f59e0b; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
+                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -3315,24 +3315,24 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Aggregate function details
     if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
         detailsSection += `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Aggregate Functions</div>
+            <div style="margin-bottom: 10px;">
+                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map(func => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                        <div style="color: #f59e0b; font-weight: 600; font-size: 13px; font-family: monospace; margin-bottom: 4px;">
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                        <div style="color: #f59e0b; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
-                            <div style="color: #94a3b8; font-size: 11px; font-family: monospace;">
+                            <div style="color: #94a3b8; font-size: 10px; font-family: monospace;">
                                 Alias: ${escapeHtml(func.alias)}
                             </div>
                         ` : ''}
                     </div>
                 `).join('')}
                 ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
-                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
-                        <div style="color: #94a3b8; font-size: 11px; margin-bottom: 4px;">GROUP BY:</div>
-                        <div style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+                        <div style="color: #94a3b8; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
+                        <div style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
                     </div>
                 ` : ''}
             </div>
@@ -3342,31 +3342,31 @@ function updateDetailsPanel(nodeId: string | null): void {
     // CASE statement details
     if (node.caseDetails && node.caseDetails.cases.length > 0) {
         detailsSection += `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">CASE Statements</div>
+            <div style="margin-bottom: 10px;">
+                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
                 ${node.caseDetails.cases.map((caseStmt, idx) => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         ${caseStmt.alias ? `
-                            <div style="color: #eab308; font-weight: 600; font-size: 12px; margin-bottom: 8px;">
+                            <div style="color: #eab308; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
                                 ${escapeHtml(caseStmt.alias)}
                             </div>
                         ` : ''}
                         ${caseStmt.conditions.map((cond, condIdx) => `
-                            <div style="margin-bottom: 6px;">
-                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
-                                    <span style="background: #6366f1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">WHEN</span>
-                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                            <div style="margin-bottom: 4px;">
+                                <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
+                                    <span style="background: #6366f1; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
+                                    <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 6px; margin-left: 40px;">
-                                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">THEN</span>
-                                    <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
+                                    <span style="background: #10b981; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
+                                    <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
-                            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                                <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 600;">ELSE</span>
-                                <span style="color: #cbd5e1; font-size: 11px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                            <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                                <span style="background: #f59e0b; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
+                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -3377,12 +3377,12 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Children details for CTEs and subqueries
     else if (node.children && node.children.length > 0) {
         detailsSection = `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Internal Structure</div>
-                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 10px;">
+            <div style="margin-bottom: 10px;">
+                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
+                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
-                        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <span style="background: ${getNodeColor(child.type)}; padding: 3px 8px; border-radius: 4px; color: white; font-size: 10px; font-weight: 500;">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                            <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
                                 ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
                             </span>
                         </div>
@@ -3394,11 +3394,11 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Standard details
     else if (node.details && node.details.length > 0) {
         detailsSection = `
-            <div style="margin-bottom: 16px;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 8px;">Details</div>
-                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 6px; padding: 12px;">
+            <div style="margin-bottom: 10px;">
+                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
+                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 8px;">
                     ${node.details.map(d => `
-                        <div style="color: #cbd5e1; font-size: 12px; padding: 4px 0; font-family: monospace;">
+                        <div style="color: #cbd5e1; font-size: 11px; padding: 2px 0; font-family: monospace;">
                             ${escapeHtml(d)}
                         </div>
                     `).join('')}
@@ -3408,20 +3408,20 @@ function updateDetailsPanel(nodeId: string | null): void {
     }
 
     detailsPanel.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 14px;">Node Details</h3>
-            <button id="close-details" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 20px; padding: 4px;">&times;</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; color: #f1f5f9; font-size: 12px;">Node Details</h3>
+            <button id="close-details" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
-        <div style="background: ${getNodeColor(node.type)}; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
-            <div style="color: white; font-weight: 600; font-size: 14px; margin-bottom: 4px;">
+        <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
+            <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
                 ${getNodeIcon(node.type)} ${node.label}
             </div>
-            <div style="color: rgba(255,255,255,0.8); font-size: 12px;">
+            <div style="color: rgba(255,255,255,0.8); font-size: 11px;">
                 ${node.description || ''}
             </div>
         </div>
         ${detailsSection}
-        <div style="color: #64748b; font-size: 11px; margin-top: 20px;">
+        <div style="color: #64748b; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
             ID: ${node.id}
         </div>
@@ -6531,24 +6531,24 @@ function showLineagePath(flow: ColumnFlow): void {
     }
 
     detailsPanel.innerHTML = `
-        <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};">
+        <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};">
             Column Lineage
         </div>
         <div style="
             background: ${state.isDarkTheme ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)'};
-            border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 16px;
+            border-radius: 6px;
+            padding: 6px 8px;
+            margin-bottom: 10px;
         ">
-            <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 4px;">Output Column</div>
-            <div style="font-weight: 600; font-size: 14px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">
+            <div style="font-size: 9px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 2px;">Output Column</div>
+            <div style="font-weight: 600; font-size: 12px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">
                 ${escapeHtml(flow.outputColumn)}
             </div>
         </div>
-        <div style="font-size: 11px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 10px;">
+        <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 6px;">
             Transformation Path (${flow.lineagePath.length} steps)
         </div>
-        <div style="padding-left: 4px;">
+        <div style="padding-left: 2px;">
             ${pathHtml}
         </div>
     `;
