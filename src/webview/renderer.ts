@@ -165,8 +165,8 @@ export function initRenderer(container: HTMLElement): void {
         top: 50%;
         width: 260px;
         max-height: 50vh;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px;
         box-sizing: border-box;
@@ -175,7 +175,7 @@ export function initRenderer(container: HTMLElement): void {
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         z-index: 200;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        box-shadow: ${UI_COLORS.shadowMedium};
     `;
     container.appendChild(detailsPanel);
 
@@ -187,13 +187,13 @@ export function initRenderer(container: HTMLElement): void {
         top: 80px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 8px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
-        color: #cbd5e1;
+        color: ${UI_COLORS.textSubtle};
         z-index: 150;
         display: none;
         max-width: 80%;
@@ -209,13 +209,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         left: 16px;
         bottom: 16px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         max-width: 300px;
     `;
@@ -228,13 +228,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         right: 16px;
         bottom: 16px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         max-width: 350px;
         max-height: 200px;
@@ -250,13 +250,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         left: 16px;
         top: 60px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 11px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         display: none;
         max-width: 200px;
@@ -273,13 +273,13 @@ export function initRenderer(container: HTMLElement): void {
         bottom: 0;
         width: 100%;
         max-height: 200px;
-        background: rgba(15, 23, 42, 0.98);
-        border-top: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border-top: 1px solid ${UI_COLORS.border};
         padding: 12px 16px;
         box-sizing: border-box;
         font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 150;
         display: none;
         overflow-y: auto;
@@ -295,8 +295,8 @@ export function initRenderer(container: HTMLElement): void {
         top: 60px;
         width: 150px;
         height: 100px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         overflow: hidden;
         z-index: 100;
@@ -315,8 +315,8 @@ export function initRenderer(container: HTMLElement): void {
     viewportRect.id = 'minimap-viewport';
     viewportRect.style.cssText = `
         position: absolute;
-        border: 2px solid rgba(99, 102, 241, 0.7);
-        background: rgba(99, 102, 241, 0.1);
+        border: 2px solid ${UI_COLORS.focusBorder};
+        background: ${UI_COLORS.focusBackground};
         pointer-events: none;
     `;
     minimapContainer.appendChild(viewportRect);
@@ -327,19 +327,19 @@ export function initRenderer(container: HTMLElement): void {
     tooltipElement.id = 'node-tooltip';
     tooltipElement.style.cssText = `
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.borderMedium};
         border-radius: 8px;
         padding: 10px 14px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 1000;
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.15s ease;
         max-width: 300px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: ${UI_COLORS.shadowLight};
     `;
     container.appendChild(tooltipElement);
 
@@ -348,17 +348,17 @@ export function initRenderer(container: HTMLElement): void {
     contextMenuElement.id = 'node-context-menu';
     contextMenuElement.style.cssText = `
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.borderMedium};
         border-radius: 8px;
         padding: 4px 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 2000;
         display: none;
         min-width: 180px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
     `;
     container.appendChild(contextMenuElement);
 
@@ -2852,13 +2852,13 @@ function showSqlClausePanel(edge: FlowEdge): void {
             bottom: 16px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(15, 23, 42, 0.98);
-            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: ${UI_COLORS.backgroundPanelSolid};
+            border: 1px solid ${UI_COLORS.borderMedium};
             border-radius: 12px;
             padding: 16px 20px;
             max-width: 600px;
             z-index: 1000;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            box-shadow: ${UI_COLORS.shadowMedium};
             font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
         `;
 
@@ -5871,21 +5871,21 @@ function applyTheme(dark: boolean): void {
     if (!svg) {return;}
 
     const colors = dark ? {
-        bg: '#0f172a',
-        panelBg: 'rgba(15, 23, 42, 0.95)',
-        panelBgSolid: 'rgba(15, 23, 42, 0.98)',
-        border: 'rgba(148, 163, 184, 0.2)',
-        text: '#f1f5f9',
-        textMuted: '#94a3b8',
-        textDim: '#64748b'
+        bg: UI_COLORS.background,
+        panelBg: UI_COLORS.backgroundPanel,
+        panelBgSolid: UI_COLORS.backgroundPanelSolid,
+        border: UI_COLORS.border,
+        text: UI_COLORS.text,
+        textMuted: UI_COLORS.textMuted,
+        textDim: UI_COLORS.textDim
     } : {
-        bg: '#ffffff',
-        panelBg: 'rgba(255, 255, 255, 0.95)',
-        panelBgSolid: 'rgba(255, 255, 255, 0.98)',
-        border: 'rgba(148, 163, 184, 0.3)',
-        text: '#1e293b',
+        bg: UI_COLORS.backgroundLight,
+        panelBg: UI_COLORS.backgroundPanelLight,
+        panelBgSolid: UI_COLORS.backgroundPanelLightSolid,
+        border: UI_COLORS.borderMedium,
+        text: UI_COLORS.textLight,
         textMuted: '#475569',
-        textDim: '#94a3b8'
+        textDim: UI_COLORS.textLightDim
     };
 
     // Apply to SVG background - use pattern for light theme, solid color for dark
@@ -6195,9 +6195,9 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     contextMenuElement.style.display = 'block';
 
     // Update theme colors
-    contextMenuElement.style.background = isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-    contextMenuElement.style.color = isDark ? '#e2e8f0' : '#1e293b';
-    contextMenuElement.style.borderColor = isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(148, 163, 184, 0.4)';
+    contextMenuElement.style.background = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;
+    contextMenuElement.style.color = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;
+    contextMenuElement.style.borderColor = isDark ? UI_COLORS.borderMedium : 'rgba(148, 163, 184, 0.4)';
 
     // Add hover effects and click handlers
     const items = contextMenuElement.querySelectorAll('.ctx-menu-item');

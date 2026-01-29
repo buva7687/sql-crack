@@ -8,16 +8,20 @@ import { NodeType, Severity } from '../types';
 // ============================================================
 
 export const UI_COLORS = {
-    // Backgrounds
+    // Backgrounds - Dark theme
     background: '#0f172a',
-    backgroundLight: '#ffffff',
-    backgroundLightGray: '#f8fafc',  // Light theme export background
     backgroundDark: '#1e293b',       // Dark slate for clouds/subflows
     backgroundPanel: 'rgba(15, 23, 42, 0.95)',
     backgroundPanelSolid: 'rgba(15, 23, 42, 0.98)',
     backgroundSubtle: 'rgba(30, 41, 59, 0.5)',
     backgroundSubtleDark: 'rgba(30, 41, 59, 0.6)',
     backgroundOverlay: 'rgba(0, 0, 0, 0.2)',
+
+    // Backgrounds - Light theme
+    backgroundLight: '#ffffff',
+    backgroundLightGray: '#f8fafc',
+    backgroundPanelLight: 'rgba(255, 255, 255, 0.95)',
+    backgroundPanelLightSolid: 'rgba(255, 255, 255, 0.98)',
 
     // Borders
     border: 'rgba(148, 163, 184, 0.2)',
