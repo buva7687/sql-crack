@@ -5039,13 +5039,22 @@ function applyFocusMode(nodeId: string): void {
 function clearFocusMode(): void {
     if (!mainGroup) {return;}
 
+    // Clear zoom state
+    state.zoomedNodeId = null;
+    state.previousZoomState = null;
+    state.focusModeEnabled = false;
+
+    // Restore all nodes - both display and opacity
     const allNodes = mainGroup.querySelectorAll('.node');
     allNodes.forEach(nodeEl => {
+        (nodeEl as SVGGElement).style.display = '';
         (nodeEl as SVGGElement).style.opacity = '1';
     });
 
+    // Restore all edges - both display and opacity
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
+        (edgeEl as SVGPathElement).style.display = '';
         (edgeEl as SVGPathElement).style.opacity = '1';
     });
 }
