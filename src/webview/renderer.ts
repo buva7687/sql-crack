@@ -2995,7 +2995,7 @@ function renderBreadcrumb(): void {
         // Click to focus on this node
         if (node.id !== 'main-query') {
             item.addEventListener('click', () => {
-                selectNode(node.id);
+                selectNode(node.id, { skipNavigation: true });
                 zoomToNode(node);
             });
         } else {
@@ -3100,7 +3100,7 @@ function renderError(message: string): void {
     mainGroup.appendChild(g);
 }
 
-function selectNode(nodeId: string | null): void {
+function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean }): void {
     state.selectedNodeId = nodeId;
 
     // Update visual selection
@@ -3134,14 +3134,15 @@ function selectNode(nodeId: string | null): void {
 
     // Phase 1 Feature: Click Node → Jump to SQL
     // Navigate to the SQL definition when a node is clicked
-    if (nodeId) {
+    // Skip navigation when zooming/focusing to keep keyboard focus in webview
+    if (nodeId && !options?.skipNavigation) {
         const node = currentNodes.find(n => n.id === nodeId);
         if (node && typeof window !== 'undefined') {
             const vscodeApi = (window as any).vscodeApi;
             if (vscodeApi && vscodeApi.postMessage) {
                 // Try to find line number from node or search in SQL
                 let lineNumber = node.startLine;
-                
+
                 // Fallback: If no line number assigned, search for table name in SQL
                 // This handles cases where line number assignment might have failed
                 if (!lineNumber && node.type === 'table' && currentSql) {
@@ -3156,7 +3157,7 @@ function selectNode(nodeId: string | null): void {
                         }
                     }
                 }
-                
+
                 if (lineNumber) {
                     console.log('Navigating to line', lineNumber, 'for node:', node.label, node.type);
                     vscodeApi.postMessage({
@@ -3960,8 +3961,8 @@ function zoomToNode(node: FlowNode): void {
         };
     }
 
-    // Select the node first
-    selectNode(node.id);
+    // Select the node first (skip navigation to keep focus in webview for keyboard shortcuts)
+    selectNode(node.id, { skipNavigation: true });
 
     // Get only immediate neighbors (1 hop away) for context, not all connected nodes
     const immediateNeighbors = new Set<string>();
@@ -6129,17 +6130,17 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
 function handleContextMenuAction(action: string | null, node: FlowNode): void {
     switch (action) {
         case 'zoom':
-            selectNode(node.id);
+            selectNode(node.id, { skipNavigation: true });
             zoomToNode(node);
             break;
         case 'focus-upstream':
-            selectNode(node.id);
+            selectNode(node.id, { skipNavigation: true });
             setFocusMode('upstream');
             state.focusModeEnabled = true;
             applyFocusMode(node.id);
             break;
         case 'focus-downstream':
-            selectNode(node.id);
+            selectNode(node.id, { skipNavigation: true });
             setFocusMode('downstream');
             state.focusModeEnabled = true;
             applyFocusMode(node.id);
