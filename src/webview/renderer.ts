@@ -780,34 +780,64 @@ function updateCloudAndArrow(node: FlowNode): void {
     cloudData.title.setAttribute('x', String(cloudX + cloudWidth / 2));
     cloudData.title.setAttribute('y', String(cloudY + 20));
 
-    // Determine which side of the node the cloud is on
+    // Determine the best connection points based on relative positions
     const cloudCenterX = cloudX + cloudWidth / 2;
+    const cloudCenterY = cloudY + cloudHeight / 2;
     const nodeCenterX = node.x + nodeWidth / 2;
-    const cloudIsOnRight = cloudCenterX > nodeCenterX;
+    const nodeCenterY = node.y + nodeHeight / 2;
 
-    // Update arrow path - arrow starts from the side of cloud closest to the node
+    // Calculate angle to determine best connection direction
+    const dx = nodeCenterX - cloudCenterX;
+    const dy = nodeCenterY - cloudCenterY;
+    const angle = Math.atan2(dy, dx);
+
     let arrowStartX: number;
     let arrowStartY: number;
     let arrowEndX: number;
     let arrowEndY: number;
+    let pathD: string;
 
-    if (cloudIsOnRight) {
-        // Cloud is to the right of node: arrow starts from left side of cloud, points to right side of node
-        arrowStartX = cloudX; // Left side of cloud
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x + nodeWidth; // Right side of node
-        arrowEndY = node.y + nodeHeight / 2;
+    // Determine connection points based on angle (in radians)
+    // -π/4 to π/4: node is to the right
+    // π/4 to 3π/4: node is below
+    // 3π/4 to π or -π to -3π/4: node is to the left
+    // -3π/4 to -π/4: node is above
+
+    if (angle > -Math.PI/4 && angle <= Math.PI/4) {
+        // Node is to the right of cloud
+        arrowStartX = cloudX + cloudWidth;
+        arrowStartY = cloudCenterY;
+        arrowEndX = node.x;
+        arrowEndY = nodeCenterY;
+        const midX = (arrowStartX + arrowEndX) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
+    } else if (angle > Math.PI/4 && angle <= 3*Math.PI/4) {
+        // Node is below cloud
+        arrowStartX = cloudCenterX;
+        arrowStartY = cloudY + cloudHeight;
+        arrowEndX = nodeCenterX;
+        arrowEndY = node.y;
+        const midY = (arrowStartY + arrowEndY) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
+    } else if (angle > -3*Math.PI/4 && angle <= -Math.PI/4) {
+        // Node is above cloud
+        arrowStartX = cloudCenterX;
+        arrowStartY = cloudY;
+        arrowEndX = nodeCenterX;
+        arrowEndY = node.y + nodeHeight;
+        const midY = (arrowStartY + arrowEndY) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
     } else {
-        // Cloud is to the left of node: arrow starts from right side of cloud, points to left side of node
-        arrowStartX = cloudX + cloudWidth; // Right side of cloud
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x; // Left side of node
-        arrowEndY = node.y + nodeHeight / 2;
+        // Node is to the left of cloud
+        arrowStartX = cloudX;
+        arrowStartY = cloudCenterY;
+        arrowEndX = node.x + nodeWidth;
+        arrowEndY = nodeCenterY;
+        const midX = (arrowStartX + arrowEndX) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
     }
 
-    // Create curved path with control point
-    const midX = (arrowStartX + arrowEndX) / 2;
-    cloudData.arrow.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+    cloudData.arrow.setAttribute('d', pathD);
 
     // Update nested SVG position (the subflowGroup inside uses internal pan/zoom transform)
     if (cloudData.nestedSvg) {
@@ -5504,19 +5534,20 @@ export function toggleNodeCollapse(nodeId: string): void {
 
 /**
  * Calculate stacked cloud offsets to prevent overlap when expanding all.
- * Uses a grid-based layout that positions clouds in rows to the left of the main diagram.
+ * Positions each cloud directly above its parent CTE/subquery node.
+ * Detects and resolves horizontal overlaps between adjacent clouds.
  */
 function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
     const cloudPadding = 15;
-    const horizontalSpacing = 40; // Space between clouds horizontally
-    const verticalSpacing = 40;   // Space between cloud rows
-    const cloudGap = 50;          // Gap between cloud area and main diagram
+    const verticalGap = 80;       // Gap between cloud bottom and node top
+    const horizontalGap = 30;     // Minimum gap between clouds horizontally
 
-    // First, calculate dimensions for all clouds
+    // Calculate dimensions for all clouds
     interface CloudInfo {
         node: FlowNode;
         width: number;
         height: number;
+        x: number;  // Calculated X position
     }
 
     const cloudInfos: CloudInfo[] = [];
@@ -5525,91 +5556,51 @@ function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
             node.children?.some(c => c.id === e.source || c.id === e.target)
         );
         const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
-        cloudInfos.push({
-            node,
-            width: layoutSize.width + cloudPadding * 2,
-            height: layoutSize.height + cloudPadding * 2 + 30 // +30 for title
-        });
+        const width = layoutSize.width + cloudPadding * 2;
+        const height = layoutSize.height + cloudPadding * 2 + 30;
+
+        // Initial X: center cloud above its parent node
+        const cloudCenterX = node.x + node.width / 2;
+        const x = cloudCenterX - width / 2;
+
+        cloudInfos.push({ node, width, height, x });
     }
 
-    // Sort clouds by their parent node's position (left-to-right, top-to-bottom)
-    // This keeps visual association between cloud and its reference node
-    cloudInfos.sort((a, b) => {
-        const yDiff = a.node.y - b.node.y;
-        if (Math.abs(yDiff) > 50) return yDiff; // Different rows
-        return a.node.x - b.node.x; // Same row, sort by X
-    });
+    // Sort clouds by X position (left to right)
+    cloudInfos.sort((a, b) => a.x - b.x);
 
-    // Find the leftmost node position to place clouds to its left
-    const minNodeX = Math.min(...currentNodes.map(n => n.x));
+    // Resolve horizontal overlaps - push clouds apart if they overlap
+    for (let i = 1; i < cloudInfos.length; i++) {
+        const prev = cloudInfos[i - 1];
+        const curr = cloudInfos[i];
+        const prevRight = prev.x + prev.width;
+        const minX = prevRight + horizontalGap;
 
-    // Calculate total width needed for all clouds in a single row
-    const totalCloudWidth = cloudInfos.reduce((sum, c) => sum + c.width, 0) +
-                           (cloudInfos.length - 1) * horizontalSpacing;
-
-    // Determine layout strategy based on number of clouds and their sizes
-    const maxRowWidth = 800; // Max width for a row of clouds
-    const useMultipleRows = totalCloudWidth > maxRowWidth || cloudInfos.length > 3;
-
-    if (useMultipleRows) {
-        // Grid layout: arrange clouds in multiple rows
-        const rows: CloudInfo[][] = [];
-        let currentRow: CloudInfo[] = [];
-        let currentRowWidth = 0;
-
-        for (const cloud of cloudInfos) {
-            if (currentRowWidth + cloud.width > maxRowWidth && currentRow.length > 0) {
-                rows.push(currentRow);
-                currentRow = [cloud];
-                currentRowWidth = cloud.width;
-            } else {
-                currentRow.push(cloud);
-                currentRowWidth += cloud.width + horizontalSpacing;
-            }
+        if (curr.x < minX) {
+            // Overlap detected - shift current cloud to the right
+            curr.x = minX;
         }
-        if (currentRow.length > 0) {
-            rows.push(currentRow);
-        }
+    }
 
-        // Position clouds row by row
-        let currentY = 0;
-        for (const row of rows) {
-            const rowHeight = Math.max(...row.map(c => c.height));
-            let currentX = 0;
+    // Find the tallest cloud for bottom alignment
+    const maxCloudHeight = Math.max(...cloudInfos.map(c => c.height));
 
-            for (const cloud of row) {
-                // Calculate offset relative to the node's position
-                // Position cloud to the LEFT of the diagram
-                const cloudAbsX = minNodeX - cloudGap - totalCloudWidth + currentX;
-                const cloudAbsY = currentY;
+    // Find the topmost CTE node Y position
+    const minNodeY = Math.min(...expandableNodes.map(n => n.y));
 
-                const offsetX = cloudAbsX - cloud.node.x;
-                const offsetY = cloudAbsY - cloud.node.y;
+    // Calculate where the bottom of all clouds should be
+    const cloudBottomY = minNodeY - verticalGap;
 
-                cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
+    // Set offsets for each cloud
+    for (const cloud of cloudInfos) {
+        // Position cloud so its bottom aligns with cloudBottomY
+        const cloudY = cloudBottomY - cloud.height;
 
-                currentX += cloud.width + horizontalSpacing;
-            }
+        // Calculate offset relative to the node's position
+        const offsetX = cloud.x - cloud.node.x;
+        const offsetY = cloudY - cloud.node.y;
 
-            currentY += rowHeight + verticalSpacing;
-        }
-    } else {
-        // Single row layout: all clouds in one horizontal row
-        let currentX = 0;
-        const maxHeight = Math.max(...cloudInfos.map(c => c.height));
-
-        for (const cloud of cloudInfos) {
-            // Position cloud to the LEFT of the diagram, vertically centered
-            const cloudAbsX = minNodeX - cloudGap - totalCloudWidth + currentX;
-            const cloudAbsY = (maxHeight - cloud.height) / 2; // Center vertically in row
-
-            const offsetX = cloudAbsX - cloud.node.x;
-            const offsetY = cloudAbsY - cloud.node.y;
-
-            cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
-
-            currentX += cloud.width + horizontalSpacing;
-        }
+        cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
     }
 }
 
