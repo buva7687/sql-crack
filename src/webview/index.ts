@@ -56,6 +56,7 @@ declare global {
         pinId?: string | null;
         viewLocation?: string;
         defaultLayout?: string;
+        showDeadColumnHints?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -269,6 +270,24 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 function visualize(sql: string): void {
     batchResult = parseSqlBatch(sql, currentDialect);
+
+    // Filter out dead column hints/warnings if the setting is disabled
+    // This addresses false positives where columns are used by the application layer
+    if (window.showDeadColumnHints === false && batchResult) {
+        batchResult.queries.forEach(query => {
+            // Filter hints
+            query.hints = query.hints.filter(h =>
+                !h.message.toLowerCase().includes('dead column')
+            );
+            // Filter node warnings
+            query.nodes.forEach(node => {
+                if (node.warnings) {
+                    node.warnings = node.warnings.filter(w => w.type !== 'dead-column');
+                }
+            });
+        });
+    }
+
     currentQueryIndex = 0;
     updateBatchTabsUI();
     renderCurrentQuery();

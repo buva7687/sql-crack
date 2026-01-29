@@ -436,6 +436,7 @@ export class VisualizationPanel {
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'beside';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
+        const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -472,6 +473,7 @@ export class VisualizationPanel {
         window.viewLocation = ${JSON.stringify(viewLocation)};
         window.defaultLayout = ${JSON.stringify(defaultLayout)};
         window.persistedPinnedTabs = ${JSON.stringify(pinnedTabs)};
+        window.showDeadColumnHints = ${JSON.stringify(showDeadColumnHints)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();
