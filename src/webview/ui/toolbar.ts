@@ -947,14 +947,36 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 12px;
         padding: 24px;
-        min-width: 320px;
-        max-width: 400px;
+        min-width: 500px;
+        max-width: 600px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     `;
 
+    // Split shortcuts into two columns
+    const midpoint = Math.ceil(shortcuts.length / 2);
+    const leftColumn = shortcuts.slice(0, midpoint);
+    const rightColumn = shortcuts.slice(midpoint);
+
+    const renderShortcut = (s: { key: string; description: string }) => `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <span style="color: #94a3b8; font-size: 12px;">${s.description}</span>
+            <kbd style="
+                background: rgba(99, 102, 241, 0.2);
+                border: 1px solid rgba(99, 102, 241, 0.3);
+                border-radius: 4px;
+                padding: 3px 6px;
+                color: #a5b4fc;
+                font-size: 10px;
+                font-family: monospace;
+                margin-left: 8px;
+                white-space: nowrap;
+            ">${s.key}</kbd>
+        </div>
+    `;
+
     modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 16px;">Keyboard Shortcuts</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
             <button id="close-shortcuts" style="
                 background: none;
                 border: none;
@@ -964,21 +986,13 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
                 padding: 4px;
             ">&times;</button>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-            ${shortcuts.map(s => `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                    <span style="color: #94a3b8; font-size: 13px;">${s.description}</span>
-                    <kbd style="
-                        background: rgba(99, 102, 241, 0.2);
-                        border: 1px solid rgba(99, 102, 241, 0.3);
-                        border-radius: 4px;
-                        padding: 4px 8px;
-                        color: #a5b4fc;
-                        font-size: 11px;
-                        font-family: monospace;
-                    ">${s.key}</kbd>
-                </div>
-            `).join('')}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
+            <div style="display: flex; flex-direction: column;">
+                ${leftColumn.map(renderShortcut).join('')}
+            </div>
+            <div style="display: flex; flex-direction: column;">
+                ${rightColumn.map(renderShortcut).join('')}
+            </div>
         </div>
     `;
 

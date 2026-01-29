@@ -6817,7 +6817,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'R', description: 'Reset view' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
-        { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
+        { key: 'H', description: 'Cycle layouts' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column lineage' },
         { key: 'Q', description: 'Toggle query stats' },
