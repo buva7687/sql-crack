@@ -72,4 +72,20 @@ export interface BatchParseResult {
     queries: ParseResult[];
     totalStats: QueryStats;
     queryLineRanges?: QueryLineRange[];
+    validationError?: ValidationError;
+}
+
+export interface ValidationError {
+    type: 'size_limit' | 'query_count_limit' | 'timeout';
+    message: string;
+    details: {
+        actual: number;
+        limit: number;
+        unit: string;
+    };
+}
+
+export interface ValidationLimits {
+    maxSqlSizeBytes: number;
+    maxQueryCount: number;
 }

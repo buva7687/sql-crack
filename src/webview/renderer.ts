@@ -15,11 +15,26 @@ import {
 } from './types';
 
 // Import color utilities
-import { getNodeColor } from './constants';
+import {
+    getNodeColor,
+    NODE_COLORS,
+    WARNING_COLORS,
+    UI_COLORS,
+    EDGE_COLORS,
+    BADGE_COLORS,
+    CONDITION_COLORS,
+    NODE_STROKE_COLORS,
+    GLOW_COLORS,
+    STATUS_COLORS,
+    CLOSE_BUTTON_COLORS,
+    COMPLEXITY_COLORS,
+    HINT_COLORS,
+} from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
-import { layoutGraphHorizontal } from './parser/forceLayout';
+import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
+import { layoutGraph } from './parser/layout';
 
 const state: ViewState = {
     scale: 1,
@@ -93,7 +108,7 @@ export function initRenderer(container: HTMLElement): void {
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.setAttribute('tabindex', '-1'); // Make SVG focusable for keyboard events
-    svg.style.background = '#0f172a';
+    svg.style.background = UI_COLORS.background;
     svg.style.cursor = 'grab';
     svg.style.position = 'absolute';
     svg.style.top = '0';
@@ -105,10 +120,10 @@ export function initRenderer(container: HTMLElement): void {
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.default}" />
         </marker>
         <marker id="arrowhead-highlight" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.highlight}" />
         </marker>
         <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
@@ -122,8 +137,8 @@ export function initRenderer(container: HTMLElement): void {
         </filter>
         <!-- Grid pattern for light theme -->
         <pattern id="grid-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-            <rect width="20" height="20" fill="#ffffff"/>
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+            <rect width="20" height="20" fill="${UI_COLORS.gridBackground}"/>
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="${UI_COLORS.gridLine}" stroke-width="1"/>
         </pattern>
     `;
     svg.appendChild(defs);
@@ -132,7 +147,7 @@ export function initRenderer(container: HTMLElement): void {
     backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     backgroundRect.setAttribute('width', '100%');
     backgroundRect.setAttribute('height', '100%');
-    backgroundRect.setAttribute('fill', '#0f172a');
+    backgroundRect.setAttribute('fill', UI_COLORS.background);
     backgroundRect.style.pointerEvents = 'none';
     svg.appendChild(backgroundRect);
 
@@ -151,8 +166,8 @@ export function initRenderer(container: HTMLElement): void {
         top: 50%;
         width: 260px;
         max-height: 50vh;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px;
         box-sizing: border-box;
@@ -161,7 +176,7 @@ export function initRenderer(container: HTMLElement): void {
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         z-index: 200;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        box-shadow: ${UI_COLORS.shadowMedium};
     `;
     container.appendChild(detailsPanel);
 
@@ -173,13 +188,13 @@ export function initRenderer(container: HTMLElement): void {
         top: 80px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 8px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
-        color: #cbd5e1;
+        color: ${UI_COLORS.textSubtle};
         z-index: 150;
         display: none;
         max-width: 80%;
@@ -195,13 +210,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         left: 16px;
         bottom: 16px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         max-width: 300px;
     `;
@@ -214,13 +229,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         right: 16px;
         bottom: 16px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         max-width: 350px;
         max-height: 200px;
@@ -236,13 +251,13 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         left: 16px;
         top: 60px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         padding: 12px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 11px;
-        color: #94a3b8;
+        color: ${UI_COLORS.textMuted};
         z-index: 100;
         display: none;
         max-width: 200px;
@@ -259,13 +274,13 @@ export function initRenderer(container: HTMLElement): void {
         bottom: 0;
         width: 100%;
         max-height: 200px;
-        background: rgba(15, 23, 42, 0.98);
-        border-top: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border-top: 1px solid ${UI_COLORS.border};
         padding: 12px 16px;
         box-sizing: border-box;
         font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 150;
         display: none;
         overflow-y: auto;
@@ -281,8 +296,8 @@ export function initRenderer(container: HTMLElement): void {
         top: 60px;
         width: 150px;
         height: 100px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${UI_COLORS.backgroundPanel};
+        border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         overflow: hidden;
         z-index: 100;
@@ -301,8 +316,8 @@ export function initRenderer(container: HTMLElement): void {
     viewportRect.id = 'minimap-viewport';
     viewportRect.style.cssText = `
         position: absolute;
-        border: 2px solid rgba(99, 102, 241, 0.7);
-        background: rgba(99, 102, 241, 0.1);
+        border: 2px solid ${UI_COLORS.focusBorder};
+        background: ${UI_COLORS.focusBackground};
         pointer-events: none;
     `;
     minimapContainer.appendChild(viewportRect);
@@ -313,19 +328,19 @@ export function initRenderer(container: HTMLElement): void {
     tooltipElement.id = 'node-tooltip';
     tooltipElement.style.cssText = `
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.borderMedium};
         border-radius: 8px;
         padding: 10px 14px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 1000;
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.15s ease;
         max-width: 300px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: ${UI_COLORS.shadowLight};
     `;
     container.appendChild(tooltipElement);
 
@@ -334,17 +349,17 @@ export function initRenderer(container: HTMLElement): void {
     contextMenuElement.id = 'node-context-menu';
     contextMenuElement.style.cssText = `
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: ${UI_COLORS.backgroundPanelSolid};
+        border: 1px solid ${UI_COLORS.borderMedium};
         border-radius: 8px;
         padding: 4px 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: #e2e8f0;
+        color: ${UI_COLORS.textBright};
         z-index: 2000;
         display: none;
         min-width: 180px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
     `;
     container.appendChild(contextMenuElement);
 
@@ -528,6 +543,7 @@ function setupEventListeners(): void {
         state.scale = newScale;
 
         updateTransform();
+        updateZoomIndicator();
     });
 
     // Click outside to deselect and reset focus
@@ -764,34 +780,64 @@ function updateCloudAndArrow(node: FlowNode): void {
     cloudData.title.setAttribute('x', String(cloudX + cloudWidth / 2));
     cloudData.title.setAttribute('y', String(cloudY + 20));
 
-    // Determine which side of the node the cloud is on
+    // Determine the best connection points based on relative positions
     const cloudCenterX = cloudX + cloudWidth / 2;
+    const cloudCenterY = cloudY + cloudHeight / 2;
     const nodeCenterX = node.x + nodeWidth / 2;
-    const cloudIsOnRight = cloudCenterX > nodeCenterX;
+    const nodeCenterY = node.y + nodeHeight / 2;
 
-    // Update arrow path - arrow starts from the side of cloud closest to the node
+    // Calculate angle to determine best connection direction
+    const dx = nodeCenterX - cloudCenterX;
+    const dy = nodeCenterY - cloudCenterY;
+    const angle = Math.atan2(dy, dx);
+
     let arrowStartX: number;
     let arrowStartY: number;
     let arrowEndX: number;
     let arrowEndY: number;
+    let pathD: string;
 
-    if (cloudIsOnRight) {
-        // Cloud is to the right of node: arrow starts from left side of cloud, points to right side of node
-        arrowStartX = cloudX; // Left side of cloud
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x + nodeWidth; // Right side of node
-        arrowEndY = node.y + nodeHeight / 2;
+    // Determine connection points based on angle (in radians)
+    // -π/4 to π/4: node is to the right
+    // π/4 to 3π/4: node is below
+    // 3π/4 to π or -π to -3π/4: node is to the left
+    // -3π/4 to -π/4: node is above
+
+    if (angle > -Math.PI/4 && angle <= Math.PI/4) {
+        // Node is to the right of cloud
+        arrowStartX = cloudX + cloudWidth;
+        arrowStartY = cloudCenterY;
+        arrowEndX = node.x;
+        arrowEndY = nodeCenterY;
+        const midX = (arrowStartX + arrowEndX) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
+    } else if (angle > Math.PI/4 && angle <= 3*Math.PI/4) {
+        // Node is below cloud
+        arrowStartX = cloudCenterX;
+        arrowStartY = cloudY + cloudHeight;
+        arrowEndX = nodeCenterX;
+        arrowEndY = node.y;
+        const midY = (arrowStartY + arrowEndY) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
+    } else if (angle > -3*Math.PI/4 && angle <= -Math.PI/4) {
+        // Node is above cloud
+        arrowStartX = cloudCenterX;
+        arrowStartY = cloudY;
+        arrowEndX = nodeCenterX;
+        arrowEndY = node.y + nodeHeight;
+        const midY = (arrowStartY + arrowEndY) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
     } else {
-        // Cloud is to the left of node: arrow starts from right side of cloud, points to left side of node
-        arrowStartX = cloudX + cloudWidth; // Right side of cloud
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x; // Left side of node
-        arrowEndY = node.y + nodeHeight / 2;
+        // Node is to the left of cloud
+        arrowStartX = cloudX;
+        arrowStartY = cloudCenterY;
+        arrowEndX = node.x + nodeWidth;
+        arrowEndY = nodeCenterY;
+        const midX = (arrowStartX + arrowEndX) / 2;
+        pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
     }
 
-    // Create curved path with control point
-    const midX = (arrowStartX + arrowEndX) / 2;
-    cloudData.arrow.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
+    cloudData.arrow.setAttribute('d', pathD);
 
     // Update nested SVG position (the subflowGroup inside uses internal pan/zoom transform)
     if (cloudData.nestedSvg) {
@@ -1154,10 +1200,10 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // But for light theme, we might need darker text on lighter backgrounds
     // Since standard nodes use colored backgrounds (blue, purple, etc.), white text should work
     // But let's be safe and use theme-aware colors for better contrast
-    const textColor = isDark ? '#ffffff' : '#ffffff'; // Keep white for colored backgrounds
-    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.9)';
-    const textColorDim = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.8)';
-    const strokeColor = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
+    const textColor = isDark ? UI_COLORS.white : UI_COLORS.white; // Keep white for colored backgrounds
+    const textColorMuted = isDark ? UI_COLORS.whiteMuted : UI_COLORS.whiteBright;
+    const textColorDim = isDark ? UI_COLORS.whiteDim : UI_COLORS.whiteMuted;
+    const strokeColor = isDark ? UI_COLORS.borderWhite : 'rgba(0, 0, 0, 0.2)';
 
     // Background rect
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1175,20 +1221,20 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         // Access mode coloring (read/write differentiation)
         if (node.accessMode === 'write') {
             // Write operations: Red border with "WRITE" emphasis
-            rect.setAttribute('stroke', 'rgba(239, 68, 68, 0.9)'); // red for write
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.write);
             rect.setAttribute('stroke-width', '3');
         } else if (node.accessMode === 'read') {
             // Read operations: Blue border
-            rect.setAttribute('stroke', 'rgba(59, 130, 246, 0.8)'); // blue for read
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.read);
             rect.setAttribute('stroke-width', '3');
         } else if (tableCategory === 'cte_reference') {
             // CTE reference: double border effect with dashed inner
-            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.8)'); // purple for CTE
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.cte);
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('stroke-dasharray', '8,4');
         } else if (tableCategory === 'derived' || node.accessMode === 'derived') {
             // Derived table: dashed border
-            rect.setAttribute('stroke', 'rgba(168, 85, 247, 0.7)'); // purple for derived
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.derived);
             rect.setAttribute('stroke-width', '2');
             rect.setAttribute('stroke-dasharray', '5,3');
         } else {
@@ -1201,8 +1247,8 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     // Add complexity indicator (colored glow for medium/high complexity)
     if (node.complexityLevel && node.complexityLevel !== 'low') {
         const complexityColor = node.complexityLevel === 'high' ?
-            'rgba(239, 68, 68, 0.4)' :    // Red glow for high complexity
-            'rgba(245, 158, 11, 0.4)';     // Orange glow for medium complexity
+            GLOW_COLORS.high :
+            GLOW_COLORS.medium;
 
         rect.setAttribute('stroke', complexityColor.replace('0.4', '0.8'));
         rect.setAttribute('stroke-width', '2');
@@ -1216,30 +1262,30 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
 
     // Access mode badges (highest priority)
     if (node.accessMode === 'read') {
-        badges.push({ text: 'READ', color: '#3b82f6' }); // Blue
+        badges.push({ text: 'READ', color: BADGE_COLORS.read });
     } else if (node.accessMode === 'write') {
-        badges.push({ text: 'WRITE', color: '#ef4444' }); // Red
+        badges.push({ text: 'WRITE', color: BADGE_COLORS.write });
     } else if (node.accessMode === 'derived') {
-        badges.push({ text: 'DERIVED', color: '#a855f7' }); // Purple
+        badges.push({ text: 'DERIVED', color: BADGE_COLORS.derived });
     }
 
     // Table category badges
     if (isTable && tableCategory === 'cte_reference' && !node.accessMode) {
-        badges.push({ text: 'CTE', color: '#a855f7' }); // Purple
+        badges.push({ text: 'CTE', color: BADGE_COLORS.cte });
     } else if (isTable && tableCategory === 'derived' && !node.accessMode) {
-        badges.push({ text: 'DERIVED', color: '#14b8a6' }); // Teal
+        badges.push({ text: 'DERIVED', color: BADGE_COLORS.derivedAlt });
     }
 
     // Operation type badges
     if (node.operationType && node.operationType !== 'SELECT') {
         const opColors: Record<string, string> = {
-            'INSERT': '#10b981', // Green
-            'UPDATE': '#f59e0b', // Amber
-            'DELETE': '#dc2626', // Dark Red
-            'MERGE': '#8b5cf6',  // Violet
-            'CREATE_TABLE_AS': '#06b6d4' // Cyan
+            'INSERT': BADGE_COLORS.insert,
+            'UPDATE': BADGE_COLORS.update,
+            'DELETE': BADGE_COLORS.delete,
+            'MERGE': BADGE_COLORS.merge,
+            'CREATE_TABLE_AS': BADGE_COLORS.createTableAs,
         };
-        const opColor = opColors[node.operationType] || '#64748b';
+        const opColor = opColors[node.operationType] || EDGE_COLORS.default;
         badges.push({ text: node.operationType, color: opColor });
     }
 
@@ -1468,7 +1514,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
         cloud.setAttribute('stroke', getNodeColor(node.type));
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('stroke-dasharray', '6,3');
@@ -1480,7 +1526,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = node.label;
@@ -1657,7 +1703,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     rect.setAttribute('width', String(nodeWidth));
     rect.setAttribute('height', String(nodeHeight));
     rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', '#1e293b');
+    rect.setAttribute('fill', UI_COLORS.backgroundDark);
     rect.setAttribute('stroke', getNodeColor(node.type));
     rect.setAttribute('stroke-width', '2');
     rect.setAttribute('stroke-dasharray', '6,3');
@@ -1689,7 +1735,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 12));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+    descText.setAttribute('fill', UI_COLORS.whiteFaint);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -1740,7 +1786,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', '#1e293b');
+        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
         cloud.setAttribute('stroke', getNodeColor(node.type));
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('filter', 'url(#shadow)');
@@ -1752,7 +1798,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', 'rgba(255,255,255,0.7)');
+        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = cteName;
@@ -1939,7 +1985,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 14));
     iconText.setAttribute('y', String(node.y + 26));
-    iconText.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    iconText.setAttribute('fill', UI_COLORS.whiteBright);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
     group.appendChild(iconText);
@@ -1959,7 +2005,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 14));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+    descText.setAttribute('fill', UI_COLORS.whiteDim);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -2104,7 +2150,7 @@ function renderCloudSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.4)');
+            path.setAttribute('stroke', UI_COLORS.whiteSubtle);
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2131,7 +2177,7 @@ function renderCloudSubflow(
         rect.setAttribute('height', String(child.height));
         rect.setAttribute('rx', '10');  // Match main nodes
         rect.setAttribute('fill', nodeColor);
-        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+        rect.setAttribute('stroke', UI_COLORS.borderWhite);
         rect.setAttribute('stroke-width', '2');  // Match main nodes
         rect.setAttribute('filter', 'url(#shadow)');
         childGroup.appendChild(rect);
@@ -2140,7 +2186,7 @@ function renderCloudSubflow(
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 14));
         icon.setAttribute('y', String(childY + 26));
-        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('fill', UI_COLORS.whiteBright);
         icon.setAttribute('font-size', '14');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -2161,7 +2207,7 @@ function renderCloudSubflow(
             const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             descText.setAttribute('x', String(childX + 14));
             descText.setAttribute('y', String(childY + 45));
-            descText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            descText.setAttribute('fill', UI_COLORS.whiteDim);
             descText.setAttribute('font-size', '10');
             descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
             descText.textContent = truncate(child.description, 22);
@@ -2214,8 +2260,8 @@ function addCloudCloseButton(
     buttonBg.setAttribute('cx', String(buttonSize / 2));
     buttonBg.setAttribute('cy', String(buttonSize / 2));
     buttonBg.setAttribute('r', String(buttonSize / 2));
-    buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)'); // Red with transparency
-    buttonBg.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+    buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.background); // Red with transparency
+    buttonBg.setAttribute('stroke', UI_COLORS.borderWhite);
     buttonBg.setAttribute('stroke-width', '1');
     closeButtonGroup.appendChild(buttonBg);
 
@@ -2253,10 +2299,10 @@ function addCloudCloseButton(
 
     // Hover effects
     closeButtonGroup.addEventListener('mouseenter', () => {
-        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.9)');
+        buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.backgroundHover);
     });
     closeButtonGroup.addEventListener('mouseleave', () => {
-        buttonBg.setAttribute('fill', 'rgba(239, 68, 68, 0.6)');
+        buttonBg.setAttribute('fill', CLOSE_BUTTON_COLORS.background);
     });
 
     cloudGroup.appendChild(closeButtonGroup);
@@ -2301,7 +2347,7 @@ function renderSubflow(
     subflowBg.setAttribute('width', String(containerWidth));
     subflowBg.setAttribute('height', String(containerHeight));
     subflowBg.setAttribute('rx', '6');
-    subflowBg.setAttribute('fill', 'rgba(0, 0, 0, 0.2)');
+    subflowBg.setAttribute('fill', UI_COLORS.backgroundOverlay);
     subflowGroup.appendChild(subflowBg);
 
     // Draw child edges first (behind nodes)
@@ -2324,7 +2370,7 @@ function renderSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            path.setAttribute('stroke', UI_COLORS.borderWhite);
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2348,7 +2394,7 @@ function renderSubflow(
         rect.setAttribute('height', String(child.height));
         rect.setAttribute('rx', '6');
         rect.setAttribute('fill', getNodeColor(child.type));
-        rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.2)');
+        rect.setAttribute('stroke', UI_COLORS.borderWhiteLight);
         rect.setAttribute('stroke-width', '1');
         childGroup.appendChild(rect);
 
@@ -2356,7 +2402,7 @@ function renderSubflow(
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 8));
         icon.setAttribute('y', String(childY + child.height / 2 + 4));
-        icon.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+        icon.setAttribute('fill', UI_COLORS.whiteBright);
         icon.setAttribute('font-size', '11');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -2403,7 +2449,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -2411,14 +2457,14 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     headerClip.setAttribute('y', String(node.y + headerHeight - 10));
     headerClip.setAttribute('width', String(node.width));
     headerClip.setAttribute('height', '10');
-    headerClip.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    headerClip.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(headerClip);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = '▦';
     group.appendChild(icon);
@@ -2443,14 +2489,14 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(funcPill);
 
         // Function name
         const funcName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcName.setAttribute('x', String(node.x + padding + 6));
         funcName.setAttribute('y', String(yOffset + 15));
-        funcName.setAttribute('fill', '#fbbf24');
+        funcName.setAttribute('fill', BADGE_COLORS.functionName);
         funcName.setAttribute('font-size', '10');
         funcName.setAttribute('font-weight', '600');
         funcName.setAttribute('font-family', 'monospace');
@@ -2467,7 +2513,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
             partBadge.setAttribute('width', '16');
             partBadge.setAttribute('height', '14');
             partBadge.setAttribute('rx', '3');
-            partBadge.setAttribute('fill', '#6366f1');
+            partBadge.setAttribute('fill', BADGE_COLORS.partitionBy);
             group.appendChild(partBadge);
 
             const partText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2489,7 +2535,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
             orderBadge.setAttribute('width', '16');
             orderBadge.setAttribute('height', '14');
             orderBadge.setAttribute('rx', '3');
-            orderBadge.setAttribute('fill', '#10b981');
+            orderBadge.setAttribute('fill', BADGE_COLORS.orderBy);
             group.appendChild(orderBadge);
 
             const orderText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2511,7 +2557,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${windowDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -2543,14 +2589,14 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = 'Σ';
     group.appendChild(icon);
@@ -2575,14 +2621,14 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(funcPill);
 
         // Function expression
         const funcText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcText.setAttribute('x', String(node.x + padding + 6));
         funcText.setAttribute('y', String(yOffset + 16));
-        funcText.setAttribute('fill', '#fbbf24');
+        funcText.setAttribute('fill', BADGE_COLORS.functionName);
         funcText.setAttribute('font-size', '10');
         funcText.setAttribute('font-weight', '600');
         funcText.setAttribute('font-family', 'monospace');
@@ -2599,7 +2645,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${aggregateDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -2631,14 +2677,14 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     header.setAttribute('width', String(node.width));
     header.setAttribute('height', String(headerHeight));
     header.setAttribute('rx', '10');
-    header.setAttribute('fill', 'rgba(0,0,0,0.2)');
+    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
     group.appendChild(header);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', 'rgba(255,255,255,0.9)');
+    icon.setAttribute('fill', UI_COLORS.whiteBright);
     icon.setAttribute('font-size', '12');
     icon.textContent = '?';
     group.appendChild(icon);
@@ -2663,14 +2709,14 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         casePill.setAttribute('width', String(node.width - padding * 2));
         casePill.setAttribute('height', String(caseHeight));
         casePill.setAttribute('rx', '4');
-        casePill.setAttribute('fill', 'rgba(0,0,0,0.2)');
+        casePill.setAttribute('fill', UI_COLORS.backgroundOverlay);
         group.appendChild(casePill);
 
         // CASE conditions count
         const caseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         caseText.setAttribute('x', String(node.x + padding + 6));
         caseText.setAttribute('y', String(yOffset + 18));
-        caseText.setAttribute('fill', '#fbbf24');
+        caseText.setAttribute('fill', BADGE_COLORS.functionName);
         caseText.setAttribute('font-size', '10');
         caseText.setAttribute('font-weight', '600');
         caseText.setAttribute('font-family', 'monospace');
@@ -2681,7 +2727,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
             const elseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             elseText.setAttribute('x', String(node.x + padding + 6));
             elseText.setAttribute('y', String(yOffset + 32));
-            elseText.setAttribute('fill', 'rgba(255,255,255,0.7)');
+            elseText.setAttribute('fill', UI_COLORS.whiteDim);
             elseText.setAttribute('font-size', '9');
             const truncatedElse = caseStmt.elseValue.length > 20 ? caseStmt.elseValue.substring(0, 17) + '...' : caseStmt.elseValue;
             elseText.textContent = 'ELSE: ' + truncatedElse;
@@ -2697,7 +2743,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', 'rgba(255,255,255,0.6)');
+        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${caseDetails.cases.length - 3} more`;
         group.appendChild(moreText);
@@ -2736,7 +2782,7 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', '#64748b');
+    path.setAttribute('stroke', EDGE_COLORS.default);
     path.setAttribute('stroke-width', '2');
     path.setAttribute('marker-end', 'url(#arrowhead)');
     path.setAttribute('class', 'edge');
@@ -2767,14 +2813,14 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
     // Hover effect for edges
     path.addEventListener('mouseenter', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', '#94a3b8');
+            path.setAttribute('stroke', EDGE_COLORS.defaultLight);
             path.setAttribute('stroke-width', '3');
         }
     });
 
     path.addEventListener('mouseleave', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', '#64748b');
+            path.setAttribute('stroke', EDGE_COLORS.default);
             path.setAttribute('stroke-width', '2');
         }
     });
@@ -2792,10 +2838,10 @@ function handleEdgeClick(edge: FlowEdge): void {
         const isConnected = state.selectedNodeId && (source === state.selectedNodeId || target === state.selectedNodeId);
 
         if (isConnected) {
-            e.setAttribute('stroke', '#fbbf24');
+            e.setAttribute('stroke', EDGE_COLORS.highlight);
             e.setAttribute('stroke-width', '3');
         } else {
-            e.setAttribute('stroke', '#64748b');
+            e.setAttribute('stroke', EDGE_COLORS.default);
             e.setAttribute('stroke-width', '2');
         }
     });
@@ -2804,7 +2850,7 @@ function handleEdgeClick(edge: FlowEdge): void {
     const clickedEdge = mainGroup?.querySelector(`[data-edge-id="${edge.id}"]`);
     if (clickedEdge) {
         clickedEdge.setAttribute('data-highlighted', 'true');
-        clickedEdge.setAttribute('stroke', '#10b981'); // Green for selected edge
+        clickedEdge.setAttribute('stroke', EDGE_COLORS.selected);
         clickedEdge.setAttribute('stroke-width', '4');
         clickedEdge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
     }
@@ -2838,13 +2884,13 @@ function showSqlClausePanel(edge: FlowEdge): void {
             bottom: 16px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(15, 23, 42, 0.98);
-            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: ${UI_COLORS.backgroundPanelSolid};
+            border: 1px solid ${UI_COLORS.borderMedium};
             border-radius: 12px;
             padding: 16px 20px;
             max-width: 600px;
             z-index: 1000;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            box-shadow: ${UI_COLORS.shadowMedium};
             font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
         `;
 
@@ -2863,7 +2909,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             right: 8px;
             background: transparent;
             border: none;
-            color: #94a3b8;
+            color: ${UI_COLORS.textMuted};
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
@@ -2878,16 +2924,16 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 font-weight: 700;
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
-            <div style="color: #cbd5e1; font-size: 13px; font-weight: 600;">
+            <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
                 ${edge.label || 'Data Flow'}
             </div>
         </div>
         <div style="
-            background: rgba(30, 41, 59, 0.6);
-            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: ${UI_COLORS.backgroundSubtleDark};
+            border: 1px solid ${UI_COLORS.border};
             border-radius: 8px;
             padding: 12px;
-            color: #e2e8f0;
+            color: ${UI_COLORS.textBright};
             font-size: 13px;
             line-height: 1.6;
             white-space: pre-wrap;
@@ -2896,7 +2942,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             overflow-y: auto;
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
-            <div style="color: #94a3b8; font-size: 11px; margin-top: 8px;">
+            <div style="color: ${UI_COLORS.textMuted}; font-size: 11px; margin-top: 8px;">
                 📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
@@ -2906,14 +2952,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
 }
 
 function getClauseTypeColor(clauseType: string): string {
-    switch (clauseType) {
-        case 'join': return '#3b82f6'; // Blue
-        case 'where': return '#8b5cf6'; // Purple
-        case 'having': return '#ec4899'; // Pink
-        case 'on': return '#06b6d4'; // Cyan
-        case 'filter': return '#f59e0b'; // Amber
-        default: return '#64748b'; // Gray
-    }
+    return CONDITION_COLORS[clauseType] || CONDITION_COLORS.default;
 }
 
 function escapeHtml(text: string): string {
@@ -3045,11 +3084,11 @@ function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
         const target = edge.getAttribute('data-target');
         if (source === nodeId || target === nodeId) {
             if (highlight) {
-                edge.setAttribute('stroke', '#fbbf24');
+                edge.setAttribute('stroke', EDGE_COLORS.highlight);
                 edge.setAttribute('stroke-width', '3');
                 edge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
             } else {
-                edge.setAttribute('stroke', '#64748b');
+                edge.setAttribute('stroke', EDGE_COLORS.default);
                 edge.setAttribute('stroke-width', '2');
                 edge.setAttribute('marker-end', 'url(#arrowhead)');
             }
@@ -3076,7 +3115,7 @@ function renderError(message: string): void {
     icon.setAttribute('x', '50%');
     icon.setAttribute('y', hasSuggestion ? '45%' : '48%');
     icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('fill', '#f87171');
+    icon.setAttribute('fill', STATUS_COLORS.error);
     icon.setAttribute('font-size', '24');
     icon.textContent = '⚠';
     g.appendChild(icon);
@@ -3086,7 +3125,7 @@ function renderError(message: string): void {
     text.setAttribute('x', '50%');
     text.setAttribute('y', hasSuggestion ? '52%' : '55%');
     text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('fill', '#f87171');
+    text.setAttribute('fill', STATUS_COLORS.error);
     text.setAttribute('font-size', '14');
     text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     text.textContent = hasSuggestion ? parts[0] : `Error: ${message}`;
@@ -3098,7 +3137,7 @@ function renderError(message: string): void {
         suggestion.setAttribute('x', '50%');
         suggestion.setAttribute('y', '58%');
         suggestion.setAttribute('text-anchor', 'middle');
-        suggestion.setAttribute('fill', '#94a3b8');
+        suggestion.setAttribute('fill', UI_COLORS.textMuted);
         suggestion.setAttribute('font-size', '12');
         suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         suggestion.textContent = `💡 ${parts[1]}`;
@@ -3109,7 +3148,7 @@ function renderError(message: string): void {
         hint.setAttribute('x', '50%');
         hint.setAttribute('y', '64%');
         hint.setAttribute('text-anchor', 'middle');
-        hint.setAttribute('fill', '#64748b');
+        hint.setAttribute('fill', UI_COLORS.textDim);
         hint.setAttribute('font-size', '11');
         hint.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         hint.textContent = 'Change dialect using the dropdown in the top-left toolbar';
@@ -3129,7 +3168,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
         const id = g.getAttribute('data-id');
         if (rect && id) {
             if (id === nodeId) {
-                rect.setAttribute('stroke', '#fff');
+                rect.setAttribute('stroke', UI_COLORS.white);
                 rect.setAttribute('stroke-width', '3');
                 rect.setAttribute('filter', 'url(#glow)');
                 highlightConnectedEdges(id, true);
@@ -3145,7 +3184,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
     if (!nodeId) {
         const edges = mainGroup?.querySelectorAll('.edge');
         edges?.forEach(edge => {
-            edge.setAttribute('stroke', '#64748b');
+            edge.setAttribute('stroke', EDGE_COLORS.default);
             edge.setAttribute('stroke-width', '2');
             edge.setAttribute('marker-end', 'url(#arrowhead)');
         });
@@ -3342,28 +3381,28 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.windowDetails && node.windowDetails.functions.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
+                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map(func => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: #fbbf24; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
+                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                        <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: #6366f1; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
-                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                                <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
+                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: #10b981; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
-                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                                <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
+                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <span style="background: #f59e0b; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
-                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
+                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -3376,23 +3415,23 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
+                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map(func => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: #f59e0b; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
+                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                        <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
-                            <div style="color: #94a3b8; font-size: 10px; font-family: monospace;">
+                            <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; font-family: monospace;">
                                 Alias: ${escapeHtml(func.alias)}
                             </div>
                         ` : ''}
                     </div>
                 `).join('')}
                 ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
-                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
-                        <div style="color: #94a3b8; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
-                        <div style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${UI_COLORS.border};">
+                        <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
+                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
                     </div>
                 ` : ''}
             </div>
@@ -3403,30 +3442,30 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.caseDetails && node.caseDetails.cases.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
+                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
                 ${node.caseDetails.cases.map((caseStmt, idx) => `
-                    <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         ${caseStmt.alias ? `
-                            <div style="color: #eab308; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
+                            <div style="color: ${COMPLEXITY_COLORS.Moderate}; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
                                 ${escapeHtml(caseStmt.alias)}
                             </div>
                         ` : ''}
                         ${caseStmt.conditions.map((cond, condIdx) => `
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
-                                    <span style="background: #6366f1; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
-                                    <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                    <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
+                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
-                                    <span style="background: #10b981; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
-                                    <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                    <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
+                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
-                                <span style="background: #f59e0b; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
-                                <span style="color: #cbd5e1; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
+                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -3438,10 +3477,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.children && node.children.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
-                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 6px 8px;">
+                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
+                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
-                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${UI_COLORS.borderLight};">
                             <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
                                 ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
                             </span>
@@ -3455,10 +3494,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.details && node.details.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: #94a3b8; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
-                <div style="background: rgba(30, 41, 59, 0.5); border-radius: 4px; padding: 8px;">
+                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
+                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 8px;">
                     ${node.details.map(d => `
-                        <div style="color: #cbd5e1; font-size: 11px; padding: 2px 0; font-family: monospace;">
+                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 11px; padding: 2px 0; font-family: monospace;">
                             ${escapeHtml(d)}
                         </div>
                     `).join('')}
@@ -3469,19 +3508,19 @@ function updateDetailsPanel(nodeId: string | null): void {
 
     detailsPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 12px;">Node Details</h3>
-            <button id="close-details" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
+            <h3 style="margin: 0; color: ${UI_COLORS.text}; font-size: 12px;">Node Details</h3>
+            <button id="close-details" style="background: none; border: none; color: ${UI_COLORS.textMuted}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
                 ${getNodeIcon(node.type)} ${node.label}
             </div>
-            <div style="color: rgba(255,255,255,0.8); font-size: 11px;">
+            <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
                 ${node.description || ''}
             </div>
         </div>
         ${detailsSection}
-        <div style="color: #64748b; font-size: 10px; margin-top: 12px;">
+        <div style="color: ${UI_COLORS.textDim}; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
             ID: ${node.id}
         </div>
@@ -3497,18 +3536,11 @@ function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
     const isDark = state.isDarkTheme;
-    const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const textColorDim = isDark ? '#64748b' : '#94a3b8';
-    const tableTextColor = isDark ? '#cbd5e1' : '#334155';
-    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-
-    const complexityColors: Record<string, string> = {
-        'Simple': '#22c55e',
-        'Moderate': '#eab308',
-        'Complex': '#f97316',
-        'Very Complex': '#ef4444'
-    };
+    const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const textColorDim = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const tableTextColor = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
 
     // Build table list HTML
     let tableListHtml = '';
@@ -3578,7 +3610,7 @@ function updateStatsPanel(): void {
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
             <span style="
-                background: ${complexityColors[currentStats.complexity]};
+                background: ${COMPLEXITY_COLORS[currentStats.complexity]};
                 color: white;
                 padding: 2px 8px;
                 border-radius: 4px;
@@ -3674,25 +3706,22 @@ function updateHintsPanel(): void {
 
     // Theme-aware colors
     const isDark = state.isDarkTheme;
-    const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+    const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
 
     // Theme-aware button/badge colors - darker versions for light theme
     const colors = {
-        blue: isDark ? '#60a5fa' : '#2563eb',
-        amber: isDark ? '#fbbf24' : '#d97706',
-        green: isDark ? '#4ade80' : '#16a34a',
-        violet: isDark ? '#a78bfa' : '#7c3aed',
-        red: isDark ? '#f87171' : '#dc2626',
-        slate: isDark ? '#cbd5e1' : '#64748b'
+        blue: isDark ? STATUS_COLORS.info : STATUS_COLORS.infoDark,
+        amber: isDark ? STATUS_COLORS.warningLight : STATUS_COLORS.warningDark,
+        green: isDark ? STATUS_COLORS.successLight : STATUS_COLORS.successDark,
+        violet: isDark ? STATUS_COLORS.violetLight : STATUS_COLORS.violetDark,
+        red: isDark ? STATUS_COLORS.error : STATUS_COLORS.errorDark,
+        slate: isDark ? UI_COLORS.textSubtle : UI_COLORS.textDim
     };
 
-    const hintColors: Record<string, { bg: string; border: string; icon: string }> = {
-        'error': { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', icon: '⚠' },
-        'warning': { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', icon: '⚡' },
-        'info': { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: 'ℹ' }
-    };
+    // Use centralized HINT_COLORS for consistent styling
+    const hintColors = HINT_COLORS;
 
     // Group hints by category
     const hintsByCategory: Record<string, OptimizationHint[]> = {
@@ -4145,15 +4174,29 @@ function zoomToNode(node: FlowNode): void {
 export function zoomIn(): void {
     state.scale = Math.min(state.scale * 1.2, 3);
     updateTransform();
+    updateZoomIndicator();
 }
 
 export function zoomOut(): void {
     state.scale = Math.max(state.scale / 1.2, 0.2);
     updateTransform();
+    updateZoomIndicator();
+}
+
+export function getZoomLevel(): number {
+    return Math.round(state.scale * 100);
 }
 
 export function resetView(): void {
     fitView();
+    updateZoomIndicator();
+}
+
+function updateZoomIndicator(): void {
+    const indicator = document.getElementById('zoom-level');
+    if (indicator) {
+        indicator.textContent = `${getZoomLevel()}%`;
+    }
 }
 
 // Search functionality
@@ -4207,7 +4250,7 @@ function highlightMatches(term: string): void {
             g.classList.add('search-match');
             const rect = g.querySelector('.node-rect');
             if (rect) {
-                rect.setAttribute('stroke', '#fbbf24');
+                rect.setAttribute('stroke', EDGE_COLORS.highlight);
                 rect.setAttribute('stroke-width', '2');
             }
         }
@@ -4305,7 +4348,7 @@ function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGEleme
     bgRect.setAttribute('y', String(bounds.minY - padding));
     bgRect.setAttribute('width', String(width));
     bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', state.isDarkTheme ? '#0f172a' : '#f8fafc');
+    bgRect.setAttribute('fill', state.isDarkTheme ? UI_COLORS.background : UI_COLORS.backgroundLightGray);
     svgClone.insertBefore(bgRect, svgClone.firstChild);
 
     // Embed inline styles for all elements (needed for image export)
@@ -4856,12 +4899,8 @@ function getWarningIcon(warningType: string): string {
 }
 
 function getWarningColor(severity: string): string {
-    const colors: Record<string, string> = {
-        'low': '#f59e0b',    // Amber
-        'medium': '#f97316', // Orange
-        'high': '#ef4444'    // Red
-    };
-    return colors[severity] || '#f59e0b';
+    const colors: Record<string, string> = WARNING_COLORS;
+    return colors[severity] || colors.low;
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -4883,18 +4922,18 @@ function lightenColor(hex: string, percent: number): string {
 // ============================================================
 
 const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
-    table: { color: '#93c5fd', icon: '⊞', description: 'Source table' },
-    filter: { color: '#c4b5fd', icon: '⧩', description: 'WHERE/HAVING filter' },
-    join: { color: '#f9a8d4', icon: '⋈', description: 'JOIN operation' },
-    aggregate: { color: '#fcd34d', icon: 'Σ', description: 'GROUP BY aggregation' },
-    sort: { color: '#86efac', icon: '↕', description: 'ORDER BY sorting' },
-    limit: { color: '#67e8f9', icon: '⊟', description: 'LIMIT clause' },
-    select: { color: '#a5b4fc', icon: '▤', description: 'Column projection' },
-    result: { color: '#86efac', icon: '◉', description: 'Query output' },
-    cte: { color: '#c4b5fd', icon: '↻', description: 'Common Table Expression' },
-    union: { color: '#fdba74', icon: '∪', description: 'Set operation' },
-    subquery: { color: '#7dd3fc', icon: '⊂', description: 'Subquery/Derived table' },
-    window: { color: '#f0abfc', icon: '▦', description: 'Window function' }
+    table: { color: NODE_COLORS.table, icon: '⊞', description: 'Source table' },
+    filter: { color: NODE_COLORS.filter, icon: '⧩', description: 'WHERE/HAVING filter' },
+    join: { color: NODE_COLORS.join, icon: '⋈', description: 'JOIN operation' },
+    aggregate: { color: NODE_COLORS.aggregate, icon: 'Σ', description: 'GROUP BY aggregation' },
+    sort: { color: NODE_COLORS.sort, icon: '↕', description: 'ORDER BY sorting' },
+    limit: { color: NODE_COLORS.limit, icon: '⊟', description: 'LIMIT clause' },
+    select: { color: NODE_COLORS.select, icon: '▤', description: 'Column projection' },
+    result: { color: NODE_COLORS.result, icon: '◉', description: 'Query output' },
+    cte: { color: NODE_COLORS.cte, icon: '↻', description: 'Common Table Expression' },
+    union: { color: NODE_COLORS.union, icon: '∪', description: 'Set operation' },
+    subquery: { color: NODE_COLORS.subquery, icon: '⊂', description: 'Subquery/Derived table' },
+    window: { color: NODE_COLORS.window, icon: '▦', description: 'Window function' },
 };
 
 function updateLegendPanel(): void {
@@ -4902,8 +4941,8 @@ function updateLegendPanel(): void {
 
     legendPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">Node Types</span>
-            <button id="close-legend" style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 14px;">&times;</button>
+            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">Node Types</span>
+            <button id="close-legend" style="background: none; border: none; color: ${UI_COLORS.textDim}; cursor: pointer; font-size: 14px;">&times;</button>
         </div>
         <div style="display: flex; flex-direction: column; gap: 6px;">
             ${Object.entries(NODE_TYPE_INFO).map(([type, info]) => `
@@ -4920,70 +4959,70 @@ function updateLegendPanel(): void {
                         color: white;
                     ">${info.icon}</span>
                     <div style="flex: 1;">
-                        <div style="color: #e2e8f0; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                        <div style="color: #64748b; font-size: 9px;">${info.description}</div>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                        <div style="color: ${UI_COLORS.textDim}; font-size: 9px;">${info.description}</div>
                     </div>
                 </div>
             `).join('')}
         </div>
-        <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
-            <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
+        <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
+            <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
             <div style="display: flex; flex-direction: column; gap: 5px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #3b82f6;
+                        background: ${BADGE_COLORS.read};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
-                        border: 2px solid rgba(255,255,255,0.3);
+                        border: 2px solid ${UI_COLORS.borderWhite};
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">Physical Table</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Physical Table</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #3b82f6;
+                        background: ${BADGE_COLORS.read};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
-                        border: 3px dashed rgba(168, 85, 247, 0.8);
+                        border: 3px dashed ${NODE_STROKE_COLORS.cte};
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">CTE Reference</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">CTE Reference</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="
-                        background: #14b8a6;
+                        background: ${BADGE_COLORS.derivedAlt};
                         width: 24px;
                         height: 16px;
                         border-radius: 3px;
                         border: 2px dashed rgba(20, 184, 166, 0.8);
                     "></span>
-                    <div style="color: #e2e8f0; font-size: 10px;">Derived Table</div>
+                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Derived Table</div>
                 </div>
             </div>
         </div>
         ${state.showColumnFlows ? `
-            <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); margin-top: 12px; padding-top: 10px;">
-                <div style="font-weight: 600; color: #f1f5f9; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
+            <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
+                <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
                 <div style="display: flex; flex-direction: column; gap: 5px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #10b981; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Source Table</div>
+                        <span style="background: ${BADGE_COLORS.orderBy}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Source Table</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #3b82f6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Renamed/Alias</div>
+                        <span style="background: ${BADGE_COLORS.read}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Renamed/Alias</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #f59e0b; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Aggregated</div>
+                        <span style="background: ${BADGE_COLORS.frame}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Aggregated</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #8b5cf6; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Calculated</div>
+                        <span style="background: ${BADGE_COLORS.merge}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Calculated</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: #ec4899; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
-                        <div style="color: #e2e8f0; font-size: 10px;">Joined</div>
+                        <span style="background: ${CONDITION_COLORS.having}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
+                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Joined</div>
                     </div>
                 </div>
             </div>
@@ -5017,70 +5056,64 @@ export function toggleHints(show?: boolean): void {
     hintsPanel.style.display = hintsVisible ? 'block' : 'none';
 }
 
+// Layout order for cycling
+const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
+
 export function toggleLayout(): void {
+    const currentIndex = LAYOUT_ORDER.indexOf(state.layoutType || 'vertical');
+    const nextIndex = (currentIndex + 1) % LAYOUT_ORDER.length;
+    switchLayout(LAYOUT_ORDER[nextIndex]);
+}
+
+export function switchLayout(layoutType: LayoutType): void {
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
         return;
     }
 
-    // Toggle between vertical (TB) and horizontal (LR) layouts
-    const newLayout: LayoutType = state.layoutType === 'vertical' ? 'horizontal' : 'vertical';
-    state.layoutType = newLayout;
+    state.layoutType = layoutType;
 
-    // Re-run layout with new algorithm
-    if (newLayout === 'horizontal') {
-        // Use horizontal (left-to-right) layout
-        layoutGraphHorizontal(currentNodes, currentEdges);
-    } else {
-        // Use vertical (top-to-bottom) dagre layout
-        const g = new dagre.graphlib.Graph();
-        g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 });
-        g.setDefaultEdgeLabel(() => ({}));
-
-        currentNodes.forEach(node => {
-            g.setNode(node.id, { width: node.width, height: node.height });
-        });
-
-        currentEdges.forEach(edge => {
-            g.setEdge(edge.source, edge.target);
-        });
-
-        dagre.layout(g);
-
-        currentNodes.forEach(node => {
-            const nodeWithPos = g.node(node.id);
-            if (nodeWithPos && nodeWithPos.x !== undefined && nodeWithPos.y !== undefined) {
-                node.x = nodeWithPos.x - node.width / 2;
-                node.y = nodeWithPos.y - node.height / 2;
-            }
-        });
+    // Re-run layout with selected algorithm
+    switch (layoutType) {
+        case 'horizontal':
+            layoutGraphHorizontal(currentNodes, currentEdges);
+            break;
+        case 'compact':
+            layoutGraphCompact(currentNodes, currentEdges);
+            break;
+        case 'force':
+            layoutGraphForce(currentNodes, currentEdges);
+            break;
+        case 'radial':
+            layoutGraphRadial(currentNodes, currentEdges);
+            break;
+        case 'vertical':
+        default:
+            layoutGraph(currentNodes, currentEdges);
+            break;
     }
 
     // Update node positions in DOM
-    // Nodes use x/y attributes on rect elements, so we need to calculate delta from original position
     currentNodes.forEach(node => {
         const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
         if (nodeGroup) {
             const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
             if (rect) {
-                // Get original position from rect attributes
                 const origX = parseFloat(rect.getAttribute('x') || '0');
                 const origY = parseFloat(rect.getAttribute('y') || '0');
-                // Calculate delta from original to new position
                 const deltaX = node.x - origX;
                 const deltaY = node.y - origY;
-                // Apply transform as delta
                 nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
             }
         }
     });
 
-    // First, show all edges (reset any that were hidden)
+    // Show all edges first
     const allEdges = mainGroup!.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
         (edgeEl as SVGPathElement).style.display = '';
     });
 
-    // Update edge paths - only for main edges (not column flows or other overlays)
+    // Update edge paths
     const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
     edgeElements.forEach(edgeEl => {
         const sourceId = edgeEl.getAttribute('data-source');
@@ -5089,36 +5122,92 @@ export function toggleLayout(): void {
             const sourceNode = currentNodes.find(n => n.id === sourceId);
             const targetNode = currentNodes.find(n => n.id === targetId);
             if (sourceNode && targetNode) {
-                // Calculate edge path based on layout type
-                let path: string;
-                if (newLayout === 'horizontal') {
-                    // For horizontal: curved lines from right to left
-                    const sx = sourceNode.x + sourceNode.width;
-                    const sy = sourceNode.y + sourceNode.height / 2;
-                    const tx = targetNode.x;
-                    const ty = targetNode.y + targetNode.height / 2;
-                    const midX = (sx + tx) / 2;
-                    path = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
-                } else {
-                    // For vertical: curved lines from bottom to top
-                    const sx = sourceNode.x + sourceNode.width / 2;
-                    const sy = sourceNode.y + sourceNode.height;
-                    const tx = targetNode.x + targetNode.width / 2;
-                    const ty = targetNode.y;
-                    const midY = (sy + ty) / 2;
-                    path = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
-                }
+                const path = calculateEdgePath(sourceNode, targetNode, layoutType);
                 edgeEl.setAttribute('d', path);
                 (edgeEl as SVGPathElement).style.display = '';
             } else {
-                // Hide edges where source or target node not found
                 (edgeEl as SVGPathElement).style.display = 'none';
             }
         }
     });
 
-    // Fit view to show all nodes
+    // Update layout selector if present
+    const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+    if (layoutSelect) {
+        layoutSelect.value = layoutType;
+    }
+
     fitView();
+}
+
+export function getCurrentLayout(): LayoutType {
+    return state.layoutType || 'vertical';
+}
+
+/**
+ * Calculate edge path based on layout type and node positions
+ */
+function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType): string {
+    if (layoutType === 'horizontal') {
+        const sx = sourceNode.x + sourceNode.width;
+        const sy = sourceNode.y + sourceNode.height / 2;
+        const tx = targetNode.x;
+        const ty = targetNode.y + targetNode.height / 2;
+        const midX = (sx + tx) / 2;
+        return `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+    } else if (layoutType === 'force' || layoutType === 'radial') {
+        // Smart edge routing based on relative positions
+        const sourceCenterX = sourceNode.x + sourceNode.width / 2;
+        const sourceCenterY = sourceNode.y + sourceNode.height / 2;
+        const targetCenterX = targetNode.x + targetNode.width / 2;
+        const targetCenterY = targetNode.y + targetNode.height / 2;
+
+        const angle = Math.atan2(targetCenterY - sourceCenterY, targetCenterX - sourceCenterX);
+
+        let sx: number, sy: number, tx: number, ty: number;
+
+        if (Math.abs(angle) < Math.PI / 4) {
+            sx = sourceNode.x + sourceNode.width;
+            sy = sourceCenterY;
+            tx = targetNode.x;
+            ty = targetCenterY;
+        } else if (Math.abs(angle) > 3 * Math.PI / 4) {
+            sx = sourceNode.x;
+            sy = sourceCenterY;
+            tx = targetNode.x + targetNode.width;
+            ty = targetCenterY;
+        } else if (angle > 0) {
+            sx = sourceCenterX;
+            sy = sourceNode.y + sourceNode.height;
+            tx = targetCenterX;
+            ty = targetNode.y;
+        } else {
+            sx = sourceCenterX;
+            sy = sourceNode.y;
+            tx = targetCenterX;
+            ty = targetNode.y + targetNode.height;
+        }
+
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const curvature = Math.min(dist * 0.3, 50);
+
+        const midX = (sx + tx) / 2;
+        const midY = (sy + ty) / 2;
+        const perpX = -dy / dist * curvature;
+        const perpY = dx / dist * curvature;
+
+        return `M ${sx} ${sy} Q ${midX + perpX} ${midY + perpY}, ${tx} ${ty}`;
+    } else {
+        // Vertical/compact: curved lines from bottom to top
+        const sx = sourceNode.x + sourceNode.width / 2;
+        const sy = sourceNode.y + sourceNode.height;
+        const tx = targetNode.x + targetNode.width / 2;
+        const ty = targetNode.y;
+        const midY = (sy + ty) / 2;
+        return `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+    }
 }
 
 // ============================================================
@@ -5269,7 +5358,7 @@ export function highlightColumnSources(columnName: string): void {
         if (nodeEl) {
             const rect = nodeEl.querySelector('.node-rect');
             if (rect) {
-                rect.setAttribute('stroke', '#22d3ee');
+                rect.setAttribute('stroke', EDGE_COLORS.columnLineage);
                 rect.setAttribute('stroke-width', '3');
                 rect.setAttribute('stroke-dasharray', '5,3');
             }
@@ -5302,7 +5391,7 @@ function highlightPathToSelect(): void {
         const source = edgeEl.getAttribute('data-source');
         const target = edgeEl.getAttribute('data-target');
         if (source && target && pathNodeIds.has(source) && pathNodeIds.has(target)) {
-            edgeEl.setAttribute('stroke', '#22d3ee');
+            edgeEl.setAttribute('stroke', EDGE_COLORS.columnLineage);
             edgeEl.setAttribute('stroke-width', '3');
             edgeEl.setAttribute('stroke-dasharray', '5,3');
         }
@@ -5345,7 +5434,7 @@ function clearColumnHighlights(): void {
     // Restore edges
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
-        edgeEl.setAttribute('stroke', '#64748b');
+        edgeEl.setAttribute('stroke', EDGE_COLORS.default);
         edgeEl.setAttribute('stroke-width', '2');
         edgeEl.removeAttribute('stroke-dasharray');
         edgeEl.setAttribute('marker-end', 'url(#arrowhead)');
@@ -5374,13 +5463,13 @@ function updateSqlPreview(): void {
 
     sqlPreviewPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: #f1f5f9; font-size: 12px;">SQL Query</span>
+            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">SQL Query</span>
             <div style="display: flex; gap: 8px;">
                 <button id="copy-sql" style="
                     background: rgba(99, 102, 241, 0.2);
                     border: 1px solid rgba(99, 102, 241, 0.3);
                     border-radius: 4px;
-                    color: #a5b4fc;
+                    color: ${UI_COLORS.focusText};
                     padding: 4px 10px;
                     font-size: 10px;
                     cursor: pointer;
@@ -5388,7 +5477,7 @@ function updateSqlPreview(): void {
                 <button id="close-sql-preview" style="
                     background: none;
                     border: none;
-                    color: #64748b;
+                    color: ${UI_COLORS.textDim};
                     cursor: pointer;
                     font-size: 16px;
                 ">&times;</button>
@@ -5445,41 +5534,73 @@ export function toggleNodeCollapse(nodeId: string): void {
 
 /**
  * Calculate stacked cloud offsets to prevent overlap when expanding all.
- * Clouds are positioned vertically from top to bottom with spacing.
+ * Positions each cloud directly above its parent CTE/subquery node.
+ * Detects and resolves horizontal overlaps between adjacent clouds.
  */
 function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
-    const cloudGap = 30;
     const cloudPadding = 15;
-    const verticalSpacing = 20; // Space between stacked clouds
+    const verticalGap = 80;       // Gap between cloud bottom and node top
+    const horizontalGap = 30;     // Minimum gap between clouds horizontally
 
-    // Sort nodes by their Y position (top to bottom)
-    const sortedNodes = [...expandableNodes].sort((a, b) => a.y - b.y);
+    // Calculate dimensions for all clouds
+    interface CloudInfo {
+        node: FlowNode;
+        width: number;
+        height: number;
+        x: number;  // Calculated X position
+    }
 
-    // Track the bottom edge of the last placed cloud
-    let nextCloudY = -Infinity;
-
-    for (const node of sortedNodes) {
-        // Calculate cloud dimensions
+    const cloudInfos: CloudInfo[] = [];
+    for (const node of expandableNodes) {
         const childEdges = currentEdges.filter(e =>
             node.children?.some(c => c.id === e.source || c.id === e.target)
         );
         const layoutSize = layoutSubflowNodesVertical(node.children!, childEdges);
-        const cloudWidth = layoutSize.width + cloudPadding * 2;
-        const cloudHeight = layoutSize.height + cloudPadding * 2 + 30; // +30 for title
+        const width = layoutSize.width + cloudPadding * 2;
+        const height = layoutSize.height + cloudPadding * 2 + 30;
 
-        // Default X position: left of the node
-        const offsetX = -cloudWidth - cloudGap;
+        // Initial X: center cloud above its parent node
+        const cloudCenterX = node.x + node.width / 2;
+        const x = cloudCenterX - width / 2;
 
-        // Calculate Y position to avoid overlap
-        // Start at node's Y position, but ensure no overlap with previous clouds
-        const idealCloudY = node.y - (cloudHeight - node.height) / 2;
-        const cloudY = Math.max(idealCloudY, nextCloudY + verticalSpacing);
-        const offsetY = cloudY - node.y;
+        cloudInfos.push({ node, width, height, x });
+    }
 
-        cloudOffsets.set(node.id, { offsetX, offsetY });
+    // Sort clouds by X position (left to right)
+    cloudInfos.sort((a, b) => a.x - b.x);
 
-        // Update next available Y position
-        nextCloudY = cloudY + cloudHeight;
+    // Resolve horizontal overlaps - push clouds apart if they overlap
+    for (let i = 1; i < cloudInfos.length; i++) {
+        const prev = cloudInfos[i - 1];
+        const curr = cloudInfos[i];
+        const prevRight = prev.x + prev.width;
+        const minX = prevRight + horizontalGap;
+
+        if (curr.x < minX) {
+            // Overlap detected - shift current cloud to the right
+            curr.x = minX;
+        }
+    }
+
+    // Find the tallest cloud for bottom alignment
+    const maxCloudHeight = Math.max(...cloudInfos.map(c => c.height));
+
+    // Find the topmost CTE node Y position
+    const minNodeY = Math.min(...expandableNodes.map(n => n.y));
+
+    // Calculate where the bottom of all clouds should be
+    const cloudBottomY = minNodeY - verticalGap;
+
+    // Set offsets for each cloud
+    for (const cloud of cloudInfos) {
+        // Position cloud so its bottom aligns with cloudBottomY
+        const cloudY = cloudBottomY - cloud.height;
+
+        // Calculate offset relative to the node's position
+        const offsetX = cloud.x - cloud.node.x;
+        const offsetY = cloudY - cloud.node.y;
+
+        cloudOffsets.set(cloud.node.id, { offsetX, offsetY });
     }
 }
 
@@ -5878,21 +5999,21 @@ function applyTheme(dark: boolean): void {
     if (!svg) {return;}
 
     const colors = dark ? {
-        bg: '#0f172a',
-        panelBg: 'rgba(15, 23, 42, 0.95)',
-        panelBgSolid: 'rgba(15, 23, 42, 0.98)',
-        border: 'rgba(148, 163, 184, 0.2)',
-        text: '#f1f5f9',
-        textMuted: '#94a3b8',
-        textDim: '#64748b'
+        bg: UI_COLORS.background,
+        panelBg: UI_COLORS.backgroundPanel,
+        panelBgSolid: UI_COLORS.backgroundPanelSolid,
+        border: UI_COLORS.border,
+        text: UI_COLORS.text,
+        textMuted: UI_COLORS.textMuted,
+        textDim: UI_COLORS.textDim
     } : {
-        bg: '#ffffff',
-        panelBg: 'rgba(255, 255, 255, 0.95)',
-        panelBgSolid: 'rgba(255, 255, 255, 0.98)',
-        border: 'rgba(148, 163, 184, 0.3)',
-        text: '#1e293b',
+        bg: UI_COLORS.backgroundLight,
+        panelBg: UI_COLORS.backgroundPanelLight,
+        panelBgSolid: UI_COLORS.backgroundPanelLightSolid,
+        border: UI_COLORS.borderMedium,
+        text: UI_COLORS.textLight,
         textMuted: '#475569',
-        textDim: '#94a3b8'
+        textDim: UI_COLORS.textLightDim
     };
 
     // Apply to SVG background - use pattern for light theme, solid color for dark
@@ -5984,7 +6105,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     border-radius: 4px;
                     font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
                     font-size: 10px;
-                    color: #e2e8f0;
+                    color: ${UI_COLORS.textBright};
                     line-height: 1.4;
                     white-space: pre-wrap;
                     word-break: break-all;
@@ -6025,7 +6146,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
     if (node.type === 'window' && node.windowDetails) {
         content += `<div style="font-size: 10px; margin-top: 6px;">
-            <span style="color: #fbbf24;">${node.windowDetails.functions.length} window function(s)</span>
+            <span style="color: ${BADGE_COLORS.functionName};">${node.windowDetails.functions.length} window function(s)</span>
         </div>`;
         node.windowDetails.functions.forEach((fn, idx) => {
             if (idx < 3) { // Show first 3
@@ -6202,9 +6323,9 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     contextMenuElement.style.display = 'block';
 
     // Update theme colors
-    contextMenuElement.style.background = isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-    contextMenuElement.style.color = isDark ? '#e2e8f0' : '#1e293b';
-    contextMenuElement.style.borderColor = isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(148, 163, 184, 0.4)';
+    contextMenuElement.style.background = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;
+    contextMenuElement.style.color = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;
+    contextMenuElement.style.borderColor = isDark ? UI_COLORS.borderMedium : 'rgba(148, 163, 184, 0.4)';
 
     // Add hover effects and click handlers
     const items = contextMenuElement.querySelectorAll('.ctx-menu-item');
@@ -6646,7 +6767,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
             // Add glow effect
             const rect = nodeGroup.querySelector('rect');
             if (rect) {
-                rect.setAttribute('stroke', '#6366f1');
+                rect.setAttribute('stroke', EDGE_COLORS.focus);
                 rect.setAttribute('stroke-width', '3');
             }
         }
@@ -6661,7 +6782,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
 
         if (sourceId && targetId && lineageNodeIds.has(sourceId) && lineageNodeIds.has(targetId)) {
             edge.style.opacity = '1';
-            edge.setAttribute('stroke', '#6366f1');
+            edge.setAttribute('stroke', EDGE_COLORS.focus);
             edge.setAttribute('stroke-width', '3');
 
             // Also highlight the arrow
@@ -6696,7 +6817,7 @@ function clearLineageHighlights(): void {
     allEdges.forEach((edge) => {
         const edgeEl = edge as SVGElement;
         edgeEl.style.opacity = '1';
-        edgeEl.setAttribute('stroke', state.isDarkTheme ? '#64748b' : '#94a3b8');
+        edgeEl.setAttribute('stroke', state.isDarkTheme ? EDGE_COLORS.default : EDGE_COLORS.defaultLight);
         edgeEl.setAttribute('stroke-width', '1.5');
     });
 
@@ -6773,7 +6894,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'R', description: 'Reset view' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
-        { key: 'H', description: 'Toggle layout (vertical/horizontal)' },
+        { key: 'H', description: 'Cycle layouts' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column lineage' },
         { key: 'Q', description: 'Toggle query stats' },
@@ -6825,7 +6946,7 @@ export function highlightNodeAtLine(line: number): void {
         group.classList.add('cursor-highlighted');
         const rect = group.querySelector('.node-rect') as SVGRectElement;
         if (rect) {
-            rect.setAttribute('stroke', '#fbbf24');
+            rect.setAttribute('stroke', EDGE_COLORS.highlight);
             rect.setAttribute('stroke-width', '3');
         }
         highlightedLineNodeId = node.id;

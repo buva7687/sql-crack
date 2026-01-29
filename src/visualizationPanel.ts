@@ -439,6 +439,7 @@ export class VisualizationPanel {
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'beside';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
+        const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -476,6 +477,7 @@ export class VisualizationPanel {
         window.defaultLayout = ${JSON.stringify(defaultLayout)};
         window.persistedPinnedTabs = ${JSON.stringify(pinnedTabs)};
         window.showDeadColumnHints = ${JSON.stringify(showDeadColumnHints)};
+        window.combineDdlStatements = ${JSON.stringify(combineDdlStatements)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();

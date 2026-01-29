@@ -8,7 +8,7 @@ export interface ZoomState {
     offsetY: number;
 }
 
-export type LayoutType = 'vertical' | 'horizontal';
+export type LayoutType = 'vertical' | 'horizontal' | 'compact' | 'force' | 'radial';
 
 export type FocusMode = 'all' | 'upstream' | 'downstream';
 

@@ -58,7 +58,7 @@ export interface FlowNode {
     // Access mode for read/write differentiation
     accessMode?: 'read' | 'write' | 'derived';
     // Operation type for write operations
-    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+    operationType?: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS' | 'CREATE_VIEW' | 'CREATE_TABLE';
     // For nested visualizations (CTEs, subqueries)
     children?: FlowNode[];
     childEdges?: FlowEdge[];

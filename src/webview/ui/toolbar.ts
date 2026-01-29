@@ -1,13 +1,14 @@
 // Toolbar UI module
 
 import { SqlDialect, BatchParseResult } from '../sqlParser';
-import { FocusMode } from '../types';
+import { FocusMode, LayoutType } from '../types';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
     onZoomIn: () => void;
     onZoomOut: () => void;
     onResetView: () => void;
+    getZoomLevel: () => number;
     onExportPng: () => void;
     onExportSvg: () => void;
     onExportMermaid: () => void;
@@ -30,6 +31,8 @@ export interface ToolbarCallbacks {
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
     onToggleLayout: () => void;
+    onLayoutChange: (layout: LayoutType) => void;
+    getCurrentLayout: () => LayoutType;
     isDarkTheme: () => boolean;
     isFullscreen: () => boolean;
     getKeyboardShortcuts: () => Array<{ key: string; description: string }>;
@@ -96,7 +99,7 @@ export function createToolbar(
 
     title.innerHTML = `
         <span>SQL Flow</span>
-        <select id="dialect-select" style="
+        <select id="dialect-select" title="SQL dialect for parsing" style="
             background: ${selectBg};
             color: ${selectColor};
             border: 1px solid rgba(148, 163, 184, 0.2);
@@ -179,6 +182,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.placeholder = 'Search nodes... (Ctrl+F)';
+    searchInput.title = 'Search by table name, type, or column. Supports regex patterns.';
     searchInput.style.cssText = `
         background: transparent;
         border: none;
@@ -271,22 +275,47 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
+        align-items: center;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
     `;
 
-    const zoomOutBtn = createButton('−', callbacks.onZoomOut);
+    const zoomOutBtn = createButton('−', () => {
+        callbacks.onZoomOut();
+    });
+    zoomOutBtn.title = 'Zoom out (-)';
     zoomGroup.appendChild(zoomOutBtn);
 
-    const fitBtn = createButton('⊡', callbacks.onResetView);
-    fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    fitBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
-    zoomGroup.appendChild(fitBtn);
+    // Zoom level indicator
+    const zoomLevel = document.createElement('span');
+    zoomLevel.id = 'zoom-level';
+    zoomLevel.style.cssText = `
+        color: #94a3b8;
+        font-size: 10px;
+        min-width: 36px;
+        text-align: center;
+        padding: 0 2px;
+        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        border-right: 1px solid rgba(148, 163, 184, 0.2);
+    `;
+    zoomLevel.textContent = `${callbacks.getZoomLevel()}%`;
+    zoomLevel.title = 'Current zoom level';
+    zoomGroup.appendChild(zoomLevel);
 
-    const zoomInBtn = createButton('+', callbacks.onZoomIn);
+    const zoomInBtn = createButton('+', () => {
+        callbacks.onZoomIn();
+    });
+    zoomInBtn.title = 'Zoom in (+)';
     zoomGroup.appendChild(zoomInBtn);
+
+    const fitBtn = createButton('⊡', () => {
+        callbacks.onResetView();
+    });
+    fitBtn.title = 'Fit to view (R)';
+    fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(fitBtn);
 
     return zoomGroup;
 }
@@ -469,11 +498,56 @@ function createFeatureGroup(
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
 
-    // Layout Toggle button
-    const layoutBtn = createButton('📐', callbacks.onToggleLayout);
-    layoutBtn.title = 'Toggle layout algorithm (H)';
-    layoutBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    featureGroup.appendChild(layoutBtn);
+    // Layout selector dropdown
+    const layoutContainer = document.createElement('div');
+    layoutContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        padding: 0 8px;
+    `;
+
+    const layoutIcon = document.createElement('span');
+    layoutIcon.textContent = '📐';
+    layoutIcon.style.cssText = 'font-size: 14px; margin-right: 4px;';
+    layoutContainer.appendChild(layoutIcon);
+
+    const layoutSelect = document.createElement('select');
+    layoutSelect.id = 'layout-select';
+    const isDark = callbacks.isDarkTheme();
+    layoutSelect.style.cssText = `
+        background: ${isDark ? '#1e293b' : '#f1f5f9'};
+        color: ${isDark ? '#f1f5f9' : '#1e293b'};
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-size: 10px;
+        cursor: pointer;
+        outline: none;
+    `;
+
+    const layouts: { value: LayoutType; label: string }[] = [
+        { value: 'vertical', label: 'Vertical' },
+        { value: 'horizontal', label: 'Horizontal' },
+        { value: 'compact', label: 'Compact' },
+        { value: 'force', label: 'Force' },
+        { value: 'radial', label: 'Radial' },
+    ];
+
+    layouts.forEach(layout => {
+        const option = document.createElement('option');
+        option.value = layout.value;
+        option.textContent = layout.label;
+        layoutSelect.appendChild(option);
+    });
+
+    layoutSelect.value = callbacks.getCurrentLayout();
+    layoutSelect.addEventListener('change', (e) => {
+        callbacks.onLayoutChange((e.target as HTMLSelectElement).value as LayoutType);
+    });
+    layoutSelect.title = 'Layout algorithm (H to cycle)';
+    layoutContainer.appendChild(layoutSelect);
+    featureGroup.appendChild(layoutContainer);
 
     // Fullscreen button
     const fullscreenBtn = createButton('⛶', () => {
@@ -900,14 +974,36 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 12px;
         padding: 24px;
-        min-width: 320px;
-        max-width: 400px;
+        min-width: 500px;
+        max-width: 600px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     `;
 
+    // Split shortcuts into two columns
+    const midpoint = Math.ceil(shortcuts.length / 2);
+    const leftColumn = shortcuts.slice(0, midpoint);
+    const rightColumn = shortcuts.slice(midpoint);
+
+    const renderShortcut = (s: { key: string; description: string }) => `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <span style="color: #94a3b8; font-size: 12px;">${s.description}</span>
+            <kbd style="
+                background: rgba(99, 102, 241, 0.2);
+                border: 1px solid rgba(99, 102, 241, 0.3);
+                border-radius: 4px;
+                padding: 3px 6px;
+                color: #a5b4fc;
+                font-size: 10px;
+                font-family: monospace;
+                margin-left: 8px;
+                white-space: nowrap;
+            ">${s.key}</kbd>
+        </div>
+    `;
+
     modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 16px;">Keyboard Shortcuts</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
             <button id="close-shortcuts" style="
                 background: none;
                 border: none;
@@ -917,21 +1013,13 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
                 padding: 4px;
             ">&times;</button>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-            ${shortcuts.map(s => `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                    <span style="color: #94a3b8; font-size: 13px;">${s.description}</span>
-                    <kbd style="
-                        background: rgba(99, 102, 241, 0.2);
-                        border: 1px solid rgba(99, 102, 241, 0.3);
-                        border-radius: 4px;
-                        padding: 4px 8px;
-                        color: #a5b4fc;
-                        font-size: 11px;
-                        font-family: monospace;
-                    ">${s.key}</kbd>
-                </div>
-            `).join('')}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
+            <div style="display: flex; flex-direction: column;">
+                ${leftColumn.map(renderShortcut).join('')}
+            </div>
+            <div style="display: flex; flex-direction: column;">
+                ${rightColumn.map(renderShortcut).join('')}
+            </div>
         </div>
     `;
 

@@ -16,7 +16,96 @@ import {
     BatchParseResult,
     SqlDialect,
     NodeType,
+    ValidationError,
+    ValidationLimits,
 } from './types';
+
+// ============================================================
+// Validation Constants
+// ============================================================
+
+/**
+ * Default validation limits for SQL parsing.
+ * These can be overridden by passing custom limits to validateSql.
+ */
+export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
+    maxSqlSizeBytes: 100 * 1024,  // 100KB
+    maxQueryCount: 50,             // 50 statements max
+};
+
+/**
+ * Validates SQL input against size and query count limits.
+ * Call this before parsing to prevent performance issues with large inputs.
+ *
+ * @param sql - The SQL string to validate
+ * @param limits - Optional custom limits (defaults to DEFAULT_VALIDATION_LIMITS)
+ * @returns ValidationError if validation fails, null if valid
+ */
+export function validateSql(
+    sql: string,
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
+): ValidationError | null {
+    // Check SQL size
+    const sizeBytes = new Blob([sql]).size;
+    if (sizeBytes > limits.maxSqlSizeBytes) {
+        return {
+            type: 'size_limit',
+            message: `SQL input exceeds maximum size limit of ${formatBytes(limits.maxSqlSizeBytes)}`,
+            details: {
+                actual: sizeBytes,
+                limit: limits.maxSqlSizeBytes,
+                unit: 'bytes',
+            },
+        };
+    }
+
+    // Quick estimate of statement count using semicolons (not counting those in strings/comments)
+    const estimatedStatements = countStatements(sql);
+    if (estimatedStatements > limits.maxQueryCount) {
+        return {
+            type: 'query_count_limit',
+            message: `SQL contains approximately ${estimatedStatements} statements, exceeding the limit of ${limits.maxQueryCount}`,
+            details: {
+                actual: estimatedStatements,
+                limit: limits.maxQueryCount,
+                unit: 'statements',
+            },
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Counts the approximate number of SQL statements.
+ * This is a quick heuristic that ignores semicolons inside strings and comments.
+ */
+function countStatements(sql: string): number {
+    // Remove string literals (single and double quoted)
+    let cleaned = sql.replace(/'[^']*'/g, '').replace(/"[^"]*"/g, '');
+
+    // Remove block comments
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // Remove line comments
+    cleaned = cleaned.replace(/--[^\n]*/g, '');
+
+    // Count semicolons
+    const semicolons = (cleaned.match(/;/g) || []).length;
+
+    // At minimum, there's 1 statement if there's any content
+    const hasContent = cleaned.trim().length > 0;
+    return hasContent ? Math.max(1, semicolons) : 0;
+}
+
+/**
+ * Formats bytes into human-readable string.
+ */
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} bytes`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 // Import color constants
 import { getNodeColor } from './constants';
@@ -33,6 +122,8 @@ export type {
     ParseResult,
     BatchParseResult,
     SqlDialect,
+    ValidationError,
+    ValidationLimits,
 };
 
 // Re-export getNodeColor for backward compatibility
@@ -428,8 +519,181 @@ export function splitSqlStatements(sql: string): string[] {
     return statements;
 }
 
+/**
+ * Check if a SQL statement is a DDL statement (CREATE, ALTER, DROP).
+ * Returns info about the DDL type and object name, or null if not a DDL statement.
+ */
+function getDdlStatementInfo(sql: string): { type: string; keyword: string; objectName: string } | null {
+    const trimmedSql = stripLeadingComments(sql).trim();
+
+    // CREATE patterns
+    const createMatch = trimmedSql.match(/^CREATE\s+(OR\s+REPLACE\s+)?(TABLE|VIEW|INDEX|SCHEMA|DATABASE|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
+    if (createMatch) {
+        const keyword = createMatch[2].toUpperCase().replace(/\s+/g, ' ');
+        return {
+            type: 'CREATE',
+            keyword: keyword,
+            objectName: createMatch[3].replace(/[`"[\]]/g, ''), // Remove quotes
+        };
+    }
+
+    // ALTER patterns
+    const alterMatch = trimmedSql.match(/^ALTER\s+(TABLE|VIEW|INDEX|SCHEMA|DATABASE|FUNCTION|PROCEDURE)\s+([^\s(]+)/i);
+    if (alterMatch) {
+        return {
+            type: 'ALTER',
+            keyword: alterMatch[1].toUpperCase(),
+            objectName: alterMatch[2].replace(/[`"[\]]/g, ''),
+        };
+    }
+
+    // DROP patterns
+    const dropMatch = trimmedSql.match(/^DROP\s+(TABLE|VIEW|INDEX|SCHEMA|DATABASE|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?([^\s(;]+)/i);
+    if (dropMatch) {
+        const keyword = dropMatch[1].toUpperCase().replace(/\s+/g, ' ');
+        return {
+            type: 'DROP',
+            keyword: keyword,
+            objectName: dropMatch[2].replace(/[`"[\]]/g, ''),
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Create a merged ParseResult for multiple consecutive DDL statements.
+ * Shows them as a single "Schema Definition" block with counts.
+ */
+function createMergedDdlResult(
+    commands: Array<{ sql: string; type: string; keyword: string; objectName: string }>,
+    dialect: SqlDialect
+): ParseResult {
+    ctx = createFreshContext(dialect);
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+
+    // Combine all SQL statements
+    const combinedSql = commands.map(c => c.sql).join(';\n');
+    const combinedLineCount = combinedSql.split('\n').length;
+
+    // Group objects by type+keyword
+    const groups: Record<string, string[]> = {};
+    for (const cmd of commands) {
+        const key = `${cmd.type} ${cmd.keyword}`;
+        if (!groups[key]) {
+            groups[key] = [];
+        }
+        groups[key].push(cmd.objectName);
+    }
+
+    // Build summary label (counts)
+    const summaryParts: string[] = [];
+    for (const [key, names] of Object.entries(groups)) {
+        summaryParts.push(`${names.length} ${key}${names.length > 1 ? 's' : ''}`);
+    }
+    const summaryLabel = summaryParts.join(', ');
+
+    // Build concise description - group names by type
+    const descriptionParts: string[] = [];
+    for (const [key, names] of Object.entries(groups)) {
+        // Extract just the object type (TABLE, VIEW, etc.)
+        const objectType = key.split(' ').slice(1).join(' ');
+        const plural = names.length > 1 ? 's' : '';
+        descriptionParts.push(`${objectType}${plural}: ${names.join(', ')}`);
+    }
+    const descriptions = descriptionParts.join('\n');
+
+    // Create a single node with all DDL commands
+    const nodeId = genId('ddl');
+    const labelWidth = Math.max(220, summaryLabel.length * 8 + 40);
+
+    nodes.push({
+        id: nodeId,
+        type: 'result' as NodeType,
+        label: 'Schema Definition',
+        description: `${summaryLabel}\n\n${descriptions}`,
+        accessMode: 'write',
+        x: 0,
+        y: 0,
+        width: labelWidth,
+        height: Math.max(80, 40 + commands.length * 18),
+        startLine: 1,
+        endLine: combinedLineCount,
+    });
+
+    // Set minimal stats
+    ctx.stats.complexity = 'Simple';
+    ctx.stats.complexityScore = commands.length;
+
+    return {
+        nodes,
+        edges,
+        stats: { ...ctx.stats },
+        hints: [{
+            type: 'info',
+            message: summaryLabel,
+            suggestion: `This block contains ${commands.length} DDL statement${commands.length > 1 ? 's' : ''} defining database schema.`
+        }],
+        sql: combinedSql,
+        columnLineage: [],
+        tableUsage: new Map(),
+    };
+}
+
+// Options for batch parsing
+export interface BatchParseOptions {
+    combineDdlStatements?: boolean;
+}
+
 // Parse multiple SQL statements
-export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): BatchParseResult {
+export function parseSqlBatch(
+    sql: string,
+    dialect: SqlDialect = 'MySQL',
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS,
+    options: BatchParseOptions = {}
+): BatchParseResult {
+    // Validate SQL before parsing
+    const validationError = validateSql(sql, limits);
+    if (validationError) {
+        // Return a result with the validation error
+        const emptyStats: QueryStats = {
+            tables: 0,
+            joins: 0,
+            subqueries: 0,
+            ctes: 0,
+            aggregations: 0,
+            windowFunctions: 0,
+            unions: 0,
+            conditions: 0,
+            complexity: 'Simple',
+            complexityScore: 0,
+        };
+
+        return {
+            queries: [{
+                nodes: [],
+                edges: [],
+                stats: emptyStats,
+                hints: [{
+                    type: 'error',
+                    message: validationError.message,
+                    suggestion: validationError.type === 'size_limit'
+                        ? 'Consider splitting your SQL into smaller files or removing unnecessary whitespace/comments.'
+                        : 'Consider splitting your SQL into multiple files with fewer statements each.',
+                    category: 'performance',
+                    severity: 'high',
+                }],
+                sql: sql.substring(0, 1000) + (sql.length > 1000 ? '...' : ''), // Truncate for display
+                columnLineage: [],
+                tableUsage: new Map(),
+                error: validationError.message,
+            }],
+            totalStats: emptyStats,
+            validationError,
+        };
+    }
+
     const statements = splitSqlStatements(sql);
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
@@ -443,6 +707,16 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         sql: string;
         type: string;
         description: string;
+        startLine: number;
+        endLine: number;
+    }> = [];
+
+    // Collect consecutive DDL commands to merge them (when option enabled)
+    let pendingDdlCommands: Array<{
+        sql: string;
+        type: string;
+        keyword: string;
+        objectName: string;
         startLine: number;
         endLine: number;
     }> = [];
@@ -467,6 +741,25 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
         queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
         pendingSessionCommands = [];
+    };
+
+    // Helper to flush pending DDL commands as a single merged result
+    const flushDdlCommands = () => {
+        if (pendingDdlCommands.length === 0) return;
+
+        const mergedResult = createMergedDdlResult(
+            pendingDdlCommands.map(c => ({ sql: c.sql, type: c.type, keyword: c.keyword, objectName: c.objectName })),
+            dialect
+        );
+
+        // Get line range for tracking (absolute lines in original file)
+        const absoluteStartLine = pendingDdlCommands[0].startLine;
+        const absoluteEndLine = pendingDdlCommands[pendingDdlCommands.length - 1].endLine;
+
+        queries.push(mergedResult);
+        queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
+
+        pendingDdlCommands = [];
     };
 
     for (const stmt of statements) {
@@ -503,31 +796,54 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
             // Flush any pending session commands before processing a regular statement
             flushSessionCommands();
 
-            // Parse the regular statement
-            const result = parseSql(stmt, dialect);
+            // Check if DDL combining is enabled and this is a DDL statement
+            const ddlInfo = options.combineDdlStatements ? getDdlStatementInfo(stmt) : null;
 
-            // Adjust line numbers by adding the offset
-            const lineOffset = stmtStartLine - 1;
-            for (const node of result.nodes) {
-                if (node.startLine) {
-                    node.startLine += lineOffset;
-                }
-                if (node.endLine) {
-                    node.endLine += lineOffset;
-                }
-            }
-            // Also adjust line numbers for edges
-            for (const edge of result.edges) {
-                if (edge.startLine) {
-                    edge.startLine += lineOffset;
-                }
-                if (edge.endLine) {
-                    edge.endLine += lineOffset;
-                }
-            }
+            if (ddlInfo) {
+                // Calculate actual start line by counting lines in leading comments
+                const strippedSql = stripLeadingComments(stmt);
+                const leadingLinesCount = stmt.split('\n').length - strippedSql.split('\n').length;
+                const actualStartLine = stmtStartLine + leadingLinesCount;
 
-            queries.push(result);
-            queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+                // Add to pending DDL commands
+                pendingDdlCommands.push({
+                    sql: strippedSql,
+                    type: ddlInfo.type,
+                    keyword: ddlInfo.keyword,
+                    objectName: ddlInfo.objectName,
+                    startLine: actualStartLine,
+                    endLine: stmtEndLine,
+                });
+            } else {
+                // Flush any pending DDL commands before processing a non-DDL statement
+                flushDdlCommands();
+
+                // Parse the regular statement
+                const result = parseSql(stmt, dialect);
+
+                // Adjust line numbers by adding the offset
+                const lineOffset = stmtStartLine - 1;
+                for (const node of result.nodes) {
+                    if (node.startLine) {
+                        node.startLine += lineOffset;
+                    }
+                    if (node.endLine) {
+                        node.endLine += lineOffset;
+                    }
+                }
+                // Also adjust line numbers for edges
+                for (const edge of result.edges) {
+                    if (edge.startLine) {
+                        edge.startLine += lineOffset;
+                    }
+                    if (edge.endLine) {
+                        edge.endLine += lineOffset;
+                    }
+                }
+
+                queries.push(result);
+                queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
+            }
         }
 
         // Update current line past this statement
@@ -536,6 +852,9 @@ export function parseSqlBatch(sql: string, dialect: SqlDialect = 'MySQL'): Batch
 
     // Flush any remaining session commands at the end
     flushSessionCommands();
+
+    // Flush any remaining DDL commands at the end
+    flushDdlCommands();
 
     // Calculate total stats
     // For tables, count unique tables across all queries (not sum, as same table in multiple queries should count as 1)
@@ -1567,12 +1886,72 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
 
     // For non-SELECT, create a simple representation
     const rootId = genId('stmt');
+
+    // Extract meaningful label and description for CREATE statements
+    let label = stmt.type.toUpperCase();
+    let description = `${stmt.type} statement`;
+    let objectName = '';
+
+    if (ctx.statementType === 'create' && stmt.keyword) {
+        const keyword = stmt.keyword.toUpperCase();
+
+        // Extract object name based on keyword type
+        if (stmt.keyword === 'view' && stmt.view) {
+            objectName = stmt.view.view || stmt.view.name || '';
+        } else if (stmt.keyword === 'table' && stmt.table) {
+            const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+            objectName = tables[0]?.table || tables[0]?.name || '';
+        } else if (stmt.keyword === 'index' && stmt.index) {
+            objectName = stmt.index || '';
+        } else if (stmt.keyword === 'database' && stmt.database) {
+            objectName = stmt.database || '';
+        } else if (stmt.keyword === 'schema' && stmt.schema) {
+            objectName = stmt.schema || '';
+        }
+
+        // Include object name in label for clarity
+        label = objectName ? `${keyword} ${objectName}` : `CREATE ${keyword}`;
+        description = objectName ? `Create ${keyword.toLowerCase()}: ${objectName}` : `Create ${keyword.toLowerCase()}`;
+
+        // For CREATE VIEW with a SELECT, process the inner SELECT and connect to view
+        if (stmt.keyword === 'view' && stmt.select && objectName) {
+            // Process the SELECT statement that defines the view
+            const selectRootId = processSelect(stmt.select, nodes, edges);
+
+            // Create the view node as the result
+            const viewNodeWidth = Math.max(160, objectName.length * 10 + 60);
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `VIEW ${objectName}`,
+                description: `Create view: ${objectName}`,
+                accessMode: 'write',
+                operationType: 'CREATE_VIEW',
+                x: 0, y: 0, width: viewNodeWidth, height: 60
+            });
+
+            // Connect SELECT output to VIEW
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+    }
+
+    // Calculate width based on label length
+    const labelWidth = Math.max(160, label.length * 10 + 40);
+
     nodes.push({
         id: rootId,
         type: 'result',
-        label: stmt.type.toUpperCase(),
-        description: `${stmt.type} statement`,
-        x: 0, y: 0, width: 160, height: 60
+        label: label,
+        description: description,
+        x: 0, y: 0, width: labelWidth, height: 60
     });
 
     // Process table for UPDATE/DELETE/INSERT
