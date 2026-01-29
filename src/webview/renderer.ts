@@ -3216,7 +3216,7 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     const targetNode = currentNodes.find(n => n.id === targetNodeId);
 
     if (targetNode) {
-        selectNode(targetNodeId);
+        selectNode(targetNodeId, { skipNavigation: true });
         zoomToNode(targetNode);
         return true;
     }
@@ -4141,7 +4141,7 @@ function navigateSearch(delta: number): void {
     const node = currentNodes.find(n => n.id === nodeId);
     if (node) {
         zoomToNode(node);
-        selectNode(nodeId);
+        selectNode(nodeId, { skipNavigation: true });
     }
 }
 
