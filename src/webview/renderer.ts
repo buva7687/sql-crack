@@ -1054,8 +1054,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             return;
         }
 
-        // Single click selects the node (double-click opens cloud, X button closes)
-        selectNode(node.id);
+        // Single click selects the node
+        // Ctrl/Cmd+Click navigates to SQL, regular click just selects (for keyboard nav)
+        const skipNav = !(e.ctrlKey || e.metaKey);
+        selectNode(node.id, { skipNavigation: skipNav });
         hideTooltip();
 
         // Focus SVG to ensure keyboard events work
