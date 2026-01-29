@@ -1703,12 +1703,72 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
 
     // For non-SELECT, create a simple representation
     const rootId = genId('stmt');
+
+    // Extract meaningful label and description for CREATE statements
+    let label = stmt.type.toUpperCase();
+    let description = `${stmt.type} statement`;
+    let objectName = '';
+
+    if (ctx.statementType === 'create' && stmt.keyword) {
+        const keyword = stmt.keyword.toUpperCase();
+
+        // Extract object name based on keyword type
+        if (stmt.keyword === 'view' && stmt.view) {
+            objectName = stmt.view.view || stmt.view.name || '';
+        } else if (stmt.keyword === 'table' && stmt.table) {
+            const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+            objectName = tables[0]?.table || tables[0]?.name || '';
+        } else if (stmt.keyword === 'index' && stmt.index) {
+            objectName = stmt.index || '';
+        } else if (stmt.keyword === 'database' && stmt.database) {
+            objectName = stmt.database || '';
+        } else if (stmt.keyword === 'schema' && stmt.schema) {
+            objectName = stmt.schema || '';
+        }
+
+        // Include object name in label for clarity
+        label = objectName ? `${keyword} ${objectName}` : `CREATE ${keyword}`;
+        description = objectName ? `Create ${keyword.toLowerCase()}: ${objectName}` : `Create ${keyword.toLowerCase()}`;
+
+        // For CREATE VIEW with a SELECT, process the inner SELECT and connect to view
+        if (stmt.keyword === 'view' && stmt.select && objectName) {
+            // Process the SELECT statement that defines the view
+            const selectRootId = processSelect(stmt.select, nodes, edges);
+
+            // Create the view node as the result
+            const viewNodeWidth = Math.max(160, objectName.length * 10 + 60);
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `VIEW ${objectName}`,
+                description: `Create view: ${objectName}`,
+                accessMode: 'write',
+                operationType: 'CREATE_VIEW',
+                x: 0, y: 0, width: viewNodeWidth, height: 60
+            });
+
+            // Connect SELECT output to VIEW
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+    }
+
+    // Calculate width based on label length
+    const labelWidth = Math.max(160, label.length * 10 + 40);
+
     nodes.push({
         id: rootId,
         type: 'result',
-        label: stmt.type.toUpperCase(),
-        description: `${stmt.type} statement`,
-        x: 0, y: 0, width: 160, height: 60
+        label: label,
+        description: description,
+        x: 0, y: 0, width: labelWidth, height: 60
     });
 
     // Process table for UPDATE/DELETE/INSERT
