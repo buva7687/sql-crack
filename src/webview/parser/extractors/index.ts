@@ -1,5 +1,5 @@
 // Re-export all extractors
-export { extractColumns, extractColumnInfos } from './columns';
+export { extractColumnInfos } from './columns';
 export { extractConditions, formatConditionRecursive, formatCondition } from './conditions';
 export {
     extractWindowFunctions,

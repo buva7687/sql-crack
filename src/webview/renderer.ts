@@ -84,6 +84,8 @@ let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
 // Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
 let cloudViewStates: Map<string, CloudViewState> = new Map();
+// Store document event listeners for cleanup
+let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 
 export function initRenderer(container: HTMLElement): void {
     // Create SVG element
@@ -347,11 +349,13 @@ export function initRenderer(container: HTMLElement): void {
     container.appendChild(contextMenuElement);
 
     // Hide context menu on click outside
-    document.addEventListener('click', () => {
+    const contextMenuClickHandler = () => {
         if (contextMenuElement) {
             contextMenuElement.style.display = 'none';
         }
-    });
+    };
+    document.addEventListener('click', contextMenuClickHandler);
+    documentListeners.push({ type: 'click', handler: contextMenuClickHandler });
 
     // Store container reference
     containerElement = container;
@@ -553,7 +557,7 @@ function setupEventListeners(): void {
     });
 
     // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
+    const keydownHandler = (e: KeyboardEvent) => {
         // Don't trigger shortcuts when typing in input fields
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
                                document.activeElement?.tagName === 'TEXTAREA';
@@ -686,7 +690,20 @@ function setupEventListeners(): void {
                 navigateToConnectedNode('downstream');
             }
         }
+    };
+    document.addEventListener('keydown', keydownHandler);
+    documentListeners.push({ type: 'keydown', handler: keydownHandler as EventListener });
+}
+
+/**
+ * Cleanup function to remove all document event listeners.
+ * Call this when the renderer is disposed to prevent memory leaks.
+ */
+export function cleanupRenderer(): void {
+    documentListeners.forEach(({ type, handler }) => {
+        document.removeEventListener(type, handler);
     });
+    documentListeners.length = 0;
 }
 
 function updateTransform(): void {

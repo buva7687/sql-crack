@@ -1,26 +1,6 @@
-// Column extraction utilities
+// Column extraction utilities (pure functions, no global state)
 
 import { ColumnInfo } from '../../types';
-import { setHasSelectStar } from '../state';
-
-export function extractColumns(columns: any): string[] {
-    if (!columns || columns === '*') {
-        setHasSelectStar(true);
-        return ['*'];
-    }
-    if (!Array.isArray(columns)) { return ['*']; }
-
-    return columns.map((col: any) => {
-        if (col === '*' || col.expr?.column === '*') {
-            setHasSelectStar(true);
-            return '*';
-        }
-        if (col.as) { return col.as; }
-        if (col.expr?.column) { return col.expr.column; }
-        if (col.expr?.name) { return `${col.expr.name}()`; }
-        return 'expr';
-    }).slice(0, 10); // Limit to first 10
-}
 
 /**
  * Extract column information from SELECT statement AST for dead column detection.
