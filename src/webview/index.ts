@@ -3,6 +3,7 @@ import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
 import { parseSqlBatch, SqlDialect, BatchParseResult } from './sqlParser';
+import { LayoutType } from './types';
 import {
     initRenderer,
     render,
@@ -24,6 +25,8 @@ import {
     toggleColumnFlows,
     toggleFullscreen,
     toggleLayout,
+    switchLayout,
+    getCurrentLayout,
     isFullscreen,
     toggleTheme,
     isDarkTheme,
@@ -229,6 +232,10 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onToggleSqlPreview: toggleSqlPreview,
         onToggleColumnFlows: toggleColumnFlows,
         onToggleLayout: toggleLayout,
+        onLayoutChange: (layout: LayoutType) => {
+            switchLayout(layout);
+        },
+        getCurrentLayout: getCurrentLayout,
         onToggleTheme: toggleTheme,
         onToggleFullscreen: toggleFullscreen,
         onSearchBoxReady: setSearchBox,

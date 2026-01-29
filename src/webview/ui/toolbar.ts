@@ -1,7 +1,7 @@
 // Toolbar UI module
 
 import { SqlDialect, BatchParseResult } from '../sqlParser';
-import { FocusMode } from '../types';
+import { FocusMode, LayoutType } from '../types';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -30,6 +30,8 @@ export interface ToolbarCallbacks {
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
     onToggleLayout: () => void;
+    onLayoutChange: (layout: LayoutType) => void;
+    getCurrentLayout: () => LayoutType;
     isDarkTheme: () => boolean;
     isFullscreen: () => boolean;
     getKeyboardShortcuts: () => Array<{ key: string; description: string }>;
@@ -469,11 +471,56 @@ function createFeatureGroup(
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
 
-    // Layout Toggle button
-    const layoutBtn = createButton('📐', callbacks.onToggleLayout);
-    layoutBtn.title = 'Toggle layout algorithm (H)';
-    layoutBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    featureGroup.appendChild(layoutBtn);
+    // Layout selector dropdown
+    const layoutContainer = document.createElement('div');
+    layoutContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        padding: 0 8px;
+    `;
+
+    const layoutIcon = document.createElement('span');
+    layoutIcon.textContent = '📐';
+    layoutIcon.style.cssText = 'font-size: 14px; margin-right: 4px;';
+    layoutContainer.appendChild(layoutIcon);
+
+    const layoutSelect = document.createElement('select');
+    layoutSelect.id = 'layout-select';
+    const isDark = callbacks.isDarkTheme();
+    layoutSelect.style.cssText = `
+        background: ${isDark ? '#1e293b' : '#f1f5f9'};
+        color: ${isDark ? '#f1f5f9' : '#1e293b'};
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-size: 10px;
+        cursor: pointer;
+        outline: none;
+    `;
+
+    const layouts: { value: LayoutType; label: string }[] = [
+        { value: 'vertical', label: 'Vertical' },
+        { value: 'horizontal', label: 'Horizontal' },
+        { value: 'compact', label: 'Compact' },
+        { value: 'force', label: 'Force' },
+        { value: 'radial', label: 'Radial' },
+    ];
+
+    layouts.forEach(layout => {
+        const option = document.createElement('option');
+        option.value = layout.value;
+        option.textContent = layout.label;
+        layoutSelect.appendChild(option);
+    });
+
+    layoutSelect.value = callbacks.getCurrentLayout();
+    layoutSelect.addEventListener('change', (e) => {
+        callbacks.onLayoutChange((e.target as HTMLSelectElement).value as LayoutType);
+    });
+    layoutSelect.title = 'Layout algorithm (H to cycle)';
+    layoutContainer.appendChild(layoutSelect);
+    featureGroup.appendChild(layoutContainer);
 
     // Fullscreen button
     const fullscreenBtn = createButton('⛶', () => {

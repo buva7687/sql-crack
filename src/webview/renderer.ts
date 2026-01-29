@@ -33,7 +33,8 @@ import {
 
 import { formatSql, highlightSql } from './sqlFormatter';
 import dagre from 'dagre';
-import { layoutGraphHorizontal } from './parser/forceLayout';
+import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
+import { layoutGraph } from './parser/layout';
 
 const state: ViewState = {
     scale: 1,
@@ -5010,70 +5011,64 @@ export function toggleHints(show?: boolean): void {
     hintsPanel.style.display = hintsVisible ? 'block' : 'none';
 }
 
+// Layout order for cycling
+const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
+
 export function toggleLayout(): void {
+    const currentIndex = LAYOUT_ORDER.indexOf(state.layoutType || 'vertical');
+    const nextIndex = (currentIndex + 1) % LAYOUT_ORDER.length;
+    switchLayout(LAYOUT_ORDER[nextIndex]);
+}
+
+export function switchLayout(layoutType: LayoutType): void {
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
         return;
     }
 
-    // Toggle between vertical (TB) and horizontal (LR) layouts
-    const newLayout: LayoutType = state.layoutType === 'vertical' ? 'horizontal' : 'vertical';
-    state.layoutType = newLayout;
+    state.layoutType = layoutType;
 
-    // Re-run layout with new algorithm
-    if (newLayout === 'horizontal') {
-        // Use horizontal (left-to-right) layout
-        layoutGraphHorizontal(currentNodes, currentEdges);
-    } else {
-        // Use vertical (top-to-bottom) dagre layout
-        const g = new dagre.graphlib.Graph();
-        g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 });
-        g.setDefaultEdgeLabel(() => ({}));
-
-        currentNodes.forEach(node => {
-            g.setNode(node.id, { width: node.width, height: node.height });
-        });
-
-        currentEdges.forEach(edge => {
-            g.setEdge(edge.source, edge.target);
-        });
-
-        dagre.layout(g);
-
-        currentNodes.forEach(node => {
-            const nodeWithPos = g.node(node.id);
-            if (nodeWithPos && nodeWithPos.x !== undefined && nodeWithPos.y !== undefined) {
-                node.x = nodeWithPos.x - node.width / 2;
-                node.y = nodeWithPos.y - node.height / 2;
-            }
-        });
+    // Re-run layout with selected algorithm
+    switch (layoutType) {
+        case 'horizontal':
+            layoutGraphHorizontal(currentNodes, currentEdges);
+            break;
+        case 'compact':
+            layoutGraphCompact(currentNodes, currentEdges);
+            break;
+        case 'force':
+            layoutGraphForce(currentNodes, currentEdges);
+            break;
+        case 'radial':
+            layoutGraphRadial(currentNodes, currentEdges);
+            break;
+        case 'vertical':
+        default:
+            layoutGraph(currentNodes, currentEdges);
+            break;
     }
 
     // Update node positions in DOM
-    // Nodes use x/y attributes on rect elements, so we need to calculate delta from original position
     currentNodes.forEach(node => {
         const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
         if (nodeGroup) {
             const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
             if (rect) {
-                // Get original position from rect attributes
                 const origX = parseFloat(rect.getAttribute('x') || '0');
                 const origY = parseFloat(rect.getAttribute('y') || '0');
-                // Calculate delta from original to new position
                 const deltaX = node.x - origX;
                 const deltaY = node.y - origY;
-                // Apply transform as delta
                 nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
             }
         }
     });
 
-    // First, show all edges (reset any that were hidden)
+    // Show all edges first
     const allEdges = mainGroup!.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
         (edgeEl as SVGPathElement).style.display = '';
     });
 
-    // Update edge paths - only for main edges (not column flows or other overlays)
+    // Update edge paths
     const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
     edgeElements.forEach(edgeEl => {
         const sourceId = edgeEl.getAttribute('data-source');
@@ -5082,36 +5077,92 @@ export function toggleLayout(): void {
             const sourceNode = currentNodes.find(n => n.id === sourceId);
             const targetNode = currentNodes.find(n => n.id === targetId);
             if (sourceNode && targetNode) {
-                // Calculate edge path based on layout type
-                let path: string;
-                if (newLayout === 'horizontal') {
-                    // For horizontal: curved lines from right to left
-                    const sx = sourceNode.x + sourceNode.width;
-                    const sy = sourceNode.y + sourceNode.height / 2;
-                    const tx = targetNode.x;
-                    const ty = targetNode.y + targetNode.height / 2;
-                    const midX = (sx + tx) / 2;
-                    path = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
-                } else {
-                    // For vertical: curved lines from bottom to top
-                    const sx = sourceNode.x + sourceNode.width / 2;
-                    const sy = sourceNode.y + sourceNode.height;
-                    const tx = targetNode.x + targetNode.width / 2;
-                    const ty = targetNode.y;
-                    const midY = (sy + ty) / 2;
-                    path = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
-                }
+                const path = calculateEdgePath(sourceNode, targetNode, layoutType);
                 edgeEl.setAttribute('d', path);
                 (edgeEl as SVGPathElement).style.display = '';
             } else {
-                // Hide edges where source or target node not found
                 (edgeEl as SVGPathElement).style.display = 'none';
             }
         }
     });
 
-    // Fit view to show all nodes
+    // Update layout selector if present
+    const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+    if (layoutSelect) {
+        layoutSelect.value = layoutType;
+    }
+
     fitView();
+}
+
+export function getCurrentLayout(): LayoutType {
+    return state.layoutType || 'vertical';
+}
+
+/**
+ * Calculate edge path based on layout type and node positions
+ */
+function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType): string {
+    if (layoutType === 'horizontal') {
+        const sx = sourceNode.x + sourceNode.width;
+        const sy = sourceNode.y + sourceNode.height / 2;
+        const tx = targetNode.x;
+        const ty = targetNode.y + targetNode.height / 2;
+        const midX = (sx + tx) / 2;
+        return `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+    } else if (layoutType === 'force' || layoutType === 'radial') {
+        // Smart edge routing based on relative positions
+        const sourceCenterX = sourceNode.x + sourceNode.width / 2;
+        const sourceCenterY = sourceNode.y + sourceNode.height / 2;
+        const targetCenterX = targetNode.x + targetNode.width / 2;
+        const targetCenterY = targetNode.y + targetNode.height / 2;
+
+        const angle = Math.atan2(targetCenterY - sourceCenterY, targetCenterX - sourceCenterX);
+
+        let sx: number, sy: number, tx: number, ty: number;
+
+        if (Math.abs(angle) < Math.PI / 4) {
+            sx = sourceNode.x + sourceNode.width;
+            sy = sourceCenterY;
+            tx = targetNode.x;
+            ty = targetCenterY;
+        } else if (Math.abs(angle) > 3 * Math.PI / 4) {
+            sx = sourceNode.x;
+            sy = sourceCenterY;
+            tx = targetNode.x + targetNode.width;
+            ty = targetCenterY;
+        } else if (angle > 0) {
+            sx = sourceCenterX;
+            sy = sourceNode.y + sourceNode.height;
+            tx = targetCenterX;
+            ty = targetNode.y;
+        } else {
+            sx = sourceCenterX;
+            sy = sourceNode.y;
+            tx = targetCenterX;
+            ty = targetNode.y + targetNode.height;
+        }
+
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const curvature = Math.min(dist * 0.3, 50);
+
+        const midX = (sx + tx) / 2;
+        const midY = (sy + ty) / 2;
+        const perpX = -dy / dist * curvature;
+        const perpY = dx / dist * curvature;
+
+        return `M ${sx} ${sy} Q ${midX + perpX} ${midY + perpY}, ${tx} ${ty}`;
+    } else {
+        // Vertical/compact: curved lines from bottom to top
+        const sx = sourceNode.x + sourceNode.width / 2;
+        const sy = sourceNode.y + sourceNode.height;
+        const tx = targetNode.x + targetNode.width / 2;
+        const ty = targetNode.y;
+        const midY = (sy + ty) / 2;
+        return `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+    }
 }
 
 // ============================================================
