@@ -524,10 +524,11 @@ function setupEventListeners(): void {
         updateTransform();
     });
 
-    // Click outside to deselect
+    // Click outside to deselect and reset focus
     svg.addEventListener('click', (e) => {
         if (e.target === svg) {
             selectNode(null);
+            clearFocusMode();
         }
     });
 
@@ -544,12 +545,15 @@ function setupEventListeners(): void {
             return;
         }
 
-        // Escape to close panels and exit fullscreen
+        // Escape to close panels, exit fullscreen, and reset view
         if (e.key === 'Escape') {
             if (state.isFullscreen) {
                 toggleFullscreen(false);
             }
             selectNode(null);
+            clearFocusMode();
+            resetView();
+            hideContextMenu();
             if (searchBox) {
                 searchBox.value = '';
                 clearSearch();
@@ -6003,6 +6007,10 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
             <span style="width: 16px;">↓</span>
             <span>Focus downstream</span>
         </div>
+        <div class="ctx-menu-item" data-action="reset-view" style="${menuItemStyle}">
+            <span style="width: 16px;">⊡</span>
+            <span>Reset view (Esc)</span>
+        </div>
         <div style="${separatorStyle}"></div>
     `;
 
@@ -6094,6 +6102,11 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
             selectNode(node.id);
             setFocusMode('downstream');
             zoomToNode(node);
+            break;
+        case 'reset-view':
+            selectNode(null);
+            clearFocusMode();
+            resetView();
             break;
         case 'toggle-expand':
             if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible) {
