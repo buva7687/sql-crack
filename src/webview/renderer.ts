@@ -543,6 +543,7 @@ function setupEventListeners(): void {
         state.scale = newScale;
 
         updateTransform();
+        updateZoomIndicator();
     });
 
     // Click outside to deselect and reset focus
@@ -4143,15 +4144,29 @@ function zoomToNode(node: FlowNode): void {
 export function zoomIn(): void {
     state.scale = Math.min(state.scale * 1.2, 3);
     updateTransform();
+    updateZoomIndicator();
 }
 
 export function zoomOut(): void {
     state.scale = Math.max(state.scale / 1.2, 0.2);
     updateTransform();
+    updateZoomIndicator();
+}
+
+export function getZoomLevel(): number {
+    return Math.round(state.scale * 100);
 }
 
 export function resetView(): void {
     fitView();
+    updateZoomIndicator();
+}
+
+function updateZoomIndicator(): void {
+    const indicator = document.getElementById('zoom-level');
+    if (indicator) {
+        indicator.textContent = `${getZoomLevel()}%`;
+    }
 }
 
 // Search functionality

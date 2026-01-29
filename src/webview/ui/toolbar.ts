@@ -8,6 +8,7 @@ export interface ToolbarCallbacks {
     onZoomIn: () => void;
     onZoomOut: () => void;
     onResetView: () => void;
+    getZoomLevel: () => number;
     onExportPng: () => void;
     onExportSvg: () => void;
     onExportMermaid: () => void;
@@ -274,22 +275,47 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
+        align-items: center;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
     `;
 
-    const zoomOutBtn = createButton('−', callbacks.onZoomOut);
+    const zoomOutBtn = createButton('−', () => {
+        callbacks.onZoomOut();
+    });
+    zoomOutBtn.title = 'Zoom out (-)';
     zoomGroup.appendChild(zoomOutBtn);
 
-    const fitBtn = createButton('⊡', callbacks.onResetView);
-    fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    fitBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
-    zoomGroup.appendChild(fitBtn);
+    // Zoom level indicator
+    const zoomLevel = document.createElement('span');
+    zoomLevel.id = 'zoom-level';
+    zoomLevel.style.cssText = `
+        color: #94a3b8;
+        font-size: 10px;
+        min-width: 36px;
+        text-align: center;
+        padding: 0 2px;
+        border-left: 1px solid rgba(148, 163, 184, 0.2);
+        border-right: 1px solid rgba(148, 163, 184, 0.2);
+    `;
+    zoomLevel.textContent = `${callbacks.getZoomLevel()}%`;
+    zoomLevel.title = 'Current zoom level';
+    zoomGroup.appendChild(zoomLevel);
 
-    const zoomInBtn = createButton('+', callbacks.onZoomIn);
+    const zoomInBtn = createButton('+', () => {
+        callbacks.onZoomIn();
+    });
+    zoomInBtn.title = 'Zoom in (+)';
     zoomGroup.appendChild(zoomInBtn);
+
+    const fitBtn = createButton('⊡', () => {
+        callbacks.onResetView();
+    });
+    fitBtn.title = 'Fit to view (R)';
+    fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(fitBtn);
 
     return zoomGroup;
 }
