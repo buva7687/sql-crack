@@ -1,7 +1,7 @@
 // Node selection and edge highlighting utilities
 
 import { state, mainGroup, currentNodes, currentEdges, currentSql } from '../state';
-import { centerOnNode } from './zoom';
+import { ensureNodeVisible } from './zoom';
 
 // Callback functions to be set by the main renderer to avoid circular dependencies
 let onUpdateDetailsPanel: ((nodeId: string | null) => void) | null = null;
@@ -155,8 +155,8 @@ export function navigateToConnectedNode(direction: 'upstream' | 'downstream'): b
 
     if (targetNode) {
         selectNode(targetNodeId, { skipNavigation: true });
-        // Center on node without hiding others (don't use zoomToNode which has toggle behavior)
-        centerOnNode(targetNode);
+        // Only pan if node is outside viewport (don't center, just ensure visibility)
+        ensureNodeVisible(targetNode);
         return true;
     }
 

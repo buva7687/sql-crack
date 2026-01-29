@@ -298,6 +298,66 @@ export function resetView(): void {
 }
 
 /**
+ * Check if a node is visible within the current viewport
+ */
+function isNodeInViewport(node: FlowNode, margin: number = 50): boolean {
+    if (!svg) { return true; }
+
+    const rect = svg.getBoundingClientRect();
+
+    // Calculate node's screen position
+    const nodeLeft = node.x * state.scale + state.offsetX;
+    const nodeRight = (node.x + node.width) * state.scale + state.offsetX;
+    const nodeTop = node.y * state.scale + state.offsetY;
+    const nodeBottom = (node.y + node.height) * state.scale + state.offsetY;
+
+    // Check if node is within viewport bounds (with margin)
+    return nodeLeft >= -margin &&
+           nodeRight <= rect.width + margin &&
+           nodeTop >= -margin &&
+           nodeBottom <= rect.height + margin;
+}
+
+/**
+ * Ensure a node is visible, panning minimally if needed
+ * Only pans if the node is outside the viewport
+ */
+export function ensureNodeVisible(node: FlowNode): void {
+    if (!svg || isNodeInViewport(node)) { return; }
+
+    const rect = svg.getBoundingClientRect();
+    const margin = 100; // Padding from viewport edge
+
+    // Calculate node's screen position
+    const nodeLeft = node.x * state.scale + state.offsetX;
+    const nodeRight = (node.x + node.width) * state.scale + state.offsetX;
+    const nodeTop = node.y * state.scale + state.offsetY;
+    const nodeBottom = (node.y + node.height) * state.scale + state.offsetY;
+
+    // Calculate minimal pan needed to bring node into view
+    let deltaX = 0;
+    let deltaY = 0;
+
+    if (nodeRight > rect.width - margin) {
+        deltaX = rect.width - margin - nodeRight;
+    } else if (nodeLeft < margin) {
+        deltaX = margin - nodeLeft;
+    }
+
+    if (nodeBottom > rect.height - margin) {
+        deltaY = rect.height - margin - nodeBottom;
+    } else if (nodeTop < margin) {
+        deltaY = margin - nodeTop;
+    }
+
+    if (deltaX !== 0 || deltaY !== 0) {
+        state.offsetX += deltaX;
+        state.offsetY += deltaY;
+        updateTransform();
+    }
+}
+
+/**
  * Center the view on a node without hiding other nodes
  * Used for keyboard navigation where we want to keep all nodes visible
  */

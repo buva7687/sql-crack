@@ -3226,22 +3226,82 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     // If there are multiple connected nodes, cycle through them
     // Track the last visited index for this direction
     const stateKey = `lastNav_${direction}_${state.selectedNodeId}`;
-    const lastIndex = (state as any)[stateKey] || 0;
+    const lastIndex = (state as any)[stateKey] || -1;
     const nextIndex = (lastIndex + 1) % connectedNodeIds.length;
     (state as any)[stateKey] = nextIndex;
 
     // Navigate to the connected node
-    const targetNodeId = connectedNodeIds[nextIndex > 0 ? nextIndex - 1 : connectedNodeIds.length - 1] || connectedNodeIds[0];
+    const targetNodeId = connectedNodeIds[nextIndex];
     const targetNode = currentNodes.find(n => n.id === targetNodeId);
 
     if (targetNode) {
         selectNode(targetNodeId, { skipNavigation: true });
-        // Center on node without hiding others (don't use zoomToNode which has toggle behavior)
-        centerOnNode(targetNode);
+        // Only pan if node is outside viewport (don't center, just ensure visibility)
+        ensureNodeVisible(targetNode);
         return true;
     }
 
     return false;
+}
+
+/**
+ * Check if a node is visible within the current viewport
+ */
+function isNodeInViewport(node: FlowNode, margin: number = 50): boolean {
+    if (!svg) { return true; }
+
+    const rect = svg.getBoundingClientRect();
+
+    // Calculate node's screen position
+    const nodeLeft = node.x * state.scale + state.offsetX;
+    const nodeRight = (node.x + node.width) * state.scale + state.offsetX;
+    const nodeTop = node.y * state.scale + state.offsetY;
+    const nodeBottom = (node.y + node.height) * state.scale + state.offsetY;
+
+    // Check if node is within viewport bounds (with margin)
+    return nodeLeft >= -margin &&
+           nodeRight <= rect.width + margin &&
+           nodeTop >= -margin &&
+           nodeBottom <= rect.height + margin;
+}
+
+/**
+ * Ensure a node is visible, panning minimally if needed
+ * Only pans if the node is outside the viewport
+ */
+function ensureNodeVisible(node: FlowNode): void {
+    if (!svg || isNodeInViewport(node)) { return; }
+
+    const rect = svg.getBoundingClientRect();
+    const margin = 100; // Padding from viewport edge
+
+    // Calculate node's screen position
+    const nodeLeft = node.x * state.scale + state.offsetX;
+    const nodeRight = (node.x + node.width) * state.scale + state.offsetX;
+    const nodeTop = node.y * state.scale + state.offsetY;
+    const nodeBottom = (node.y + node.height) * state.scale + state.offsetY;
+
+    // Calculate minimal pan needed to bring node into view
+    let deltaX = 0;
+    let deltaY = 0;
+
+    if (nodeRight > rect.width - margin) {
+        deltaX = rect.width - margin - nodeRight;
+    } else if (nodeLeft < margin) {
+        deltaX = margin - nodeLeft;
+    }
+
+    if (nodeBottom > rect.height - margin) {
+        deltaY = rect.height - margin - nodeBottom;
+    } else if (nodeTop < margin) {
+        deltaY = margin - nodeTop;
+    }
+
+    if (deltaX !== 0 || deltaY !== 0) {
+        state.offsetX += deltaX;
+        state.offsetY += deltaY;
+        updateTransform();
+    }
 }
 
 /**
