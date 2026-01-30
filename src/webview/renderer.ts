@@ -7203,7 +7203,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'Enter', description: 'Next search result' },
         { key: '↑/←', description: 'Navigate to upstream node' },
         { key: '↓/→', description: 'Navigate to downstream node' },
-        { key: '[', description: 'Previous query (Q1 → Q2)' },
+        { key: '[', description: 'Previous query (Q2 → Q1)' },
         { key: ']', description: 'Next query (Q2 → Q3)' }
     ];
 }
