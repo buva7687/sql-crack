@@ -102,7 +102,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators and affected
 
 ### Layout & Export
 
-- **Layout Toggle** — Switch between vertical (top-down) and horizontal (left-right) layouts
+- **Layout Toggle** — Cycle through vertical, horizontal, compact, and force-directed layouts with `H`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
 - **View Modes** — Display beside editor, in tab, or secondary sidebar
@@ -165,7 +165,7 @@ Analyze cross-file dependencies:
 
 | Shortcut | Action |
 |----------|--------|
-| `Cmd/Ctrl + Shift + V` | Open visualization |
+| `Cmd/Ctrl + Shift + L` | Open visualization |
 | `Cmd/Ctrl + F` | Search nodes |
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
@@ -174,10 +174,11 @@ Analyze cross-file dependencies:
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
-| `H` | Toggle layout direction |
+| `H` | Cycle layout (vertical → horizontal → compact → force) |
 | `E` | Expand/collapse all CTEs |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
+| `[` / `]` | Previous/next query |
 | `?` | Show all shortcuts |
 
 ### Lineage View
@@ -191,20 +192,92 @@ Analyze cross-file dependencies:
 | `Scroll` | Zoom in/out |
 | `Drag` | Pan the view |
 
+### Accessibility
+
+All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboard-navigable:
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Focus next node |
+| `Enter` / `Space` | Select focused node |
+| `Arrow keys` | Navigate between nodes |
+| `Escape` | Deselect and return to canvas |
+
 ---
 
 ## Configuration
+
+### Core Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, `secondary-sidebar` |
-| `sqlCrack.defaultLayout` | `vertical` | Graph direction: `vertical` or `horizontal` |
+| `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
+
+### Workspace Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Max files to auto-index (10-500) |
-| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, or `hybrid` |
+| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, `hybrid` |
+
+### Custom File Extensions
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sqlCrack.additionalFileExtensions` | `[]` | Additional extensions to treat as SQL (e.g., `[".tpt", ".hql", ".bteq"]`) |
+
+Files with these extensions will show the SQL Crack icon and can be visualized like `.sql` files.
+
+### Custom Functions
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sqlCrack.customAggregateFunctions` | `[]` | Custom aggregate function names (e.g., `["MY_SUM"]`) |
+| `sqlCrack.customWindowFunctions` | `[]` | Custom window function names (e.g., `["MY_RANK"]`) |
+
+### Advanced Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
+| `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
+| `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
+| `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration |
+| `sqlCrack.advanced.clearCacheOnStartup` | `false` | Clear cache when VS Code starts |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+| Problem | Solution |
+|---------|----------|
+| **Icon not showing for custom extensions** | Ensure you added extensions correctly: Settings → "Additional File Extensions" → Add Item → `.ext` (just the extension with dot, not `[".ext"]`) |
+| **Parse error on valid SQL** | Try a different dialect from the dropdown. PostgreSQL is most permissive. Some vendor-specific syntax may not be supported. |
+| **Graph is slow with large files** | SQL files over 100KB or 50+ statements may be slow. Try visualizing smaller sections by selecting text first. |
+| **CTE/Subquery not expanding** | Double-click the node. If it has no children, it may be a simple reference. |
+| **Workspace indexing stuck** | Click Cancel in the notification, then try again. For very large workspaces, increase `workspaceAutoIndexThreshold`. |
+| **Columns not highlighting** | Press `C` to enable column lineage mode first, then click output columns in the SELECT node. |
+
+### Debug Mode
+
+To see detailed logs:
+1. Open **Help → Toggle Developer Tools**
+2. Go to **Console** tab
+3. Filter by "SQL Crack" to see extension logs
+
+### Resetting State
+
+If the extension behaves unexpectedly:
+1. Run **"Developer: Reload Window"** from Command Palette
+2. If issues persist, disable/re-enable the extension
+3. For workspace issues, try **"SQL Crack: Clear Workspace Cache"** (if available) or restart VS Code
 
 ---
 
@@ -229,6 +302,35 @@ npm run lint         # Lint code
 
 Press `F5` to launch the Extension Development Host.
 
+### Architecture Overview
+
+```
+src/
+├── extension.ts           # VS Code extension entry point, commands, lifecycle
+├── visualizationPanel.ts  # Query visualization webview panel
+├── webview/               # Browser-side code (runs in webview)
+│   ├── index.ts           # Webview entry point
+│   ├── sqlParser.ts       # SQL parsing with node-sql-parser
+│   ├── renderer.ts        # SVG rendering, pan/zoom, interactions
+│   ├── constants/         # Centralized colors and theme
+│   ├── types/             # TypeScript interfaces
+│   └── ui/                # Toolbar, tabs, panels
+├── workspace/             # Workspace analysis (runs in extension host)
+│   ├── workspacePanel.ts  # Workspace webview panel
+│   ├── scanner.ts         # File discovery and parsing
+│   ├── indexManager.ts    # Incremental index with SHA-256 hashing
+│   ├── lineage/           # Cross-file lineage tracking
+│   └── ui/                # Workspace view renderers
+├── dialects/              # SQL dialect function registry
+└── shared/                # Shared utilities (theme, colors)
+```
+
+**Data Flow**:
+1. User opens `.sql` file → `extension.ts` creates `VisualizationPanel`
+2. SQL text → `sqlParser.ts` (node-sql-parser) → AST → `FlowNode[]` + `FlowEdge[]`
+3. Nodes/edges → `renderer.ts` → SVG with dagre layout
+4. User interactions → message passing between webview and extension host
+
 ---
 
 ## Roadmap
@@ -237,8 +339,13 @@ Press `F5` to launch the Extension Development Host.
 - ✅ **Phase 2** — Developer productivity (quality warnings, column lineage, cloud panels)
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 4 view modes)
+- ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 
-**Planned**: Diff-aware visualization for PR reviews, dbt integration (`ref()`, `source()` macros)
+**Planned**:
+- Diff-aware visualization for PR reviews
+- dbt integration (`ref()`, `source()` macros)
+- Query comparison (column diff between two queries)
+- Performance regression detection
 
 ---
 
