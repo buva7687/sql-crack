@@ -6868,7 +6868,7 @@ function showLineagePath(flow: ColumnFlow): void {
 
     detailsPanel.innerHTML = `
         <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};">
-            Column Lineage
+            Lineage Path
         </div>
         <div style="
             background: ${state.isDarkTheme ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)'};
