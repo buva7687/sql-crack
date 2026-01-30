@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { ProgressCallback } from './types';
+import { ProgressCallback, CancellationToken } from './types';
 import {
     FileAnalysis,
     SqlDialect,
@@ -138,12 +138,21 @@ export class WorkspaceScanner {
 
     /**
      * Analyze all SQL files in the workspace
+     * Supports cancellation via token
      */
-    async analyzeWorkspace(progressCallback?: ProgressCallback): Promise<FileAnalysis[]> {
+    async analyzeWorkspace(
+        progressCallback?: ProgressCallback,
+        cancellationToken?: CancellationToken
+    ): Promise<FileAnalysis[]> {
         const files = await this.findSqlFiles();
         const results: FileAnalysis[] = [];
 
         for (let i = 0; i < files.length; i++) {
+            // Check for cancellation
+            if (cancellationToken?.isCancellationRequested) {
+                break;
+            }
+
             const file = files[i];
             const fileName = path.basename(file.fsPath);
 

@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "buvan",
   "repository": {
     "type": "git",
@@ -19,7 +19,8 @@
   "activationEvents": [
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
-    "onCommand:sql-crack.analyzeWorkspace"
+    "onCommand:sql-crack.analyzeWorkspace",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -39,21 +40,21 @@
       "editor/title": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         },
         {
@@ -72,9 +73,9 @@
     "keybindings": [
       {
         "command": "sql-crack.visualize",
-        "key": "ctrl+shift+q",
-        "mac": "cmd+shift+q",
-        "when": "resourceExtname == .sql"
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile"
       }
     ],
     "configuration": {

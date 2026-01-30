@@ -14,6 +14,7 @@ import {
     OptimizationHint,
     ParseResult,
     BatchParseResult,
+    ParseError,
     SqlDialect,
     NodeType,
     ValidationError,
@@ -102,8 +103,8 @@ function countStatements(sql: string): number {
  * Formats bytes into human-readable string.
  */
 function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} bytes`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    if (bytes < 1024) {return `${bytes} bytes`;}
+    if (bytes < 1024 * 1024) {return `${(bytes / 1024).toFixed(1)}KB`;}
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
@@ -121,6 +122,7 @@ export type {
     OptimizationHint,
     ParseResult,
     BatchParseResult,
+    ParseError,
     SqlDialect,
     ValidationError,
     ValidationLimits,
@@ -723,7 +725,7 @@ export function parseSqlBatch(
 
     // Helper to flush pending session commands as a single merged result
     const flushSessionCommands = () => {
-        if (pendingSessionCommands.length === 0) return;
+        if (pendingSessionCommands.length === 0) {return;}
 
         const mergedResult = createMergedSessionResult(
             pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
@@ -745,7 +747,7 @@ export function parseSqlBatch(
 
     // Helper to flush pending DDL commands as a single merged result
     const flushDdlCommands = () => {
-        if (pendingDdlCommands.length === 0) return;
+        if (pendingDdlCommands.length === 0) {return;}
 
         const mergedResult = createMergedDdlResult(
             pendingDdlCommands.map(c => ({ sql: c.sql, type: c.type, keyword: c.keyword, objectName: c.objectName })),
@@ -904,7 +906,38 @@ export function parseSqlBatch(
         totalStats.complexity = 'Very Complex';
     }
 
-    return { queries, totalStats, queryLineRanges };
+    // Collect parse errors for partial results tracking
+    const parseErrors: ParseError[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    queries.forEach((query, index) => {
+        if (query.error) {
+            errorCount++;
+            // Extract line number from error message if available (e.g., "at line 5")
+            const lineMatch = query.error.match(/line\s+(\d+)/i);
+            const columnMatch = query.error.match(/column\s+(\d+)/i);
+
+            parseErrors.push({
+                queryIndex: index,
+                line: lineMatch ? parseInt(lineMatch[1], 10) : queryLineRanges[index]?.startLine,
+                column: columnMatch ? parseInt(columnMatch[1], 10) : undefined,
+                message: query.error,
+                sql: query.sql.substring(0, 200) + (query.sql.length > 200 ? '...' : '')
+            });
+        } else {
+            successCount++;
+        }
+    });
+
+    return {
+        queries,
+        totalStats,
+        queryLineRanges,
+        parseErrors: parseErrors.length > 0 ? parseErrors : undefined,
+        successCount,
+        errorCount
+    };
 }
 
 // Extract line numbers for SQL keywords
@@ -2539,6 +2572,87 @@ function getTableName(item: any): string {
     return item.name || item.as || 'table';
 }
 
+/**
+ * Format an AST expression node into a readable SQL expression string
+ */
+function formatExpressionFromAst(expr: any): string {
+    if (!expr) return '';
+
+    // Simple column reference
+    if (expr.type === 'column_ref') {
+        const table = expr.table ? `${expr.table}.` : '';
+        return `${table}${expr.column || '?'}`;
+    }
+
+    // Aggregate function
+    if (expr.type === 'aggr_func') {
+        const funcName = expr.name || 'AGG';
+        const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
+        let argsStr = '';
+
+        if (expr.args) {
+            const args = expr.args.value || expr.args.expr || expr.args;
+            if (Array.isArray(args)) {
+                argsStr = args.map((arg: any) => formatExpressionFromAst(arg)).join(', ');
+            } else if (args) {
+                argsStr = formatExpressionFromAst(args);
+            }
+        }
+
+        return `${funcName}(${distinct}${argsStr})`;
+    }
+
+    // Function call
+    if (expr.type === 'function') {
+        const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        const args = expr.args?.value || expr.args || [];
+        const argsStr = Array.isArray(args)
+            ? args.map((arg: any) => formatExpressionFromAst(arg)).join(', ')
+            : formatExpressionFromAst(args);
+        return `${funcName}(${argsStr})`;
+    }
+
+    // Binary expression
+    if (expr.type === 'binary_expr') {
+        const left = formatExpressionFromAst(expr.left);
+        const right = formatExpressionFromAst(expr.right);
+        return `${left} ${expr.operator || '?'} ${right}`;
+    }
+
+    // Unary expression
+    if (expr.type === 'unary_expr') {
+        return `${expr.operator || ''}${formatExpressionFromAst(expr.expr)}`;
+    }
+
+    // Number or string literal
+    if (expr.type === 'number' || expr.type === 'single_quote_string' || expr.type === 'string') {
+        return String(expr.value ?? '');
+    }
+
+    // Star
+    if (expr.type === 'star' || expr.column === '*') {
+        return '*';
+    }
+
+    // Window function (has over clause)
+    if (expr.over) {
+        const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        return `${funcName}() OVER(...)`;
+    }
+
+    // CASE expression
+    if (expr.type === 'case') {
+        return 'CASE...END';
+    }
+
+    // Fallback: try common properties
+    if (expr.column) return expr.column;
+    if (expr.value !== undefined) return String(expr.value);
+    if (expr.name) return String(typeof expr.name === 'string' ? expr.name : expr.name?.name || 'expr');
+
+    return 'expr';
+}
+
 function extractColumns(columns: any): string[] {
     if (!columns || columns === '*') {
         ctx.hasSelectStar = true;
@@ -2612,7 +2726,7 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
             name = 'expr';
         }
         
-        const expression = col.expr ? JSON.stringify(col.expr) : name;
+        const expression = col.expr ? formatExpressionFromAst(col.expr) : name;
         const sourceColName = getStringValue(col.expr?.column);
         const sourceTableName = getStringValue(col.expr?.table) ||
             (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined);
@@ -2769,12 +2883,14 @@ function extractAggregateFunctionDetails(columns: any): Array<{
     name: string;
     expression: string;
     alias?: string;
+    sourceColumn?: string;
+    sourceTable?: string;
 }> {
     if (!columns || !Array.isArray(columns)) { return []; }
 
     // Get dialect-specific aggregate functions
     const aggregateFuncSet = new Set(getAggregateFunctions(ctx.dialect));
-    const details: Array<{ name: string; expression: string; alias?: string }> = [];
+    const details: Array<{ name: string; expression: string; alias?: string; sourceColumn?: string; sourceTable?: string }> = [];
 
     function extractAggregatesFromExpr(expr: any): void {
         if (!expr) {return;}
@@ -2783,13 +2899,25 @@ function extractAggregateFunctionDetails(columns: any): Array<{
         const exprFuncName = String(expr.name || '').toUpperCase();
         if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
             const funcName = exprFuncName || 'AGG';
-            
-            // Extract arguments/expression
+
+            // Extract arguments/expression and source column info
             let expression = funcName + '()';
+            let sourceColumn: string | undefined;
+            let sourceTable: string | undefined;
+
             if (expr.args) {
-                const args = expr.args.value || expr.args;
+                const args = expr.args.value || expr.args.expr || expr.args;
                 if (Array.isArray(args)) {
                     const argStrs = args.map((arg: any) => {
+                        // Extract source column from first column reference
+                        if (arg.column && !sourceColumn) {
+                            sourceColumn = arg.column;
+                            sourceTable = arg.table;
+                        }
+                        if (arg.expr?.column && !sourceColumn) {
+                            sourceColumn = arg.expr.column;
+                            sourceTable = arg.expr.table;
+                        }
                         if (arg.column) {return arg.column;}
                         if (arg.value) {return String(arg.value);}
                         if (arg.expr?.column) {return arg.expr.column;}
@@ -2797,6 +2925,12 @@ function extractAggregateFunctionDetails(columns: any): Array<{
                     });
                     expression = funcName + '(' + argStrs.join(', ') + ')';
                 } else if (args.column) {
+                    sourceColumn = args.column;
+                    sourceTable = args.table;
+                    expression = funcName + '(' + args.column + ')';
+                } else if (args.type === 'column_ref') {
+                    sourceColumn = args.column;
+                    sourceTable = args.table;
                     expression = funcName + '(' + args.column + ')';
                 }
             }
@@ -2804,7 +2938,9 @@ function extractAggregateFunctionDetails(columns: any): Array<{
             details.push({
                 name: funcName,
                 expression: expression,
-                alias: undefined
+                alias: undefined,
+                sourceColumn,
+                sourceTable
             });
             return;
         }
@@ -3386,9 +3522,21 @@ function buildColumnLineagePath(
         const sourceColumn = findSourceColumn(column, sourceNode, currentNode);
 
         if (sourceColumn) {
+            // For aggregate columns, trace the inner column (e.g., order_id from COUNT(order_id))
+            // not the output alias (e.g., order_count)
+            let columnToTrace = sourceColumn;
+            if (sourceColumn.isAggregate && sourceColumn.sourceColumn && sourceColumn.sourceColumn !== sourceColumn.name) {
+                columnToTrace = {
+                    name: sourceColumn.sourceColumn,
+                    expression: sourceColumn.sourceColumn,
+                    sourceColumn: sourceColumn.sourceColumn,
+                    sourceTable: sourceColumn.sourceTable
+                };
+            }
+
             // Recursively trace this source
             const sourcePath = buildColumnLineagePath(
-                sourceColumn,
+                columnToTrace,
                 sourceNode,
                 nodeMap,
                 incomingEdges,
@@ -3405,18 +3553,45 @@ function buildColumnLineagePath(
     // If we couldn't trace further and column has explicit source info
     if (column.sourceTable && column.sourceColumn) {
         // Try to find the source table node
+        const sourceTableLower = column.sourceTable.toLowerCase();
         for (const node of nodeMap.values()) {
-            if (node.type === 'table' &&
-                (node.label.toLowerCase() === column.sourceTable.toLowerCase() ||
-                 node.label.toLowerCase().includes(column.sourceTable.toLowerCase()))) {
-                path.unshift({
-                    nodeId: node.id,
-                    nodeName: node.label,
-                    nodeType: 'table',
-                    columnName: column.sourceColumn,
-                    transformation: 'source'
-                });
-                break;
+            if (node.type === 'table') {
+                const nodeLabelLower = node.label.toLowerCase();
+                // Check for exact match first
+                if (nodeLabelLower === sourceTableLower) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
+                // For aliases (short names), check if table name starts with alias
+                // e.g., alias 'o' should match 'orders' but not 'customers'
+                if (sourceTableLower.length <= 2 && nodeLabelLower.startsWith(sourceTableLower)) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
+                // For longer names, check if either contains the other as a word
+                if (sourceTableLower.length > 2 &&
+                    (nodeLabelLower.includes(sourceTableLower) || sourceTableLower.includes(nodeLabelLower))) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
             }
         }
     }
@@ -3449,10 +3624,13 @@ function findSourceColumn(
             const outputName = aggFunc.alias || aggFunc.name;
             if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
                 targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+                // Include source column info for proper lineage tracing
                 return {
                     name: outputName,
                     expression: aggFunc.expression,
-                    isAggregate: true
+                    isAggregate: true,
+                    sourceColumn: (aggFunc as any).sourceColumn || outputName,
+                    sourceTable: (aggFunc as any).sourceTable
                 };
             }
         }
@@ -3517,8 +3695,9 @@ function getTransformationType(
         return 'source';
     }
 
-    // Aggregations
-    if (column.isAggregate || node.type === 'aggregate') {
+    // Aggregations - only mark as aggregated if the column itself uses an aggregate function
+    // GROUP BY columns that pass through an aggregate node should remain passthrough
+    if (column.isAggregate) {
         return 'aggregated';
     }
 

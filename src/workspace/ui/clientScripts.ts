@@ -829,8 +829,90 @@ function getMessageHandlingScript(): string {
                         collapseNodeWithColumns(message.data.nodeId);
                     }
                     break;
+                case 'exportPng':
+                    // Handle PNG export request from extension
+                    exportToPng();
+                    break;
             }
         });
+
+        // ========== PNG Export Function ==========
+        function exportToPng() {
+            const svgElement = document.getElementById('graph-svg');
+            if (!svgElement) {
+                vscode.postMessage({ command: 'exportPngError', error: 'No SVG element found' });
+                return;
+            }
+
+            try {
+                // Clone SVG to avoid modifying the original
+                const svgClone = svgElement.cloneNode(true);
+                
+                // Get computed styles and dimensions
+                const bbox = mainGroup ? mainGroup.getBBox() : { x: 0, y: 0, width: 1200, height: 800 };
+                const padding = 50;
+                const width = Math.max(1200, bbox.width + padding * 2);
+                const height = Math.max(800, bbox.height + padding * 2);
+
+                // Set proper dimensions on clone
+                svgClone.setAttribute('width', width);
+                svgClone.setAttribute('height', height);
+                svgClone.setAttribute('viewBox', (bbox.x - padding) + ' ' + (bbox.y - padding) + ' ' + width + ' ' + height);
+
+                // Reset transform on main-group for export
+                const cloneMainGroup = svgClone.getElementById('main-group');
+                if (cloneMainGroup) {
+                    cloneMainGroup.setAttribute('transform', 'translate(0,0) scale(1)');
+                }
+
+                // Add background
+                const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bgRect.setAttribute('x', bbox.x - padding);
+                bgRect.setAttribute('y', bbox.y - padding);
+                bgRect.setAttribute('width', width);
+                bgRect.setAttribute('height', height);
+                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#0f172a' : '#ffffff');
+                svgClone.insertBefore(bgRect, svgClone.firstChild);
+
+                // Serialize SVG
+                const svgData = new XMLSerializer().serializeToString(svgClone);
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const svgUrl = URL.createObjectURL(svgBlob);
+
+                // Create canvas and draw
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const scale = 2; // 2x for retina quality
+                canvas.width = width * scale;
+                canvas.height = height * scale;
+                ctx.scale(scale, scale);
+
+                const img = new Image();
+                img.onload = function() {
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(svgUrl);
+
+                    // Convert to PNG and send to extension
+                    const pngDataUrl = canvas.toDataURL('image/png');
+                    const base64Data = pngDataUrl.split(',')[1];
+
+                    vscode.postMessage({
+                        command: 'savePng',
+                        data: base64Data,
+                        filename: 'workspace-dependencies-' + Date.now() + '.png'
+                    });
+                };
+
+                img.onerror = function(e) {
+                    URL.revokeObjectURL(svgUrl);
+                    vscode.postMessage({ command: 'exportPngError', error: 'Failed to load SVG for PNG conversion' });
+                };
+
+                img.src = svgUrl;
+            } catch (e) {
+                vscode.postMessage({ command: 'exportPngError', error: 'PNG export failed: ' + e.message });
+            }
+        }
     `;
 }
 

@@ -284,7 +284,7 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
 
     const zoomOutBtn = createButton('−', () => {
         callbacks.onZoomOut();
-    });
+    }, 'Zoom out');
     zoomOutBtn.title = 'Zoom out (-)';
     zoomGroup.appendChild(zoomOutBtn);
 
@@ -306,13 +306,13 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
 
     const zoomInBtn = createButton('+', () => {
         callbacks.onZoomIn();
-    });
+    }, 'Zoom in');
     zoomInBtn.title = 'Zoom in (+)';
     zoomGroup.appendChild(zoomInBtn);
 
     const fitBtn = createButton('⊡', () => {
         callbacks.onResetView();
-    });
+    }, 'Fit to view');
     fitBtn.title = 'Fit to view (R)';
     fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     zoomGroup.appendChild(fitBtn);
@@ -334,25 +334,25 @@ function createExportGroup(callbacks: ToolbarCallbacks): HTMLElement {
         callbacks.onCopyToClipboard();
         copyBtn.innerHTML = '✓';
         setTimeout(() => copyBtn.innerHTML = '📋', 1500);
-    });
+    }, 'Copy to clipboard');
     copyBtn.title = 'Copy to clipboard';
     exportGroup.appendChild(copyBtn);
 
-    const pngBtn = createButton('PNG', callbacks.onExportPng);
+    const pngBtn = createButton('PNG', callbacks.onExportPng, 'Export as PNG image');
     pngBtn.title = 'Export as PNG';
     pngBtn.style.fontSize = '11px';
     pngBtn.style.fontWeight = '600';
     pngBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     exportGroup.appendChild(pngBtn);
 
-    const svgBtn = createButton('SVG', callbacks.onExportSvg);
+    const svgBtn = createButton('SVG', callbacks.onExportSvg, 'Export as SVG vector');
     svgBtn.title = 'Export as SVG';
     svgBtn.style.fontSize = '11px';
     svgBtn.style.fontWeight = '600';
     svgBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     exportGroup.appendChild(svgBtn);
 
-    const mermaidBtn = createButton('MMD', callbacks.onExportMermaid);
+    const mermaidBtn = createButton('MMD', callbacks.onExportMermaid, 'Export as Mermaid diagram');
     mermaidBtn.title = 'Export as Mermaid flowchart';
     mermaidBtn.style.fontSize = '11px';
     mermaidBtn.style.fontWeight = '600';
@@ -382,7 +382,7 @@ function createFeatureGroup(
     `;
 
     // Refresh button
-    const refreshBtn = createButton('↻', callbacks.onRefresh);
+    const refreshBtn = createButton('↻', callbacks.onRefresh, 'Refresh visualization');
     refreshBtn.id = 'refresh-btn';
     refreshBtn.title = 'Refresh visualization';
     refreshBtn.style.fontSize = '16px';
@@ -394,7 +394,7 @@ function createFeatureGroup(
         const pinBtn = createButton('📌', () => {
             const { sql, name } = callbacks.getCurrentQuerySql();
             callbacks.onPinVisualization(sql, 'MySQL' as SqlDialect, name);
-        });
+        }, 'Pin visualization as new tab');
         pinBtn.title = 'Pin visualization as new tab';
         pinBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
         featureGroup.appendChild(pinBtn);
@@ -450,7 +450,7 @@ function createFeatureGroup(
     }
 
     // Legend button
-    const legendBtn = createButton('🎨', callbacks.onToggleLegend);
+    const legendBtn = createButton('🎨', callbacks.onToggleLegend, 'Show color legend');
     legendBtn.title = 'Show color legend (L)';
     legendBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(legendBtn);
@@ -461,7 +461,7 @@ function createFeatureGroup(
         focusModeActive = !focusModeActive;
         callbacks.onToggleFocusMode(focusModeActive);
         focusBtn.style.background = focusModeActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-    });
+    }, 'Toggle focus mode');
     focusBtn.title = 'Focus mode - highlight connected nodes';
     focusBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(focusBtn);
@@ -471,7 +471,7 @@ function createFeatureGroup(
     featureGroup.appendChild(focusModeSelector);
 
     // SQL Preview button
-    const sqlBtn = createButton('{ }', callbacks.onToggleSqlPreview);
+    const sqlBtn = createButton('{ }', callbacks.onToggleSqlPreview, 'Show formatted SQL');
     sqlBtn.title = 'Show formatted SQL (S)';
     sqlBtn.style.fontSize = '11px';
     sqlBtn.style.fontWeight = '700';
@@ -484,7 +484,7 @@ function createFeatureGroup(
         columnFlowActive = !columnFlowActive;
         callbacks.onToggleColumnFlows(columnFlowActive);
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-    });
+    }, 'Toggle column lineage');
     columnFlowBtn.title = 'Toggle column lineage (C)';
     columnFlowBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(columnFlowBtn);
@@ -493,7 +493,7 @@ function createFeatureGroup(
     const themeBtn = createButton(callbacks.isDarkTheme() ? '◐' : '◑', () => {
         callbacks.onToggleTheme();
         themeBtn.innerHTML = callbacks.isDarkTheme() ? '◐' : '◑';
-    });
+    }, 'Toggle dark or light theme');
     themeBtn.title = 'Toggle dark/light theme (T)';
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
@@ -555,7 +555,7 @@ function createFeatureGroup(
         setTimeout(() => {
             fullscreenBtn.style.background = callbacks.isFullscreen() ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
         }, 50);
-    });
+    }, 'Toggle fullscreen');
     fullscreenBtn.title = 'Toggle fullscreen (F)';
     fullscreenBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(fullscreenBtn);
@@ -569,7 +569,7 @@ function createFeatureGroup(
     // Help button
     const helpBtn = createButton('?', () => {
         showKeyboardShortcutsHelp(callbacks.getKeyboardShortcuts());
-    });
+    }, 'Show keyboard shortcuts');
     helpBtn.title = 'Keyboard shortcuts';
     helpBtn.style.fontWeight = '700';
     helpBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
@@ -578,7 +578,7 @@ function createFeatureGroup(
     return featureGroup;
 }
 
-function createButton(label: string, onClick: () => void): HTMLButtonElement {
+function createButton(label: string, onClick: () => void, ariaLabel?: string): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.innerHTML = label;
     btn.style.cssText = btnStyle;
@@ -589,6 +589,13 @@ function createButton(label: string, onClick: () => void): HTMLButtonElement {
             btn.style.background = 'transparent';
         }
     });
+
+    // Accessibility: add aria-label for screen readers
+    if (ariaLabel) {
+        btn.setAttribute('aria-label', ariaLabel);
+    }
+    btn.setAttribute('role', 'button');
+
     return btn;
 }
 
@@ -1102,5 +1109,82 @@ export function clearRefreshButtonStale(): void {
     if (refreshBtn) {
         refreshBtn.style.background = 'transparent';
         refreshBtn.title = 'Refresh visualization';
+    }
+}
+
+// ============================================================
+// Error Badge - Shows parse error count in toolbar
+// ============================================================
+
+/**
+ * Update or hide the error notification badge in the toolbar
+ * Shows number of failed queries when errors exist
+ */
+export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string }>): void {
+    const existingBadge = document.getElementById('sql-crack-error-badge');
+
+    if (errorCount === 0) {
+        // Remove badge if no errors
+        if (existingBadge) {
+            existingBadge.remove();
+        }
+        return;
+    }
+
+    // Create or update badge
+    // Position below the toolbar row to avoid overlap with batch tabs
+    let badge = existingBadge;
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'sql-crack-error-badge';
+        badge.style.cssText = `
+            position: absolute;
+            top: 60px;
+            right: 16px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            padding: 6px 12px;
+            z-index: 100;
+            cursor: pointer;
+            transition: background 0.2s;
+        `;
+        badge.addEventListener('mouseenter', () => {
+            badge!.style.background = 'rgba(239, 68, 68, 0.25)';
+        });
+        badge.addEventListener('mouseleave', () => {
+            badge!.style.background = 'rgba(239, 68, 68, 0.15)';
+        });
+
+        // Insert into root container
+        const container = document.getElementById('root');
+        if (container) {
+            container.appendChild(badge);
+        }
+    }
+
+    // Build tooltip content
+    const tooltipText = errors?.map(e => `Q${e.queryIndex + 1}: ${e.message}`).join('\n') ||
+        `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
+
+    badge.innerHTML = `
+        <span style="color: #f87171; font-size: 14px;">⚠</span>
+        <span style="color: #fca5a5; font-size: 12px; font-weight: 500;">
+            ${errorCount} parse error${errorCount > 1 ? 's' : ''}
+        </span>
+    `;
+    badge.title = tooltipText;
+}
+
+/**
+ * Clear the error badge from the toolbar
+ */
+export function clearErrorBadge(): void {
+    const badge = document.getElementById('sql-crack-error-badge');
+    if (badge) {
+        badge.remove();
     }
 }

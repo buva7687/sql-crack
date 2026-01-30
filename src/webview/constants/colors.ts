@@ -209,6 +209,24 @@ export const COMPLEXITY_COLORS: Record<string, string> = {
     'Very Complex': '#ef4444',
 };
 
+// ============================================================
+// Transformation Colors - For column lineage transformations
+// ============================================================
+
+export const TRANSFORMATION_COLORS: Record<string, string> = {
+    source: '#10b981',      // Emerald - source column
+    passthrough: '#64748b', // Slate - passed through unchanged
+    renamed: '#3b82f6',     // Blue - renamed column
+    aggregated: '#f59e0b',  // Amber - aggregated value
+    calculated: '#8b5cf6',  // Violet - calculated/derived
+    joined: '#ec4899',      // Pink - from join
+    default: '#64748b',     // Slate - fallback
+};
+
+export function getTransformationColor(type: string): string {
+    return TRANSFORMATION_COLORS[type] || TRANSFORMATION_COLORS.default;
+}
+
 export function getNodeColor(type: NodeType): string {
     return NODE_COLORS[type] || '#6366f1';
 }

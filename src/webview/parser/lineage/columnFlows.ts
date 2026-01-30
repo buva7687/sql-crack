@@ -100,9 +100,22 @@ export function buildColumnLineagePath(
         const sourceColumn = findSourceColumn(column, sourceNode, currentNode);
 
         if (sourceColumn) {
+            // For aggregate columns, we need to trace the inner column (e.g., order_id from COUNT(order_id))
+            // not the output alias (e.g., order_count)
+            let columnToTrace = sourceColumn;
+            if (sourceColumn.isAggregate && sourceColumn.sourceColumn && sourceColumn.sourceColumn !== sourceColumn.name) {
+                // Create a new column info to trace the actual source column
+                columnToTrace = {
+                    name: sourceColumn.sourceColumn,
+                    expression: sourceColumn.sourceColumn,
+                    sourceColumn: sourceColumn.sourceColumn,
+                    sourceTable: sourceColumn.sourceTable
+                };
+            }
+
             // Recursively trace this source
             const sourcePath = buildColumnLineagePath(
-                sourceColumn,
+                columnToTrace,
                 sourceNode,
                 nodeMap,
                 incomingEdges,
@@ -118,18 +131,44 @@ export function buildColumnLineagePath(
 
     // If we couldn't trace further and column has explicit source info
     if (column.sourceTable && column.sourceColumn) {
+        const sourceTableLower = column.sourceTable.toLowerCase();
         for (const node of nodeMap.values()) {
-            if (node.type === 'table' &&
-                (node.label.toLowerCase() === column.sourceTable.toLowerCase() ||
-                    node.label.toLowerCase().includes(column.sourceTable.toLowerCase()))) {
-                path.unshift({
-                    nodeId: node.id,
-                    nodeName: node.label,
-                    nodeType: 'table',
-                    columnName: column.sourceColumn,
-                    transformation: 'source'
-                });
-                break;
+            if (node.type === 'table') {
+                const nodeLabelLower = node.label.toLowerCase();
+                // Check for exact match first
+                if (nodeLabelLower === sourceTableLower) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
+                // For aliases (short names), check if table name starts with alias
+                if (sourceTableLower.length <= 2 && nodeLabelLower.startsWith(sourceTableLower)) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
+                // For longer names, check if either contains the other
+                if (sourceTableLower.length > 2 &&
+                    (nodeLabelLower.includes(sourceTableLower) || sourceTableLower.includes(nodeLabelLower))) {
+                    path.unshift({
+                        nodeId: node.id,
+                        nodeName: node.label,
+                        nodeType: 'table',
+                        columnName: column.sourceColumn,
+                        transformation: 'source'
+                    });
+                    break;
+                }
             }
         }
     }
@@ -159,10 +198,15 @@ export function findSourceColumn(
             const outputName = aggFunc.alias || aggFunc.name;
             if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
                 targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+                // Return the source column used in the aggregate function for proper lineage tracing
+                // e.g., COUNT(order_id) -> we should trace order_id, not the output alias
                 return {
                     name: outputName,
                     expression: aggFunc.expression,
-                    isAggregate: true
+                    isAggregate: true,
+                    // Pass through source column info so lineage can continue tracing
+                    sourceColumn: (aggFunc as any).sourceColumn || outputName,
+                    sourceTable: (aggFunc as any).sourceTable
                 };
             }
         }
@@ -220,7 +264,9 @@ export function getTransformationType(
         return 'source';
     }
 
-    if (column.isAggregate || node.type === 'aggregate') {
+    // Only mark as aggregated if the column itself uses an aggregate function
+    // GROUP BY columns that pass through an aggregate node should remain passthrough
+    if (column.isAggregate) {
         return 'aggregated';
     }
 

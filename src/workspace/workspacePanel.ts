@@ -35,6 +35,9 @@ import { getWebviewScript, getIssuesScript, getMinimalScript, WebviewScriptParam
 // Handler modules
 import { MessageHandler, MessageHandlerContext } from './handlers';
 
+// Shared theme
+import { REFERENCE_TYPE_COLORS, WORKSPACE_NODE_COLORS, getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
+
 const AUTO_INDEX_THRESHOLD = 50;
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
@@ -227,23 +230,61 @@ export class WorkspacePanel {
 
     /**
      * Build index with progress indicator
+     * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
+        let wasCancelled = false;
+
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Indexing SQL Workspace',
-                cancellable: false
+                cancellable: true
             },
-            async (progress) => {
+            async (progress, token) => {
+                // Create cancellation token wrapper
+                const cancellationToken = {
+                    get isCancellationRequested() {
+                        return token.isCancellationRequested;
+                    }
+                };
+
+                token.onCancellationRequested(() => {
+                    wasCancelled = true;
+                });
+
+                const startTime = Date.now();
+                let lastFile = '';
+
                 await this._indexManager.buildIndex((current, total, fileName) => {
+                    lastFile = fileName;
+
+                    // Calculate time estimate
+                    const elapsed = Date.now() - startTime;
+                    const avgTimePerFile = elapsed / current;
+                    const remaining = avgTimePerFile * (total - current);
+                    const remainingStr = this.formatDuration(remaining);
+
                     progress.report({
-                        message: `${current}/${total}: ${fileName}`,
+                        message: `${current}/${total}: ${fileName} (~${remainingStr} remaining)`,
                         increment: (1 / total) * 100
                     });
-                });
+                }, cancellationToken);
             }
         );
+
+        if (wasCancelled) {
+            vscode.window.showWarningMessage('Workspace indexing was cancelled. Partial results may be available.');
+        }
+    }
+
+    /**
+     * Format duration in human-readable form
+     */
+    private formatDuration(ms: number): string {
+        if (ms < 1000) { return '<1s'; }
+        if (ms < 60000) { return `${Math.round(ms / 1000)}s`; }
+        return `${Math.round(ms / 60000)}m`;
     }
 
     /**
@@ -383,6 +424,15 @@ export class WorkspacePanel {
 
             case 'export':
                 await this.handleExport(message.format);
+                break;
+
+            case 'savePng':
+                // Handle PNG data from webview - save to file
+                await this.savePngToFile(message.data, message.filename);
+                break;
+
+            case 'exportPngError':
+                vscode.window.showErrorMessage(`PNG export failed: ${message.error}`);
                 break;
 
             case 'openFile':
@@ -1516,16 +1566,8 @@ ${bodyContent}
             // Create smooth bezier curve with better control points
             const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
 
-            // Get edge color based on reference type
-            const edgeColors: Record<string, string> = {
-                'select': '#64748b',
-                'join': '#a78bfa',
-                'insert': '#10b981',
-                'update': '#fbbf24',
-                'delete': '#f87171',
-                'subquery': '#8b5cf6'
-            };
-            const edgeColor = edgeColors[edge.referenceType] || '#64748b';
+            // Get edge color based on reference type (uses centralized theme)
+            const edgeColor = getReferenceTypeColor(edge.referenceType);
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
@@ -1683,13 +1725,17 @@ ${bodyContent}
         }
 
         if (format === 'png') {
-            // For PNG export, we'd need to use a library like sharp or canvas
-            // For now, show a message that this feature is coming soon
-            vscode.window.showInformationMessage('PNG export coming soon! Try SVG or Mermaid instead.');
+            // Request PNG export from webview
+            // The webview will convert SVG to PNG via canvas and send back the data
+            this._panel.webview.postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
         } else if (format === 'svg') {
             await this.exportAsSvg();
+        } else if (format === 'json') {
+            await this.exportAsJson();
+        } else if (format === 'dot') {
+            await this.exportAsDot();
         }
     }
 
@@ -1752,6 +1798,148 @@ ${bodyContent}
     }
 
     /**
+     * Export graph as JSON
+     * Useful for data interchange, CI/CD pipelines, and external tools
+     */
+    private async exportAsJson(): Promise<void> {
+        if (!this._currentGraph) { return; }
+
+        const exportData = {
+            version: '1.0',
+            exportedAt: new Date().toISOString(),
+            graph: {
+                nodes: this._currentGraph.nodes.map(node => ({
+                    id: node.id,
+                    label: node.label,
+                    type: node.type,
+                    filePath: node.filePath,
+                    definitionCount: node.definitionCount,
+                    referenceCount: node.referenceCount
+                })),
+                edges: this._currentGraph.edges.map(edge => ({
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    referenceType: edge.referenceType,
+                    count: edge.count,
+                    tables: edge.tables
+                }))
+            },
+            statistics: {
+                nodeCount: this._currentGraph.nodes.length,
+                edgeCount: this._currentGraph.edges.length,
+                fileNodes: this._currentGraph.nodes.filter(n => n.type === 'file').length,
+                tableNodes: this._currentGraph.nodes.filter(n => n.type === 'table').length,
+                externalNodes: this._currentGraph.nodes.filter(n => n.type === 'external').length
+            }
+        };
+
+        const jsonContent = JSON.stringify(exportData, null, 2);
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.json'),
+            filters: {
+                'JSON': ['json']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(jsonContent));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Export graph as DOT (Graphviz) format
+     * Useful for external visualization tools and large graph analysis
+     */
+    private async exportAsDot(): Promise<void> {
+        if (!this._currentGraph) { return; }
+
+        let dot = 'digraph WorkspaceDependencies {\n';
+        dot += '    // Graph settings\n';
+        dot += '    rankdir=TB;\n';
+        dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
+        dot += '    edge [fontname="Arial", fontsize=10];\n\n';
+
+        // Define node colors by type
+        const nodeColors: Record<string, string> = {
+            file: '#3b82f6',
+            table: '#10b981',
+            view: '#8b5cf6',
+            external: '#64748b'
+        };
+
+        // Add nodes
+        dot += '    // Nodes\n';
+        for (const node of this._currentGraph.nodes) {
+            const color = nodeColors[node.type] || '#64748b';
+            const label = node.label.replace(/"/g, '\\"');
+            dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
+        }
+
+        dot += '\n    // Edges\n';
+
+        // Define edge colors by reference type
+        const edgeColors: Record<string, string> = {
+            select: '#64748b',
+            join: '#a78bfa',
+            insert: '#10b981',
+            update: '#fbbf24',
+            delete: '#f87171'
+        };
+
+        // Add edges
+        for (const edge of this._currentGraph.edges) {
+            const color = edgeColors[edge.referenceType] || '#64748b';
+            const label = edge.referenceType || '';
+            dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
+        }
+
+        dot += '}\n';
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.dot'),
+            filters: {
+                'Graphviz DOT': ['dot', 'gv']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(dot));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Save PNG data to file
+     * Receives base64-encoded PNG data from webview and saves to user-selected location
+     */
+    private async savePngToFile(base64Data: string, suggestedFilename: string): Promise<void> {
+        if (!base64Data) {
+            vscode.window.showErrorMessage('No PNG data to save');
+            return;
+        }
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(suggestedFilename || 'workspace-dependencies.png'),
+            filters: {
+                'PNG Image': ['png']
+            }
+        });
+
+        if (uri) {
+            try {
+                const buffer = Buffer.from(base64Data, 'base64');
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to save PNG: ${error}`);
+            }
+        }
+    }
+
+    /**
      * Generate SVG string from graph
      */
     private generateSvgString(graph: WorkspaceDependencyGraph): string {
@@ -1779,18 +1967,13 @@ ${bodyContent}
             const y2 = target.y;
 
             const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
-            const color = edge.referenceType === 'select' ? '#64748b' :
-                        edge.referenceType === 'join' ? '#a78bfa' :
-                        edge.referenceType === 'insert' ? '#10b981' :
-                        edge.referenceType === 'update' ? '#fbbf24' : '#f87171';
+            const color = getReferenceTypeColor(edge.referenceType);
 
             return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
         }).join('\n');
 
         const nodesHtml = graph.nodes.map(node => {
-            const color = node.type === 'file' ? '#3b82f6' :
-                        node.type === 'table' ? '#10b981' :
-                        node.type === 'view' ? '#8b5cf6' : '#475569';
+            const color = getWorkspaceNodeColor(node.type);
 
             return `    <g transform="translate(${node.x}, ${node.y})">
         <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>
