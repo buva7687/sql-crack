@@ -102,7 +102,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators and affected
 
 ### Layout & Export
 
-- **Layout Toggle** — Cycle through vertical, horizontal, compact, and force-directed layouts with `H`
+- **Layout Toggle** — Cycle through vertical, horizontal, compact, force-directed, and radial layouts with `H`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
 - **View Modes** — Display beside editor, in tab, or secondary sidebar
@@ -174,7 +174,7 @@ Analyze cross-file dependencies:
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
-| `H` | Cycle layout (vertical → horizontal → compact → force) |
+| `H` | Cycle layout (vertical → horizontal → compact → force → radial) |
 | `E` | Expand/collapse all CTEs |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
@@ -213,8 +213,8 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 |---------|---------|-------------|
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
-| `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab`, `secondary-sidebar` |
-| `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force` |
+| `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab` |
+| `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
 
@@ -229,9 +229,9 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.additionalFileExtensions` | `[]` | Additional extensions to treat as SQL (e.g., `[".tpt", ".hql", ".bteq"]`) |
+| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). Include the leading dot; with or without dot is accepted and normalized. |
 
-Files with these extensions will show the SQL Crack icon and can be visualized like `.sql` files.
+Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index).
 
 ### Custom Functions
 
@@ -247,7 +247,7 @@ Files with these extensions will show the SQL Crack icon and can be visualized l
 | `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
-| `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration |
+| `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |
 | `sqlCrack.advanced.clearCacheOnStartup` | `false` | Clear cache when VS Code starts |
 
 ---
@@ -258,7 +258,7 @@ Files with these extensions will show the SQL Crack icon and can be visualized l
 
 | Problem | Solution |
 |---------|----------|
-| **Icon not showing for custom extensions** | Ensure you added extensions correctly: Settings → "Additional File Extensions" → Add Item → `.ext` (just the extension with dot, not `[".ext"]`) |
+| **Icon not showing for custom extensions** | In Settings → **SQL Crack** → **Additional File Extensions**, add one item per extension (e.g. .hql, .tpt). With or without a leading dot is fine; the extension normalizes automatically. Reload the window if the icon still doesn’t appear. |
 | **Parse error on valid SQL** | Try a different dialect from the dropdown. PostgreSQL is most permissive. Some vendor-specific syntax may not be supported. |
 | **Graph is slow with large files** | SQL files over 100KB or 50+ statements may be slow. Try visualizing smaller sections by selecting text first. |
 | **CTE/Subquery not expanding** | Double-click the node. If it has no children, it may be a simple reference. |
@@ -277,7 +277,7 @@ To see detailed logs:
 If the extension behaves unexpectedly:
 1. Run **"Developer: Reload Window"** from Command Palette
 2. If issues persist, disable/re-enable the extension
-3. For workspace issues, try **"SQL Crack: Clear Workspace Cache"** (if available) or restart VS Code
+3. For workspace index issues, re-run **"SQL Crack: Analyze Workspace Dependencies"** to rebuild the index, or enable **Clear cache on startup** (Advanced) and reload the window
 
 ---
 
