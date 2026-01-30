@@ -2,17 +2,111 @@
  * SQL Parser Unit Tests
  *
  * Tests core SQL parsing functionality including:
+ * - Validation (validateSql, size/query count limits)
+ * - Statement splitting (splitSqlStatements)
  * - Basic SELECT statements
  * - JOINs (INNER, LEFT, RIGHT, FULL)
  * - CTEs (simple, chained, recursive)
  * - Aggregations (GROUP BY, HAVING)
  * - Window functions
  * - Error handling
+ * - Batch parsing (including validation errors)
  */
 
-import { parseSql, parseSqlBatch } from '../../../src/webview/sqlParser';
+import * as path from 'path';
+import * as fs from 'fs';
+import {
+  parseSql,
+  parseSqlBatch,
+  validateSql,
+  splitSqlStatements,
+} from '../../../src/webview/sqlParser';
 
 describe('SQL Parser', () => {
+  describe('validateSql', () => {
+    it('returns null for valid SQL within size limit', () => {
+      const result = validateSql('SELECT * FROM users');
+      expect(result).toBeNull();
+    });
+
+    it('returns size_limit error when SQL exceeds max size', () => {
+      const smallLimit = 50;
+      const sqlOverLimit = 'x'.repeat(smallLimit + 1);
+      const result = validateSql(sqlOverLimit, {
+        maxSqlSizeBytes: smallLimit,
+        maxQueryCount: 50,
+      });
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('size_limit');
+      expect(result?.message).toContain('size limit');
+      expect(result?.details?.actual).toBeGreaterThan(smallLimit);
+      expect(result?.details?.limit).toBe(smallLimit);
+    });
+
+    it('returns query_count_limit error when statement count exceeds limit', () => {
+      const manyStatements = Array(55).fill('SELECT 1;').join('\n');
+      const result = validateSql(manyStatements, {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 50,
+      });
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('query_count_limit');
+      expect(result?.message).toContain('statements');
+      expect((result?.details?.actual as number)).toBeGreaterThan(50);
+    });
+
+    it('uses DEFAULT_VALIDATION_LIMITS when limits not provided', () => {
+      const result = validateSql('SELECT 1');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('splitSqlStatements', () => {
+    it('splits on semicolons', () => {
+      const sql = 'SELECT * FROM users; SELECT * FROM orders;';
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+      expect(statements[0].trim()).toBe('SELECT * FROM users');
+      expect(statements[1].trim()).toBe('SELECT * FROM orders');
+    });
+
+    it('returns single statement when no semicolon', () => {
+      const sql = 'SELECT * FROM users';
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(1);
+      expect(statements[0].trim()).toBe('SELECT * FROM users');
+    });
+
+    it('ignores semicolons inside single-quoted strings', () => {
+      const sql = "SELECT 'a;b' AS x FROM t; SELECT 2;";
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain("'a;b'");
+    });
+
+    it('ignores semicolons inside double-quoted strings', () => {
+      const sql = 'SELECT "a;b" AS x FROM t; SELECT 2;';
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('ignores semicolons inside parentheses', () => {
+      const sql = 'SELECT func(a; b) FROM t; SELECT 2;';
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('returns empty array for empty string', () => {
+      const statements = splitSqlStatements('');
+      expect(statements).toHaveLength(0);
+    });
+
+    it('trims whitespace-only statements', () => {
+      const sql = '  SELECT 1;  ;  SELECT 2  ;';
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+  });
   describe('Basic SELECT', () => {
     it('parses simple SELECT with single table', () => {
       const result = parseSql('SELECT * FROM users', 'MySQL');
@@ -427,6 +521,42 @@ SELECT * FROM orders;`;
       const result = parseSqlBatch('', 'MySQL');
 
       expect(result.queries.length).toBe(0);
+    });
+
+    it('returns validationError when SQL exceeds size limit', () => {
+      const hugeSql = 'x'.repeat(101 * 1024); // > 100KB default
+      const result = parseSqlBatch(hugeSql, 'MySQL');
+
+      expect(result.validationError).toBeDefined();
+      expect(result.validationError?.type).toBe('size_limit');
+      expect(result.queries.length).toBe(1);
+      expect(result.queries[0].error).toBeDefined();
+    });
+
+    it('returns validationError when statement count exceeds limit', () => {
+      const manyStatements = Array(52).fill('SELECT 1;').join('\n');
+      const result = parseSqlBatch(manyStatements, 'MySQL', {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 50,
+      });
+
+      expect(result.validationError).toBeDefined();
+      expect(result.validationError?.type).toBe('query_count_limit');
+    });
+  });
+
+  describe('Fixture: edge-cases/parse-errors.sql', () => {
+    it('batch parses mixed valid and invalid statements with correct counts', () => {
+      const fixturePath = path.join(__dirname, '../../fixtures/edge-cases/parse-errors.sql');
+      const sql = fs.readFileSync(fixturePath, 'utf-8');
+      const result = parseSqlBatch(sql, 'MySQL');
+
+      expect(result.queries.length).toBeGreaterThan(0);
+      const successCount = result.successCount ?? 0;
+      const errorCount = result.errorCount ?? 0;
+      expect(successCount + errorCount).toBe(result.queries.length);
+      expect(errorCount).toBeGreaterThan(0);
+      expect(successCount).toBeGreaterThan(0);
     });
   });
 });
