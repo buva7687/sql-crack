@@ -14,6 +14,7 @@ import {
     OptimizationHint,
     ParseResult,
     BatchParseResult,
+    ParseError,
     SqlDialect,
     NodeType,
     ValidationError,
@@ -121,6 +122,7 @@ export type {
     OptimizationHint,
     ParseResult,
     BatchParseResult,
+    ParseError,
     SqlDialect,
     ValidationError,
     ValidationLimits,
@@ -904,7 +906,38 @@ export function parseSqlBatch(
         totalStats.complexity = 'Very Complex';
     }
 
-    return { queries, totalStats, queryLineRanges };
+    // Collect parse errors for partial results tracking
+    const parseErrors: ParseError[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    queries.forEach((query, index) => {
+        if (query.error) {
+            errorCount++;
+            // Extract line number from error message if available (e.g., "at line 5")
+            const lineMatch = query.error.match(/line\s+(\d+)/i);
+            const columnMatch = query.error.match(/column\s+(\d+)/i);
+
+            parseErrors.push({
+                queryIndex: index,
+                line: lineMatch ? parseInt(lineMatch[1], 10) : queryLineRanges[index]?.startLine,
+                column: columnMatch ? parseInt(columnMatch[1], 10) : undefined,
+                message: query.error,
+                sql: query.sql.substring(0, 200) + (query.sql.length > 200 ? '...' : '')
+            });
+        } else {
+            successCount++;
+        }
+    });
+
+    return {
+        queries,
+        totalStats,
+        queryLineRanges,
+        parseErrors: parseErrors.length > 0 ? parseErrors : undefined,
+        successCount,
+        errorCount
+    };
 }
 
 // Extract line numbers for SQL keywords

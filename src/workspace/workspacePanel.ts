@@ -35,6 +35,9 @@ import { getWebviewScript, getIssuesScript, getMinimalScript, WebviewScriptParam
 // Handler modules
 import { MessageHandler, MessageHandlerContext } from './handlers';
 
+// Shared theme
+import { REFERENCE_TYPE_COLORS, WORKSPACE_NODE_COLORS, getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
+
 const AUTO_INDEX_THRESHOLD = 50;
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
@@ -383,6 +386,15 @@ export class WorkspacePanel {
 
             case 'export':
                 await this.handleExport(message.format);
+                break;
+
+            case 'savePng':
+                // Handle PNG data from webview - save to file
+                await this.savePngToFile(message.data, message.filename);
+                break;
+
+            case 'exportPngError':
+                vscode.window.showErrorMessage(`PNG export failed: ${message.error}`);
                 break;
 
             case 'openFile':
@@ -1516,16 +1528,8 @@ ${bodyContent}
             // Create smooth bezier curve with better control points
             const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
 
-            // Get edge color based on reference type
-            const edgeColors: Record<string, string> = {
-                'select': '#64748b',
-                'join': '#a78bfa',
-                'insert': '#10b981',
-                'update': '#fbbf24',
-                'delete': '#f87171',
-                'subquery': '#8b5cf6'
-            };
-            const edgeColor = edgeColors[edge.referenceType] || '#64748b';
+            // Get edge color based on reference type (uses centralized theme)
+            const edgeColor = getReferenceTypeColor(edge.referenceType);
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
@@ -1683,9 +1687,9 @@ ${bodyContent}
         }
 
         if (format === 'png') {
-            // For PNG export, we'd need to use a library like sharp or canvas
-            // For now, show a message that this feature is coming soon
-            vscode.window.showInformationMessage('PNG export coming soon! Try SVG or Mermaid instead.');
+            // Request PNG export from webview
+            // The webview will convert SVG to PNG via canvas and send back the data
+            this._panel.webview.postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
         } else if (format === 'svg') {
@@ -1752,6 +1756,34 @@ ${bodyContent}
     }
 
     /**
+     * Save PNG data to file
+     * Receives base64-encoded PNG data from webview and saves to user-selected location
+     */
+    private async savePngToFile(base64Data: string, suggestedFilename: string): Promise<void> {
+        if (!base64Data) {
+            vscode.window.showErrorMessage('No PNG data to save');
+            return;
+        }
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(suggestedFilename || 'workspace-dependencies.png'),
+            filters: {
+                'PNG Image': ['png']
+            }
+        });
+
+        if (uri) {
+            try {
+                const buffer = Buffer.from(base64Data, 'base64');
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to save PNG: ${error}`);
+            }
+        }
+    }
+
+    /**
      * Generate SVG string from graph
      */
     private generateSvgString(graph: WorkspaceDependencyGraph): string {
@@ -1779,18 +1811,13 @@ ${bodyContent}
             const y2 = target.y;
 
             const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
-            const color = edge.referenceType === 'select' ? '#64748b' :
-                        edge.referenceType === 'join' ? '#a78bfa' :
-                        edge.referenceType === 'insert' ? '#10b981' :
-                        edge.referenceType === 'update' ? '#fbbf24' : '#f87171';
+            const color = getReferenceTypeColor(edge.referenceType);
 
             return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
         }).join('\n');
 
         const nodesHtml = graph.nodes.map(node => {
-            const color = node.type === 'file' ? '#3b82f6' :
-                        node.type === 'table' ? '#10b981' :
-                        node.type === 'view' ? '#8b5cf6' : '#475569';
+            const color = getWorkspaceNodeColor(node.type);
 
             return `    <g transform="translate(${node.x}, ${node.y})">
         <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>

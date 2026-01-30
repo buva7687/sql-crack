@@ -205,6 +205,31 @@ export function updateBatchTabs(
     `;
     counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
     tabsContainer.appendChild(counter);
+
+    // Error summary indicator (if there are errors)
+    if (batchResult.errorCount && batchResult.errorCount > 0) {
+        const errorSummary = document.createElement('span');
+        const successCount = batchResult.successCount || 0;
+        errorSummary.style.cssText = `
+            color: ${errorColor};
+            font-size: 10px;
+            margin-left: 8px;
+            padding: 2px 6px;
+            background: ${isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.1)'};
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        `;
+        errorSummary.innerHTML = `
+            <span style="font-size: 10px;">⚠</span>
+            <span>${successCount} ok, ${batchResult.errorCount} failed</span>
+        `;
+        errorSummary.title = batchResult.parseErrors
+            ?.map(e => `Q${e.queryIndex + 1}: ${e.message}`)
+            .join('\n') || 'Some queries failed to parse';
+        tabsContainer.appendChild(errorSummary);
+    }
 }
 
 function truncateSql(sql: string, maxLen: number): string {

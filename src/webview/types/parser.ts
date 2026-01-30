@@ -68,11 +68,23 @@ export interface ParseResult {
     error?: string;
 }
 
+export interface ParseError {
+    queryIndex: number;
+    line?: number;
+    column?: number;
+    message: string;
+    sql: string;  // The specific statement that failed (truncated)
+}
+
 export interface BatchParseResult {
     queries: ParseResult[];
     totalStats: QueryStats;
     queryLineRanges?: QueryLineRange[];
     validationError?: ValidationError;
+    // Enhanced error tracking for partial results
+    parseErrors?: ParseError[];
+    successCount?: number;
+    errorCount?: number;
 }
 
 export interface ValidationError {

@@ -38,6 +38,7 @@ export type {
     QueryLineRange,
     ParseResult,
     BatchParseResult,
+    ParseError,
     ValidationError,
     ValidationLimits,
 } from './parser';
