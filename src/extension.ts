@@ -76,6 +76,28 @@ function isSqlLikeFile(uri: vscode.Uri): boolean {
     return false;
 }
 
+/**
+ * Update the context variable for SQL-like files (used in when clauses)
+ * This enables the SQL Crack icon/menu for files with additional extensions
+ */
+function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
+    let isSqlLike = false;
+
+    if (editor) {
+        const fileName = editor.document.fileName.toLowerCase();
+        // Check if file has an additional extension (not .sql, since that's handled by package.json)
+        for (const ext of additionalExtensions) {
+            if (fileName.endsWith(ext)) {
+                isSqlLike = true;
+                break;
+            }
+        }
+    }
+
+    // Set context for use in when clauses
+    vscode.commands.executeCommand('setContext', 'sqlCrack.isAdditionalSqlFile', isSqlLike);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('SQL Crack extension is now active!');
 
@@ -91,17 +113,22 @@ export function activate(context: vscode.ExtensionContext) {
     // Get configuration
     const getConfig = () => vscode.workspace.getConfiguration('sqlCrack');
 
-    // Track active SQL document
+    // Track active SQL document and update context for menu visibility
     let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor && isSqlLikeDocument(editor.document)) {
             lastActiveSqlDocument = editor.document;
         }
+        // Update context for additional file extensions (used in when clauses)
+        updateSqlLikeFileContext(editor);
     });
 
     // Initialize with current editor if it's SQL-like
     if (vscode.window.activeTextEditor && isSqlLikeDocument(vscode.window.activeTextEditor.document)) {
         lastActiveSqlDocument = vscode.window.activeTextEditor.document;
     }
+
+    // Set initial context for menu visibility
+    updateSqlLikeFileContext(vscode.window.activeTextEditor);
 
     // Command: Visualize SQL
     let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
@@ -329,6 +356,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
             loadAdditionalExtensions();
+            // Re-evaluate context for current editor with new extensions
+            updateSqlLikeFileContext(vscode.window.activeTextEditor);
         }
     });
 

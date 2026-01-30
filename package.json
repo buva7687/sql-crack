@@ -19,7 +19,8 @@
   "activationEvents": [
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
-    "onCommand:sql-crack.analyzeWorkspace"
+    "onCommand:sql-crack.analyzeWorkspace",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -39,21 +40,21 @@
       "editor/title": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql",
+          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         },
         {
@@ -74,7 +75,7 @@
         "command": "sql-crack.visualize",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
-        "when": "resourceExtname == .sql"
+        "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile"
       }
     ],
     "configuration": {
