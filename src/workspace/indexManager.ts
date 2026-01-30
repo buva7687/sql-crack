@@ -7,7 +7,8 @@ import {
     FileAnalysis,
     SchemaDefinition,
     TableReference,
-    ProgressCallback
+    ProgressCallback,
+    CancellationToken
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
@@ -59,9 +60,13 @@ export class IndexManager {
 
     /**
      * Build the full workspace index with incremental updates based on content hashes
+     * Supports cancellation via token
      */
-    async buildIndex(progressCallback?: ProgressCallback): Promise<WorkspaceIndex> {
-        const analyses = await this.scanner.analyzeWorkspace(progressCallback);
+    async buildIndex(
+        progressCallback?: ProgressCallback,
+        cancellationToken?: CancellationToken
+    ): Promise<WorkspaceIndex> {
+        const analyses = await this.scanner.analyzeWorkspace(progressCallback, cancellationToken);
 
         // Initialize new index or reuse existing for incremental updates
         const newIndex: WorkspaceIndex = {

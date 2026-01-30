@@ -230,23 +230,61 @@ export class WorkspacePanel {
 
     /**
      * Build index with progress indicator
+     * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
+        let wasCancelled = false;
+
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Indexing SQL Workspace',
-                cancellable: false
+                cancellable: true
             },
-            async (progress) => {
+            async (progress, token) => {
+                // Create cancellation token wrapper
+                const cancellationToken = {
+                    get isCancellationRequested() {
+                        return token.isCancellationRequested;
+                    }
+                };
+
+                token.onCancellationRequested(() => {
+                    wasCancelled = true;
+                });
+
+                const startTime = Date.now();
+                let lastFile = '';
+
                 await this._indexManager.buildIndex((current, total, fileName) => {
+                    lastFile = fileName;
+
+                    // Calculate time estimate
+                    const elapsed = Date.now() - startTime;
+                    const avgTimePerFile = elapsed / current;
+                    const remaining = avgTimePerFile * (total - current);
+                    const remainingStr = this.formatDuration(remaining);
+
                     progress.report({
-                        message: `${current}/${total}: ${fileName}`,
+                        message: `${current}/${total}: ${fileName} (~${remainingStr} remaining)`,
                         increment: (1 / total) * 100
                     });
-                });
+                }, cancellationToken);
             }
         );
+
+        if (wasCancelled) {
+            vscode.window.showWarningMessage('Workspace indexing was cancelled. Partial results may be available.');
+        }
+    }
+
+    /**
+     * Format duration in human-readable form
+     */
+    private formatDuration(ms: number): string {
+        if (ms < 1000) { return '<1s'; }
+        if (ms < 60000) { return `${Math.round(ms / 1000)}s`; }
+        return `${Math.round(ms / 60000)}m`;
     }
 
     /**
@@ -1694,6 +1732,10 @@ ${bodyContent}
             await this.exportAsMermaid();
         } else if (format === 'svg') {
             await this.exportAsSvg();
+        } else if (format === 'json') {
+            await this.exportAsJson();
+        } else if (format === 'dot') {
+            await this.exportAsDot();
         }
     }
 
@@ -1751,6 +1793,120 @@ ${bodyContent}
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(svg));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Export graph as JSON
+     * Useful for data interchange, CI/CD pipelines, and external tools
+     */
+    private async exportAsJson(): Promise<void> {
+        if (!this._currentGraph) { return; }
+
+        const exportData = {
+            version: '1.0',
+            exportedAt: new Date().toISOString(),
+            graph: {
+                nodes: this._currentGraph.nodes.map(node => ({
+                    id: node.id,
+                    label: node.label,
+                    type: node.type,
+                    filePath: node.filePath,
+                    definitionCount: node.definitionCount,
+                    referenceCount: node.referenceCount
+                })),
+                edges: this._currentGraph.edges.map(edge => ({
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    referenceType: edge.referenceType,
+                    count: edge.count,
+                    tables: edge.tables
+                }))
+            },
+            statistics: {
+                nodeCount: this._currentGraph.nodes.length,
+                edgeCount: this._currentGraph.edges.length,
+                fileNodes: this._currentGraph.nodes.filter(n => n.type === 'file').length,
+                tableNodes: this._currentGraph.nodes.filter(n => n.type === 'table').length,
+                externalNodes: this._currentGraph.nodes.filter(n => n.type === 'external').length
+            }
+        };
+
+        const jsonContent = JSON.stringify(exportData, null, 2);
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.json'),
+            filters: {
+                'JSON': ['json']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(jsonContent));
+            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+        }
+    }
+
+    /**
+     * Export graph as DOT (Graphviz) format
+     * Useful for external visualization tools and large graph analysis
+     */
+    private async exportAsDot(): Promise<void> {
+        if (!this._currentGraph) { return; }
+
+        let dot = 'digraph WorkspaceDependencies {\n';
+        dot += '    // Graph settings\n';
+        dot += '    rankdir=TB;\n';
+        dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
+        dot += '    edge [fontname="Arial", fontsize=10];\n\n';
+
+        // Define node colors by type
+        const nodeColors: Record<string, string> = {
+            file: '#3b82f6',
+            table: '#10b981',
+            view: '#8b5cf6',
+            external: '#64748b'
+        };
+
+        // Add nodes
+        dot += '    // Nodes\n';
+        for (const node of this._currentGraph.nodes) {
+            const color = nodeColors[node.type] || '#64748b';
+            const label = node.label.replace(/"/g, '\\"');
+            dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
+        }
+
+        dot += '\n    // Edges\n';
+
+        // Define edge colors by reference type
+        const edgeColors: Record<string, string> = {
+            select: '#64748b',
+            join: '#a78bfa',
+            insert: '#10b981',
+            update: '#fbbf24',
+            delete: '#f87171'
+        };
+
+        // Add edges
+        for (const edge of this._currentGraph.edges) {
+            const color = edgeColors[edge.referenceType] || '#64748b';
+            const label = edge.referenceType || '';
+            dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
+        }
+
+        dot += '}\n';
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('workspace-dependencies.dot'),
+            filters: {
+                'Graphviz DOT': ['dot', 'gv']
+            }
+        });
+
+        if (uri) {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(dot));
             vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
         }
     }

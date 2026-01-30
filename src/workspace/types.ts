@@ -120,8 +120,16 @@ export interface WorkspaceAnalysisOptions {
 
 /**
  * Progress callback for long operations
+ * Returns true if operation should be cancelled
  */
 export type ProgressCallback = (current: number, total: number, fileName: string) => void;
+
+/**
+ * Cancellation token for long-running operations
+ */
+export interface CancellationToken {
+    isCancellationRequested: boolean;
+}
 
 /**
  * Search filter options for workspace

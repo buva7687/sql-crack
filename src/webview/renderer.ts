@@ -999,6 +999,12 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('data-label', node.label.toLowerCase());
     group.style.cursor = 'pointer';
 
+    // Accessibility: make nodes focusable and provide context for screen readers
+    group.setAttribute('role', 'button');
+    group.setAttribute('tabindex', '0');
+    const nodeDescription = node.description ? `. ${node.description}` : '';
+    group.setAttribute('aria-label', `${node.type} node: ${node.label}${nodeDescription}`);
+
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
     const isWindowNode = node.type === 'window' && node.windowDetails;
@@ -1127,6 +1133,66 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
 
         // Focus SVG to ensure keyboard events work
         svg?.focus();
+    });
+
+    // Accessibility: keyboard navigation for nodes
+    // Only handle node-specific keys; let global shortcuts (C, E, S, etc.) bubble up
+    group.addEventListener('keydown', (e) => {
+        const key = e.key;
+
+        // Enter or Space to select/activate the node
+        if (key === 'Enter' || key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            selectNode(node.id, { skipNavigation: true });
+            hideTooltip();
+            return;
+        }
+
+        // Arrow keys to navigate between nodes (only when not using modifiers)
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            if (key === 'ArrowRight' || key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToAdjacentNode(node, 'next');
+                return;
+            }
+            if (key === 'ArrowLeft' || key === 'ArrowUp') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToAdjacentNode(node, 'prev');
+                return;
+            }
+        }
+
+        // Escape to deselect and return focus to SVG
+        if (key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            selectNode(null);
+            svg?.focus();
+            return;
+        }
+
+        // For all other keys (including global shortcuts like C, E, S, T, etc.),
+        // do NOT prevent default or stop propagation - let them bubble to document handler
+    });
+
+    // Focus visual indicator
+    group.addEventListener('focus', () => {
+        const rect = group.querySelector('.node-rect') as SVGRectElement;
+        if (rect) {
+            rect.setAttribute('stroke', '#6366f1');
+            rect.setAttribute('stroke-width', '3');
+        }
+    });
+
+    group.addEventListener('blur', () => {
+        const rect = group.querySelector('.node-rect') as SVGRectElement;
+        if (rect && state.selectedNodeId !== node.id) {
+            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            rect.setAttribute('stroke-width', '1');
+        }
     });
 
     // Double click to zoom to node or open cloud
@@ -3283,6 +3349,45 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     }
 
     return false;
+}
+
+/**
+ * Navigate to adjacent node in the visual order (for accessibility)
+ * Uses Y position primarily, then X position for nodes at same level
+ */
+function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev'): void {
+    if (currentNodes.length === 0) { return; }
+
+    // Sort nodes by Y position, then X position for consistent navigation
+    const sortedNodes = [...currentNodes].sort((a, b) => {
+        if (Math.abs(a.y - b.y) < 20) {
+            // Same row, sort by X
+            return a.x - b.x;
+        }
+        return a.y - b.y;
+    });
+
+    const currentIndex = sortedNodes.findIndex(n => n.id === currentNode.id);
+    if (currentIndex === -1) { return; }
+
+    let targetIndex: number;
+    if (direction === 'next') {
+        targetIndex = (currentIndex + 1) % sortedNodes.length;
+    } else {
+        targetIndex = (currentIndex - 1 + sortedNodes.length) % sortedNodes.length;
+    }
+
+    const targetNode = sortedNodes[targetIndex];
+    if (targetNode) {
+        selectNode(targetNode.id, { skipNavigation: true });
+        ensureNodeVisible(targetNode);
+
+        // Focus the new node's SVG group for continued keyboard navigation
+        const nodeGroup = mainGroup?.querySelector(`[data-id="${targetNode.id}"]`) as SVGGElement;
+        if (nodeGroup) {
+            nodeGroup.focus();
+        }
+    }
 }
 
 /**
@@ -5656,7 +5761,8 @@ export function toggleExpandAll(): void {
         hints: currentHints,
         sql: currentSql,
         columnLineage: currentColumnLineage,
-        tableUsage: currentTableUsage
+        tableUsage: currentTableUsage,
+        columnFlows: currentColumnFlows  // Preserve column flows for 'C' shortcut to work
     };
 
     const wasHorizontal = state.layoutType === 'horizontal';
