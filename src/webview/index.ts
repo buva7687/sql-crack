@@ -39,6 +39,8 @@ import {
     createToolbar,
     markRefreshButtonStale,
     clearRefreshButtonStale,
+    updateErrorBadge,
+    clearErrorBadge,
     createBatchTabs,
     updateBatchTabs,
     findPinnedTab,
@@ -328,6 +330,17 @@ function visualize(sql: string): void {
                 }
             });
         });
+    }
+
+    // Update error badge in toolbar if there are parse errors
+    if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
+        const errorDetails = batchResult.parseErrors?.map(e => ({
+            queryIndex: e.queryIndex,
+            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message
+        }));
+        updateErrorBadge(batchResult.errorCount, errorDetails);
+    } else {
+        clearErrorBadge();
     }
 
     currentQueryIndex = 0;

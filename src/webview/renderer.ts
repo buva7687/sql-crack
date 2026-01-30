@@ -17,6 +17,7 @@ import {
 // Import color utilities
 import {
     getNodeColor,
+    getTransformationColor,
     NODE_COLORS,
     WARNING_COLORS,
     UI_COLORS,
@@ -28,6 +29,7 @@ import {
     STATUS_COLORS,
     CLOSE_BUTTON_COLORS,
     COMPLEXITY_COLORS,
+    TRANSFORMATION_COLORS,
     HINT_COLORS,
 } from './constants';
 
@@ -6643,15 +6645,7 @@ function hideColumnLineagePanel(): void {
 function showLineagePath(flow: ColumnFlow): void {
     if (!detailsPanel) {return;}
 
-    const transformationColors: Record<string, string> = {
-        source: '#10b981',
-        passthrough: '#64748b',
-        renamed: '#3b82f6',
-        aggregated: '#f59e0b',
-        calculated: '#8b5cf6',
-        joined: '#ec4899'
-    };
-
+    // Use centralized transformation colors from constants
     const transformationLabels: Record<string, string> = {
         source: 'Source',
         passthrough: 'Pass',
@@ -6681,7 +6675,7 @@ function showLineagePath(flow: ColumnFlow): void {
                         width: 8px;
                         height: 8px;
                         border-radius: 50%;
-                        background: ${transformationColors[step.transformation] || '#64748b'};
+                        background: ${getTransformationColor(step.transformation)};
                         ${isFirst ? 'box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);' : ''}
                         ${isLast ? 'box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);' : ''}
                     "></div>
@@ -6698,7 +6692,7 @@ function showLineagePath(flow: ColumnFlow): void {
                             font-size: 9px;
                             padding: 1px 4px;
                             border-radius: 3px;
-                            background: ${transformationColors[step.transformation] || '#64748b'};
+                            background: ${getTransformationColor(step.transformation)};
                             color: white;
                         ">${transformationLabels[step.transformation] || step.transformation}</span>
                     </div>

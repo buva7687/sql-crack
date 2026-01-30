@@ -4,6 +4,7 @@ export {
     WARNING_COLORS,
     HINT_COLORS,
     COMPLEXITY_COLORS,
+    TRANSFORMATION_COLORS,
     UI_COLORS,
     EDGE_COLORS,
     BADGE_COLORS,
@@ -14,4 +15,5 @@ export {
     CLOSE_BUTTON_COLORS,
     getNodeColor,
     getWarningColor,
+    getTransformationColor,
 } from './colors';

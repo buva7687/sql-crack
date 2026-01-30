@@ -6,6 +6,8 @@ export {
     showKeyboardShortcutsHelp,
     markRefreshButtonStale,
     clearRefreshButtonStale,
+    updateErrorBadge,
+    clearErrorBadge,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './toolbar';
