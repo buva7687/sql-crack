@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2026-01-30
+
+### Changed
+
+- **README.md**: Fixed keyboard shortcut from `Cmd/Ctrl+Shift+V` to `Cmd/Ctrl+Shift+L` for visualization.
+- **README.md**: Added `[` / `]` shortcuts for previous/next query navigation.
+- **README.md**: Added Accessibility section with keyboard navigation documentation.
+- **README.md**: Expanded Configuration into Core, Workspace, Custom Extensions, Custom Functions, and Advanced sections.
+- **README.md**: Added Troubleshooting section with common issues and debug mode.
+- **README.md**: Added Architecture Overview with directory structure and data flow.
+- **README.md**: Updated roadmap with Phase 5 (polish & accessibility).
+- **README.md**: Removed incorrect JSON/DOT export options (not implemented).
+- **examples/README.md**: Added `analytics-customer.sql` and `analytics-orders.sql` to file reference.
+- **examples/README.md**: Improved feature descriptions and added Pro Tips.
+
+### Fixed
+
+- Keyboard shortcut help: corrected "Previous query" arrow direction from `Q1 → Q2` to `Q2 → Q1`.
+
+---
+
 ## [0.1.0] - 2026-01-29
 
 ### Added
