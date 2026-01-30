@@ -11,7 +11,8 @@ module.exports = {
     }]
   },
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1'
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^vscode$': '<rootDir>/tests/__mocks__/vscode.ts'
   },
   collectCoverageFrom: [
     'src/**/*.ts',
