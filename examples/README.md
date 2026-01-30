@@ -1,13 +1,13 @@
 # SQL Crack Examples
 
-Interactive examples to explore SQL Crack features. Open any file and press `Cmd+Shift+V` (Mac) or `Ctrl+Shift+V` (Windows/Linux) to visualize.
+Interactive examples to explore SQL Crack features. Open any file and press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to visualize.
 
 ---
 
 ## Quick Start
 
 1. Open `demo-showcase.sql`
-2. Visualize with `Cmd/Ctrl+Shift+V`
+2. Visualize with `Cmd/Ctrl+Shift+L`
 3. Press `?` to see all keyboard shortcuts
 
 ---

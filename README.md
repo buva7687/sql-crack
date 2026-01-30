@@ -148,7 +148,7 @@ Install the generated `.vsix` file via **Extensions → ••• → Install fr
 1. Open any `.sql` file
 2. Visualize using one of:
    - Click the **graph icon** in the editor title bar
-   - Press `Cmd+Shift+V` (Mac) / `Ctrl+Shift+V` (Windows/Linux)
+   - Press `Cmd+Shift+L` (Mac) / `Ctrl+Shift+L` (Windows/Linux)
    - Right-click → **"SQL Crack: Visualize SQL Query"**
 
 ### Workspace Analysis
