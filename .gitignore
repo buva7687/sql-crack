@@ -35,3 +35,6 @@ archive/
 
 # Local docs/notes
 docs/
+
+# Test coverage reports (generated)
+coverage/
