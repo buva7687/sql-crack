@@ -1181,7 +1181,8 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage, columnFlows, tableUsage: ctx.tableUsageMap };
     } catch (err) {
-        let message = err instanceof Error ? err.message : 'Parse error';
+        const originalError = err instanceof Error ? err.message : 'Parse error';
+        let message = originalError;
 
         // Enhance error messages with helpful dialect suggestions for common issues
         // This helps users quickly identify when they need to switch SQL dialects
@@ -1189,7 +1190,17 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(sql);
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
 
-        if (message.includes('found') || message.includes('Expected')) {
+        // Extract specific syntax issue from error message
+        // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"
+        // We want to extract what was found (the problematic token)
+        const butFoundMatch = originalError.match(/but\s+["']([^"']+)["']\s+found/i);
+        const quotedFoundMatch = originalError.match(/["']([^"']+)["']\s+found/i);
+        const unexpectedMatch = originalError.match(/unexpected\s+(?:token\s+)?["']?(\w+)["']?/i);
+        const syntaxHint = butFoundMatch ? butFoundMatch[1] :
+                          (quotedFoundMatch ? quotedFoundMatch[1] :
+                          (unexpectedMatch ? unexpectedMatch[1] : null));
+
+        if (originalError.includes('found') || originalError.includes('Expected')) {
             if (ctx.dialect === 'MySQL') {
                 // MySQL-specific issues - check in order of likelihood
                 if (hasParenthesizedUnion && hasIntervalQuoted) {
@@ -1199,7 +1210,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                 } else if (hasIntervalQuoted) {
                     message = `PostgreSQL-style INTERVAL syntax detected. Try PostgreSQL dialect, or use MySQL syntax: INTERVAL 30 DAY.`;
                 } else {
-                    message = `SQL syntax not recognized by MySQL parser. Try PostgreSQL dialect (most compatible).`;
+                    message = `SQL syntax not recognized by MySQL parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
                 }
             }
             // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
@@ -1213,9 +1224,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(ctx.dialect)) {
                 message = `RECURSIVE CTE not supported in ${ctx.dialect}. Try PostgreSQL or MySQL dialect.`;
             }
-            // Generic parse error - make it more user-friendly
+            // Generic parse error - include original error details for better debugging
             else {
-                message = `SQL syntax not recognized by ${ctx.dialect} parser. Try PostgreSQL dialect (most compatible).`;
+                message = `SQL syntax not recognized by ${ctx.dialect} parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
             }
         }
 
@@ -3153,6 +3164,33 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
             edges.push({ id: genId('ce'), source: previousId, target: groupId });
         }
         previousId = groupId;
+    }
+
+    // Extract CASE statements from SELECT columns in CTEs
+    const caseStatementDetails = extractCaseStatementDetails(stmt.columns);
+    if (caseStatementDetails.length > 0) {
+        const caseId = genId('child_case');
+
+        // Calculate height based on number of CASE statements
+        const baseHeight = 50;
+        const perCaseHeight = 35;
+        const caseHeight = baseHeight + caseStatementDetails.length * perCaseHeight;
+
+        nodes.push({
+            id: caseId,
+            type: 'case',
+            label: 'CASE',
+            description: `${caseStatementDetails.length} CASE statement${caseStatementDetails.length > 1 ? 's' : ''}`,
+            caseDetails: { cases: caseStatementDetails },
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 220, height: Math.min(caseHeight, 200)
+        });
+
+        if (previousId) {
+            edges.push({ id: genId('ce'), source: previousId, target: caseId });
+        }
+        previousId = caseId;
     }
 
     // Add ORDER BY if present

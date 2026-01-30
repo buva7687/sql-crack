@@ -295,6 +295,60 @@ describe('SQL Parser', () => {
 
       expect(result.error).toBeUndefined();
     });
+
+    it('extracts CASE nodes from CTE internal structure', () => {
+      const sql = `
+        WITH customer_segments AS (
+          SELECT
+            customer_id,
+            CASE
+              WHEN lifetime_value > 10000 THEN 'Platinum'
+              WHEN lifetime_value > 5000 THEN 'Gold'
+              ELSE 'Standard'
+            END AS customer_tier
+          FROM customers
+        )
+        SELECT * FROM customer_segments
+      `;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeUndefined();
+
+      // Find the CTE node
+      const cteNode = result.nodes.find(n => n.type === 'cte');
+      expect(cteNode).toBeDefined();
+      expect(cteNode?.children).toBeDefined();
+
+      // CTE's internal nodes are stored in the children property
+      const caseNode = cteNode?.children?.find(n => n.type === 'case');
+      expect(caseNode).toBeDefined();
+      expect(caseNode?.caseDetails?.cases.length).toBeGreaterThan(0);
+    });
+
+    it('extracts multiple CASE statements from CTE', () => {
+      const sql = `
+        WITH segments AS (
+          SELECT
+            id,
+            CASE WHEN status = 1 THEN 'Active' ELSE 'Inactive' END AS status_label,
+            CASE WHEN tier > 5 THEN 'Premium' ELSE 'Basic' END AS tier_label
+          FROM users
+        )
+        SELECT * FROM segments
+      `;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeUndefined();
+
+      // CTE's internal nodes are stored in the children property
+      const cteNode = result.nodes.find(n => n.type === 'cte');
+      expect(cteNode?.children).toBeDefined();
+
+      const caseNode = cteNode?.children?.find(n => n.type === 'case');
+      expect(caseNode).toBeDefined();
+      // Should have 2 CASE statements
+      expect(caseNode?.caseDetails?.cases.length).toBe(2);
+    });
   });
 
   describe('Aggregations', () => {
@@ -478,6 +532,25 @@ describe('SQL Parser', () => {
       const result = parseSql('   \n\t  ', 'MySQL');
 
       expect(result.nodes).toEqual([]);
+    });
+
+    it('includes problematic syntax hint in error message', () => {
+      // This SQL uses INTERVAL syntax that Snowflake parser doesn't recognize
+      const sql = `DELETE FROM test_orders WHERE created_at < CURRENT_DATE - INTERVAL '90 days'`;
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.error).toBeDefined();
+      // Error should include hint about what syntax failed, not just generic message
+      expect(result.error).toMatch(/near|syntax/i);
+    });
+
+    it('provides dialect suggestion in error message', () => {
+      const sql = `SELECT * FROM users WHERE created > INTERVAL '30 days'`;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeDefined();
+      // Should suggest trying PostgreSQL for INTERVAL syntax
+      expect(result.error).toMatch(/PostgreSQL|dialect/i);
     });
   });
 

@@ -939,6 +939,8 @@ export function render(result: ParseResult): void {
         renderError(result.error);
         updateStatsPanel();
         updateHintsPanel();
+        // Reset viewport to center so error message is visible
+        resetViewportToCenter();
         return;
     }
 
@@ -946,6 +948,8 @@ export function render(result: ParseResult): void {
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
+        // Reset viewport to center so error message is visible
+        resetViewportToCenter();
         return;
     }
 
@@ -4297,6 +4301,15 @@ export function getZoomLevel(): number {
 
 export function resetView(): void {
     fitView();
+    updateZoomIndicator();
+}
+
+function resetViewportToCenter(): void {
+    // Reset transform to center the viewport (for error states when there are no nodes)
+    state.scale = 1;
+    state.offsetX = 0;
+    state.offsetY = 0;
+    updateTransform();
     updateZoomIndicator();
 }
 
