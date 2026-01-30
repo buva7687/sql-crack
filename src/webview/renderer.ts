@@ -3,6 +3,7 @@ import {
     FlowNode,
     FlowEdge,
     ColumnFlow,
+    LineagePathStep,
     ParseResult,
     QueryStats,
     OptimizationHint,
@@ -6630,16 +6631,70 @@ function showColumnLineagePanel(): void {
     `;
     columnLineagePanel.appendChild(header);
 
+    // Column search input
+    const searchContainer = document.createElement('div');
+    searchContainer.style.cssText = `
+        margin-bottom: 8px;
+        position: relative;
+    `;
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search columns...';
+    searchInput.style.cssText = `
+        width: 100%;
+        padding: 6px 8px 6px 28px;
+        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.15)'};
+        border-radius: 4px;
+        background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.9)'};
+        color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
+        font-size: 11px;
+        outline: none;
+        box-sizing: border-box;
+    `;
+    const searchIcon = document.createElement('span');
+    searchIcon.innerHTML = '🔍';
+    searchIcon.style.cssText = `
+        position: absolute;
+        left: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 10px;
+        opacity: 0.6;
+    `;
+    searchContainer.appendChild(searchIcon);
+    searchContainer.appendChild(searchInput);
+    columnLineagePanel.appendChild(searchContainer);
+
     // List output columns
     const columnList = document.createElement('div');
+    columnList.id = 'column-lineage-list';
     columnList.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
 
     for (const flow of currentColumnFlows) {
         const columnItem = createColumnItem(flow);
+        columnItem.setAttribute('data-column-name', flow.outputColumn.toLowerCase());
         columnList.appendChild(columnItem);
     }
 
     columnLineagePanel.appendChild(columnList);
+
+    // Search filter functionality
+    searchInput.addEventListener('input', (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase();
+        const items = columnList.querySelectorAll('[data-column-name]');
+        items.forEach((item) => {
+            const columnName = item.getAttribute('data-column-name') || '';
+            const flow = currentColumnFlows.find(f => f.outputColumn.toLowerCase() === columnName);
+            // Search in column name and source columns
+            const matchesQuery = columnName.includes(query) ||
+                (flow && flow.lineagePath.some(step =>
+                    step.columnName.toLowerCase().includes(query) ||
+                    step.nodeName.toLowerCase().includes(query)
+                ));
+            (item as HTMLElement).style.display = matchesQuery ? 'block' : 'none';
+        });
+    });
+
     document.body.appendChild(columnLineagePanel);
 }
 
@@ -6838,10 +6893,13 @@ function showLineagePath(flow: ColumnFlow): void {
 }
 
 /**
- * Highlight nodes in the lineage path
+ * Highlight nodes in the lineage path with transformation badges
  */
 function highlightLineageNodes(flow: ColumnFlow): void {
     if (!mainGroup) {return;}
+
+    // First, clear any existing lineage badges
+    clearLineageBadges();
 
     // Reset all nodes to dimmed state
     const allNodes = mainGroup.querySelectorAll('.node-group');
@@ -6855,10 +6913,24 @@ function highlightLineageNodes(flow: ColumnFlow): void {
         (edge as SVGElement).style.opacity = '0.15';
     });
 
-    // Get node IDs in the lineage path
+    // Get node IDs in the lineage path with their transformations
     const lineageNodeIds = new Set(flow.lineagePath.map(s => s.nodeId));
+    const nodeTransformations = new Map<string, LineagePathStep>();
+    flow.lineagePath.forEach(step => {
+        nodeTransformations.set(step.nodeId, step);
+    });
 
-    // Highlight nodes in the path
+    // Transformation badge config
+    const transformationBadges: Record<string, { label: string; color: string; icon: string }> = {
+        source: { label: 'SRC', color: '#10b981', icon: '◉' },
+        passthrough: { label: 'PASS', color: '#64748b', icon: '→' },
+        renamed: { label: 'ALIAS', color: '#3b82f6', icon: '✎' },
+        aggregated: { label: 'AGG', color: '#f59e0b', icon: 'Σ' },
+        calculated: { label: 'CALC', color: '#8b5cf6', icon: 'ƒ' },
+        joined: { label: 'JOIN', color: '#ec4899', icon: '⋈' }
+    };
+
+    // Highlight nodes in the path and add transformation badges
     for (const step of flow.lineagePath) {
         const nodeGroup = mainGroup.querySelector(`[data-node-id="${step.nodeId}"]`);
         if (nodeGroup) {
@@ -6869,11 +6941,24 @@ function highlightLineageNodes(flow: ColumnFlow): void {
             if (rect) {
                 rect.setAttribute('stroke', EDGE_COLORS.focus);
                 rect.setAttribute('stroke-width', '3');
+
+                // Add transformation badge to the node
+                const badgeConfig = transformationBadges[step.transformation] || transformationBadges.passthrough;
+                const rectBBox = rect.getBBox();
+                const badge = createTransformationBadge(
+                    rectBBox.x + rectBBox.width - 8,
+                    rectBBox.y - 8,
+                    badgeConfig.label,
+                    badgeConfig.color,
+                    badgeConfig.icon
+                );
+                badge.classList.add('lineage-badge');
+                nodeGroup.appendChild(badge);
             }
         }
     }
 
-    // Highlight edges between lineage nodes
+    // Highlight edges between lineage nodes and add transformation badges
     const allEdgePaths = mainGroup.querySelectorAll('.edge-path');
     allEdgePaths.forEach((edgePath) => {
         const edge = edgePath as SVGElement;
@@ -6885,6 +6970,16 @@ function highlightLineageNodes(flow: ColumnFlow): void {
             edge.setAttribute('stroke', EDGE_COLORS.focus);
             edge.setAttribute('stroke-width', '3');
 
+            // Get transformation for target node (what happens to the column at this step)
+            const targetStep = nodeTransformations.get(targetId);
+            if (targetStep && targetStep.transformation !== 'passthrough' && targetStep.transformation !== 'source') {
+                // Add transformation badge on the edge
+                const edgeBadgeConfig = transformationBadges[targetStep.transformation];
+                if (edgeBadgeConfig) {
+                    addEdgeTransformationBadge(edge, edgeBadgeConfig);
+                }
+            }
+
             // Also highlight the arrow
             const arrow = mainGroup?.querySelector(`.edge-arrow[data-source="${sourceId}"][data-target="${targetId}"]`);
             if (arrow) {
@@ -6895,10 +6990,111 @@ function highlightLineageNodes(flow: ColumnFlow): void {
 }
 
 /**
+ * Create a transformation badge SVG element
+ */
+function createTransformationBadge(x: number, y: number, label: string, color: string, icon: string): SVGGElement {
+    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    badge.setAttribute('transform', `translate(${x}, ${y})`);
+
+    // Badge background
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('x', '-12');
+    bg.setAttribute('y', '-8');
+    bg.setAttribute('width', '24');
+    bg.setAttribute('height', '16');
+    bg.setAttribute('rx', '4');
+    bg.setAttribute('fill', color);
+    badge.appendChild(bg);
+
+    // Badge text
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', '0');
+    text.setAttribute('y', '4');
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('fill', 'white');
+    text.setAttribute('font-size', '8');
+    text.setAttribute('font-weight', '600');
+    text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, sans-serif');
+    text.textContent = label;
+    badge.appendChild(text);
+
+    return badge;
+}
+
+/**
+ * Add transformation badge on an edge (at midpoint)
+ */
+function addEdgeTransformationBadge(edge: SVGElement, config: { label: string; color: string; icon: string }): void {
+    if (!mainGroup) { return; }
+
+    // Get edge path data to find midpoint
+    const pathData = edge.getAttribute('d');
+    if (!pathData) { return; }
+
+    // Parse the path to find midpoint (for bezier curves: M x1 y1 C cx1 cy1, cx2 cy2, x2 y2)
+    const pathMatch = pathData.match(/M\s*([\d.-]+)\s*([\d.-]+).*?([\d.-]+)\s*([\d.-]+)\s*$/);
+    if (!pathMatch) { return; }
+
+    const x1 = parseFloat(pathMatch[1]);
+    const y1 = parseFloat(pathMatch[2]);
+    const x2 = parseFloat(pathMatch[3]);
+    const y2 = parseFloat(pathMatch[4]);
+
+    // Calculate midpoint
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+
+    // Create badge group
+    const badgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    badgeGroup.classList.add('lineage-edge-badge');
+    badgeGroup.setAttribute('transform', `translate(${midX}, ${midY})`);
+
+    // Badge background with icon
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    bg.setAttribute('r', '10');
+    bg.setAttribute('fill', config.color);
+    bg.setAttribute('stroke', 'white');
+    bg.setAttribute('stroke-width', '1.5');
+    badgeGroup.appendChild(bg);
+
+    // Icon/label
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', '0');
+    text.setAttribute('y', '4');
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('fill', 'white');
+    text.setAttribute('font-size', '10');
+    text.setAttribute('font-weight', '700');
+    text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, sans-serif');
+    text.textContent = config.icon;
+    badgeGroup.appendChild(text);
+
+    mainGroup.appendChild(badgeGroup);
+}
+
+/**
+ * Clear lineage badges from nodes and edges
+ */
+function clearLineageBadges(): void {
+    if (!mainGroup) { return; }
+
+    // Remove node badges
+    const nodeBadges = mainGroup.querySelectorAll('.lineage-badge');
+    nodeBadges.forEach(badge => badge.remove());
+
+    // Remove edge badges
+    const edgeBadges = mainGroup.querySelectorAll('.lineage-edge-badge');
+    edgeBadges.forEach(badge => badge.remove());
+}
+
+/**
  * Clear all lineage highlights
  */
 function clearLineageHighlights(): void {
     if (!mainGroup) {return;}
+
+    // Clear transformation badges first
+    clearLineageBadges();
 
     // Reset all nodes
     const allNodes = mainGroup.querySelectorAll('.node-group');
