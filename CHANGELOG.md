@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.2] - 2026-01-31
+
+### Added
+
+- **Keyboard shortcut `L`**: Toggle legend panel visibility.
+- **Keyboard shortcut `?`**: Show all keyboard shortcuts help dialog.
+- **Testing infrastructure**: Jest setup with 414 tests covering parser, renderer, workspace, and lineage modules.
+
+### Changed
+
+- **Toolbar layout**: Responsive design with horizontal scroll on narrow screens instead of overlapping elements.
+- **Error badge**: Adjusted positioning to align with new toolbar layout.
+
+### Fixed
+
+- **CTE CASE visualization**: Improved rendering of CASE expressions within CTEs.
+- **Error messages**: More descriptive parse error messages with dialect suggestions.
+
+---
+
 ## [0.1.1] - 2026-01-30
 
 ### Changed
@@ -210,6 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.2]: https://github.com/buva7687/sql-crack/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/buva7687/sql-crack/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/buva7687/sql-crack/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/buva7687/sql-crack/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/buva7687/sql-crack/compare/v0.0.7...v0.0.8
