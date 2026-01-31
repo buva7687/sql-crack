@@ -68,15 +68,51 @@ export function createToolbar(
 ): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement; cleanup: ToolbarCleanup } {
     // Store event listeners for cleanup
     const documentListeners: Array<{ type: string; handler: EventListener }> = [];
+
+    // Create a full-width wrapper with horizontal scroll on small screens
+    const toolbarWrapper = document.createElement('div');
+    toolbarWrapper.id = 'sql-crack-toolbar-wrapper';
+    toolbarWrapper.style.cssText = `
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 100;
+        overflow-x: auto;
+        overflow-y: visible;
+        padding-bottom: 4px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+    `;
+
+    // Add webkit scrollbar styles via a style element
+    const scrollbarStyle = document.createElement('style');
+    scrollbarStyle.textContent = `
+        #sql-crack-toolbar-wrapper::-webkit-scrollbar {
+            height: 4px;
+        }
+        #sql-crack-toolbar-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #sql-crack-toolbar-wrapper::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.3);
+            border-radius: 2px;
+        }
+        #sql-crack-toolbar-wrapper::-webkit-scrollbar-thumb:hover {
+            background: rgba(148, 163, 184, 0.5);
+        }
+    `;
+    document.head.appendChild(scrollbarStyle);
+
     const toolbar = document.createElement('div');
     toolbar.id = 'sql-crack-toolbar';
     toolbar.style.cssText = `
-        position: absolute;
-        top: 16px;
-        left: 16px;
         display: flex;
         gap: 8px;
-        z-index: 100;
+        flex-shrink: 0;
     `;
 
     // Title and dialect selector
@@ -85,13 +121,13 @@ export function createToolbar(
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
-        padding: 8px 16px;
+        padding: 8px 12px;
         color: #f1f5f9;
         font-size: 13px;
         font-weight: 600;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 8px;
     `;
     const isDark = callbacks.isDarkTheme();
     const selectBg = isDark ? '#1e293b' : '#f1f5f9';
@@ -128,11 +164,15 @@ export function createToolbar(
     const searchContainer = createSearchBox(callbacks);
     toolbar.appendChild(searchContainer);
 
-    container.appendChild(toolbar);
+    // Add toolbar (left side) to wrapper
+    toolbarWrapper.appendChild(toolbar);
 
-    // Action buttons (top right)
-    const actions = createActionButtons(container, callbacks, options, documentListeners);
-    container.appendChild(actions);
+    // Action buttons (right side) - now inside the wrapper instead of separate absolute
+    const actions = createActionButtons(callbacks, options, documentListeners);
+    toolbarWrapper.appendChild(actions);
+
+    // Add the single wrapper to container
+    container.appendChild(toolbarWrapper);
 
     // Set initial dialect value
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -164,6 +204,7 @@ export function createToolbar(
 
 function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     const searchContainer = document.createElement('div');
+    searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
@@ -176,7 +217,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
 
     const searchIcon = document.createElement('span');
     searchIcon.textContent = '🔍';
-    searchIcon.style.fontSize = '12px';
+    searchIcon.style.cssText = 'font-size: 12px;';
     searchContainer.appendChild(searchIcon);
 
     const searchInput = document.createElement('input');
@@ -238,7 +279,6 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
 }
 
 function createActionButtons(
-    container: HTMLElement,
     callbacks: ToolbarCallbacks,
     options: {
         isPinnedView: boolean;
@@ -251,12 +291,10 @@ function createActionButtons(
     const actions = document.createElement('div');
     actions.id = 'sql-crack-actions';
     actions.style.cssText = `
-        position: absolute;
-        top: 16px;
-        right: 16px;
         display: flex;
         gap: 8px;
-        z-index: 100;
+        flex-shrink: 0;
+        margin-left: auto;
     `;
 
     // Zoom controls
@@ -1139,8 +1177,8 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         badge.id = 'sql-crack-error-badge';
         badge.style.cssText = `
             position: absolute;
-            top: 60px;
-            right: 16px;
+            top: 56px;
+            right: 12px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -1148,7 +1186,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
             border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
             padding: 6px 12px;
-            z-index: 100;
+            z-index: 99;
             cursor: pointer;
             transition: background 0.2s;
         `;

@@ -35,6 +35,7 @@ import {
 } from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
+import { showKeyboardShortcutsHelp } from './ui';
 import dagre from 'dagre';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
@@ -694,6 +695,16 @@ function setupEventListeners(): void {
         if (e.key === '/') {
             e.preventDefault();
             searchBox?.focus();
+        }
+        // L to toggle legend
+        if (e.key === 'l' || e.key === 'L') {
+            e.preventDefault();
+            toggleLegend();
+        }
+        // ? to show keyboard shortcuts help
+        if (e.key === '?') {
+            e.preventDefault();
+            showKeyboardShortcutsHelp(getKeyboardShortcuts());
         }
 
         // Arrow keys to navigate between connected nodes (accessibility)
@@ -7206,6 +7217,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'H', description: 'Cycle layouts' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column lineage' },
+        { key: 'L', description: 'Toggle legend' },
         { key: 'Q', description: 'Toggle query stats' },
         { key: 'O', description: 'Toggle optimization hints' },
         { key: 'U', description: 'Focus upstream nodes' },
@@ -7217,7 +7229,8 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: '↑/←', description: 'Navigate to upstream node' },
         { key: '↓/→', description: 'Navigate to downstream node' },
         { key: '[', description: 'Previous query (Q2 → Q1)' },
-        { key: ']', description: 'Next query (Q2 → Q3)' }
+        { key: ']', description: 'Next query (Q2 → Q3)' },
+        { key: '?', description: 'Show all shortcuts' }
     ];
 }
 
