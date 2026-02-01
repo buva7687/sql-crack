@@ -214,6 +214,147 @@ describe('Function Extractors', () => {
 
             expect(result[0].name).toBe('RANK');
         });
+
+        it('infers ROW_NUMBER from alias containing row_num', () => {
+            const columns = [{
+                as: 'row_num_value',
+                expr: { over: {} }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('ROW_NUMBER');
+        });
+
+        it('infers SUM from alias containing running or total', () => {
+            const columns = [{
+                as: 'running_sum',
+                expr: { over: {} }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('SUM');
+        });
+
+        it('infers AVG from alias containing avg or average', () => {
+            const columns = [{
+                as: 'moving_average',
+                expr: { over: {} }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('AVG');
+        });
+
+        it('extracts function name from aggr_func type', () => {
+            const columns = [{
+                expr: {
+                    type: 'aggr_func',
+                    name: 'SUM',
+                    over: {}
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('SUM');
+        });
+
+        it('extracts function name from function type', () => {
+            const columns = [{
+                expr: {
+                    type: 'function',
+                    name: 'NTILE',
+                    over: {}
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('NTILE');
+        });
+
+        it('extracts function name from args.expr', () => {
+            const columns = [{
+                expr: {
+                    args: { expr: { name: 'LAG' } },
+                    over: {}
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].name).toBe('LAG');
+        });
+
+        it('handles partitionby with value property', () => {
+            const columns = [{
+                expr: {
+                    name: 'RANK',
+                    over: {
+                        partitionby: [
+                            { value: 'category' }
+                        ]
+                    }
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].partitionBy).toContain('category');
+        });
+
+        it('handles orderby without type (direction)', () => {
+            const columns = [{
+                expr: {
+                    name: 'ROW_NUMBER',
+                    over: {
+                        orderby: [
+                            { column: 'id' }
+                        ]
+                    }
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].orderBy).toContain('id');
+        });
+
+        it('handles frame without end', () => {
+            const columns = [{
+                expr: {
+                    name: 'SUM',
+                    over: {
+                        frame: {
+                            type: 'RANGE',
+                            start: 'UNBOUNDED PRECEDING'
+                        }
+                    }
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns);
+
+            expect(result[0].frame).toContain('RANGE');
+        });
+
+        it('uses dialect-specific function detection', () => {
+            const columns = [{
+                expr: {
+                    over: {}
+                }
+            }];
+
+            // Test with different dialects
+            const mysqlResult = extractWindowFunctionDetails(columns, 'MySQL');
+            const pgResult = extractWindowFunctionDetails(columns, 'PostgreSQL');
+
+            expect(mysqlResult).toBeDefined();
+            expect(pgResult).toBeDefined();
+        });
     });
 
     describe('extractAggregateFunctionDetails', () => {
@@ -302,6 +443,106 @@ describe('Function Extractors', () => {
             const result = extractAggregateFunctionDetails(columns);
 
             expect(result).toHaveLength(0);
+        });
+
+        it('extracts aggregate with expr.column in args', () => {
+            const columns = [{
+                expr: {
+                    type: 'aggr_func',
+                    name: 'AVG',
+                    args: {
+                        value: [{ expr: { column: 'price' } }]
+                    }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result[0].expression).toBe('AVG(price)');
+        });
+
+        it('handles aggregate with value in args', () => {
+            const columns = [{
+                expr: {
+                    type: 'aggr_func',
+                    name: 'MAX',
+                    args: {
+                        value: [{ value: 100 }]
+                    }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result[0].expression).toBe('MAX(100)');
+        });
+
+        it('handles aggregate with unknown arg structure', () => {
+            const columns = [{
+                expr: {
+                    type: 'aggr_func',
+                    name: 'MIN',
+                    args: {
+                        value: [{}]
+                    }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result[0].expression).toBe('MIN(?)');
+        });
+
+        it('recursively extracts from args.value', () => {
+            const columns = [{
+                expr: {
+                    args: {
+                        value: [{
+                            type: 'aggr_func',
+                            name: 'COUNT',
+                            args: { column: 'id' }
+                        }]
+                    }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result).toHaveLength(1);
+            expect(result[0].name).toBe('COUNT');
+        });
+
+        it('extracts from left/right of binary expression', () => {
+            const columns = [{
+                expr: {
+                    type: 'binary_expr',
+                    left: {
+                        type: 'aggr_func',
+                        name: 'SUM',
+                        args: { column: 'price' }
+                    },
+                    right: { value: 0.1 }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result).toHaveLength(1);
+            expect(result[0].name).toBe('SUM');
+        });
+
+        it('uses dialect for function detection', () => {
+            const columns = [{
+                expr: {
+                    type: 'aggr_func',
+                    name: 'ARRAY_AGG',
+                    args: { column: 'values' }
+                }
+            }];
+
+            const result = extractAggregateFunctionDetails(columns, 'PostgreSQL');
+
+            expect(result).toHaveLength(1);
         });
     });
 
