@@ -2587,7 +2587,7 @@ function getTableName(item: any): string {
  * Format an AST expression node into a readable SQL expression string
  */
 function formatExpressionFromAst(expr: any): string {
-    if (!expr) return '';
+    if (!expr) { return ''; }
 
     // Simple column reference
     if (expr.type === 'column_ref') {
@@ -2657,9 +2657,9 @@ function formatExpressionFromAst(expr: any): string {
     }
 
     // Fallback: try common properties
-    if (expr.column) return expr.column;
-    if (expr.value !== undefined) return String(expr.value);
-    if (expr.name) return String(typeof expr.name === 'string' ? expr.name : expr.name?.name || 'expr');
+    if (expr.column) { return expr.column; }
+    if (expr.value !== undefined) { return String(expr.value); }
+    if (expr.name) { return String(typeof expr.name === 'string' ? expr.name : expr.name?.name || 'expr'); }
 
     return 'expr';
 }
