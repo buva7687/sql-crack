@@ -38,3 +38,4 @@ docs/
 
 # Test coverage reports (generated)
 coverage/
+junit.xml
