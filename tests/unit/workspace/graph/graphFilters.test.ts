@@ -454,6 +454,48 @@ describe('GraphFilters', () => {
         });
     });
 
+    describe('applyFilters', () => {
+        it('applies nodeTypes filter', () => {
+            const graph = createTestGraph(
+                [
+                    { id: 'T1', type: 'table', label: 'table1' },
+                    { id: 'V1', type: 'view', label: 'view1' },
+                    { id: 'C1', type: 'column', label: 'column1' }
+                ],
+                []
+            );
+
+            const result = filters.applyFilters(graph, { nodeTypes: ['table', 'view'] });
+
+            expect(result.nodes.map(n => n.id).sort()).toEqual(['T1', 'V1']);
+        });
+
+        it('applies excludeExternal filter', () => {
+            const graph = createTestGraph(
+                [
+                    { id: 'T1', type: 'table', label: 'table1' },
+                    { id: 'E1', type: 'external', label: 'external1' }
+                ],
+                []
+            );
+
+            const result = filters.applyFilters(graph, { excludeExternal: true });
+
+            expect(result.nodes.map(n => n.id)).toEqual(['T1']);
+        });
+
+        it('returns original graph when no filters', () => {
+            const graph = createTestGraph(
+                [{ id: 'T1', label: 'table1' }],
+                []
+            );
+
+            const result = filters.applyFilters(graph, {});
+
+            expect(result.nodes).toEqual(graph.nodes);
+        });
+    });
+
     describe('edge cases', () => {
         it('handles empty graph', () => {
             const graph = createTestGraph([], []);
