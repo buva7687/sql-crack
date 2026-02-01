@@ -2,11 +2,59 @@
  * DOM Utility Tests
  *
  * Tests for DOM manipulation utilities.
- * Note: escapeHtml and createSvgElement require a DOM environment
- * and are tested separately or skipped in unit tests.
  */
 
-import { truncate } from '../../../../src/webview/renderer/utils/dom';
+import { truncate, escapeHtml, createSvgElement, setAttributes } from '../../../../src/webview/renderer/utils/dom';
+
+// Mock document for DOM functions
+const mockDiv = {
+    textContent: '',
+    innerHTML: ''
+};
+
+const mockElement = {
+    setAttribute: jest.fn()
+};
+
+const mockSvgElement = {
+    tagName: 'svg'
+};
+
+// Setup document mock before tests
+beforeAll(() => {
+    (global as any).document = {
+        createElement: jest.fn().mockImplementation((tag: string) => {
+            if (tag === 'div') {
+                // Return a new mock each time to simulate real DOM behavior
+                return {
+                    set textContent(value: string) {
+                        this._textContent = value;
+                        // Simulate HTML escaping
+                        this._innerHTML = value
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;')
+                            .replace(/"/g, '&quot;');
+                    },
+                    get textContent() {
+                        return this._textContent;
+                    },
+                    get innerHTML() {
+                        return this._innerHTML;
+                    },
+                    _textContent: '',
+                    _innerHTML: ''
+                };
+            }
+            return mockElement;
+        }),
+        createElementNS: jest.fn().mockReturnValue(mockSvgElement)
+    };
+});
+
+afterAll(() => {
+    delete (global as any).document;
+});
 
 describe('DOM Utilities', () => {
     describe('truncate', () => {
@@ -52,6 +100,100 @@ describe('DOM Utilities', () => {
             const result = truncate('hello world', 8);
             expect(result).toContain('…');
             expect(result).not.toContain('...');
+        });
+    });
+
+    describe('escapeHtml', () => {
+        it('escapes HTML special characters', () => {
+            const result = escapeHtml('<script>alert("xss")</script>');
+            expect(result).not.toContain('<script>');
+            expect(result).toContain('&lt;');
+            expect(result).toContain('&gt;');
+        });
+
+        it('escapes ampersands', () => {
+            const result = escapeHtml('foo & bar');
+            expect(result).toContain('&amp;');
+        });
+
+        it('escapes quotes', () => {
+            const result = escapeHtml('say "hello"');
+            expect(result).toContain('&quot;');
+        });
+
+        it('returns plain text unchanged', () => {
+            const result = escapeHtml('Hello World');
+            expect(result).toBe('Hello World');
+        });
+
+        it('handles empty string', () => {
+            const result = escapeHtml('');
+            expect(result).toBe('');
+        });
+    });
+
+    describe('createSvgElement', () => {
+        it('creates SVG element using createElementNS', () => {
+            const result = createSvgElement('svg');
+
+            expect(document.createElementNS).toHaveBeenCalledWith(
+                'http://www.w3.org/2000/svg',
+                'svg'
+            );
+            expect(result).toBeDefined();
+        });
+
+        it('creates different SVG element types', () => {
+            createSvgElement('path');
+            expect(document.createElementNS).toHaveBeenCalledWith(
+                'http://www.w3.org/2000/svg',
+                'path'
+            );
+
+            createSvgElement('rect');
+            expect(document.createElementNS).toHaveBeenCalledWith(
+                'http://www.w3.org/2000/svg',
+                'rect'
+            );
+        });
+    });
+
+    describe('setAttributes', () => {
+        it('sets multiple attributes on element', () => {
+            const element = {
+                setAttribute: jest.fn()
+            };
+
+            setAttributes(element as any, {
+                width: 100,
+                height: 50,
+                class: 'my-class'
+            });
+
+            expect(element.setAttribute).toHaveBeenCalledWith('width', '100');
+            expect(element.setAttribute).toHaveBeenCalledWith('height', '50');
+            expect(element.setAttribute).toHaveBeenCalledWith('class', 'my-class');
+        });
+
+        it('converts numbers to strings', () => {
+            const element = {
+                setAttribute: jest.fn()
+            };
+
+            setAttributes(element as any, { x: 10, y: 20 });
+
+            expect(element.setAttribute).toHaveBeenCalledWith('x', '10');
+            expect(element.setAttribute).toHaveBeenCalledWith('y', '20');
+        });
+
+        it('handles empty attributes object', () => {
+            const element = {
+                setAttribute: jest.fn()
+            };
+
+            setAttributes(element as any, {});
+
+            expect(element.setAttribute).not.toHaveBeenCalled();
         });
     });
 });
