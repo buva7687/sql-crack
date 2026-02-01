@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { VisualizationPanel } from './visualizationPanel';
 import { WorkspacePanel } from './workspace';
 import { setCustomFunctions } from './dialects';
+import { logger } from './logger';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -99,7 +100,9 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('SQL Crack extension is now active!');
+    // Initialize logger first
+    logger.initialize(context);
+    logger.info('SQL Crack extension is now active!');
 
     // Load custom functions from settings
     loadCustomFunctions();

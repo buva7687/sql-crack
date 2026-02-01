@@ -13,6 +13,7 @@ import {
 import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
+import { logger } from '../logger';
 
 const INDEX_VERSION = 4; // Bumped for column extraction in schema definitions
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
@@ -499,14 +500,14 @@ export class IndexManager {
 
         // If clear on startup is enabled, always return null (force rebuild)
         if (clearOnStartup) {
-            console.log('[IndexManager] Clear cache on startup enabled - rebuilding index');
+            logger.debug('[IndexManager] Clear cache on startup enabled - rebuilding index');
             await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
             return null;
         }
 
         // If TTL is 0, caching is disabled
         if (cacheTTLHours === 0) {
-            console.log('[IndexManager] Caching disabled (TTL=0) - rebuilding index');
+            logger.debug('[IndexManager] Caching disabled (TTL=0) - rebuilding index');
             return null;
         }
 
@@ -520,7 +521,7 @@ export class IndexManager {
         const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
         const cacheAge = Date.now() - cached.lastUpdated;
         if (cacheAge > cacheTTLMs) {
-            console.log(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
+            logger.debug(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
             return null;
         }
 
@@ -532,7 +533,7 @@ export class IndexManager {
             return [key, Array.isArray(value) ? value : [value]];
         });
 
-        console.log(`[IndexManager] Using cached index (age: ${Math.round(cacheAge / 3600000)}h)`);
+        logger.debug(`[IndexManager] Using cached index (age: ${Math.round(cacheAge / 3600000)}h)`);
         return {
             version: cached.version,
             lastUpdated: cached.lastUpdated,
@@ -586,6 +587,6 @@ export class IndexManager {
     async clearCache(): Promise<void> {
         this.index = null;
         await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
-        console.log('[IndexManager] Cache cleared');
+        logger.debug('[IndexManager] Cache cleared');
     }
 }

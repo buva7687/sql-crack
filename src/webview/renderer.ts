@@ -3301,7 +3301,6 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
                 }
 
                 if (lineNumber) {
-                    console.log('Navigating to line', lineNumber, 'for node:', node.label, node.type);
                     vscodeApi.postMessage({
                         command: 'goToLine',
                         line: lineNumber
@@ -3807,8 +3806,8 @@ function updateStatsPanel(): void {
                             copyBtn.innerHTML = originalText;
                             copyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
                         }, 2000);
-                    } catch (fallbackErr) {
-                        console.error('Failed to copy:', fallbackErr);
+                    } catch {
+                        // Fallback copy failed silently
                     }
                     document.body.removeChild(textarea);
                 }
@@ -4547,7 +4546,6 @@ export function exportToPng(): void {
     // Get SVG from DOM if local reference is missing (fallback for reliability)
     const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
-        console.log('No visualization to export. Please render a query first.');
         return;
     }
 
@@ -4558,7 +4556,6 @@ export function exportToPng(): void {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-            console.log('Failed to create canvas context');
             return;
         }
 
@@ -4589,23 +4586,20 @@ export function exportToPng(): void {
                         data: base64Data,
                         filename: `sql-flow-${Date.now()}.png`
                     });
-                } else {
-                    console.log('VS Code API not available for PNG export');
                 }
-            } catch (e) {
-                console.log('PNG export error:', e);
+            } catch {
+                // PNG export failed silently
                 URL.revokeObjectURL(svgUrl);
             }
         };
 
-        img.onerror = (e) => {
-            console.log('Failed to load SVG for PNG export:', e);
+        img.onerror = () => {
             URL.revokeObjectURL(svgUrl);
         };
 
         img.src = svgUrl;
-    } catch (e) {
-        console.log('PNG export failed: ' + e);
+    } catch {
+        // PNG export failed silently
     }
 }
 
@@ -4613,7 +4607,6 @@ export function exportToSvg(): void {
     // Get SVG from DOM if local reference is missing
     const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
-        console.error('No SVG element found - cannot export');
         return;
     }
 
@@ -4629,8 +4622,8 @@ export function exportToSvg(): void {
         a.href = url;
         a.click();
         URL.revokeObjectURL(url);
-    } catch (e) {
-        console.error('SVG export failed:', e);
+    } catch {
+        // SVG export failed silently
     }
 }
 
@@ -4644,7 +4637,6 @@ function showExportNotification(type: 'success' | 'error', message: string): voi
  */
 export function exportToMermaid(): void {
     if (currentNodes.length === 0) {
-        console.warn('No nodes to export');
         return;
     }
 
@@ -4859,7 +4851,6 @@ export function copyToClipboard(): void {
     // Get SVG from DOM if local reference is missing
     const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
-        console.log('No visualization to copy. Please render a query first.');
         return;
     }
 
@@ -4869,7 +4860,6 @@ export function copyToClipboard(): void {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-            console.log('Failed to create canvas context');
             return;
         }
 
@@ -4888,20 +4878,18 @@ export function copyToClipboard(): void {
                     ]).then(() => {
                         // Success - notification shown via UI
                     }).catch(() => {
-                        // Fallback: download as PNG (same as Mermaid)
+                        // Fallback: download as PNG
                         const a = document.createElement('a');
                         a.download = `sql-flow-${Date.now()}.png`;
                         a.href = canvas.toDataURL('image/png');
                         a.click();
-                        console.log('Clipboard unavailable - downloaded as PNG');
                     });
                 } else {
-                    // Fallback: download as PNG (same as Mermaid)
+                    // Fallback: download as PNG
                     const a = document.createElement('a');
                     a.download = `sql-flow-${Date.now()}.png`;
                     a.href = canvas.toDataURL('image/png');
                     a.click();
-                    console.log('Downloaded as PNG');
                 }
             }, 'image/png');
         };
@@ -4917,16 +4905,15 @@ export function copyToClipboard(): void {
                 a.href = canvas.toDataURL('image/png');
                 a.click();
                 URL.revokeObjectURL(url);
-                console.log('Downloaded as PNG');
             };
             img2.onerror = () => {
-                console.log('Failed to copy. Try SVG export instead.');
+                // Copy failed silently
             };
             img2.src = url;
         };
         img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-    } catch (e) {
-        console.log('Copy failed: ' + e);
+    } catch {
+        // Copy failed silently
     }
 }
 
@@ -5940,7 +5927,6 @@ export function toggleFullscreen(enable?: boolean): void {
     const svgElement = svg;
     
     if (!rootElement) {
-        console.error('Root element not found for fullscreen');
         return;
     }
 

@@ -1886,7 +1886,6 @@ function getLineageGraphScript(): string {
 
         function expandNodeWithColumns(nodeId) {
             if (!lineageCurrentNodeId) {
-                console.warn('[Lineage] Cannot expand node: no graph loaded');
                 return;
             }
 
@@ -1906,7 +1905,6 @@ function getLineageGraphScript(): string {
 
         function collapseNodeWithColumns(nodeId) {
             if (!lineageCurrentNodeId) {
-                console.warn('[Lineage] Cannot collapse node: no graph loaded');
                 return;
             }
 

@@ -17,6 +17,7 @@ import { TableExplorer } from '../ui/tableExplorer';
 import { LineageView } from '../ui/lineageView';
 import { ImpactView } from '../ui/impactView';
 import { ViewMode } from '../ui/types';
+import { logger } from '../../logger';
 
 /**
  * Context interface for message handler
@@ -214,7 +215,7 @@ export class MessageHandler {
                 break;
 
             default:
-                console.warn(`Unknown message command: ${message.command}`);
+                logger.warn(`Unknown message command: ${message.command}`);
         }
     }
 

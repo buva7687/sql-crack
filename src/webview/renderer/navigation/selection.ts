@@ -93,7 +93,6 @@ export function selectNode(nodeId: string | null, options?: { skipNavigation?: b
                 }
 
                 if (lineNumber) {
-                    console.log('Navigating to line', lineNumber, 'for node:', node.label, node.type);
                     vscodeApi.postMessage({
                         command: 'goToLine',
                         line: lineNumber

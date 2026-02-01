@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { logger } from './logger';
 
 interface VisualizationOptions {
     dialect: string;
@@ -351,7 +352,7 @@ export class VisualizationPanel {
                 editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
                 return;
             } catch (error) {
-                console.error('Failed to open document:', error);
+                logger.error('Failed to open document', error);
             }
         }
         
@@ -362,7 +363,7 @@ export class VisualizationPanel {
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         } else {
-            console.warn('No active editor found, cannot navigate to line', line);
+            logger.warn(`No active editor found, cannot navigate to line ${line}`);
             vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);
         }
     }
@@ -390,7 +391,7 @@ export class VisualizationPanel {
                 vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
             }
         } catch (error) {
-            console.error('Failed to save PNG:', error);
+            logger.error('Failed to save PNG', error);
             vscode.window.showErrorMessage('Failed to save PNG file');
         }
     }

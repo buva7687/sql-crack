@@ -167,8 +167,8 @@ export function updateStatsPanel(): void {
                         newCopyBtn.innerHTML = originalText;
                         newCopyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
                     }, 2000);
-                } catch (fallbackErr) {
-                    console.error('Failed to copy:', fallbackErr);
+                } catch {
+                    // Fallback copy failed silently
                 }
                 document.body.removeChild(textarea);
             }
