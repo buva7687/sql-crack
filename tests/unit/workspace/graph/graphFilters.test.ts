@@ -496,6 +496,70 @@ describe('GraphFilters', () => {
         });
     });
 
+    describe('getConnectedComponents', () => {
+        it('returns single component for fully connected graph', () => {
+            const graph = createTestGraph(
+                [
+                    { id: 'A', label: 'A' },
+                    { id: 'B', label: 'B' },
+                    { id: 'C', label: 'C' }
+                ],
+                [
+                    { source: 'A', target: 'B' },
+                    { source: 'B', target: 'C' }
+                ]
+            );
+
+            const components = filters.getConnectedComponents(graph);
+
+            expect(components).toHaveLength(1);
+            expect(components[0].nodes).toHaveLength(3);
+        });
+
+        it('returns multiple components for disconnected graph', () => {
+            const graph = createTestGraph(
+                [
+                    { id: 'A', label: 'A' },
+                    { id: 'B', label: 'B' },
+                    { id: 'C', label: 'C' },
+                    { id: 'D', label: 'D' }
+                ],
+                [
+                    { source: 'A', target: 'B' },
+                    { source: 'C', target: 'D' }
+                ]
+            );
+
+            const components = filters.getConnectedComponents(graph);
+
+            expect(components).toHaveLength(2);
+            expect(components[0].nodes.map(n => n.id).sort()).toEqual(['A', 'B']);
+            expect(components[1].nodes.map(n => n.id).sort()).toEqual(['C', 'D']);
+        });
+
+        it('handles isolated nodes', () => {
+            const graph = createTestGraph(
+                [
+                    { id: 'A', label: 'A' },
+                    { id: 'B', label: 'B' }
+                ],
+                []
+            );
+
+            const components = filters.getConnectedComponents(graph);
+
+            expect(components).toHaveLength(2);
+        });
+
+        it('returns empty array for empty graph', () => {
+            const graph = createTestGraph([], []);
+
+            const components = filters.getConnectedComponents(graph);
+
+            expect(components).toHaveLength(0);
+        });
+    });
+
     describe('edge cases', () => {
         it('handles empty graph', () => {
             const graph = createTestGraph([], []);
