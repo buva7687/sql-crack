@@ -257,7 +257,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit"
+    "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit",
+    "precheck": "npm run typecheck && npm run lint && npm run test:ci",
+    "prepare": "node scripts/install-hooks.js || true"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
