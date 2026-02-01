@@ -4,10 +4,9 @@ import * as fs from 'fs';
 import {
     WorkspaceIndex,
     SchemaDefinition,
-    FileAnalysis,
-    TableReference
+    FileAnalysis
 } from '../types';
-import { ColumnInfo, Transformation } from '../extraction/types';
+import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import {
     LineageNode,

@@ -1,7 +1,7 @@
 import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
-import { isAggregateFunction, isWindowFunction, getAggregateFunctions, getWindowFunctions } from '../dialects';
+import { getAggregateFunctions, getWindowFunctions } from '../dialects';
 
 // Import types from centralized type definitions
 import {
@@ -311,7 +311,7 @@ const SESSION_COMMAND_PATTERNS: Array<{
     { pattern: /^REVOKE\s+(.+)/i, type: 'REVOKE', description: (m) => `Revoke: ${m[1].substring(0, 50)}...` },
 
     // Comment (single statement)
-    { pattern: /^--.*$/i, type: 'COMMENT', description: (m) => `SQL comment` },
+    { pattern: /^--.*$/i, type: 'COMMENT', description: () => `SQL comment` },
     { pattern: /^\/\*[\s\S]*\*\/$/i, type: 'COMMENT', description: () => `SQL block comment` },
 ];
 
@@ -319,7 +319,7 @@ const SESSION_COMMAND_PATTERNS: Array<{
  * Check if SQL is a session/utility command that node-sql-parser doesn't support.
  * Returns a ParseResult if handled, or null if the SQL should be parsed normally.
  */
-function tryParseSessionCommand(sql: string, dialect: SqlDialect): ParseResult | null {
+function tryParseSessionCommand(sql: string, _dialect: SqlDialect): ParseResult | null {
     // Strip leading comments so patterns can match at start of actual SQL
     const trimmedSql = stripLeadingComments(sql);
 
@@ -863,7 +863,7 @@ export function parseSqlBatch(
     const allUniqueTables = new Set<string>();
     for (const q of queries) {
         if (q.tableUsage) {
-            q.tableUsage.forEach((count, tableName) => {
+            q.tableUsage.forEach((_count, tableName) => {
                 allUniqueTables.add(tableName);
             });
         }
@@ -1298,7 +1298,7 @@ function generateHints(stmt: any): void {
 
 // Advanced quality checks - detect unused CTEs, dead columns, duplicate subqueries
 // Phase 2 Feature: Advanced SQL Annotations
-function detectAdvancedIssues(nodes: FlowNode[], edges: FlowEdge[], sql: string): void {
+function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string): void {
     // Detect unused CTEs
     // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
     const cteNodes = nodes.filter(n => n.type === 'cte');
@@ -2510,7 +2510,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     return resultId;
 }
 
-function processFromItem(fromItem: any, nodes: FlowNode[], edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
+function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
         ctx.stats.subqueries++;
@@ -3643,7 +3643,7 @@ function buildColumnLineagePath(
 function findSourceColumn(
     targetColumn: ColumnInfo,
     sourceNode: FlowNode,
-    targetNode: FlowNode
+    _targetNode: FlowNode
 ): ColumnInfo | null {
     // If target column has explicit source info, use it
     if (targetColumn.sourceColumn && targetColumn.sourceTable) {

@@ -5,7 +5,6 @@ import {
     Transformation,
     TransformationType,
     ColumnReference,
-    ColumnInfo,
     SqlDialect,
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS
@@ -16,11 +15,12 @@ import {
  */
 export class TransformExtractor {
     private parser: Parser;
-    private options: ExtractionOptions;
+    // Reserved for future use
+    private _options: ExtractionOptions;
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
-        this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
+        this._options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**

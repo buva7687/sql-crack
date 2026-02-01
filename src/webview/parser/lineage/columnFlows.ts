@@ -179,7 +179,7 @@ export function buildColumnLineagePath(
 export function findSourceColumn(
     targetColumn: ColumnInfo,
     sourceNode: FlowNode,
-    targetNode: FlowNode
+    _targetNode: FlowNode
 ): ColumnInfo | null {
     // If target column has explicit source info, use it
     if (targetColumn.sourceColumn && targetColumn.sourceTable) {

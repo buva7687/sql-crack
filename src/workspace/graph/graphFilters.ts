@@ -1,6 +1,6 @@
 // Graph Filters - Filter and search graphs
 
-import { Graph, GraphNode, GraphEdge, FilterOptions, SearchOptions } from './types';
+import { Graph, GraphNode, FilterOptions, SearchOptions } from './types';
 
 /**
  * Filtering and searching operations on graphs

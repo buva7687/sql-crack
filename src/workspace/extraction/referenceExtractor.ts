@@ -1309,7 +1309,7 @@ export class ReferenceExtractor {
     private extractColumnsFromTable(
         tableItem: any,
         stmt: any,
-        aliasMap: AliasMap
+        _aliasMap: AliasMap
     ): any[] {
         if (!stmt || !this.options.extractColumns) {
             return [];

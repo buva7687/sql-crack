@@ -1,8 +1,7 @@
 // Graph View - HTML body generation for main dependency graph
 // Extracted from workspacePanel.ts for modularity
 
-import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter, DetailedWorkspaceStats } from '../types';
-import { getDisplayName } from '../identifiers';
+import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } from '../types';
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
 

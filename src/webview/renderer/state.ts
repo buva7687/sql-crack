@@ -9,7 +9,6 @@ import {
     ColumnLineage,
     ViewState,
     CloudViewState,
-    FocusMode,
 } from '../types';
 
 // View state

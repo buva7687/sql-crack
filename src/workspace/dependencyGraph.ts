@@ -218,7 +218,7 @@ function buildTableGraph(
 
     // Create edges based on view/query dependencies
     // Views reference tables, so create edges from views to their source tables
-    for (const [filePath, analysis] of index.files.entries()) {
+    for (const [_filePath, analysis] of index.files.entries()) {
         // Get tables defined in this file
         const definedHere = new Set(
             analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))

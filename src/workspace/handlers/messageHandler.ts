@@ -6,7 +6,6 @@ import { SearchFilter, GraphMode } from '../types';
 import {
     LineageGraph,
     LineageNode,
-    LineagePath,
     FlowAnalyzer,
     FlowResult,
     ImpactAnalyzer,

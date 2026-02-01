@@ -1,8 +1,8 @@
 // LineageGraphRenderer - Renders interactive lineage graph using dagre layout
 
 import * as dagre from 'dagre';
-import { LineageGraph, LineageNode, LineageEdge } from '../lineage/types';
-import { FlowAnalyzer, FlowResult } from '../lineage/flowAnalyzer';
+import { LineageGraph, LineageNode } from '../lineage/types';
+import { FlowAnalyzer } from '../lineage/flowAnalyzer';
 
 /**
  * Graph node for rendering

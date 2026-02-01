@@ -219,7 +219,6 @@ export function layoutGraphRadial(
     });
 
     // Calculate radial positions
-    const maxLayer = Math.max(...Array.from(layerGroups.keys()));
     const avgSize = nodes.reduce((sum, n) => sum + Math.max(n.width, n.height), 0) / nodes.length;
     const baseRadius = avgSize * 1.5;
     const layerSpacing = avgSize * 2;

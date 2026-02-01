@@ -1,6 +1,6 @@
 // Toolbar UI module
 
-import { SqlDialect, BatchParseResult } from '../sqlParser';
+import { SqlDialect } from '../sqlParser';
 import { FocusMode, LayoutType } from '../types';
 
 // Toolbar callbacks interface

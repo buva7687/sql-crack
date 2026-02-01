@@ -130,8 +130,6 @@ function detectFilterPushdownOpportunities(
         });
         
         if (hasJoinBefore && filterNode.details) {
-            // Extract column references from filter details
-            const filterText = filterNode.details.join(' ');
             const sourceTables = traceFilterLineage(filterNode, nodes, edges);
             
             // If filter only references one table but comes after JOIN, suggest pushdown
@@ -199,7 +197,6 @@ function analyzeJoinOrder(
     });
     
     // Check if unfiltered tables are joined before filtered tables
-    let hasUnfilteredBeforeFiltered = false;
     let hasCrossJoinEarly = false;
     
     joinNodes.forEach((joinNode, index) => {
@@ -247,7 +244,7 @@ function analyzeJoinOrder(
 // Note: This function receives existingHints to check for duplicate subquery hints
 // from detectAdvancedIssues() and merge them into comprehensive hints
 function detectRepeatedScans(
-    ast: any,
+    _ast: any,
     tableUsage: Map<string, number>,
     hints: OptimizationHint[],
     existingHints: OptimizationHint[]
@@ -684,7 +681,6 @@ function analyzeAggregatePerformance(
     
     let hasCountStar = false;
     let hasCountDistinct = false;
-    let hasAggregateWithoutFilter = false;
     let groupByColumnCount = 0;
     
     ast.columns.forEach((col: any) => {
@@ -727,7 +723,6 @@ function analyzeAggregatePerformance(
     
     // Check if aggregation happens without WHERE filter
     if (!ast.where && (ast.groupby || hasCountStar || hasCountDistinct)) {
-        hasAggregateWithoutFilter = true;
         hints.push({
             type: 'info',
             message: 'Aggregate query without WHERE clause',

@@ -1,7 +1,6 @@
 // UI Types - Interfaces for UI components
 
-import { LineageGraph, LineageNode, LineagePath } from '../lineage/types';
-import { FlowResult } from '../lineage/flowAnalyzer';
+import { LineageGraph, LineageNode } from '../lineage/types';
 import { ImpactReport } from '../lineage/impactAnalyzer';
 
 /**

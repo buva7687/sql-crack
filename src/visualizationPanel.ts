@@ -142,13 +142,9 @@ export class VisualizationPanel {
     }
 
     private static restorePinnedTabs() {
-        if (!VisualizationPanel._context) {return;}
-
-        const pinnedTabs = VisualizationPanel._context.workspaceState.get<PinnedVisualization[]>('pinnedTabs') || [];
-
         // Don't auto-restore on activation - let user reopen manually or use a command
         // This prevents opening many tabs unexpectedly
-        // We just keep the data persisted
+        // Data is persisted via workspaceState and accessed via getPinnedTabs()
     }
 
     public static getPinnedTabs(): PinnedVisualization[] {

@@ -3,7 +3,7 @@
 import { LineagePath, LineageGraph, LineageNode } from '../lineage/types';
 import { FlowResult, FlowAnalyzer } from '../lineage/flowAnalyzer';
 import { LineageViewOptions } from './types';
-import { LineageGraphRenderer, RenderableGraph, GraphNode } from './lineageGraphRenderer';
+import { LineageGraphRenderer } from './lineageGraphRenderer';
 
 /**
  * Recent selection for history tracking

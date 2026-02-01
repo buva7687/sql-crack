@@ -317,7 +317,6 @@ export class SchemaExtractor {
      */
     private extractWithRegex(sql: string, filePath: string): SchemaDefinition[] {
         const definitions: SchemaDefinition[] = [];
-        const fileName = filePath.split('/').pop() || filePath;
 
         // Strip comments to prevent false matches like "CREATE TABLE AS SELECT" in comments
         const sqlNoComments = this.stripSqlComments(sql);

@@ -1,7 +1,6 @@
 // Workspace Panel - VS Code webview panel for workspace dependency visualization
 
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { IndexManager } from './indexManager';
 import { buildDependencyGraph } from './dependencyGraph';
 import {
@@ -9,7 +8,6 @@ import {
     GraphMode,
     WorkspaceNode,
     SearchFilter,
-    SearchResult,
     DetailedWorkspaceStats,
     DefinitionDetail,
     MissingDefinitionDetail
@@ -19,7 +17,7 @@ import { getDisplayName } from './identifiers';
 
 // Lineage modules
 import { LineageBuilder } from './lineage/lineageBuilder';
-import { LineageGraph, LineageNode, LineagePath } from './lineage/types';
+import { LineageGraph, LineageNode } from './lineage/types';
 import { FlowAnalyzer, FlowResult } from './lineage/flowAnalyzer';
 import { ImpactAnalyzer, ImpactReport } from './lineage/impactAnalyzer';
 import { ColumnLineageTracker } from './lineage/columnLineage';
@@ -30,13 +28,13 @@ import { LineageView } from './ui/lineageView';
 import { ImpactView } from './ui/impactView';
 import { ViewMode } from './ui/types';
 import { getWebviewStyles, getIssuesStyles, getStateStyles } from './ui/sharedStyles';
-import { getWebviewScript, getIssuesScript, getMinimalScript, WebviewScriptParams } from './ui/clientScripts';
+import { getWebviewScript, getIssuesScript, WebviewScriptParams } from './ui/clientScripts';
 
 // Handler modules
 import { MessageHandler, MessageHandlerContext } from './handlers';
 
 // Shared theme
-import { REFERENCE_TYPE_COLORS, WORKSPACE_NODE_COLORS, getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
+import { getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
 
 const AUTO_INDEX_THRESHOLD = 50;
 

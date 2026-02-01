@@ -1,7 +1,7 @@
 // Impact Analyzer - Analyze impact of changes
 
 import { LineageGraph, LineageNode } from './types';
-import { FlowAnalyzer, FlowResult } from './flowAnalyzer';
+import { FlowAnalyzer } from './flowAnalyzer';
 
 /**
  * Type of change being analyzed

@@ -57,27 +57,6 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
 }
 
 /**
- * Check if a file URI has a SQL-like extension
- */
-function isSqlLikeFile(uri: vscode.Uri): boolean {
-    const fileName = uri.fsPath.toLowerCase();
-
-    // Check for .sql extension
-    if (fileName.endsWith('.sql')) {
-        return true;
-    }
-
-    // Check additional extensions
-    for (const ext of additionalExtensions) {
-        if (fileName.endsWith(ext)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/**
  * Update the context variable for SQL-like files (used in when clauses)
  * This enables the SQL Crack icon/menu for files with additional extensions
  */

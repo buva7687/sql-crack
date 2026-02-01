@@ -5,9 +5,7 @@ import {
     ColumnInfo,
     ColumnReference,
     ColumnUsageContext,
-    TableReference,
     SqlDialect,
-    AliasMap,
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS
 } from './types';
@@ -17,11 +15,12 @@ import {
  */
 export class ColumnExtractor {
     private parser: Parser;
-    private options: ExtractionOptions;
+    // Reserved for future use
+    private _options: ExtractionOptions;
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
-        this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
+        this._options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**

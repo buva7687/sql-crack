@@ -1,6 +1,6 @@
 // Column Lineage Tracker - Trace column-to-column data flow
 
-import { LineageGraph, LineageNode, LineagePath, ColumnLineageEdge } from './types';
+import { LineageGraph, LineagePath, ColumnLineageEdge } from './types';
 
 /**
  * Column lineage path with column-specific information

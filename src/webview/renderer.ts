@@ -10,7 +10,6 @@ import {
     ColumnLineage,
     ViewState,
     CloudViewState,
-    Severity,
     FocusMode,
     LayoutType,
 } from './types';
@@ -30,7 +29,6 @@ import {
     STATUS_COLORS,
     CLOSE_BUTTON_COLORS,
     COMPLEXITY_COLORS,
-    TRANSFORMATION_COLORS,
     HINT_COLORS,
 } from './constants';
 
@@ -1577,9 +1575,6 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
 
     // Render the floating cloud to the LEFT of the subquery node when expanded
     if (isExpanded && hasChildren && node.children) {
-        const defaultCloudX = node.x - cloudWidth - cloudGap;
-        const defaultCloudY = node.y - (cloudHeight - nodeHeight) / 2;
-        
         // Get custom offset or use default
         const offset = cloudOffsets.get(node.id) || { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 };
         const cloudX = node.x + offset.offsetX;
@@ -2204,14 +2199,14 @@ function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { 
 
 // Render internal flow inside the floating cloud container
 function renderCloudSubflow(
-    parentNode: FlowNode,
+    _parentNode: FlowNode,
     children: FlowNode[],
     childEdges: FlowEdge[],
     group: SVGGElement,
     offsetX: number,
     offsetY: number,
-    containerWidth: number,
-    containerHeight: number
+    _containerWidth: number,
+    _containerHeight: number
 ): void {
     // Draw child edges first (behind nodes)
     for (const edge of childEdges) {
@@ -3565,14 +3560,14 @@ function updateDetailsPanel(nodeId: string | null): void {
         detailsSection += `
             <div style="margin-bottom: 10px;">
                 <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
-                ${node.caseDetails.cases.map((caseStmt, idx) => `
+                ${node.caseDetails.cases.map((caseStmt) => `
                     <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         ${caseStmt.alias ? `
                             <div style="color: ${COMPLEXITY_COLORS.Moderate}; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
                                 ${escapeHtml(caseStmt.alias)}
                             </div>
                         ` : ''}
-                        ${caseStmt.conditions.map((cond, condIdx) => `
+                        ${caseStmt.conditions.map((cond) => `
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
                                     <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
@@ -3868,7 +3863,6 @@ function updateHintsPanel(): void {
     const qualityCount = hintsByCategory['quality'].length;
     const bestPracticeCount = hintsByCategory['best-practice'].length;
     const complexityCount = hintsByCategory['complexity'].length;
-    const otherCount = hintsByCategory['other'].length;
 
     // Count by severity
     const highCount = currentHints.filter(h => h.severity === 'high').length;
@@ -4095,7 +4089,6 @@ function updateHintsPanel(): void {
         // Hide/show category groups
         categoryGroups.forEach(group => {
             const groupEl = group as HTMLElement;
-            const category = groupEl.getAttribute('data-category');
             const visibleItems = Array.from(groupEl.querySelectorAll('.hint-item')).filter(item => {
                 const itemEl = item as HTMLElement;
                 return itemEl.style.display !== 'none';
@@ -5701,9 +5694,6 @@ function calculateStackedCloudOffsets(expandableNodes: FlowNode[]): void {
         }
     }
 
-    // Find the tallest cloud for bottom alignment
-    const maxCloudHeight = Math.max(...cloudInfos.map(c => c.height));
-
     // Find the topmost CTE node Y position
     const minNodeY = Math.min(...expandableNodes.map(n => n.y));
 
@@ -6722,9 +6712,8 @@ function createColumnItem(flow: ColumnFlow): HTMLElement {
         border: 2px solid transparent;
     `;
 
-    // Get first and last step for summary
+    // Get first step for summary
     const firstStep = flow.lineagePath[0];
-    const lastStep = flow.lineagePath[flow.lineagePath.length - 1];
 
     // Determine overall transformation type
     const hasAggregation = flow.lineagePath.some(s => s.transformation === 'aggregated');
@@ -7002,7 +6991,7 @@ function highlightLineageNodes(flow: ColumnFlow): void {
 /**
  * Create a transformation badge SVG element
  */
-function createTransformationBadge(x: number, y: number, label: string, color: string, icon: string): SVGGElement {
+function createTransformationBadge(x: number, y: number, label: string, color: string, _icon: string): SVGGElement {
     const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     badge.setAttribute('transform', `translate(${x}, ${y})`);
 

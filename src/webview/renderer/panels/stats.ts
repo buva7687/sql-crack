@@ -25,8 +25,7 @@ export function updateStatsPanel(): void {
     if (currentTableUsage && currentTableUsage.size > 0) {
         const sortedTables = Array.from(currentTableUsage.entries())
             .sort((a, b) => b[1] - a[1]); // Sort by usage count descending
-        
-        const allTableNames = sortedTables.map(([name]) => name).join(', ');
+
         const displayTables = sortedTables.slice(0, 10); // Show top 10 tables
 
         tableListHtml = `

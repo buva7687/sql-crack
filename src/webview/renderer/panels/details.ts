@@ -1,6 +1,6 @@
 // Node details panel
 
-import { state, detailsPanel, currentNodes } from '../state';
+import { detailsPanel, currentNodes } from '../state';
 import { escapeHtml, getNodeIcon } from '../utils';
 import { getNodeColor } from '../../constants';
 

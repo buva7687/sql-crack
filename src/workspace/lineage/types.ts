@@ -1,6 +1,6 @@
 // Lineage Types - Core interfaces for data lineage tracking
 
-import { ColumnInfo, Transformation } from '../extraction/types';
+import { ColumnInfo } from '../extraction/types';
 
 /**
  * Node in the lineage graph
