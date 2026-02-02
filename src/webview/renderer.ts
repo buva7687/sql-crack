@@ -1422,7 +1422,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         group.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                (group as unknown as SVGGElement).click();
+                group.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             }
         });
         parent.appendChild(group);

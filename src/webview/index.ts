@@ -336,8 +336,20 @@ async function visualize(sql: string): Promise<void> {
         batchResult = {
             queries: [],
             errorCount: 1,
-            parseErrors: [{ queryIndex: 0, message }]
-        } as BatchParseResult;
+            parseErrors: [{ queryIndex: 0, message, sql: '' }],
+            totalStats: {
+                tables: 0,
+                joins: 0,
+                subqueries: 0,
+                ctes: 0,
+                aggregations: 0,
+                windowFunctions: 0,
+                unions: 0,
+                conditions: 0,
+                complexity: 'Simple',
+                complexityScore: 0
+            }
+        };
         return;
     }
 
