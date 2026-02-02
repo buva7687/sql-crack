@@ -264,7 +264,8 @@
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
-    "prepare": "node scripts/install-hooks.js || true"
+    "prepare": "node scripts/install-hooks.js || true",
+    "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
