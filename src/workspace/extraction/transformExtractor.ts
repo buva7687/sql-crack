@@ -4,10 +4,7 @@ import { Parser } from 'node-sql-parser';
 import {
     Transformation,
     TransformationType,
-    ColumnReference,
-    SqlDialect,
-    ExtractionOptions,
-    DEFAULT_EXTRACTION_OPTIONS
+    ColumnReference
 } from './types';
 
 /**
@@ -15,12 +12,9 @@ import {
  */
 export class TransformExtractor {
     private parser: Parser;
-    // Reserved for future use
-    private _options: ExtractionOptions;
 
-    constructor(options: Partial<ExtractionOptions> = {}) {
+    constructor() {
         this.parser = new Parser();
-        this._options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**
@@ -489,25 +483,5 @@ export class TransformExtractor {
             // Fallback to type name
             return expr.type || 'expression';
         }
-    }
-
-    /**
-     * Map SqlDialect to node-sql-parser database option
-     */
-    private mapDialect(dialect: SqlDialect): string {
-        const dialectMap: Record<string, string> = {
-            'MySQL': 'mysql',
-            'PostgreSQL': 'postgresql',
-            'TransactSQL': 'transactsql',
-            'MariaDB': 'mariadb',
-            'SQLite': 'sqlite',
-            'Snowflake': 'snowflake',
-            'BigQuery': 'bigquery',
-            'Hive': 'hive',
-            'Redshift': 'redshift',
-            'Athena': 'athena',
-            'Trino': 'trino'
-        };
-        return dialectMap[dialect] || 'mysql';
     }
 }

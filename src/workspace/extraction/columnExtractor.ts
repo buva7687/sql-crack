@@ -4,10 +4,7 @@ import { Parser } from 'node-sql-parser';
 import {
     ColumnInfo,
     ColumnReference,
-    ColumnUsageContext,
-    SqlDialect,
-    ExtractionOptions,
-    DEFAULT_EXTRACTION_OPTIONS
+    ColumnUsageContext
 } from './types';
 
 /**
@@ -15,12 +12,9 @@ import {
  */
 export class ColumnExtractor {
     private parser: Parser;
-    // Reserved for future use
-    private _options: ExtractionOptions;
 
-    constructor(options: Partial<ExtractionOptions> = {}) {
+    constructor() {
         this.parser = new Parser();
-        this._options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
     }
 
     /**
@@ -98,35 +92,6 @@ export class ColumnExtractor {
         } catch (error) {
             return null;
         }
-    }
-
-    /**
-     * Resolve column to its source table
-     */
-    resolveColumnSource(
-        column: any,
-        tableAliases: Map<string, string>
-    ): ColumnReference | null {
-        if (!column || column.type !== 'column_ref') {
-            return null;
-        }
-
-        const columnName = this.extractColumnName(column);
-        const tableRef = column.table;
-        const alias = tableRef ? (tableRef.alias || tableRef) : null;
-
-        // Resolve alias to actual table name
-        const sourceTable = alias
-            ? tableAliases.get(alias) || alias
-            : null;
-
-        return {
-            columnName,
-            tableName: sourceTable || undefined,
-            tableAlias: alias || undefined,
-            usedIn: 'select',
-            lineNumber: 0
-        };
     }
 
     /**
@@ -453,25 +418,5 @@ export class ColumnExtractor {
                 this.extractColumnsFromExpression(col.expr, result, context);
             }
         }
-    }
-
-    /**
-     * Map SqlDialect to node-sql-parser database option
-     */
-    private mapDialect(dialect: SqlDialect): string {
-        const dialectMap: Record<string, string> = {
-            'MySQL': 'mysql',
-            'PostgreSQL': 'postgresql',
-            'TransactSQL': 'transactsql',
-            'MariaDB': 'mariadb',
-            'SQLite': 'sqlite',
-            'Snowflake': 'snowflake',
-            'BigQuery': 'bigquery',
-            'Hive': 'hive',
-            'Redshift': 'redshift',
-            'Athena': 'athena',
-            'Trino': 'trino'
-        };
-        return dialectMap[dialect] || 'mysql';
     }
 }

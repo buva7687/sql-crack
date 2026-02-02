@@ -288,19 +288,10 @@ describe('TransformExtractor', () => {
         });
     });
 
-    describe('constructor options', () => {
-        it('accepts custom options', () => {
-            const customExtractor = new TransformExtractor({
-                dialect: 'PostgreSQL',
-                maxSubqueryDepth: 5
-            });
-
-            expect(customExtractor).toBeDefined();
-        });
-
-        it('uses default options when none provided', () => {
-            const defaultExtractor = new TransformExtractor();
-            expect(defaultExtractor).toBeDefined();
+    describe('constructor', () => {
+        it('creates an instance', () => {
+            const newExtractor = new TransformExtractor();
+            expect(newExtractor).toBeDefined();
         });
     });
 

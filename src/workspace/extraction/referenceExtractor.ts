@@ -56,7 +56,7 @@ export class ReferenceExtractor {
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
         this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
-        this.columnExtractor = new ColumnExtractor(options);
+        this.columnExtractor = new ColumnExtractor();
     }
 
     /**
