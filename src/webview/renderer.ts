@@ -841,7 +841,9 @@ function updateVisibleNodes(): void {
  * Update off-screen node count indicators
  */
 function updateOffscreenIndicators(result: VirtualizationResult): void {
-    if (!svg) return;
+    if (!svg) {
+        return;
+    }
 
     // Remove existing indicator
     if (offscreenIndicator) {

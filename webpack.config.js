@@ -75,11 +75,26 @@ const webviewConfig = {
       }
     ]
   },
-  optimization: isProduction ? {
-    minimize: true,
+  optimization: {
+    minimize: isProduction,
     usedExports: true,
-    sideEffects: true
-  } : undefined,
+    sideEffects: true,
+    splitChunks: isProduction ? {
+      chunks: 'all',
+      cacheGroups: {
+        vendor: {
+          test: /node_modules/,
+          name: 'vendors',
+          priority: 10
+        },
+        parser: {
+          test: /[\\/]node_modules[\\/]node-sql-parser[\\/]/,
+          name: 'parser',
+          priority: 20
+        }
+      }
+    } : undefined
+  },
   performance: {
     hints: isProduction ? 'warning' : false,
     maxAssetSize: 1000000, // 1 MB target
