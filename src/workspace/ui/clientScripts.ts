@@ -395,6 +395,12 @@ function getViewModeScript(): string {
             });
             currentViewMode = view;
 
+            // Show/hide header search box (only relevant for Graph tab)
+            const headerSearchBox = document.querySelector('.header-right .search-box');
+            if (headerSearchBox) {
+                headerSearchBox.style.display = view === 'graph' ? '' : 'none';
+            }
+
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
