@@ -35,6 +35,13 @@ import {
 import { formatSql, highlightSql } from './sqlFormatter';
 import { showKeyboardShortcutsHelp } from './ui';
 import dagre from 'dagre';
+import {
+    getViewportBounds,
+    getVisibleElements,
+    shouldVirtualize,
+    throttle,
+    VirtualizationResult
+} from './virtualization';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
 
@@ -97,6 +104,12 @@ let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
+
+// Virtualization state
+let virtualizationEnabled = true;
+let renderedNodeIds: Set<string> = new Set();
+let lastVirtualizationResult: VirtualizationResult | null = null;
+let offscreenIndicator: SVGGElement | null = null;
 // Store references to cloud and arrow elements for dynamic updates
 let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
 // Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
@@ -745,7 +758,244 @@ function updateTransform(): void {
                 document.dispatchEvent(event);
             });
         }
+        // Trigger virtualized re-render on pan/zoom
+        throttledVirtualizedRender();
     }
+}
+
+/**
+ * Throttled function to re-render visible nodes during pan/zoom
+ * Uses 60fps throttle (16ms) for smooth updates
+ */
+const throttledVirtualizedRender = throttle(() => {
+    if (virtualizationEnabled && shouldVirtualize(currentNodes.length)) {
+        updateVisibleNodes();
+    }
+}, 16);
+
+/**
+ * Update which nodes are rendered based on current viewport
+ * Called during pan/zoom to add/remove nodes from DOM
+ */
+function updateVisibleNodes(): void {
+    if (!svg || !mainGroup || currentNodes.length === 0) {
+        return;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    const bounds = getViewportBounds(
+        rect.width,
+        rect.height,
+        state.scale,
+        state.offsetX,
+        state.offsetY
+    );
+
+    const result = getVisibleElements(currentNodes, currentEdges, bounds);
+    lastVirtualizationResult = result;
+
+    // Get the nodes and edges groups
+    const nodesGroup = mainGroup.querySelector('.nodes') as SVGGElement;
+    const edgesGroup = mainGroup.querySelector('.edges') as SVGGElement;
+
+    if (!nodesGroup || !edgesGroup) {
+        return;
+    }
+
+    // Find nodes that need to be added (visible but not rendered)
+    const nodesToAdd = result.visibleNodes.filter(n => !renderedNodeIds.has(n.id));
+
+    // Find nodes that need to be removed (rendered but no longer visible)
+    const nodeIdsToRemove = [...renderedNodeIds].filter(id => !result.visibleNodeIds.has(id));
+
+    // Remove nodes that are no longer visible
+    for (const nodeId of nodeIdsToRemove) {
+        const nodeElement = nodesGroup.querySelector(`[data-id="${nodeId}"]`);
+        if (nodeElement) {
+            nodeElement.remove();
+        }
+        renderedNodeIds.delete(nodeId);
+    }
+
+    // Add newly visible nodes
+    for (const node of nodesToAdd) {
+        renderNode(node, nodesGroup);
+        renderedNodeIds.add(node.id);
+    }
+
+    // Update edges - remove edges connected to removed nodes, add edges for new nodes
+    // For simplicity, we'll re-render all visible edges if there were changes
+    if (nodesToAdd.length > 0 || nodeIdsToRemove.length > 0) {
+        // Clear and re-render edges
+        edgesGroup.innerHTML = '';
+        for (const edge of result.visibleEdges) {
+            renderEdge(edge, edgesGroup);
+        }
+    }
+
+    // Update off-screen indicators
+    updateOffscreenIndicators(result);
+}
+
+/**
+ * Update off-screen node count indicators
+ */
+function updateOffscreenIndicators(result: VirtualizationResult): void {
+    if (!svg) return;
+
+    // Remove existing indicator
+    if (offscreenIndicator) {
+        offscreenIndicator.remove();
+    }
+
+    const { offscreenCounts, totalNodes } = result;
+    const hasOffscreen = offscreenCounts.top + offscreenCounts.bottom +
+                         offscreenCounts.left + offscreenCounts.right > 0;
+
+    if (!hasOffscreen) {
+        return;
+    }
+
+    // Create indicator group (positioned in screen space, not affected by transform)
+    offscreenIndicator = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    offscreenIndicator.setAttribute('class', 'offscreen-indicators');
+    offscreenIndicator.style.pointerEvents = 'none';
+
+    const rect = svg.getBoundingClientRect();
+    const indicatorStyle = `
+        fill: ${UI_COLORS.backgroundDark};
+        stroke: ${UI_COLORS.border};
+        stroke-width: 1;
+    `;
+    const textStyle = `
+        fill: ${UI_COLORS.textDim};
+        font-size: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        text-anchor: middle;
+        dominant-baseline: middle;
+    `;
+
+    // Top indicator
+    if (offscreenCounts.top > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width / 2}, 20)`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-30');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '60');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `↑ ${offscreenCounts.top}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Bottom indicator
+    if (offscreenCounts.bottom > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width / 2}, ${rect.height - 20})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-30');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '60');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `↓ ${offscreenCounts.bottom}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Left indicator
+    if (offscreenCounts.left > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(20, ${rect.height / 2})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-20');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '40');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `← ${offscreenCounts.left}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Right indicator
+    if (offscreenCounts.right > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width - 20}, ${rect.height / 2})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-20');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '40');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `→ ${offscreenCounts.right}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Add to SVG (outside mainGroup so it's not affected by pan/zoom)
+    svg.appendChild(offscreenIndicator);
+}
+
+/**
+ * Enable or disable virtualization
+ */
+export function setVirtualizationEnabled(enabled: boolean): void {
+    virtualizationEnabled = enabled;
+    // Re-render if needed
+    if (currentNodes.length > 0) {
+        const nodesGroup = mainGroup?.querySelector('.nodes') as SVGGElement;
+        const edgesGroup = mainGroup?.querySelector('.edges') as SVGGElement;
+        if (nodesGroup && edgesGroup) {
+            // If disabling virtualization, render all nodes
+            if (!enabled) {
+                for (const node of currentNodes) {
+                    if (!renderedNodeIds.has(node.id)) {
+                        renderNode(node, nodesGroup);
+                        renderedNodeIds.add(node.id);
+                    }
+                }
+                // Re-render all edges
+                edgesGroup.innerHTML = '';
+                for (const edge of currentEdges) {
+                    renderEdge(edge, edgesGroup);
+                }
+                // Remove indicators
+                if (offscreenIndicator) {
+                    offscreenIndicator.remove();
+                    offscreenIndicator = null;
+                }
+            } else {
+                // If enabling, trigger update
+                updateVisibleNodes();
+            }
+        }
+    }
+}
+
+/**
+ * Get virtualization status
+ */
+export function isVirtualizationEnabled(): boolean {
+    return virtualizationEnabled;
 }
 
 /**
@@ -941,6 +1191,14 @@ export function render(result: ParseResult): void {
     state.zoomedNodeId = null;
     state.previousZoomState = null;
 
+    // Reset virtualization state
+    renderedNodeIds.clear();
+    lastVirtualizationResult = null;
+    if (offscreenIndicator) {
+        offscreenIndicator.remove();
+        offscreenIndicator = null;
+    }
+
     // Clear previous content
     mainGroup.innerHTML = '';
 
@@ -969,10 +1227,24 @@ export function render(result: ParseResult): void {
     // This ensures edges are drawn correctly
     preCalculateExpandableDimensions(result.nodes);
 
+    // Determine if we should use virtualization
+    const useVirtualization = virtualizationEnabled && shouldVirtualize(result.nodes.length);
+
+    // Get nodes and edges to render (all or visible subset)
+    let nodesToRender = result.nodes;
+    let edgesToRender = result.edges;
+
+    if (useVirtualization && svg) {
+        // For initial render with virtualization, render all nodes first
+        // then fitView will adjust viewport, and subsequent pan/zoom will virtualize
+        // This ensures proper layout calculation
+        // We'll enable virtualization after fitView completes
+    }
+
     // Render edges first (behind nodes)
     const edgesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     edgesGroup.setAttribute('class', 'edges');
-    for (const edge of result.edges) {
+    for (const edge of edgesToRender) {
         renderEdge(edge, edgesGroup);
     }
     mainGroup.appendChild(edgesGroup);
@@ -985,8 +1257,9 @@ export function render(result: ParseResult): void {
     // Render nodes
     const nodesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     nodesGroup.setAttribute('class', 'nodes');
-    for (const node of result.nodes) {
+    for (const node of nodesToRender) {
         renderNode(node, nodesGroup);
+        renderedNodeIds.add(node.id);
     }
     mainGroup.appendChild(nodesGroup);
 
@@ -1004,6 +1277,15 @@ export function render(result: ParseResult): void {
 
     // Update minimap for complex queries
     updateMinimap();
+
+    // After fitView, trigger virtualization update if enabled
+    // This will remove nodes outside viewport and show indicators
+    if (useVirtualization) {
+        // Use requestAnimationFrame to ensure layout is complete
+        requestAnimationFrame(() => {
+            updateVisibleNodes();
+        });
+    }
 }
 
 function renderNode(node: FlowNode, parent: SVGGElement): void {
