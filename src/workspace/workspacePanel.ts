@@ -1199,8 +1199,15 @@ ${bodyContent}
                     <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
                         title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
                         aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
-                    <span class="graph-mode-help" title="Modes: Files = file-to-file dependencies. Tables = table-to-table relationships. Hybrid = files + tables referenced 3+ times.">?</span>
+                    <button class="graph-mode-help" id="graph-mode-help-btn" type="button" aria-label="Help: Click to learn about graph modes">?</button>
                 </div>
+            </div>
+            <!-- Help tooltip (outside switcher to avoid clipping) -->
+            <div class="graph-mode-help-tooltip" id="graph-mode-help-tooltip">
+                <div class="help-tooltip-title">Graph Display Modes</div>
+                <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
+                <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
+                <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
             </div>
 
             <div class="header-right">

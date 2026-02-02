@@ -497,6 +497,27 @@ function getViewModeScript(): string {
 
         updateSidebarSectionsForView();
 
+        // Graph mode help tooltip
+        const helpBtn = document.getElementById('graph-mode-help-btn');
+        const helpTooltip = document.getElementById('graph-mode-help-tooltip');
+        if (helpBtn && helpTooltip) {
+            helpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = helpTooltip.classList.contains('visible');
+                if (!isVisible) {
+                    const rect = helpBtn.getBoundingClientRect();
+                    helpTooltip.style.top = (rect.bottom + 8) + 'px';
+                    helpTooltip.style.right = (window.innerWidth - rect.right) + 'px';
+                }
+                helpTooltip.classList.toggle('visible');
+            });
+            document.addEventListener('click', (e) => {
+                if (!helpBtn.contains(e.target) && !helpTooltip.contains(e.target)) {
+                    helpTooltip.classList.remove('visible');
+                }
+            });
+        }
+
         // Set initial graph-mode-switcher visibility (always in layout; visibility reserves space).
         // This ensures main tabs are in the same position on initial load regardless of active tab.
         if (graphModeSwitcher) {
@@ -1860,9 +1881,23 @@ function getLineageGraphScript(): string {
             tooltip.querySelector('.upstream-value').textContent = '-';
             tooltip.querySelector('.downstream-value').textContent = '-';
 
-            const rect = node.getBoundingClientRect();
-            tooltip.style.left = (rect.right + 10) + 'px';
-            tooltip.style.top = rect.top + 'px';
+            // Position near mouse cursor with boundary checks
+            const tooltipWidth = 220;
+            const tooltipHeight = 280;
+            const padding = 15;
+            let left = e.clientX + padding;
+            let top = e.clientY + padding;
+
+            // Keep within viewport
+            if (left + tooltipWidth > window.innerWidth) {
+                left = e.clientX - tooltipWidth - padding;
+            }
+            if (top + tooltipHeight > window.innerHeight) {
+                top = e.clientY - tooltipHeight - padding;
+            }
+
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
             tooltip.style.display = 'block';
         }
 
@@ -1895,6 +1930,25 @@ function getLineageGraphScript(): string {
                 allNodes.forEach(n => n.classList.remove('focused', 'highlighted', 'dimmed'));
             }
             lineageFocusedNode = null;
+        }
+
+        function showCopyFeedback(message) {
+            const existing = document.getElementById('copy-feedback-toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'copy-feedback-toast';
+            toast.textContent = message;
+            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.style.opacity = '1';
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 200);
+                }, 1500);
+            });
         }
 
         function showLineageContextMenu(e, node) {
@@ -1932,7 +1986,11 @@ function getLineageGraphScript(): string {
                 },
                 'copy-name': () => {
                     if (nodeName) {
-                        navigator.clipboard.writeText(nodeName);
+                        navigator.clipboard.writeText(nodeName).then(() => {
+                            showCopyFeedback('Copied!');
+                        }).catch(() => {
+                            showCopyFeedback('Copy failed');
+                        });
                     }
                 }
             };

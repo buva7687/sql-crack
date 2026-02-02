@@ -227,12 +227,13 @@ function generateNode(node: WorkspaceNode): string {
     const icon = getNodeIcon(node.type);
     
     return `
-        <g class="node ${node.type}" 
-           data-id="${escapeHtml(node.id)}" 
-           data-label="${escapeHtml(node.label)}" 
-           data-type="${node.type}" 
+        <g class="node ${node.type}"
+           data-id="${escapeHtml(node.id)}"
+           data-label="${escapeHtml(node.label)}"
+           data-type="${node.type}"
            data-filepath="${escapeHtml(node.filePath || '')}"
            transform="translate(${x - width/2}, ${y - height/2})">
+            <title>${escapeHtml(node.label)}</title>
             <rect class="node-bg" width="${width}" height="${height}" rx="8"/>
             <text x="10" y="25" class="node-icon">${icon}</text>
             <text x="40" y="35" class="node-label">${escapeHtml(truncateLabel(node.label, 18))}</text>

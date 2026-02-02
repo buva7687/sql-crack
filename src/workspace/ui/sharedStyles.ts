@@ -202,9 +202,49 @@ export function getBaseStyles(): string {
             width: 18px; height: 18px; margin-left: 4px;
             border-radius: 50%; background: var(--bg-tertiary);
             color: var(--text-muted); font-size: 11px; font-weight: 600;
-            cursor: help; border: 1px solid var(--border-subtle);
+            cursor: pointer; border: 1px solid var(--border-subtle);
+            position: relative;
         }
         .graph-mode-help:hover { color: var(--text-primary); border-color: var(--border-color); }
+        .graph-mode-help:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .graph-mode-help-tooltip {
+            display: none;
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            width: 240px;
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            text-align: left;
+        }
+        .graph-mode-help-tooltip.visible { display: block; }
+        .help-tooltip-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .help-tooltip-item {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+        .help-tooltip-item:last-child { margin-bottom: 0; }
+        .help-tooltip-item strong { color: var(--text-primary); }
+
+        /* ========== Reduced Motion ========== */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     `;
 }
 
@@ -325,6 +365,7 @@ export function getSharedViewStyles(): string {
     return `
         /* ========== Shared View Container ========== */
         .view-container {
+            width: 100%;
             max-width: 1000px;
             margin: 0 auto;
             padding: 24px;
@@ -1109,12 +1150,13 @@ export function getImpactFormStyles(): string {
     return `
         /* Impact Form Styles */
         .impact-form-container {
-            max-width: 900px; margin: 0 auto;
+            width: 100%; max-width: 900px; margin: 0 auto;
         }
         .impact-form {
             background: var(--bg-secondary); border-radius: var(--radius-xl);
             border: 1px solid var(--border-subtle); padding: 32px;
             margin-bottom: 24px; box-shadow: var(--shadow-md);
+            width: 100%;
         }
         .form-header {
             display: flex; align-items: flex-start; gap: 16px;
@@ -1393,6 +1435,7 @@ export function getImpactFormStyles(): string {
             padding: 2px 8px;
             font-size: 10px;
             color: var(--text-secondary);
+            text-transform: capitalize;
         }
         .item-severity {
             font-weight: 600;
@@ -1633,7 +1676,7 @@ export function getLineageVisualStyles(): string {
         .node-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
         .node-icon { font-size: 16px; }
         .node-name { flex: 1; font-weight: 500; color: var(--text-primary); }
-        .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); }
+        .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); text-transform: capitalize; }
         .connection-count {
             font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm);
             min-width: 28px; text-align: center;
