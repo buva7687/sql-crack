@@ -78,27 +78,15 @@ const webviewConfig = {
   optimization: {
     minimize: isProduction,
     usedExports: true,
-    sideEffects: true,
-    splitChunks: isProduction ? {
-      chunks: 'all',
-      cacheGroups: {
-        vendor: {
-          test: /node_modules/,
-          name: 'vendors',
-          priority: 10
-        },
-        parser: {
-          test: /[\\/]node_modules[\\/]node-sql-parser[\\/]/,
-          name: 'parser',
-          priority: 20
-        }
-      }
-    } : undefined
+    sideEffects: true
+    // Note: Code splitting disabled to avoid CSP issues with dynamically loaded chunks
+    // in VS Code webview. The webview CSP requires nonce on all scripts, and webpack
+    // chunks loaded via dynamic import don't get the nonce attribute.
   },
   performance: {
     hints: isProduction ? 'warning' : false,
-    maxAssetSize: 1000000, // 1 MB target
-    maxEntrypointSize: 1000000
+    maxAssetSize: 4000000, // 4 MB (node-sql-parser is ~2.4MB)
+    maxEntrypointSize: 4000000
   },
   plugins: [
     new webpack.ProvidePlugin({

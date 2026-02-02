@@ -1,15 +1,16 @@
 /**
  * Parser Client for async SQL parsing
  *
- * Provides async parsing API with dynamic imports for code splitting.
+ * Provides async parsing API that wraps the synchronous parser.
+ * Uses regular imports (not dynamic) to avoid CSP issues with webpack chunks.
  * Web Worker implementation is deferred to future work due to bundling complexity.
- * The async API still provides benefits by allowing chunked code loading.
  */
 
 import { ParseResult, BatchParseResult, SqlDialect, ValidationError, ValidationLimits } from './types';
+import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS } from './sqlParser';
 
 /**
- * Parse SQL asynchronously using dynamic imports
+ * Parse SQL asynchronously
  *
  * @param sql - SQL string to parse
  * @param dialect - SQL dialect to use
@@ -19,9 +20,8 @@ export async function parseAsync(
     sql: string,
     dialect: SqlDialect = 'MySQL'
 ): Promise<ParseResult> {
-    // Dynamically import parseSql for code splitting
-    const { parseSql } = await import('./sqlParser');
-    return parseSql(sql, dialect);
+    // Use Promise.resolve to make it async without blocking
+    return Promise.resolve(parseSql(sql, dialect));
 }
 
 /**
@@ -37,10 +37,8 @@ export async function parseBatchAsync(
     limits?: ValidationLimits,
     options?: { combineDdlStatements?: boolean }
 ): Promise<BatchParseResult> {
-    // Dynamically import parseSqlBatch for code splitting
-    const { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } = await import('./sqlParser');
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
-    return parseSqlBatch(sql, dialect, appliedLimits, options ?? {});
+    return Promise.resolve(parseSqlBatch(sql, dialect, appliedLimits, options ?? {}));
 }
 
 /**
@@ -56,15 +54,12 @@ export async function validateAsync(
     maxSizeBytes?: number,
     maxQueryCount?: number
 ): Promise<ValidationError | null> {
-    // Dynamically import validateSql for code splitting
-    const { validateSql, DEFAULT_VALIDATION_LIMITS } = await import('./sqlParser');
-
     const limits = {
         maxSqlSizeBytes: maxSizeBytes ?? DEFAULT_VALIDATION_LIMITS.maxSqlSizeBytes,
         maxQueryCount: maxQueryCount ?? DEFAULT_VALIDATION_LIMITS.maxQueryCount
     };
 
-    return validateSql(sql, limits);
+    return Promise.resolve(validateSql(sql, limits));
 }
 
 /**
