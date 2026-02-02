@@ -335,11 +335,12 @@ export class ImpactView {
                 ? definitionFiles.join('\n')
                 : (filePath || definitionFiles[0] || 'File location not available');
 
+            const severityIcon = item.severity === 'high' ? '⚠️' : item.severity === 'medium' ? '●' : '○';
             html += `
                 <div class="impact-item severity-${item.severity}">
                     <div class="item-header">
                         <span class="item-type">${typeLabel}</span>
-                        <span class="item-severity">${item.severity}</span>
+                        <span class="item-severity">${severityIcon} ${item.severity}</span>
                     </div>
                     <div class="item-name">${this.escapeHtml(item.node.name)}</div>
                     <div class="item-reason">${this.escapeHtml(item.reason)}</div>

@@ -1479,6 +1479,17 @@ ${bodyContent}
             <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
+        </div>
+
+        <!-- Keyboard Shortcuts Hint -->
+        <div class="keyboard-hints" id="graph-keyboard-hints">
+            <div class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Drag</kbd><span>Pan</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Click</kbd><span>Select</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
         </div>`;
     }
 
