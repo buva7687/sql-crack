@@ -1487,7 +1487,7 @@ ${bodyContent}
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Drag</kbd><span>Pan</span></div>
             <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Click</kbd><span>Select</span></div>
+            <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
         </div>`;
