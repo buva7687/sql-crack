@@ -6,7 +6,7 @@
  * The async API still provides benefits by allowing chunked code loading.
  */
 
-import { ParseResult, BatchParseResult, SqlDialect, ValidationError } from './types';
+import { ParseResult, BatchParseResult, SqlDialect, ValidationError, ValidationLimits } from './types';
 
 /**
  * Parse SQL asynchronously using dynamic imports
@@ -33,11 +33,14 @@ export async function parseAsync(
  */
 export async function parseBatchAsync(
     sql: string,
-    dialect: SqlDialect = 'MySQL'
+    dialect: SqlDialect = 'MySQL',
+    limits?: ValidationLimits,
+    options?: { combineDdlStatements?: boolean }
 ): Promise<BatchParseResult> {
     // Dynamically import parseSqlBatch for code splitting
-    const { parseSqlBatch } = await import('./sqlParser');
-    return parseSqlBatch(sql, dialect);
+    const { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } = await import('./sqlParser');
+    const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
+    return parseSqlBatch(sql, dialect, appliedLimits, options ?? {});
 }
 
 /**

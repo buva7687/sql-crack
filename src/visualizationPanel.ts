@@ -464,6 +464,9 @@ export class VisualizationPanel {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">
+        // Ensure webpack chunk loading uses the CSP nonce
+        window.__webpack_nonce__ = ${JSON.stringify(nonce)};
+
         window.initialSqlCode = ${JSON.stringify(sqlCode)};
         window.vscodeTheme = ${JSON.stringify(vscodeTheme)};
         window.defaultDialect = ${JSON.stringify(options.dialect)};

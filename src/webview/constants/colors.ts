@@ -188,6 +188,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
     subquery: '#7dd3fc',   // light teal (sky-300)
     window: '#f0abfc',     // light fuchsia (fuchsia-300)
     case: '#fde047',       // light yellow (yellow-300)
+    cluster: '#64748b',    // slate (cluster nodes)
 };
 
 export const WARNING_COLORS: Record<Severity, string> = {

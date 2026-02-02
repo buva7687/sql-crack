@@ -42,6 +42,13 @@ import {
     throttle,
     VirtualizationResult
 } from './virtualization';
+import {
+    createClusters,
+    getClusterColor,
+    shouldCluster,
+    toggleCluster,
+    NodeCluster,
+} from './clustering';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
 
@@ -96,6 +103,11 @@ let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
+let renderNodes: FlowNode[] = [];
+let renderEdges: FlowEdge[] = [];
+let renderNodeMap: Map<string, FlowNode> = new Map();
+let currentClusters: NodeCluster[] = [];
+let clusterNodeMap: Map<string, NodeCluster> = new Map();
 let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
@@ -768,7 +780,7 @@ function updateTransform(): void {
  * Uses 60fps throttle (16ms) for smooth updates
  */
 const throttledVirtualizedRender = throttle(() => {
-    if (virtualizationEnabled && shouldVirtualize(currentNodes.length)) {
+    if (virtualizationEnabled && shouldVirtualize(renderNodes.length)) {
         updateVisibleNodes();
     }
 }, 16);
@@ -778,7 +790,7 @@ const throttledVirtualizedRender = throttle(() => {
  * Called during pan/zoom to add/remove nodes from DOM
  */
 function updateVisibleNodes(): void {
-    if (!svg || !mainGroup || currentNodes.length === 0) {
+    if (!svg || !mainGroup || renderNodes.length === 0) {
         return;
     }
 
@@ -791,7 +803,7 @@ function updateVisibleNodes(): void {
         state.offsetY
     );
 
-    const result = getVisibleElements(currentNodes, currentEdges, bounds);
+    const result = getVisibleElements(renderNodes, renderEdges, bounds);
     lastVirtualizationResult = result;
 
     // Get the nodes and edges groups
@@ -1172,6 +1184,77 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
     }
 }
 
+function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+    if (!shouldCluster(nodes.length)) {
+        currentClusters = [];
+        clusterNodeMap.clear();
+        return { nodes, edges };
+    }
+
+    const baseClusters = createClusters(nodes);
+    if (baseClusters.length === 0) {
+        currentClusters = [];
+        clusterNodeMap.clear();
+        return { nodes, edges };
+    }
+
+    const previousById = new Map(currentClusters.map(cluster => [cluster.id, cluster]));
+    currentClusters = baseClusters.map(cluster => {
+        const previous = previousById.get(cluster.id);
+        return previous ? { ...cluster, expanded: previous.expanded } : cluster;
+    });
+    clusterNodeMap = new Map(currentClusters.map(cluster => [cluster.id, cluster]));
+
+    const collapsedClusters = currentClusters.filter(cluster => !cluster.expanded);
+    if (collapsedClusters.length === 0) {
+        return { nodes, edges };
+    }
+
+    const nodeToCluster = new Map<string, NodeCluster>();
+    for (const cluster of collapsedClusters) {
+        for (const nodeId of cluster.nodeIds) {
+            nodeToCluster.set(nodeId, cluster);
+        }
+    }
+
+    const visibleNodes = nodes.filter(node => !nodeToCluster.has(node.id));
+    const clusterNodes: FlowNode[] = collapsedClusters.map(cluster => ({
+        id: cluster.id,
+        type: 'cluster',
+        label: cluster.label,
+        description: 'Click to expand',
+        x: cluster.x,
+        y: cluster.y,
+        width: cluster.width,
+        height: cluster.height,
+    }));
+
+    const edgeMap = new Map<string, FlowEdge>();
+    for (const edge of edges) {
+        const sourceCluster = nodeToCluster.get(edge.source);
+        const targetCluster = nodeToCluster.get(edge.target);
+        const source = sourceCluster ? sourceCluster.id : edge.source;
+        const target = targetCluster ? targetCluster.id : edge.target;
+        if (source === target) {
+            continue;
+        }
+        const key = `${source}->${target}`;
+        if (!edgeMap.has(key)) {
+            edgeMap.set(key, {
+                ...edge,
+                id: `${edge.id}:${key}`,
+                source,
+                target,
+            });
+        }
+    }
+
+    return {
+        nodes: [...visibleNodes, ...clusterNodes],
+        edges: [...edgeMap.values()],
+    };
+}
+
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
@@ -1185,6 +1268,7 @@ export function render(result: ParseResult): void {
     currentSql = result.sql;
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
+
 
     // Reset highlight state
     state.highlightedColumnSources = [];
@@ -1205,6 +1289,9 @@ export function render(result: ParseResult): void {
     mainGroup.innerHTML = '';
 
     if (result.error) {
+        renderNodes = [];
+        renderEdges = [];
+        renderNodeMap.clear();
         renderError(result.error);
         updateStatsPanel();
         updateHintsPanel();
@@ -1214,6 +1301,9 @@ export function render(result: ParseResult): void {
     }
 
     if (result.nodes.length === 0) {
+        renderNodes = [];
+        renderEdges = [];
+        renderNodeMap.clear();
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -1229,12 +1319,17 @@ export function render(result: ParseResult): void {
     // This ensures edges are drawn correctly
     preCalculateExpandableDimensions(result.nodes);
 
+    const clustered = applyClustering(result.nodes, result.edges);
+    renderNodes = clustered.nodes;
+    renderEdges = clustered.edges;
+    renderNodeMap = new Map(renderNodes.map(node => [node.id, node]));
+
     // Determine if we should use virtualization
-    const useVirtualization = virtualizationEnabled && shouldVirtualize(result.nodes.length);
+    const useVirtualization = virtualizationEnabled && shouldVirtualize(renderNodes.length);
 
     // Get nodes and edges to render (all or visible subset)
-    let nodesToRender = result.nodes;
-    let edgesToRender = result.edges;
+    let nodesToRender = renderNodes;
+    let edgesToRender = renderEdges;
 
     if (useVirtualization && svg) {
         // For initial render with virtualization, render all nodes first
@@ -1302,6 +1397,37 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('tabindex', '0');
     const nodeDescription = node.description ? `. ${node.description}` : '';
     group.setAttribute('aria-label', `${node.type} node: ${node.label}${nodeDescription}`);
+
+    if (node.type === 'cluster') {
+        renderClusterNode(node, group);
+        group.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const cluster = clusterNodeMap.get(node.id);
+            if (!cluster) {
+                return;
+            }
+            currentClusters = toggleCluster(cluster, currentClusters);
+            const currentResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats || ({} as QueryStats),
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult as ParseResult);
+        });
+        group.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                (group as unknown as SVGGElement).click();
+            }
+        });
+        parent.appendChild(group);
+        return;
+    }
 
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
@@ -1554,6 +1680,46 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     }
 
     parent.appendChild(group);
+}
+
+function renderClusterNode(node: FlowNode, group: SVGGElement): void {
+    const cluster = clusterNodeMap.get(node.id);
+    const clusterColor = cluster ? getClusterColor(cluster.type) : getNodeColor('cluster');
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'node-rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', UI_COLORS.backgroundSubtle);
+    rect.setAttribute('stroke', clusterColor);
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('filter', 'url(#shadow)');
+    group.appendChild(rect);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + node.width / 2));
+    label.setAttribute('y', String(node.y + node.height / 2));
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('dominant-baseline', 'middle');
+    label.setAttribute('fill', UI_COLORS.text);
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    label.textContent = node.label;
+    group.appendChild(label);
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + node.width - 16));
+    icon.setAttribute('y', String(node.y + 16));
+    icon.setAttribute('text-anchor', 'middle');
+    icon.setAttribute('dominant-baseline', 'middle');
+    icon.setAttribute('fill', clusterColor);
+    icon.setAttribute('font-size', '14');
+    icon.setAttribute('font-weight', '700');
+    icon.textContent = '+';
+    group.appendChild(icon);
 }
 
 function renderStandardNode(node: FlowNode, group: SVGGElement): void {
@@ -3129,8 +3295,8 @@ function toggleNodeExpansion(node: FlowNode): void {
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
-    const sourceNode = currentNodes.find(n => n.id === edge.source);
-    const targetNode = currentNodes.find(n => n.id === edge.target);
+    const sourceNode = renderNodeMap.get(edge.source) || currentNodes.find(n => n.id === edge.source);
+    const targetNode = renderNodeMap.get(edge.target) || currentNodes.find(n => n.id === edge.target);
 
     if (!sourceNode || !targetNode) { return; }
 
@@ -4388,14 +4554,15 @@ function updateHintsPanel(): void {
 }
 
 function fitView(): void {
-    if (!svg || currentNodes.length === 0) { return; }
+    const nodesForFit = renderNodes.length > 0 ? renderNodes : currentNodes;
+    if (!svg || nodesForFit.length === 0) { return; }
 
     const rect = svg.getBoundingClientRect();
     const padding = 80;
 
     // Calculate bounds including nodes and expanded cloud containers
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const node of currentNodes) {
+    for (const node of nodesForFit) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
@@ -5242,8 +5409,8 @@ function showClipboardNotification(type: 'success' | 'error', message: string): 
 
 function calculateBounds(): { minX: number; minY: number; width: number; height: number } {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    for (const node of currentNodes) {
+    const nodesForBounds = renderNodes.length > 0 ? renderNodes : currentNodes;
+    for (const node of nodesForBounds) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
@@ -5273,7 +5440,8 @@ function getNodeIcon(type: FlowNode['type']): string {
         union: '∪',
         subquery: '⊂',
         window: '▦',
-        case: '⎇'
+        case: '⎇',
+        cluster: '▣'
     };
     return icons[type] || '○';
 }
@@ -6073,8 +6241,9 @@ export function getFormattedSql(): string {
 export function updateMinimap(): void {
     const minimapContainer = document.getElementById('minimap-container');
     const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
+    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!minimapContainer || !minimapSvg || currentNodes.length < 8) {
+    if (!minimapContainer || !minimapSvg || nodesForMinimap.length < 8) {
         // Only show minimap for complex queries (8+ nodes)
         if (minimapContainer) {minimapContainer.style.display = 'none';}
         return;
@@ -6096,7 +6265,7 @@ export function updateMinimap(): void {
     // Render mini nodes
     minimapSvg.innerHTML = '';
 
-    for (const node of currentNodes) {
+    for (const node of nodesForMinimap) {
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String((node.x - bounds.minX) * mapScale + padding));
         rect.setAttribute('y', String((node.y - bounds.minY) * mapScale + padding));
@@ -6114,8 +6283,9 @@ export function updateMinimap(): void {
 function updateMinimapViewport(): void {
     const viewport = document.getElementById('minimap-viewport');
     const minimapContainer = document.getElementById('minimap-container');
+    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!viewport || !minimapContainer || !svg || currentNodes.length < 8) {return;}
+    if (!viewport || !minimapContainer || !svg || nodesForMinimap.length < 8) {return;}
 
     const bounds = calculateBounds();
     const svgRect = svg.getBoundingClientRect();

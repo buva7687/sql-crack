@@ -2,8 +2,8 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseSqlBatch, SqlDialect, BatchParseResult } from './sqlParser';
-import { LayoutType } from './types';
+import { parseBatchAsync } from './parserClient';
+import { BatchParseResult, LayoutType, SqlDialect } from './types';
 import {
     initRenderer,
     render,
@@ -77,6 +77,7 @@ let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
+let parseRequestId = 0;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -117,7 +118,7 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
         dialectSelect.value = currentDialect;
     }
 
-    visualize(sql);
+    void visualize(sql);
     clearStaleIndicator();
 }
 
@@ -216,7 +217,7 @@ function init(): void {
     // Parse and render initial SQL
     const sql = window.initialSqlCode || '';
     if (sql) {
-        visualize(sql);
+        void visualize(sql);
     }
 }
 
@@ -250,7 +251,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             currentDialect = dialect;
             const sql = window.initialSqlCode || '';
             if (sql) {
-                visualize(sql);
+                void visualize(sql);
             }
         },
         onRefresh: () => {
@@ -259,7 +260,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             } else {
                 const sql = window.initialSqlCode || '';
                 if (sql) {
-                    visualize(sql);
+                    void visualize(sql);
                     clearStaleIndicator();
                 }
             }
@@ -310,10 +311,35 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 // Query Visualization
 // ============================================================
 
-function visualize(sql: string): void {
-    batchResult = parseSqlBatch(sql, currentDialect, undefined, {
-        combineDdlStatements: window.combineDdlStatements === true
-    });
+async function visualize(sql: string): Promise<void> {
+    const requestId = ++parseRequestId;
+
+    try {
+        const result = await parseBatchAsync(
+            sql,
+            currentDialect,
+            undefined,
+            {
+                combineDdlStatements: window.combineDdlStatements === true
+            }
+        );
+        if (requestId !== parseRequestId) {
+            return;
+        }
+        batchResult = result;
+    } catch (error) {
+        if (requestId !== parseRequestId) {
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to parse SQL';
+        updateErrorBadge(1, [{ queryIndex: 0, message }]);
+        batchResult = {
+            queries: [],
+            errorCount: 1,
+            parseErrors: [{ queryIndex: 0, message }]
+        } as BatchParseResult;
+        return;
+    }
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer
@@ -396,7 +422,7 @@ function handlePinnedTabSwitch(tabId: string | null): void {
     if (tabId === null) {
         const sql = window.initialSqlCode || '';
         if (sql) {
-            visualize(sql);
+            void visualize(sql);
         }
     } else {
         const tab = findPinnedTab(tabId);
