@@ -1645,6 +1645,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
                     hints: currentHints,
                     sql: currentSql,
                     columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
                     tableUsage: currentTableUsage
                 };
                 // Preserve current layout type
@@ -2821,6 +2822,7 @@ function addCloudCloseButton(
             hints: currentHints,
             sql: currentSql,
             columnLineage: currentColumnLineage,
+            columnFlows: currentColumnFlows,
             tableUsage: currentTableUsage
         };
         render(result);
@@ -3290,8 +3292,17 @@ function toggleNodeExpansion(node: FlowNode): void {
     }
 
     // Re-render (this is a simple approach; a more efficient one would update in place)
-    const currentResult = { nodes: currentNodes, edges: currentEdges, stats: currentStats!, hints: currentHints, sql: '' };
-    render(currentResult as ParseResult);
+    const currentResult: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage,
+        columnFlows: currentColumnFlows,
+        tableUsage: currentTableUsage
+    };
+    render(currentResult);
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
@@ -6091,6 +6102,7 @@ export function toggleNodeCollapse(nodeId: string): void {
         hints: currentHints,
         sql: currentSql,
         columnLineage: currentColumnLineage,
+        columnFlows: currentColumnFlows,
         tableUsage: currentTableUsage
     };
     render(result);
@@ -6946,6 +6958,7 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
                     hints: currentHints,
                     sql: currentSql,
                     columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
                     tableUsage: currentTableUsage
                 };
                 render(result);
@@ -7039,12 +7052,13 @@ export function toggleColumnFlows(show?: boolean): void {
  * Show the column lineage selection panel
  */
 function showColumnLineagePanel(): void {
+    // Always remove existing panel first (fixes stale panel when switching queries)
+    hideColumnLineagePanel();
+
     if (!currentColumnFlows || currentColumnFlows.length === 0) {
+        // No column flows for this query type (e.g., UPDATE, DELETE, INSERT)
         return;
     }
-
-    // Remove existing panel
-    hideColumnLineagePanel();
 
     // Create panel
     columnLineagePanel = document.createElement('div');
