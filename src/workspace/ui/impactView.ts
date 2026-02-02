@@ -98,15 +98,17 @@ export class ImpactView {
                                         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                                     </svg>
                                     Table/View
+                                    <span class="field-hint">(${tableCount} tables, ${viewCount} views)</span>
                                 </label>
                                 <select id="impact-table-select" class="form-select">
-                                    <option value="">-- Select a table or view --</option>
+                                    <option value="">-- Select a table or view (${tableCount} tables, ${viewCount} views) --</option>
                                     ${tables.map(table => `
                                         <option value="${this.escapeHtml(table.id)}" data-name="${this.escapeHtml(table.name)}" data-type="${table.type}">
                                             ${this.escapeHtml(table.name)} (${table.type})
                                         </option>
                                     `).join('')}
                                 </select>
+                                <div class="field-subtext">Available: ${tableCount} tables • ${viewCount} views</div>
                             </div>
                             <div class="view-form-field">
                                 <label>
@@ -194,7 +196,7 @@ export class ImpactView {
                     ${report.target.type} "${this.escapeHtml(report.target.name)}"</p>
                 </div>
 
-                ${this.generateSummary(report.summary)}
+                ${this.generateSummary(report)}
 
                 ${report.directImpacts.length > 0 ? this.generateImpactList('Direct Impacts', report.directImpacts) : ''}
 
@@ -240,27 +242,63 @@ export class ImpactView {
     /**
      * Generate summary section
      */
-    private generateSummary(summary: ImpactReport['summary']): string {
+    private generateSummary(report: ImpactReport): string {
+        const impacts = [...report.directImpacts, ...report.transitiveImpacts];
+        const unique = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+        const totalLabel = impacts.length > 0 && impacts.every(i => i.node.type === 'column')
+            ? 'Columns Affected'
+            : 'Total Affected';
+
+        const totalItems = unique(impacts.map(item => `${item.node.name} (${item.node.type})`)).map(item => ({
+            label: item,
+            title: 'Affected item'
+        }));
+        const tables = unique(impacts.filter(i => i.node.type === 'table').map(i => i.node.name)).map(name => ({
+            label: name,
+            title: 'Table'
+        }));
+        const views = unique(impacts.filter(i => i.node.type === 'view').map(i => i.node.name)).map(name => ({
+            label: name,
+            title: 'View'
+        }));
+        const files = unique(impacts.map(i => i.filePath).filter(Boolean) as string[]).map(filePath => {
+            const fileName = filePath.split('/').pop() || filePath;
+            return {
+                label: fileName,
+                title: filePath
+            };
+        });
+
+        const encodeList = (items: Array<{ label: string; title: string }>) =>
+            encodeURIComponent(JSON.stringify(items));
+
         return `
             <div class="impact-summary">
                 <h3>Summary</h3>
-                <div class="summary-stats">
-                    <div class="stat-item">
-                        <span class="stat-value">${summary.totalAffected}</span>
-                        <span class="stat-label">Total Affected</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-value">${summary.tablesAffected}</span>
+                <div class="summary-stats summary-stats-compact">
+                    <button class="stat-item impact-summary-trigger" data-title="${totalLabel}" data-list="${encodeList(totalItems)}" type="button">
+                        <span class="stat-value">${report.summary.totalAffected}</span>
+                        <span class="stat-label">${totalLabel}</span>
+                    </button>
+                    <button class="stat-item impact-summary-trigger" data-title="Tables" data-list="${encodeList(tables)}" type="button">
+                        <span class="stat-value">${report.summary.tablesAffected}</span>
                         <span class="stat-label">Tables</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-value">${summary.viewsAffected}</span>
+                    </button>
+                    <button class="stat-item impact-summary-trigger" data-title="Views" data-list="${encodeList(views)}" type="button">
+                        <span class="stat-value">${report.summary.viewsAffected}</span>
                         <span class="stat-label">Views</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-value">${summary.filesAffected}</span>
+                    </button>
+                    <button class="stat-item impact-summary-trigger" data-title="Files" data-list="${encodeList(files)}" type="button">
+                        <span class="stat-value">${report.summary.filesAffected}</span>
                         <span class="stat-label">Files</span>
+                    </button>
+                </div>
+                <div class="summary-details" id="impact-summary-details" style="display: none;">
+                    <div class="summary-details-header">
+                        <span id="impact-summary-title">Details</span>
+                        <button class="summary-details-close" id="impact-summary-close" type="button">Close</button>
                     </div>
+                    <div class="summary-details-list" id="impact-summary-list"></div>
                 </div>
             </div>
         `;
@@ -272,22 +310,41 @@ export class ImpactView {
     private generateImpactList(title: string, items: ImpactItem[]): string {
         let html = `
             <div class="impact-list">
-                <h3>${title} (${items.length})</h3>
+                <div class="impact-list-header">
+                    <h3>${title}</h3>
+                    <span class="impact-count">${items.length} affected</span>
+                </div>
                 <div class="items-grid">
         `;
 
         for (const item of items) {
+            const definitionFiles = Array.isArray(item.node.metadata?.definitionFiles)
+                ? item.node.metadata.definitionFiles as string[]
+                : [];
+            const filePath = item.filePath && item.filePath !== 'Unknown' ? item.filePath : '';
+            const fileName = filePath ? filePath.split('/').pop() || filePath : '';
+            const location = item.lineNumber > 0 ? `${fileName} • Line ${item.lineNumber}` : fileName;
+            const typeLabel = item.node.type === 'view' ? 'view'
+                : item.node.type === 'table' ? 'table'
+                    : item.node.type;
+            const hasMultipleDefinitions = !filePath && definitionFiles.length > 1;
+            const displayFile = hasMultipleDefinitions
+                ? `${definitionFiles.length} definition files`
+                : (location || (definitionFiles[0]?.split('/').pop() || 'Unknown file'));
+            const tooltip = hasMultipleDefinitions
+                ? definitionFiles.join('\n')
+                : (filePath || definitionFiles[0] || 'File location not available');
+
             html += `
                 <div class="impact-item severity-${item.severity}">
                     <div class="item-header">
-                        <span class="item-type">${item.node.type}</span>
+                        <span class="item-type">${typeLabel}</span>
                         <span class="item-severity">${item.severity}</span>
                     </div>
                     <div class="item-name">${this.escapeHtml(item.node.name)}</div>
                     <div class="item-reason">${this.escapeHtml(item.reason)}</div>
-                    <div class="item-location">
-                        <span>📄 ${this.escapeHtml(item.filePath)}</span>
-                        ${item.lineNumber > 0 ? `<span>Line ${item.lineNumber}</span>` : ''}
+                    <div class="item-location" title="${this.escapeHtml(tooltip)}">
+                        <span>📄 ${this.escapeHtml(displayFile)}</span>
                     </div>
                 </div>
             `;

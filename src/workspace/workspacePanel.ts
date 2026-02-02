@@ -1188,7 +1188,7 @@ ${bodyContent}
                 
                 <!-- Graph mode switcher (visible only when Graph tab is active, appears below view tabs) -->
                 <div id="graph-mode-switcher" class="graph-mode-switcher" 
-                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables."
+                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables (3+)."
                     aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
                     <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
                         title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
@@ -1199,6 +1199,7 @@ ${bodyContent}
                     <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
                         title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
                         aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
+                    <span class="graph-mode-help" title="Modes: Files = file-to-file dependencies. Tables = table-to-table relationships. Hybrid = files + tables referenced 3+ times.">?</span>
                 </div>
             </div>
 
@@ -1389,7 +1390,7 @@ ${bodyContent}
                             <div class="legend-item"><div class="legend-node file"></div><span>SQL Files</span></div>
                             <div class="legend-item"><div class="legend-node table"></div><span>Tables</span></div>
                             <div class="legend-item"><div class="legend-node view"></div><span>Views</span></div>
-                            <div class="legend-item"><div class="legend-node external"></div><span>External (undefined)</span></div>
+                            <div class="legend-item" title="Referenced in queries but not defined in this workspace"><div class="legend-node external"></div><span>External (not defined here)</span></div>
                         </div>
                         <div class="legend-group">
                             <div class="legend-group-title">Edges</div>
@@ -1448,8 +1449,8 @@ ${bodyContent}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
-                <div class="empty-state-title">No dependencies found</div>
-                <div>Try refreshing or check your SQL files</div>
+                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'No dependencies found'}</div>
+                <div>${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'Try clearing filters or changing your search terms.' : 'Try refreshing or check your SQL files.'}</div>
             </div>
             `}
         </div>

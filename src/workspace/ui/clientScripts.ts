@@ -338,6 +338,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         ${getEventDelegationScript()}
         ${getNodeInteractionsScript()}
         ${getTooltipScript()}
+        ${getImpactSummaryScript()}
         ${getImpactFormScript()}
         ${getTableSearchScript()}
         ${getVisualLineageSearchScript()}
@@ -756,6 +757,7 @@ function getMessageHandlingScript(): string {
                         } else {
                             lineageContent.innerHTML = message.data.html;
                         }
+                        setupImpactSummaryDetails();
                     }
                     break;
                 case 'tableExplorerResult':
@@ -1236,6 +1238,60 @@ function getImpactFormScript(): string {
     `;
 }
 
+function getImpactSummaryScript(): string {
+    return `
+        function setupImpactSummaryDetails() {
+            const details = document.getElementById('impact-summary-details');
+            const titleEl = document.getElementById('impact-summary-title');
+            const listEl = document.getElementById('impact-summary-list');
+            const closeBtn = document.getElementById('impact-summary-close');
+            if (!details || !titleEl || !listEl) {
+                return;
+            }
+
+            function escapeHtml(text) {
+                return text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            closeBtn?.addEventListener('click', () => {
+                details.style.display = 'none';
+            });
+
+            document.querySelectorAll('.impact-summary-trigger').forEach(button => {
+                button.addEventListener('click', () => {
+                    const title = button.getAttribute('data-title') || 'Details';
+                    const listRaw = button.getAttribute('data-list') || '[]';
+                    let items = [];
+                    try {
+                        items = JSON.parse(decodeURIComponent(listRaw));
+                    } catch {
+                        items = [];
+                    }
+
+                    titleEl.textContent = title;
+                    if (!items.length) {
+                        listEl.innerHTML = '<div class="summary-item">No items found</div>';
+                    } else {
+                        listEl.innerHTML = items.map(item => {
+                            const label = escapeHtml(item.label || '');
+                            const titleAttr = escapeHtml(item.title || '');
+                            return '<div class="summary-item" title="' + titleAttr + '">' + label + '</div>';
+                        }).join('');
+                    }
+
+                    details.style.display = 'block';
+                    details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
+            });
+        }
+    `;
+}
+
 function getTableSearchScript(): string {
     return `
         // ========== Table Search and Filter Setup ==========
@@ -1244,6 +1300,7 @@ function getTableSearchScript(): string {
             const searchClear = document.getElementById('table-search-clear');
             const typeFilter = document.getElementById('table-type-filter');
             const sortSelect = document.getElementById('table-sort');
+            const clearFilters = document.getElementById('table-clear-filters');
             const tableGrid = document.getElementById('table-list-grid');
             const emptyFilter = document.getElementById('table-list-empty-filter');
             const resultsInfo = document.getElementById('table-list-results-info');
@@ -1331,12 +1388,8 @@ function getTableSearchScript(): string {
                 }
 
                 if (resultsInfo && resultsCount) {
-                    if (visibleItems.length < totalItems || searchQuery || typeValue !== 'all') {
-                        resultsInfo.style.display = 'block';
-                        resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
-                    } else {
-                        resultsInfo.style.display = 'none';
-                    }
+                    resultsInfo.style.display = 'block';
+                    resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
                 }
 
                 if (emptyFilter && emptyMessage) {
@@ -1357,6 +1410,9 @@ function getTableSearchScript(): string {
                 if (searchClear) {
                     searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
                 }
+                if (clearFilters) {
+                    clearFilters.style.display = searchQuery || typeValue !== 'all' ? 'inline-flex' : 'none';
+                }
             }
 
             function debouncedFilter() {
@@ -1368,6 +1424,13 @@ function getTableSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (typeFilter) typeFilter.value = 'all';
+                filterTables();
+                searchInput?.focus();
+            });
+            clearFilters?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                if (typeFilter) typeFilter.value = 'all';
+                if (sortSelect) sortSelect.value = 'connected';
                 filterTables();
                 searchInput?.focus();
             });
