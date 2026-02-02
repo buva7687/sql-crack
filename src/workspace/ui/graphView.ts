@@ -57,27 +57,27 @@ export function generateGraphBody(params: GraphBodyParams): string {
                 <span class="header-counts">(${graph.nodes.length} objects, ${graph.edges.length} relationships)</span>
             </div>
             <div class="header-right">
-                <button class="icon-btn" id="btn-sidebar" title="Toggle Sidebar">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-sidebar" title="Toggle Sidebar" aria-label="Toggle sidebar panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"/>
                         <line x1="9" y1="3" x2="9" y2="21"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-refresh" title="Refresh">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-refresh" title="Refresh" aria-label="Refresh workspace data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M23 4v6h-6"/>
                         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-view-issues" title="View Issues">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-view-issues" title="View Issues" aria-label="View issues in current file">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <circle cx="12" cy="12" r="10"/>
                         <line x1="12" y1="8" x2="12" y2="12"/>
                         <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-all-issues" title="All Issues">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-all-issues" title="All Issues" aria-label="View all workspace issues">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
                         <line x1="14" y1="2" x2="14" y2="22"/>
                         <line x1="2" y1="6" x2="22" y2="6"/>
@@ -149,8 +149,8 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
                     <path d="M21 21l-4.35-4.35"/>
                 </svg>
                 <input type="text" id="search-input" class="search-input" placeholder="Search nodes..." value="${escapeHtml(searchFilter.query)}">
-                <button class="icon-btn" id="btn-clear-search" style="display: ${searchFilter.query ? 'flex' : 'none'}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-clear-search" title="Clear search" aria-label="Clear search" style="display: ${searchFilter.query ? 'flex' : 'none'}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M18 6L6 18M6 6l12 12"/>
                     </svg>
                 </button>

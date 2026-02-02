@@ -563,7 +563,7 @@ function getViewModeScript(): string {
                 if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
                     const prev = tableExplorerHistory.pop();
                     if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
-                    lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                    lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                     vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
                     updateBackButtonText();
                 } else {
@@ -669,7 +669,7 @@ function getContextMenuScript(): string {
                     case 'showUpstream':
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading upstream dependencies...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading upstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
                             vscode.postMessage({
                                 command: 'getUpstream',
@@ -689,7 +689,7 @@ function getContextMenuScript(): string {
                     case 'showDownstream':
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading downstream dependencies...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading downstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
                             vscode.postMessage({
                                 command: 'getDownstream',
@@ -709,7 +709,7 @@ function getContextMenuScript(): string {
                     case 'analyzeImpact':
                         switchToView('impact');
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Analyzing impact...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         vscode.postMessage({
                             command: 'analyzeImpact',
                             type: 'table',
@@ -720,7 +720,7 @@ function getContextMenuScript(): string {
                     case 'exploreTable':
                         switchToView('tableExplorer');
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading table details...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
                         vscode.postMessage({
                             command: 'exploreTable',
                             tableName: nodeName
@@ -964,18 +964,18 @@ function getEventDelegationScript(): string {
                         }
                         currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
                         vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
                         break;
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                     case 'show-downstream':
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                 }

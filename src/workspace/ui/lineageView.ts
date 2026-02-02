@@ -256,27 +256,27 @@ export class LineageView {
                     ${svg}
 
                     <!-- Zoom Controls -->
-                    <div class="lineage-zoom-controls">
-                        <button class="zoom-btn" id="lineage-zoom-out" title="Zoom out">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="lineage-zoom-controls" role="toolbar" aria-label="Lineage graph zoom controls">
+                        <button class="zoom-btn" id="lineage-zoom-out" title="Zoom out" aria-label="Zoom out">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
                         </button>
-                        <span class="zoom-level" id="lineage-zoom-level">100%</span>
-                        <button class="zoom-btn" id="lineage-zoom-in" title="Zoom in">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <span class="zoom-level" id="lineage-zoom-level" aria-live="polite">100%</span>
+                        <button class="zoom-btn" id="lineage-zoom-in" title="Zoom in" aria-label="Zoom in">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
                         </button>
                         <div class="zoom-divider"></div>
-                        <button class="zoom-btn" id="lineage-zoom-fit" title="Fit to screen">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <button class="zoom-btn" id="lineage-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                             </svg>
                         </button>
-                        <button class="zoom-btn" id="lineage-zoom-reset" title="Reset view">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <button class="zoom-btn" id="lineage-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                                 <path d="M3 3v5h5"/>
                             </svg>
@@ -287,8 +287,8 @@ export class LineageView {
                     <div class="lineage-legend" id="lineage-legend">
                         <div class="legend-header">
                             <span class="legend-title">Legend</span>
-                            <button class="legend-toggle" id="legend-toggle" title="Toggle legend">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                            <button class="legend-toggle" id="legend-toggle" title="Toggle legend" aria-label="Toggle legend panel" aria-expanded="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true">
                                     <path d="M18 15l-6-6-6 6"/>
                                 </svg>
                             </button>

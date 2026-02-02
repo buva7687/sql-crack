@@ -1229,13 +1229,13 @@ ${bodyContent}
                         </svg>
                     </button>
                 </div>
-                <button class="icon-btn" id="btn-sidebar" title="Toggle panel">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                         <path d="M15 3v18"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})">
+                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})" aria-label="Toggle theme to ${this._isDarkTheme ? 'light' : 'dark'} mode">
                     ${this._isDarkTheme ? `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="5"/>
@@ -1252,8 +1252,8 @@ ${bodyContent}
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>`}
                 </button>
-                <button class="icon-btn" id="btn-refresh" title="Refresh">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-refresh" title="Refresh" aria-label="Refresh workspace data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
@@ -1463,21 +1463,21 @@ ${bodyContent}
         </div>
 
         <!-- Zoom Toolbar -->
-        <div class="zoom-toolbar">
-            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <div class="zoom-toolbar" role="toolbar" aria-label="Graph zoom controls">
+            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out" aria-label="Zoom out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in" aria-label="Zoom in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <div class="zoom-divider"></div>
-            <span class="zoom-level" id="zoom-level">100%</span>
+            <span class="zoom-level" id="zoom-level" aria-live="polite">100%</span>
             <div class="zoom-divider"></div>
-            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
             </button>
-            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
         </div>`;
     }
