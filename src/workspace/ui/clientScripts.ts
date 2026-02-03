@@ -50,11 +50,16 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const selectionFile = document.getElementById('selection-file');
         const selectionUpstream = document.getElementById('selection-upstream');
         const selectionDownstream = document.getElementById('selection-downstream');
+        const graphEmptyOverlay = document.getElementById('graph-empty-overlay');
+        const graphEmptyTitle = document.getElementById('graph-empty-title');
+        const graphEmptyDesc = document.getElementById('graph-empty-desc');
+        const graphEmptyActions = document.getElementById('graph-empty-actions');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========
         let selectedNodeId = null;
         let focusModeEnabled = false;
+        let activeEmptyState = null;
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -309,6 +314,102 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             if (focusModeEnabled) applyFocusMode();
         }
 
+        function markWelcomeSeen() {
+            const state = vscode.getState() || {};
+            if (!state.workspaceDepsWelcomeSeen) {
+                state.workspaceDepsWelcomeSeen = true;
+                vscode.setState(state);
+            }
+        }
+
+        function setGraphEmptyState(state) {
+            if (!graphEmptyOverlay || !graphEmptyTitle || !graphEmptyDesc || !graphEmptyActions) return;
+            if (!state) {
+                graphEmptyOverlay.classList.add('is-hidden');
+                graphEmptyOverlay.setAttribute('aria-hidden', 'true');
+                activeEmptyState = null;
+                return;
+            }
+
+            graphEmptyTitle.textContent = state.title;
+            graphEmptyDesc.textContent = state.description || '';
+            graphEmptyDesc.style.display = state.description ? '' : 'none';
+            graphEmptyActions.innerHTML = state.actionsHtml || '';
+            graphEmptyOverlay.classList.remove('is-hidden');
+            graphEmptyOverlay.setAttribute('aria-hidden', 'false');
+            activeEmptyState = state.id;
+        }
+
+        function getSearchMatchCount(query, typeFilter) {
+            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return 0;
+            const trimmedQuery = (query || '').trim();
+            const hasQuery = trimmedQuery.length > 0;
+            const queryLower = trimmedQuery.toLowerCase();
+            let count = 0;
+
+            for (const node of graphData.nodes) {
+                if (!node) continue;
+                if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+                if (!hasQuery) {
+                    count += 1;
+                    continue;
+                }
+
+                const label = (node.label || node.id || '').toString();
+                const filePath = (node.filePath || '').toString();
+                const haystack = (label + ' ' + filePath).toLowerCase();
+                if (haystack.includes(queryLower)) {
+                    count += 1;
+                }
+            }
+
+            return count;
+        }
+
+        function updateGraphEmptyState() {
+            if (!graphEmptyOverlay) return;
+            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+                setGraphEmptyState(null);
+                return;
+            }
+
+            const query = searchInput ? searchInput.value.trim() : '';
+            const typeFilter = filterType ? filterType.value : 'all';
+            const searchActive = Boolean(query) || typeFilter !== 'all';
+
+            if (searchActive) {
+                const matchCount = getSearchMatchCount(query, typeFilter);
+                if (matchCount === 0) {
+                    setGraphEmptyState({
+                        id: 'no-matches',
+                        title: 'No matches for this search',
+                        description: 'Try clearing filters or changing your search terms.',
+                        actionsHtml: '<button class="action-chip" data-graph-action="clear-search">Clear search</button>' +
+                            '<button class="action-chip" data-graph-action="focus-search">Search again</button>'
+                    });
+                    return;
+                }
+            }
+
+            const state = vscode.getState() || {};
+            if (!searchActive && !state.workspaceDepsWelcomeSeen) {
+                setGraphEmptyState({
+                    id: 'welcome',
+                    title: 'Workspace dependencies at a glance',
+                    description: 'This graph shows how your SQL files, tables, and views connect across the workspace.',
+                    actionsHtml: '<button class="action-chip" data-graph-action="focus-search">Search for a table</button>' +
+                        '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>' +
+                        '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>' +
+                        '<button class="action-chip" data-graph-action="view-issues">View issues</button>' +
+                        '<button class="action-chip" data-graph-action="refresh">Refresh index</button>' +
+                        '<button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>'
+                });
+                return;
+            }
+
+            setGraphEmptyState(null);
+        }
+
         updateFocusButton();
 
         // ========== Pan/Zoom Setup ==========
@@ -396,6 +497,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             });
 
             btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
+            updateGraphEmptyState();
         }
 
         function clearSearch() {
@@ -403,6 +505,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             filterType.value = 'all';
             btnClearSearch.classList.remove('visible');
             vscode.postMessage({ command: 'clearSearch' });
+            updateGraphEmptyState();
         }
 
         let searchTimeout;
@@ -414,6 +517,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         searchInput?.addEventListener('input', debouncedSearch);
         filterType?.addEventListener('change', performSearch);
         btnClearSearch?.addEventListener('click', clearSearch);
+        updateGraphEmptyState();
 
         // ========== Keyboard Shortcuts ==========
         document.addEventListener('keydown', (e) => {
@@ -487,6 +591,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             const action = actionEl.getAttribute('data-graph-action');
             if (!action) return;
 
+            if (activeEmptyState === 'welcome' && actionEl.closest('#graph-empty-overlay')) {
+                markWelcomeSeen();
+            }
+
             switch (action) {
                 case 'focus-search':
                     focusSearch();
@@ -514,6 +622,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                     break;
                 case 'clear-selection':
                     clearSelection();
+                    break;
+                case 'dismiss-welcome':
+                    markWelcomeSeen();
+                    updateGraphEmptyState();
                     break;
             }
         });

@@ -1498,8 +1498,27 @@ ${bodyContent}
      */
     private generateGraphAreaHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter): string {
         return `
-        <div id="graph-container" style="width: 100%; height: 100%;">
-            ${graph.nodes.length > 0 ? this.renderGraph(graph) : `
+        <div id="graph-container" style="width: 100%; height: 100%; position: relative;">
+            ${graph.nodes.length > 0 ? `
+                ${this.renderGraph(graph)}
+                <div class="graph-empty-overlay is-hidden" id="graph-empty-overlay" aria-hidden="true">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                        <div class="empty-state-title" id="graph-empty-title">Workspace dependencies at a glance</div>
+                        <div class="empty-state-desc" id="graph-empty-desc">This graph shows how your SQL files, tables, and views connect across the workspace.</div>
+                        <div class="empty-state-actions" id="graph-empty-actions">
+                            <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
+                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
+                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                            <button class="action-chip" data-graph-action="view-issues">View issues</button>
+                            <button class="action-chip" data-graph-action="refresh">Refresh index</button>
+                            <button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+            ` : `
             <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>

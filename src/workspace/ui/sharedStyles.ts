@@ -42,6 +42,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
                 --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
                 --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
+                --overlay-scrim: rgba(15, 23, 42, 0.7);
             }
         `;
     } else {
@@ -81,6 +82,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
                 --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
                 --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
+                --overlay-scrim: rgba(248, 250, 252, 0.85);
             }
         `;
     }
@@ -2974,6 +2976,24 @@ export function getGraphStyles(): string {
         /* ========== Main Layout ========== */
         .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; min-height: 0; }
         .graph-area { flex: 1; position: relative; overflow: hidden; min-height: 0; width: 100%; height: 100%; }
+        #graph-container { position: relative; }
+        .graph-empty-overlay {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--overlay-scrim);
+            backdrop-filter: blur(2px);
+            z-index: 5;
+        }
+        .graph-empty-overlay.is-hidden { display: none; }
+        .graph-empty-overlay .empty-state {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-lg);
+            max-width: 560px;
+            text-align: center;
+        }
         .empty-state-desc { margin-top: 6px; max-width: 520px; }
         .empty-state-actions {
             display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
