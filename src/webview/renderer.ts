@@ -45,6 +45,7 @@ import {
 import {
     createClusters,
     getClusterColor,
+    getClusterForNode,
     shouldCluster,
     toggleCluster,
     NodeCluster,
@@ -102,6 +103,8 @@ let contextMenuElement: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
+/** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
+let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
 let renderNodes: FlowNode[] = [];
@@ -3835,25 +3838,9 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
     updateBreadcrumb(nodeId);
 }
 
-/**
- * Add a pulse animation to a node to draw user attention
- * Called when jumping to a node from search, explore, or table clicks
- */
-function pulseNode(nodeId: string): void {
-    const nodeGroup = mainGroup?.querySelector(`.node[data-id="${nodeId}"]`) as SVGGElement;
-    if (!nodeGroup) { return; }
-
-    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-    if (!rect) { return; }
-
-    // Save original stroke state
-    const origStroke = rect.getAttribute('stroke') || '';
-    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
-
-    // Add pulse CSS animation
+/** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
+function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
     rect.style.animation = 'node-pulse 0.6s ease-out';
-
-    // Define keyframes if not already added
     if (!document.getElementById('pulse-animation-style')) {
         const style = document.createElement('style');
         style.id = 'pulse-animation-style';
@@ -3878,29 +3865,117 @@ function pulseNode(nodeId: string): void {
         `;
         document.head.appendChild(style);
     }
-
-    // Clean up animation after completion
     setTimeout(() => {
         rect.style.animation = '';
-        // Restore original stroke (if node is still selected, selectNode will have set it)
+        restoreStroke();
+    }, 600);
+}
+
+/**
+ * Add a pulse animation to a node to draw user attention
+ * Called when jumping to a node from search, explore, or table clicks
+ */
+function pulseNode(nodeId: string): void {
+    const nodeGroup = mainGroup?.querySelector(`.node[data-id="${nodeId}"]`) as SVGGElement;
+    if (!nodeGroup) { return; }
+
+    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+    if (!rect) { return; }
+
+    const origStroke = rect.getAttribute('stroke') || '';
+    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
+
+    applyPulseToRect(rect, () => {
         if (state.selectedNodeId === nodeId) {
             rect.setAttribute('stroke', UI_COLORS.white);
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('filter', 'url(#glow)');
         } else {
-            if (origStroke) {
-                rect.setAttribute('stroke', origStroke);
-            } else {
-                rect.removeAttribute('stroke');
-            }
-            if (origStrokeWidth) {
-                rect.setAttribute('stroke-width', origStrokeWidth);
-            } else {
-                rect.removeAttribute('stroke-width');
-            }
+            if (origStroke) rect.setAttribute('stroke', origStroke);
+            else rect.removeAttribute('stroke');
+            if (origStrokeWidth) rect.setAttribute('stroke-width', origStrokeWidth);
+            else rect.removeAttribute('stroke-width');
             rect.setAttribute('filter', 'url(#shadow)');
         }
-    }, 600);
+    });
+}
+
+/**
+ * Pulse a sub-node inside a CTE/subquery cloud (cloud-subflow-node with data-node-id).
+ * Used when navigating to a table from Query Stats so we highlight the table/join node inside the cloud, not the CTE.
+ * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
+ */
+function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
+    const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
+    if (!cloudContainer) { return; }
+
+    const subGroup = cloudContainer.querySelector(`.cloud-subflow-node[data-node-id="${subNodeId}"]`) as SVGGElement;
+    if (!subGroup) { return; }
+
+    const rect = subGroup.querySelector('rect') as SVGRectElement;
+    if (!rect) { return; }
+
+    const origStroke = rect.getAttribute('stroke') || '';
+    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
+    const origFilter = rect.getAttribute('filter') || '';
+
+    // Add enhanced pulse animation style for cloud sub-nodes (multi-pulse, more prominent)
+    if (!document.getElementById('cloud-pulse-animation-style')) {
+        const style = document.createElement('style');
+        style.id = 'cloud-pulse-animation-style';
+        style.textContent = `
+            @keyframes cloud-node-pulse {
+                0%, 100% {
+                    stroke: #fbbf24;
+                    stroke-width: 4px;
+                    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.8));
+                }
+                25% {
+                    stroke: #f59e0b;
+                    stroke-width: 5px;
+                    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.9));
+                }
+                50% {
+                    stroke: #fbbf24;
+                    stroke-width: 4px;
+                    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.8));
+                }
+                75% {
+                    stroke: #f59e0b;
+                    stroke-width: 5px;
+                    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.9));
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Apply multi-pulse animation (1.5s = ~3 pulses)
+    rect.style.animation = 'cloud-node-pulse 1.5s ease-in-out';
+
+    // After animation, keep a subtle highlight for 2 more seconds
+    setTimeout(() => {
+        rect.style.animation = '';
+        // Keep highlight glow
+        rect.setAttribute('stroke', '#fbbf24');
+        rect.setAttribute('stroke-width', '3');
+        rect.setAttribute('filter', 'drop-shadow(0 0 6px rgba(251, 191, 36, 0.6))');
+
+        // Fade back to original after 2 seconds
+        setTimeout(() => {
+            rect.style.transition = 'stroke 0.5s ease, stroke-width 0.5s ease, filter 0.5s ease';
+            if (origStroke) rect.setAttribute('stroke', origStroke);
+            else rect.setAttribute('stroke', UI_COLORS.borderWhite);
+            if (origStrokeWidth) rect.setAttribute('stroke-width', origStrokeWidth);
+            else rect.setAttribute('stroke-width', '2');
+            rect.setAttribute('filter', origFilter || 'url(#shadow)');
+
+            // Clean up transition after fade
+            setTimeout(() => {
+                rect.style.transition = '';
+            }, 500);
+        }, 2000);
+    }, 1500);
 }
 
 /**
@@ -4530,49 +4605,166 @@ function updateStatsPanel(): void {
         });
     }
 
+    // Match table name: exact match for type 'table', or join label ending with " <name>" (e.g. "LEFT brands")
+    function tableLabelMatches(node: FlowNode, lowerName: string): boolean {
+        const label = node.label.toLowerCase();
+        if (node.type === 'table') {
+            return label === lowerName;
+        }
+        if (node.type === 'join') {
+            return label === lowerName || label.endsWith(' ' + lowerName);
+        }
+        return false;
+    }
+
+    // Recursively find a table by label inside children of a CTE/subquery (handles nested subqueries).
+    // JOIN tables in CTEs are emitted as type 'join' with label e.g. "LEFT brands", not type 'table'.
+    function findTableInChildren(children: FlowNode[], container: FlowNode, lowerName: string): { table: FlowNode; parent: FlowNode } | null {
+        for (const child of children) {
+            if (tableLabelMatches(child, lowerName)) {
+                return { table: child, parent: container };
+            }
+            if ((child.type === 'cte' || child.type === 'subquery') && child.children && child.children.length > 0) {
+                const found = findTableInChildren(child.children, child, lowerName);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
     // Helper to navigate to a table node in the graph
     function navigateToTable(tableName: string) {
         if (!tableName) return;
-        const tableNode = currentNodes.find(n =>
-            n.type === 'table' && n.label.toLowerCase() === tableName.toLowerCase()
-        );
-        if (tableNode) {
-            // If table is inside a CTE/subquery, expand the parent first
-            if (tableNode.parentId) {
-                const parentNode = currentNodes.find(n => n.id === tableNode.parentId);
-                if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery')) {
-                    if (!parentNode.expanded) {
-                        // Expand the parent node and re-render
-                        parentNode.expanded = true;
-                        if (parentNode.children) {
-                            parentNode.height = 70 + parentNode.children.length * 30;
-                        }
-                        // Re-render to show expanded cloud
-                        const currentResult: ParseResult = {
-                            nodes: currentNodes,
-                            edges: currentEdges,
-                            stats: currentStats!,
-                            hints: currentHints,
-                            sql: currentSql,
-                            columnLineage: currentColumnLineage,
-                            columnFlows: currentColumnFlows,
-                            tableUsage: currentTableUsage
-                        };
-                        render(currentResult);
-                        // After re-render, find and navigate to the table
-                        requestAnimationFrame(() => {
-                            selectNode(tableNode.id, { skipNavigation: true });
-                            zoomToNode(tableNode);
-                            pulseNode(tableNode.id);
-                        });
-                        return;
-                    }
+        const lowerName = tableName.toLowerCase();
+
+        let tableNode: FlowNode | undefined;
+        let parentNode: FlowNode | undefined;
+
+        // Search inside CTE/subquery children FIRST so we prefer expanding the cloud when the table exists there.
+        // Otherwise we might find a top-level table with the same name and never expand the CTE (e.g. after closing the cloud and clicking another table in the same CTE).
+        for (const node of currentNodes) {
+            if ((node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+                const found = findTableInChildren(node.children, node, lowerName);
+                if (found) {
+                    tableNode = found.table;
+                    parentNode = found.parent;
+                    break;
                 }
             }
-            selectNode(tableNode.id, { skipNavigation: true });
-            zoomToNode(tableNode);
-            pulseNode(tableNode.id);
         }
+
+        // If not found in children, search in top-level nodes
+        if (!tableNode) {
+            tableNode = currentNodes.find(n =>
+                n.type === 'table' && n.label.toLowerCase() === lowerName
+            );
+        }
+
+        // If table is inside a CTE/subquery (found via parentId, e.g. from flat list with parentId)
+        if (!parentNode && tableNode && tableNode.parentId) {
+            parentNode = currentNodes.find(n => n.id === tableNode!.parentId);
+        }
+
+        if (!tableNode) return;
+
+        // Clear zoom state so zoomToNode actually zooms to the target (don't treat as "toggle off" from previous query)
+        state.zoomedNodeId = null;
+
+        // After expanding a cloud, zoom to the parent so the cloud is visible, then highlight the sub-node inside the cloud (e.g. "orders") instead of the CTE.
+        const doExpandAndNavigate = (zoomToParent: boolean, subNodeIdToHighlight?: string): void => {
+            const currentResult: ParseResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats!,
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult);
+            requestAnimationFrame(() => {
+                const targetNode = zoomToParent && parentNode ? parentNode : tableNode!;
+                selectNode(targetNode.id, { skipNavigation: true });
+                zoomToNode(targetNode);
+                if (zoomToParent && parentNode && subNodeIdToHighlight) {
+                    pulseNodeInCloud(subNodeIdToHighlight, parentNode.id);
+                } else {
+                    pulseNode(targetNode.id);
+                }
+            });
+        };
+
+        // If target node (table or its parent) is inside a collapsed cluster, expand cluster first so the node is in the DOM
+        const nodeToShow = parentNode || tableNode;
+        const cluster = getClusterForNode(nodeToShow.id, currentClusters);
+        if (cluster && !cluster.expanded) {
+            currentClusters = toggleCluster(cluster, currentClusters);
+            const currentResult: ParseResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats!,
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult);
+            requestAnimationFrame(() => {
+                if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery') && !parentNode.expanded) {
+                    parentNode.expanded = true;
+                    if (parentNode.children) {
+                        parentNode.height = 70 + parentNode.children.length * 30;
+                    }
+                    doExpandAndNavigate(true, tableNode!.id);
+                } else {
+                    selectNode(tableNode.id, { skipNavigation: true });
+                    zoomToNode(tableNode);
+                    pulseNode(tableNode.id);
+                }
+            });
+            return;
+        }
+
+        // When table is inside a CTE/subquery, always expand the cloud (so it opens even if user had closed it), zoom to it, and highlight the sub-node inside the cloud
+        if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery')) {
+            // If parent is inside a collapsed cluster (e.g. "CTEs" cluster), expand cluster first so the CTE node is visible
+            const cluster = getClusterForNode(parentNode.id, currentClusters);
+            if (cluster && !cluster.expanded) {
+                currentClusters = toggleCluster(cluster, currentClusters);
+                const currentResult: ParseResult = {
+                    nodes: currentNodes,
+                    edges: currentEdges,
+                    stats: currentStats!,
+                    hints: currentHints,
+                    sql: currentSql,
+                    columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
+                    tableUsage: currentTableUsage
+                };
+                render(currentResult);
+                requestAnimationFrame(() => {
+                    parentNode!.expanded = true;
+                    if (parentNode!.children) {
+                        parentNode!.height = 70 + parentNode!.children!.length * 30;
+                    }
+                    doExpandAndNavigate(true, tableNode!.id);
+                });
+                return;
+            }
+            // Always expand the parent cloud (opens it if it was collapsed), zoom to it, and highlight the sub-node (e.g. orders) inside the cloud
+            parentNode.expanded = true;
+            if (parentNode.children) {
+                parentNode.height = 70 + parentNode.children.length * 30;
+            }
+            doExpandAndNavigate(true, tableNode.id);
+            return;
+        }
+
+        selectNode(tableNode.id, { skipNavigation: true });
+        zoomToNode(tableNode);
+        pulseNode(tableNode.id);
     }
 }
 
@@ -4995,6 +5187,7 @@ function fitView(): void {
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
     state.scale = Math.min(scaleX, scaleY, 1.5);
+    fitViewScale = state.scale; // Treat this as 100% for the zoom indicator
 
     // Center the graph
     state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
@@ -5005,6 +5198,7 @@ function fitView(): void {
     state.previousZoomState = null;
 
     updateTransform();
+    updateZoomIndicator();
 }
 
 function zoomToNode(node: FlowNode): void {
@@ -5012,7 +5206,7 @@ function zoomToNode(node: FlowNode): void {
 
     // Simple toggle behavior: if already zoomed to any node, restore to fit view
     if (state.zoomedNodeId !== null) {
-        // Show all nodes and edges again
+        // Show all nodes, edges, and cloud containers again
         const allNodes = mainGroup.querySelectorAll('.node');
         allNodes.forEach(nodeEl => {
             (nodeEl as SVGGElement).style.display = '';
@@ -5023,7 +5217,12 @@ function zoomToNode(node: FlowNode): void {
             (edgeEl as SVGPathElement).style.display = '';
             (edgeEl as SVGPathElement).style.opacity = '1';
         });
-        
+        const allClouds = mainGroup.querySelectorAll('.cloud-container');
+        allClouds.forEach(cloudEl => {
+            (cloudEl as SVGGElement).style.display = '';
+            (cloudEl as SVGGElement).style.opacity = '1';
+        });
+
         // Clear focus mode and restore to fit view (default state)
         clearFocusMode();
         state.focusModeEnabled = false;
@@ -5070,6 +5269,18 @@ function zoomToNode(node: FlowNode): void {
         }
     });
 
+    // Show/hide cloud containers based on whether their parent node is visible
+    const allClouds = mainGroup.querySelectorAll('.cloud-container');
+    allClouds.forEach(cloudEl => {
+        const nodeId = cloudEl.getAttribute('data-node-id');
+        if (nodeId && immediateNeighbors.has(nodeId)) {
+            (cloudEl as SVGGElement).style.display = '';
+            (cloudEl as SVGGElement).style.opacity = '1';
+        } else {
+            (cloudEl as SVGGElement).style.display = 'none';
+        }
+    });
+
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
         const source = edgeEl.getAttribute('data-source');
@@ -5083,6 +5294,7 @@ function zoomToNode(node: FlowNode): void {
     });
 
     // Calculate bounds of visible nodes (the clicked node and its immediate neighbors)
+    // Also include expanded cloud containers for CTE/subquery nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const visibleNodes = currentNodes.filter(n => immediateNeighbors.has(n.id));
     for (const n of visibleNodes) {
@@ -5090,27 +5302,56 @@ function zoomToNode(node: FlowNode): void {
         minY = Math.min(minY, n.y);
         maxX = Math.max(maxX, n.x + n.width);
         maxY = Math.max(maxY, n.y + n.height);
+
+        // If this node is an expanded CTE/subquery, include cloud bounds
+        if (n.expanded && (n.type === 'cte' || n.type === 'subquery') && n.children && n.children.length > 0) {
+            const cloudPadding = 15;
+            const cloudGap = 30;
+            // Estimate cloud dimensions (same logic as render)
+            const nodeHeight = n.type === 'subquery' ? 60 : 60;
+            let cloudWidth = 160;
+            let cloudHeight = 150;
+            if (n.children.length > 0) {
+                // Rough estimate: each child adds to height
+                cloudWidth = Math.max(200, n.children.length * 80);
+                cloudHeight = Math.max(150, n.children.length * 50 + 50);
+            }
+            const offset = cloudOffsets.get(n.id) || {
+                offsetX: -cloudWidth - cloudGap,
+                offsetY: -(cloudHeight - nodeHeight) / 2
+            };
+            const cloudX = n.x + offset.offsetX;
+            const cloudY = n.y + offset.offsetY;
+            minX = Math.min(minX, cloudX);
+            minY = Math.min(minY, cloudY);
+            maxX = Math.max(maxX, cloudX + cloudWidth);
+            maxY = Math.max(maxY, cloudY + cloudHeight);
+        }
     }
 
-    // If only one node, use its bounds with some padding
-    if (visibleNodes.length === 1) {
-        const padding = 100;
+    // If only one node (without expanded cloud), use its bounds with generous padding
+    const hasExpandedCloud = node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
+    if (visibleNodes.length === 1 && !hasExpandedCloud) {
+        const padding = 220;
         minX = node.x - padding;
         minY = node.y - padding;
         maxX = node.x + node.width + padding;
         maxY = node.y + node.height + padding;
     }
 
-    // Calculate zoom to fit the visible nodes in the viewport
+    // Calculate zoom to fit the visible nodes in the viewport (cap scale to avoid zooming too much)
     const rect = svg.getBoundingClientRect();
     const availableWidth = rect.width - 320; // Account for panels
     const availableHeight = rect.height - 100;
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
-    
+
     const scaleX = (availableWidth * 0.8) / graphWidth; // Use 80% of available space
     const scaleY = (availableHeight * 0.8) / graphHeight;
-    const targetScale = Math.min(scaleX, scaleY, 5.0); // Cap at 5x zoom
+    // Cap at 2.5x raw scale OR 180% of fit view scale (whichever is smaller)
+    const maxScaleAbsolute = 2.5;
+    const maxScaleRelative = fitViewScale > 0 ? fitViewScale * 1.8 : maxScaleAbsolute;
+    const targetScale = Math.min(scaleX, scaleY, maxScaleAbsolute, maxScaleRelative);
 
     // Center the visible nodes
     const centerX = (minX + maxX) / 2;
@@ -5122,6 +5363,7 @@ function zoomToNode(node: FlowNode): void {
     state.zoomedNodeId = node.id;
 
     updateTransform();
+    updateZoomIndicator();
 }
 
 export function zoomIn(): void {
@@ -5137,7 +5379,10 @@ export function zoomOut(): void {
 }
 
 export function getZoomLevel(): number {
-    return Math.round(state.scale * 100);
+    // Display zoom relative to "fit to view" so 100% = fit view, not raw scale 1
+    const base = fitViewScale > 0 ? fitViewScale : 1;
+    const pct = Math.round((state.scale / base) * 100);
+    return Math.min(300, Math.max(10, pct)); // Clamp to sensible range for display
 }
 
 // View state for tab persistence
@@ -5171,6 +5416,7 @@ export function resetView(): void {
 function resetViewportToCenter(): void {
     // Reset transform to center the viewport (for error states when there are no nodes)
     state.scale = 1;
+    fitViewScale = 1;
     state.offsetX = 0;
     state.offsetY = 0;
     updateTransform();
