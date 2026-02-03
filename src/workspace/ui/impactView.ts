@@ -429,9 +429,13 @@ export class ImpactView {
                     : '';
                 const location = item.lineNumber > 0 ? `${fileName} • Line ${item.lineNumber}` : fileName;
 
+                // Show the data flow path if available (e.g., "departments.id → department_id")
+                const hasFlowPath = item.reason && item.reason.includes('→');
+                const displayName = hasFlowPath ? item.reason : item.node.name;
+
                 html += `
                             <div class="column-item">
-                                <span class="column-name">${this.escapeHtml(item.node.name)}</span>
+                                <span class="column-name">${this.escapeHtml(displayName)}</span>
                                 ${location ? `<span class="column-location">📄 ${this.escapeHtml(location)}</span>` : ''}
                             </div>
                 `;

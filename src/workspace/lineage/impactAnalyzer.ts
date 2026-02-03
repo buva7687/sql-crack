@@ -87,11 +87,24 @@ export class ImpactAnalyzer {
         const transitiveImpacts: ImpactItem[] = [];
 
         // Build set of columns that have actual data flow edges (not just structural "contains")
-        // A column is truly impacted only if there's a non-structural edge pointing to it
+        // Check both regular edges and column-level lineage edges
         const columnsWithDataFlow = new Set<string>();
+
+        // Check regular edges for non-structural relationships
         for (const edge of this.graph.edges) {
             if (edge.metadata?.relationship !== 'contains' && edge.targetId.startsWith('column:')) {
                 columnsWithDataFlow.add(edge.targetId);
+            }
+        }
+
+        // Check column lineage edges (column-to-column data flow)
+        if (this.graph.columnEdges) {
+            for (const colEdge of this.graph.columnEdges) {
+                // Add both source and target columns as having data flow
+                const sourceColId = `column:${colEdge.sourceTableId.replace(/^(table|view):/, '')}.${colEdge.sourceColumnName.toLowerCase()}`;
+                const targetColId = `column:${colEdge.targetTableId.replace(/^(table|view):/, '')}.${colEdge.targetColumnName.toLowerCase()}`;
+                columnsWithDataFlow.add(sourceColId);
+                columnsWithDataFlow.add(targetColId);
             }
         }
 
@@ -110,10 +123,24 @@ export class ImpactAnalyzer {
             }
 
             const resolved = this.resolveImpactLocation(depNode);
+
+            // For column nodes, try to find source column info from column lineage
+            let reason = this.generateImpactReason(depNode, tableName, 'table');
+            if (depNode.type === 'column' && this.graph.columnEdges) {
+                const colEdge = this.graph.columnEdges.find(e => {
+                    const targetColId = `column:${e.targetTableId.replace(/^(table|view):/, '')}.${e.targetColumnName.toLowerCase()}`;
+                    return targetColId === depNode.id;
+                });
+                if (colEdge) {
+                    const sourceTable = colEdge.sourceTableId.replace(/^(table|view):/, '');
+                    reason = `${sourceTable}.${colEdge.sourceColumnName} → ${depNode.name}`;
+                }
+            }
+
             const impactItem: ImpactItem = {
                 node: depNode,
                 impactType: isDirect ? 'direct' : 'transitive',
-                reason: this.generateImpactReason(depNode, tableName, 'table'),
+                reason,
                 filePath: resolved.filePath || 'Unknown',
                 lineNumber: resolved.lineNumber || 0,
                 severity: this.calculateNodeSeverity(depNode, downstream.nodes.length)
