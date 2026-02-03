@@ -1189,7 +1189,7 @@ ${bodyContent}
                 
                 <!-- Graph mode switcher (visible only when Graph tab is active, appears below view tabs) -->
                 <div id="graph-mode-switcher" class="graph-mode-switcher" 
-                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables."
+                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables (3+)."
                     aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
                     <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
                         title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
@@ -1200,7 +1200,15 @@ ${bodyContent}
                     <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
                         title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
                         aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
+                    <button class="graph-mode-help" id="graph-mode-help-btn" type="button" aria-label="Help: Click to learn about graph modes">?</button>
                 </div>
+            </div>
+            <!-- Help tooltip (outside switcher to avoid clipping) -->
+            <div class="graph-mode-help-tooltip" id="graph-mode-help-tooltip">
+                <div class="help-tooltip-title">Graph Display Modes</div>
+                <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
+                <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
+                <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
             </div>
 
             <div class="header-right">
@@ -1222,13 +1230,13 @@ ${bodyContent}
                         </svg>
                     </button>
                 </div>
-                <button class="icon-btn" id="btn-sidebar" title="Toggle panel">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                         <path d="M15 3v18"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})">
+                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})" aria-label="Toggle theme to ${this._isDarkTheme ? 'light' : 'dark'} mode">
                     ${this._isDarkTheme ? `
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="5"/>
@@ -1245,8 +1253,8 @@ ${bodyContent}
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>`}
                 </button>
-                <button class="icon-btn" id="btn-refresh" title="Refresh">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="icon-btn" id="btn-refresh" title="Refresh" aria-label="Refresh workspace data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
@@ -1437,7 +1445,7 @@ ${bodyContent}
                             <div class="legend-item"><div class="legend-node file"></div><span>SQL Files</span></div>
                             <div class="legend-item"><div class="legend-node table"></div><span>Tables</span></div>
                             <div class="legend-item"><div class="legend-node view"></div><span>Views</span></div>
-                            <div class="legend-item"><div class="legend-node external"></div><span>External (undefined)</span></div>
+                            <div class="legend-item" title="Referenced in queries but not defined in this workspace"><div class="legend-node external"></div><span>External (not defined here)</span></div>
                         </div>
                         <div class="legend-group">
                             <div class="legend-group-title">Edges</div>
@@ -1519,22 +1527,33 @@ ${bodyContent}
         </div>
 
         <!-- Zoom Toolbar -->
-        <div class="zoom-toolbar">
-            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <div class="zoom-toolbar" role="toolbar" aria-label="Graph zoom controls">
+            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out" aria-label="Zoom out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in" aria-label="Zoom in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <div class="zoom-divider"></div>
-            <span class="zoom-level" id="zoom-level">100%</span>
+            <span class="zoom-level" id="zoom-level" aria-live="polite">100%</span>
             <div class="zoom-divider"></div>
-            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
             </button>
-            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
+        </div>
+
+        <!-- Keyboard Shortcuts Hint -->
+        <div class="keyboard-hints" id="graph-keyboard-hints">
+            <div class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Drag</kbd><span>Pan</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
         </div>`;
     }
 

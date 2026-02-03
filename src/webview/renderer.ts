@@ -35,8 +35,24 @@ import {
 import { formatSql, highlightSql } from './sqlFormatter';
 import { showKeyboardShortcutsHelp } from './ui';
 import dagre from 'dagre';
+import {
+    getViewportBounds,
+    getVisibleElements,
+    shouldVirtualize,
+    throttle,
+    VirtualizationResult
+} from './virtualization';
+import {
+    createClusters,
+    getClusterColor,
+    getClusterForNode,
+    shouldCluster,
+    toggleCluster,
+    NodeCluster,
+} from './clustering';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
+import { escapeRegex } from '../shared';
 
 const state: ViewState = {
     scale: 1,
@@ -87,8 +103,16 @@ let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
+let loadingOverlay: HTMLDivElement | null = null;
+/** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
+let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
+let renderNodes: FlowNode[] = [];
+let renderEdges: FlowEdge[] = [];
+let renderNodeMap: Map<string, FlowNode> = new Map();
+let currentClusters: NodeCluster[] = [];
+let clusterNodeMap: Map<string, NodeCluster> = new Map();
 let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
@@ -97,6 +121,12 @@ let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
+
+// Virtualization state
+let virtualizationEnabled = true;
+let renderedNodeIds: Set<string> = new Set();
+let lastVirtualizationResult: VirtualizationResult | null = null;
+let offscreenIndicator: SVGGElement | null = null;
 // Store references to cloud and arrow elements for dynamic updates
 let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; arrow: SVGPathElement; subflowGroup: SVGGElement; nestedSvg?: SVGSVGElement; closeButton?: SVGGElement }> = new Map();
 // Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
@@ -242,7 +272,10 @@ export function initRenderer(container: HTMLElement): void {
         max-width: 350px;
         max-height: 200px;
         overflow-y: auto;
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     container.appendChild(hintsPanel);
 
@@ -261,8 +294,11 @@ export function initRenderer(container: HTMLElement): void {
         font-size: 11px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        display: none;
         max-width: 200px;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     updateLegendPanel();
     container.appendChild(legendPanel);
@@ -284,7 +320,10 @@ export function initRenderer(container: HTMLElement): void {
         font-size: 12px;
         color: ${UI_COLORS.textBright};
         z-index: 150;
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(16px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
         overflow-y: auto;
     `;
     container.appendChild(sqlPreviewPanel);
@@ -364,6 +403,56 @@ export function initRenderer(container: HTMLElement): void {
         box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
     `;
     container.appendChild(contextMenuElement);
+
+    // Create loading overlay for layout switching
+    loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loading-overlay';
+    loadingOverlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 500;
+        pointer-events: none;
+    `;
+    loadingOverlay.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 20px 32px;
+            background: ${UI_COLORS.backgroundPanelSolid};
+            border: 1px solid ${UI_COLORS.border};
+            border-radius: 12px;
+            box-shadow: ${UI_COLORS.shadowMedium};
+        ">
+            <div class="loading-spinner" style="
+                width: 24px;
+                height: 24px;
+                border: 3px solid rgba(99, 102, 241, 0.2);
+                border-top-color: #6366f1;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            "></div>
+            <span style="color: ${UI_COLORS.textMuted}; font-size: 12px;">Calculating layout...</span>
+        </div>
+    `;
+
+    // Add spinner animation
+    const spinnerStyle = document.createElement('style');
+    spinnerStyle.textContent = `
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(spinnerStyle);
+    container.appendChild(loadingOverlay);
 
     // Hide context menu on click outside
     const contextMenuClickHandler = () => {
@@ -745,7 +834,246 @@ function updateTransform(): void {
                 document.dispatchEvent(event);
             });
         }
+        // Trigger virtualized re-render on pan/zoom
+        throttledVirtualizedRender();
     }
+}
+
+/**
+ * Throttled function to re-render visible nodes during pan/zoom
+ * Uses 60fps throttle (16ms) for smooth updates
+ */
+const throttledVirtualizedRender = throttle(() => {
+    if (virtualizationEnabled && shouldVirtualize(renderNodes.length)) {
+        updateVisibleNodes();
+    }
+}, 16);
+
+/**
+ * Update which nodes are rendered based on current viewport
+ * Called during pan/zoom to add/remove nodes from DOM
+ */
+function updateVisibleNodes(): void {
+    if (!svg || !mainGroup || renderNodes.length === 0) {
+        return;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    const bounds = getViewportBounds(
+        rect.width,
+        rect.height,
+        state.scale,
+        state.offsetX,
+        state.offsetY
+    );
+
+    const result = getVisibleElements(renderNodes, renderEdges, bounds);
+    lastVirtualizationResult = result;
+
+    // Get the nodes and edges groups
+    const nodesGroup = mainGroup.querySelector('.nodes') as SVGGElement;
+    const edgesGroup = mainGroup.querySelector('.edges') as SVGGElement;
+
+    if (!nodesGroup || !edgesGroup) {
+        return;
+    }
+
+    // Find nodes that need to be added (visible but not rendered)
+    const nodesToAdd = result.visibleNodes.filter(n => !renderedNodeIds.has(n.id));
+
+    // Find nodes that need to be removed (rendered but no longer visible)
+    const nodeIdsToRemove = [...renderedNodeIds].filter(id => !result.visibleNodeIds.has(id));
+
+    // Remove nodes that are no longer visible
+    for (const nodeId of nodeIdsToRemove) {
+        const nodeElement = nodesGroup.querySelector(`[data-id="${nodeId}"]`);
+        if (nodeElement) {
+            nodeElement.remove();
+        }
+        renderedNodeIds.delete(nodeId);
+    }
+
+    // Add newly visible nodes
+    for (const node of nodesToAdd) {
+        renderNode(node, nodesGroup);
+        renderedNodeIds.add(node.id);
+    }
+
+    // Update edges - remove edges connected to removed nodes, add edges for new nodes
+    // For simplicity, we'll re-render all visible edges if there were changes
+    if (nodesToAdd.length > 0 || nodeIdsToRemove.length > 0) {
+        // Clear and re-render edges
+        edgesGroup.innerHTML = '';
+        for (const edge of result.visibleEdges) {
+            renderEdge(edge, edgesGroup);
+        }
+    }
+
+    // Update off-screen indicators
+    updateOffscreenIndicators(result);
+}
+
+/**
+ * Update off-screen node count indicators
+ */
+function updateOffscreenIndicators(result: VirtualizationResult): void {
+    if (!svg) {
+        return;
+    }
+
+    // Remove existing indicator
+    if (offscreenIndicator) {
+        offscreenIndicator.remove();
+    }
+
+    const { offscreenCounts, totalNodes } = result;
+    const hasOffscreen = offscreenCounts.top + offscreenCounts.bottom +
+                         offscreenCounts.left + offscreenCounts.right > 0;
+
+    if (!hasOffscreen) {
+        return;
+    }
+
+    // Create indicator group (positioned in screen space, not affected by transform)
+    offscreenIndicator = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    offscreenIndicator.setAttribute('class', 'offscreen-indicators');
+    offscreenIndicator.style.pointerEvents = 'none';
+
+    const rect = svg.getBoundingClientRect();
+    const indicatorStyle = `
+        fill: ${UI_COLORS.backgroundDark};
+        stroke: ${UI_COLORS.border};
+        stroke-width: 1;
+    `;
+    const textStyle = `
+        fill: ${UI_COLORS.textDim};
+        font-size: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        text-anchor: middle;
+        dominant-baseline: middle;
+    `;
+
+    // Top indicator
+    if (offscreenCounts.top > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width / 2}, 20)`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-30');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '60');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `↑ ${offscreenCounts.top}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Bottom indicator
+    if (offscreenCounts.bottom > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width / 2}, ${rect.height - 20})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-30');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '60');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `↓ ${offscreenCounts.bottom}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Left indicator
+    if (offscreenCounts.left > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(20, ${rect.height / 2})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-20');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '40');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `← ${offscreenCounts.left}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Right indicator
+    if (offscreenCounts.right > 0) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('transform', `translate(${rect.width - 20}, ${rect.height / 2})`);
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', '-20');
+        bg.setAttribute('y', '-10');
+        bg.setAttribute('width', '40');
+        bg.setAttribute('height', '20');
+        bg.setAttribute('rx', '10');
+        bg.setAttribute('style', indicatorStyle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('style', textStyle);
+        text.textContent = `→ ${offscreenCounts.right}`;
+        g.appendChild(bg);
+        g.appendChild(text);
+        offscreenIndicator.appendChild(g);
+    }
+
+    // Add to SVG (outside mainGroup so it's not affected by pan/zoom)
+    svg.appendChild(offscreenIndicator);
+}
+
+/**
+ * Enable or disable virtualization
+ */
+export function setVirtualizationEnabled(enabled: boolean): void {
+    virtualizationEnabled = enabled;
+    // Re-render if needed
+    if (currentNodes.length > 0) {
+        const nodesGroup = mainGroup?.querySelector('.nodes') as SVGGElement;
+        const edgesGroup = mainGroup?.querySelector('.edges') as SVGGElement;
+        if (nodesGroup && edgesGroup) {
+            // If disabling virtualization, render all nodes
+            if (!enabled) {
+                for (const node of currentNodes) {
+                    if (!renderedNodeIds.has(node.id)) {
+                        renderNode(node, nodesGroup);
+                        renderedNodeIds.add(node.id);
+                    }
+                }
+                // Re-render all edges
+                edgesGroup.innerHTML = '';
+                for (const edge of currentEdges) {
+                    renderEdge(edge, edgesGroup);
+                }
+                // Remove indicators
+                if (offscreenIndicator) {
+                    offscreenIndicator.remove();
+                    offscreenIndicator = null;
+                }
+            } else {
+                // If enabling, trigger update
+                updateVisibleNodes();
+            }
+        }
+    }
+}
+
+/**
+ * Get virtualization status
+ */
+export function isVirtualizationEnabled(): boolean {
+    return virtualizationEnabled;
 }
 
 /**
@@ -920,6 +1248,77 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
     }
 }
 
+function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+    if (!shouldCluster(nodes.length)) {
+        currentClusters = [];
+        clusterNodeMap.clear();
+        return { nodes, edges };
+    }
+
+    const baseClusters = createClusters(nodes);
+    if (baseClusters.length === 0) {
+        currentClusters = [];
+        clusterNodeMap.clear();
+        return { nodes, edges };
+    }
+
+    const previousById = new Map(currentClusters.map(cluster => [cluster.id, cluster]));
+    currentClusters = baseClusters.map(cluster => {
+        const previous = previousById.get(cluster.id);
+        return previous ? { ...cluster, expanded: previous.expanded } : cluster;
+    });
+    clusterNodeMap = new Map(currentClusters.map(cluster => [cluster.id, cluster]));
+
+    const collapsedClusters = currentClusters.filter(cluster => !cluster.expanded);
+    if (collapsedClusters.length === 0) {
+        return { nodes, edges };
+    }
+
+    const nodeToCluster = new Map<string, NodeCluster>();
+    for (const cluster of collapsedClusters) {
+        for (const nodeId of cluster.nodeIds) {
+            nodeToCluster.set(nodeId, cluster);
+        }
+    }
+
+    const visibleNodes = nodes.filter(node => !nodeToCluster.has(node.id));
+    const clusterNodes: FlowNode[] = collapsedClusters.map(cluster => ({
+        id: cluster.id,
+        type: 'cluster',
+        label: cluster.label,
+        description: 'Click to expand',
+        x: cluster.x,
+        y: cluster.y,
+        width: cluster.width,
+        height: cluster.height,
+    }));
+
+    const edgeMap = new Map<string, FlowEdge>();
+    for (const edge of edges) {
+        const sourceCluster = nodeToCluster.get(edge.source);
+        const targetCluster = nodeToCluster.get(edge.target);
+        const source = sourceCluster ? sourceCluster.id : edge.source;
+        const target = targetCluster ? targetCluster.id : edge.target;
+        if (source === target) {
+            continue;
+        }
+        const key = `${source}->${target}`;
+        if (!edgeMap.has(key)) {
+            edgeMap.set(key, {
+                ...edge,
+                id: `${edge.id}:${key}`,
+                source,
+                target,
+            });
+        }
+    }
+
+    return {
+        nodes: [...visibleNodes, ...clusterNodes],
+        edges: [...edgeMap.values()],
+    };
+}
+
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
 
@@ -934,6 +1333,7 @@ export function render(result: ParseResult): void {
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
+
     // Reset highlight state
     state.highlightedColumnSources = [];
 
@@ -941,10 +1341,21 @@ export function render(result: ParseResult): void {
     state.zoomedNodeId = null;
     state.previousZoomState = null;
 
+    // Reset virtualization state
+    renderedNodeIds.clear();
+    lastVirtualizationResult = null;
+    if (offscreenIndicator) {
+        offscreenIndicator.remove();
+        offscreenIndicator = null;
+    }
+
     // Clear previous content
     mainGroup.innerHTML = '';
 
     if (result.error) {
+        renderNodes = [];
+        renderEdges = [];
+        renderNodeMap.clear();
         renderError(result.error);
         updateStatsPanel();
         updateHintsPanel();
@@ -954,6 +1365,9 @@ export function render(result: ParseResult): void {
     }
 
     if (result.nodes.length === 0) {
+        renderNodes = [];
+        renderEdges = [];
+        renderNodeMap.clear();
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -969,10 +1383,29 @@ export function render(result: ParseResult): void {
     // This ensures edges are drawn correctly
     preCalculateExpandableDimensions(result.nodes);
 
+    const clustered = applyClustering(result.nodes, result.edges);
+    renderNodes = clustered.nodes;
+    renderEdges = clustered.edges;
+    renderNodeMap = new Map(renderNodes.map(node => [node.id, node]));
+
+    // Determine if we should use virtualization
+    const useVirtualization = virtualizationEnabled && shouldVirtualize(renderNodes.length);
+
+    // Get nodes and edges to render (all or visible subset)
+    let nodesToRender = renderNodes;
+    let edgesToRender = renderEdges;
+
+    if (useVirtualization && svg) {
+        // For initial render with virtualization, render all nodes first
+        // then fitView will adjust viewport, and subsequent pan/zoom will virtualize
+        // This ensures proper layout calculation
+        // We'll enable virtualization after fitView completes
+    }
+
     // Render edges first (behind nodes)
     const edgesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     edgesGroup.setAttribute('class', 'edges');
-    for (const edge of result.edges) {
+    for (const edge of edgesToRender) {
         renderEdge(edge, edgesGroup);
     }
     mainGroup.appendChild(edgesGroup);
@@ -985,8 +1418,9 @@ export function render(result: ParseResult): void {
     // Render nodes
     const nodesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     nodesGroup.setAttribute('class', 'nodes');
-    for (const node of result.nodes) {
+    for (const node of nodesToRender) {
         renderNode(node, nodesGroup);
+        renderedNodeIds.add(node.id);
     }
     mainGroup.appendChild(nodesGroup);
 
@@ -995,7 +1429,7 @@ export function render(result: ParseResult): void {
     updateHintsPanel();
 
     // Update SQL preview if visible
-    if (sqlPreviewPanel && sqlPreviewPanel.style.display !== 'none') {
+    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
         updateSqlPreview();
     }
 
@@ -1004,6 +1438,15 @@ export function render(result: ParseResult): void {
 
     // Update minimap for complex queries
     updateMinimap();
+
+    // After fitView, trigger virtualization update if enabled
+    // This will remove nodes outside viewport and show indicators
+    if (useVirtualization) {
+        // Use requestAnimationFrame to ensure layout is complete
+        requestAnimationFrame(() => {
+            updateVisibleNodes();
+        });
+    }
 }
 
 function renderNode(node: FlowNode, parent: SVGGElement): void {
@@ -1018,6 +1461,37 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('tabindex', '0');
     const nodeDescription = node.description ? `. ${node.description}` : '';
     group.setAttribute('aria-label', `${node.type} node: ${node.label}${nodeDescription}`);
+
+    if (node.type === 'cluster') {
+        renderClusterNode(node, group);
+        group.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const cluster = clusterNodeMap.get(node.id);
+            if (!cluster) {
+                return;
+            }
+            currentClusters = toggleCluster(cluster, currentClusters);
+            const currentResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats || ({} as QueryStats),
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult as ParseResult);
+        });
+        group.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                group.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
+        });
+        parent.appendChild(group);
+        return;
+    }
 
     // Check if this is a container node (CTE or Subquery with children)
     const isContainer = (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
@@ -1235,6 +1709,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
                     hints: currentHints,
                     sql: currentSql,
                     columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
                     tableUsage: currentTableUsage
                 };
                 // Preserve current layout type
@@ -1250,6 +1725,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             }
         } else {
             zoomToNode(node);
+            pulseNode(node.id);
         }
         // Focus SVG to ensure keyboard events work
         svg?.focus();
@@ -1270,6 +1746,46 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     }
 
     parent.appendChild(group);
+}
+
+function renderClusterNode(node: FlowNode, group: SVGGElement): void {
+    const cluster = clusterNodeMap.get(node.id);
+    const clusterColor = cluster ? getClusterColor(cluster.type) : getNodeColor('cluster');
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'node-rect');
+    rect.setAttribute('x', String(node.x));
+    rect.setAttribute('y', String(node.y));
+    rect.setAttribute('width', String(node.width));
+    rect.setAttribute('height', String(node.height));
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', UI_COLORS.backgroundSubtle);
+    rect.setAttribute('stroke', clusterColor);
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('filter', 'url(#shadow)');
+    group.appendChild(rect);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(node.x + node.width / 2));
+    label.setAttribute('y', String(node.y + node.height / 2));
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('dominant-baseline', 'middle');
+    label.setAttribute('fill', UI_COLORS.text);
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+    label.textContent = node.label;
+    group.appendChild(label);
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    icon.setAttribute('x', String(node.x + node.width - 16));
+    icon.setAttribute('y', String(node.y + 16));
+    icon.setAttribute('text-anchor', 'middle');
+    icon.setAttribute('dominant-baseline', 'middle');
+    icon.setAttribute('fill', clusterColor);
+    icon.setAttribute('font-size', '14');
+    icon.setAttribute('font-weight', '700');
+    icon.textContent = '+';
+    group.appendChild(icon);
 }
 
 function renderStandardNode(node: FlowNode, group: SVGGElement): void {
@@ -2371,6 +2887,7 @@ function addCloudCloseButton(
             hints: currentHints,
             sql: currentSql,
             columnLineage: currentColumnLineage,
+            columnFlows: currentColumnFlows,
             tableUsage: currentTableUsage
         };
         render(result);
@@ -2840,13 +3357,22 @@ function toggleNodeExpansion(node: FlowNode): void {
     }
 
     // Re-render (this is a simple approach; a more efficient one would update in place)
-    const currentResult = { nodes: currentNodes, edges: currentEdges, stats: currentStats!, hints: currentHints, sql: '' };
-    render(currentResult as ParseResult);
+    const currentResult: ParseResult = {
+        nodes: currentNodes,
+        edges: currentEdges,
+        stats: currentStats!,
+        hints: currentHints,
+        sql: currentSql,
+        columnLineage: currentColumnLineage,
+        columnFlows: currentColumnFlows,
+        tableUsage: currentTableUsage
+    };
+    render(currentResult);
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
-    const sourceNode = currentNodes.find(n => n.id === edge.source);
-    const targetNode = currentNodes.find(n => n.id === edge.target);
+    const sourceNode = renderNodeMap.get(edge.source) || currentNodes.find(n => n.id === edge.source);
+    const targetNode = renderNodeMap.get(edge.target) || currentNodes.find(n => n.id === edge.target);
 
     if (!sourceNode || !targetNode) { return; }
 
@@ -3134,6 +3660,7 @@ function renderBreadcrumb(): void {
             item.addEventListener('click', () => {
                 selectNode(node.id, { skipNavigation: true });
                 zoomToNode(node);
+                pulseNode(node.id);
             });
         } else {
             // For main query, reset to full view
@@ -3284,11 +3811,13 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
                 // This handles cases where line number assignment might have failed
                 if (!lineNumber && node.type === 'table' && currentSql) {
                     const tableName = node.label.toLowerCase();
+                    const escapedTableName = escapeRegex(tableName);
+                    const tableRegex = new RegExp(`\\b${escapedTableName}\\b`);
                     const sqlLines = currentSql.split('\n');
                     for (let i = 0; i < sqlLines.length; i++) {
                         const line = sqlLines[i].toLowerCase();
                         // Look for table name as a word boundary match to avoid partial matches
-                        if (line.match(new RegExp(`\\b${tableName}\\b`))) {
+                        if (tableRegex.test(line)) {
                             lineNumber = i + 1;
                             break;
                         }
@@ -3310,6 +3839,158 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
     // Update breadcrumb navigation
     updateBreadcrumb(nodeId);
+}
+
+/** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
+function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
+    rect.style.animation = 'node-pulse 0.6s ease-out';
+    if (!document.getElementById('pulse-animation-style')) {
+        const style = document.createElement('style');
+        style.id = 'pulse-animation-style';
+        style.textContent = `
+            @keyframes node-pulse {
+                0% {
+                    stroke: #818cf8;
+                    stroke-width: 6px;
+                    filter: url(#glow) brightness(1.3);
+                }
+                50% {
+                    stroke: #6366f1;
+                    stroke-width: 4px;
+                    filter: url(#glow) brightness(1.1);
+                }
+                100% {
+                    stroke: inherit;
+                    stroke-width: inherit;
+                    filter: url(#shadow);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    setTimeout(() => {
+        rect.style.animation = '';
+        restoreStroke();
+    }, 600);
+}
+
+/**
+ * Add a pulse animation to a node to draw user attention
+ * Called when jumping to a node from search, explore, or table clicks
+ */
+function pulseNode(nodeId: string): void {
+    const nodeGroup = mainGroup?.querySelector(`.node[data-id="${nodeId}"]`) as SVGGElement;
+    if (!nodeGroup) { return; }
+
+    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+    if (!rect) { return; }
+
+    const origStroke = rect.getAttribute('stroke') || '';
+    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
+
+    applyPulseToRect(rect, () => {
+        if (state.selectedNodeId === nodeId) {
+            rect.setAttribute('stroke', UI_COLORS.white);
+            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('filter', 'url(#glow)');
+        } else {
+            if (origStroke) {
+                rect.setAttribute('stroke', origStroke);
+            } else {
+                rect.removeAttribute('stroke');
+            }
+            if (origStrokeWidth) {
+                rect.setAttribute('stroke-width', origStrokeWidth);
+            } else {
+                rect.removeAttribute('stroke-width');
+            }
+            rect.setAttribute('filter', 'url(#shadow)');
+        }
+    });
+}
+
+/**
+ * Pulse a sub-node inside a CTE/subquery cloud (cloud-subflow-node with data-node-id).
+ * Used when navigating to a table from Query Stats so we highlight the table/join node inside the cloud, not the CTE.
+ * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
+ */
+function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
+    const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
+    if (!cloudContainer) { return; }
+
+    const subGroup = cloudContainer.querySelector(`.cloud-subflow-node[data-node-id="${subNodeId}"]`) as SVGGElement;
+    if (!subGroup) { return; }
+
+    const rect = subGroup.querySelector('rect') as SVGRectElement;
+    if (!rect) { return; }
+
+    const origStroke = rect.getAttribute('stroke') || '';
+    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
+    const origFilter = rect.getAttribute('filter') || '';
+
+    // Add enhanced pulse animation style for cloud sub-nodes (multi-pulse, more prominent)
+    if (!document.getElementById('cloud-pulse-animation-style')) {
+        const style = document.createElement('style');
+        style.id = 'cloud-pulse-animation-style';
+        style.textContent = `
+            @keyframes cloud-node-pulse {
+                0%, 100% {
+                    stroke: #fbbf24;
+                    stroke-width: 4px;
+                    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.8));
+                }
+                25% {
+                    stroke: #f59e0b;
+                    stroke-width: 5px;
+                    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.9));
+                }
+                50% {
+                    stroke: #fbbf24;
+                    stroke-width: 4px;
+                    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.8));
+                }
+                75% {
+                    stroke: #f59e0b;
+                    stroke-width: 5px;
+                    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.9));
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Apply multi-pulse animation (1.5s = ~3 pulses)
+    rect.style.animation = 'cloud-node-pulse 1.5s ease-in-out';
+
+    // After animation, keep a subtle highlight for 2 more seconds
+    setTimeout(() => {
+        rect.style.animation = '';
+        // Keep highlight glow
+        rect.setAttribute('stroke', '#fbbf24');
+        rect.setAttribute('stroke-width', '3');
+        rect.setAttribute('filter', 'drop-shadow(0 0 6px rgba(251, 191, 36, 0.6))');
+
+        // Fade back to original after 2 seconds
+        setTimeout(() => {
+            rect.style.transition = 'stroke 0.5s ease, stroke-width 0.5s ease, filter 0.5s ease';
+            if (origStroke) {
+                rect.setAttribute('stroke', origStroke);
+            } else {
+                rect.setAttribute('stroke', UI_COLORS.borderWhite);
+            }
+            if (origStrokeWidth) {
+                rect.setAttribute('stroke-width', origStrokeWidth);
+            } else {
+                rect.setAttribute('stroke-width', '2');
+            }
+            rect.setAttribute('filter', origFilter || 'url(#shadow)');
+
+            // Clean up transition after fade
+            setTimeout(() => {
+                rect.style.transition = '';
+            }, 500);
+        }, 2000);
+    }, 1500);
 }
 
 /**
@@ -3649,6 +4330,50 @@ function updateDetailsPanel(nodeId: string | null): void {
     });
 }
 
+/**
+ * Creates consistent empty state HTML for panels
+ */
+function createEmptyStateHtml(options: {
+    icon: string;
+    title: string;
+    subtitle?: string;
+    actionText?: string;
+    actionId?: string;
+}): string {
+    const isDark = state.isDarkTheme;
+    const textColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const subtitleColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const actionColor = isDark ? '#818cf8' : '#6366f1';
+
+    return `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+            text-align: center;
+        ">
+            <span style="font-size: 24px; margin-bottom: 8px; opacity: 0.6;">${options.icon}</span>
+            <span style="color: ${textColor}; font-size: 12px; font-weight: 500;">${options.title}</span>
+            ${options.subtitle ? `<span style="color: ${subtitleColor}; font-size: 11px; margin-top: 4px;">${options.subtitle}</span>` : ''}
+            ${options.actionText && options.actionId ? `
+                <button id="${options.actionId}" style="
+                    margin-top: 12px;
+                    background: rgba(99, 102, 241, 0.15);
+                    color: ${actionColor};
+                    border: 1px solid rgba(99, 102, 241, 0.3);
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                ">${options.actionText}</button>
+            ` : ''}
+        </div>
+    `;
+}
+
 function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
@@ -3698,9 +4423,23 @@ function updateStatsPanel(): void {
                         Copy
                     </button>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
-                    ${displayTables.map(([tableName, count]) => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                <div id="table-list" role="listbox" aria-label="Tables used in query" style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
+                    ${displayTables.map(([tableName, count], index) => `
+                        <div class="table-list-item"
+                             role="option"
+                             tabindex="${index === 0 ? '0' : '-1'}"
+                             data-table="${escapeHtml(tableName)}"
+                             style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                font-size: 10px;
+                                padding: 4px 6px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                transition: background 0.15s;
+                             "
+                             title="Click to find ${escapeHtml(tableName)} in graph">
                             <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
                             <span style="
                                 background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
@@ -3809,17 +4548,260 @@ function updateStatsPanel(): void {
             }
         });
     }
+
+    // Add keyboard navigation and click handlers for table list
+    const tableList = statsPanel.querySelector('#table-list');
+    const tableItems = statsPanel.querySelectorAll('.table-list-item');
+
+    if (tableList && tableItems.length > 0) {
+        const hoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.15)';
+        const focusBg = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.15)';
+
+        tableItems.forEach((item, index) => {
+            const itemEl = item as HTMLElement;
+
+            // Hover effects
+            itemEl.addEventListener('mouseenter', () => {
+                if (document.activeElement !== itemEl) {
+                    itemEl.style.background = hoverBg;
+                }
+            });
+            itemEl.addEventListener('mouseleave', () => {
+                if (document.activeElement !== itemEl) {
+                    itemEl.style.background = '';
+                }
+            });
+
+            // Focus effects
+            itemEl.addEventListener('focus', () => {
+                itemEl.style.background = focusBg;
+                itemEl.style.outline = 'none';
+            });
+            itemEl.addEventListener('blur', () => {
+                itemEl.style.background = '';
+            });
+
+            // Click to navigate to table
+            itemEl.addEventListener('click', () => {
+                navigateToTable(itemEl.getAttribute('data-table') || '');
+            });
+
+            // Keyboard navigation
+            itemEl.addEventListener('keydown', (e) => {
+                const key = e.key;
+                let nextIndex = index;
+
+                if (key === 'ArrowDown' || key === 'ArrowRight') {
+                    e.preventDefault();
+                    nextIndex = Math.min(index + 1, tableItems.length - 1);
+                } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+                    e.preventDefault();
+                    nextIndex = Math.max(index - 1, 0);
+                } else if (key === 'Home') {
+                    e.preventDefault();
+                    nextIndex = 0;
+                } else if (key === 'End') {
+                    e.preventDefault();
+                    nextIndex = tableItems.length - 1;
+                } else if (key === 'Enter' || key === ' ') {
+                    e.preventDefault();
+                    navigateToTable(itemEl.getAttribute('data-table') || '');
+                    return;
+                }
+
+                if (nextIndex !== index) {
+                    // Update tabindex for roving tabindex pattern
+                    itemEl.setAttribute('tabindex', '-1');
+                    const nextItem = tableItems[nextIndex] as HTMLElement;
+                    nextItem.setAttribute('tabindex', '0');
+                    nextItem.focus();
+                }
+            });
+        });
+    }
+
+    // Match table name: exact match for type 'table', or join label ending with " <name>" (e.g. "LEFT brands")
+    function tableLabelMatches(node: FlowNode, lowerName: string): boolean {
+        const label = node.label.toLowerCase();
+        if (node.type === 'table') {
+            return label === lowerName;
+        }
+        if (node.type === 'join') {
+            return label === lowerName || label.endsWith(' ' + lowerName);
+        }
+        return false;
+    }
+
+    // Recursively find a table by label inside children of a CTE/subquery (handles nested subqueries).
+    // JOIN tables in CTEs are emitted as type 'join' with label e.g. "LEFT brands", not type 'table'.
+    function findTableInChildren(children: FlowNode[], container: FlowNode, lowerName: string): { table: FlowNode; parent: FlowNode } | null {
+        for (const child of children) {
+            if (tableLabelMatches(child, lowerName)) {
+                return { table: child, parent: container };
+            }
+            if ((child.type === 'cte' || child.type === 'subquery') && child.children && child.children.length > 0) {
+                const found = findTableInChildren(child.children, child, lowerName);
+                if (found) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Helper to navigate to a table node in the graph
+    function navigateToTable(tableName: string) {
+        if (!tableName) {
+            return;
+        }
+        const lowerName = tableName.toLowerCase();
+
+        let tableNode: FlowNode | undefined;
+        let parentNode: FlowNode | undefined;
+
+        // Search inside CTE/subquery children FIRST so we prefer expanding the cloud when the table exists there.
+        // Otherwise we might find a top-level table with the same name and never expand the CTE (e.g. after closing the cloud and clicking another table in the same CTE).
+        for (const node of currentNodes) {
+            if ((node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+                const found = findTableInChildren(node.children, node, lowerName);
+                if (found) {
+                    tableNode = found.table;
+                    parentNode = found.parent;
+                    break;
+                }
+            }
+        }
+
+        // If not found in children, search in top-level nodes
+        if (!tableNode) {
+            tableNode = currentNodes.find(n =>
+                n.type === 'table' && n.label.toLowerCase() === lowerName
+            );
+        }
+
+        // If table is inside a CTE/subquery (found via parentId, e.g. from flat list with parentId)
+        if (!parentNode && tableNode && tableNode.parentId) {
+            parentNode = currentNodes.find(n => n.id === tableNode!.parentId);
+        }
+
+        if (!tableNode) {
+            return;
+        }
+
+        // Clear zoom state so zoomToNode actually zooms to the target (don't treat as "toggle off" from previous query)
+        state.zoomedNodeId = null;
+
+        // After expanding a cloud, zoom to the parent so the cloud is visible, then highlight the sub-node inside the cloud (e.g. "orders") instead of the CTE.
+        const doExpandAndNavigate = (zoomToParent: boolean, subNodeIdToHighlight?: string): void => {
+            const currentResult: ParseResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats!,
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult);
+            requestAnimationFrame(() => {
+                const targetNode = zoomToParent && parentNode ? parentNode : tableNode!;
+                selectNode(targetNode.id, { skipNavigation: true });
+                zoomToNode(targetNode);
+                if (zoomToParent && parentNode && subNodeIdToHighlight) {
+                    pulseNodeInCloud(subNodeIdToHighlight, parentNode.id);
+                } else {
+                    pulseNode(targetNode.id);
+                }
+            });
+        };
+
+        // If target node (table or its parent) is inside a collapsed cluster, expand cluster first so the node is in the DOM
+        const nodeToShow = parentNode || tableNode;
+        const cluster = getClusterForNode(nodeToShow.id, currentClusters);
+        if (cluster && !cluster.expanded) {
+            currentClusters = toggleCluster(cluster, currentClusters);
+            const currentResult: ParseResult = {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats!,
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            };
+            render(currentResult);
+            requestAnimationFrame(() => {
+                if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery') && !parentNode.expanded) {
+                    parentNode.expanded = true;
+                    if (parentNode.children) {
+                        parentNode.height = 70 + parentNode.children.length * 30;
+                    }
+                    doExpandAndNavigate(true, tableNode!.id);
+                } else {
+                    selectNode(tableNode.id, { skipNavigation: true });
+                    zoomToNode(tableNode);
+                    pulseNode(tableNode.id);
+                }
+            });
+            return;
+        }
+
+        // When table is inside a CTE/subquery, always expand the cloud (so it opens even if user had closed it), zoom to it, and highlight the sub-node inside the cloud
+        if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery')) {
+            // If parent is inside a collapsed cluster (e.g. "CTEs" cluster), expand cluster first so the CTE node is visible
+            const cluster = getClusterForNode(parentNode.id, currentClusters);
+            if (cluster && !cluster.expanded) {
+                currentClusters = toggleCluster(cluster, currentClusters);
+                const currentResult: ParseResult = {
+                    nodes: currentNodes,
+                    edges: currentEdges,
+                    stats: currentStats!,
+                    hints: currentHints,
+                    sql: currentSql,
+                    columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
+                    tableUsage: currentTableUsage
+                };
+                render(currentResult);
+                requestAnimationFrame(() => {
+                    parentNode!.expanded = true;
+                    if (parentNode!.children) {
+                        parentNode!.height = 70 + parentNode!.children!.length * 30;
+                    }
+                    doExpandAndNavigate(true, tableNode!.id);
+                });
+                return;
+            }
+            // Always expand the parent cloud (opens it if it was collapsed), zoom to it, and highlight the sub-node (e.g. orders) inside the cloud
+            parentNode.expanded = true;
+            if (parentNode.children) {
+                parentNode.height = 70 + parentNode.children.length * 30;
+            }
+            doExpandAndNavigate(true, tableNode.id);
+            return;
+        }
+
+        selectNode(tableNode.id, { skipNavigation: true });
+        zoomToNode(tableNode);
+        pulseNode(tableNode.id);
+    }
 }
 
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
 
     if (!currentHints || currentHints.length === 0) {
-        hintsPanel.style.display = 'none';
+        hintsPanel.style.opacity = '0';
+        hintsPanel.style.visibility = 'hidden';
+        hintsPanel.style.transform = 'translateY(8px)';
         return;
     }
 
-    hintsPanel.style.display = 'block';
+    hintsPanel.style.opacity = '1';
+    hintsPanel.style.visibility = 'visible';
+    hintsPanel.style.transform = 'translateY(0)';
 
     // Theme-aware colors
     const isDark = state.isDarkTheme;
@@ -3892,6 +4874,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Performance (${perfCount})</button>
             ` : ''}
             ${qualityCount > 0 ? `
@@ -3903,6 +4886,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Quality (${qualityCount})</button>
             ` : ''}
             ${bestPracticeCount > 0 ? `
@@ -3914,6 +4898,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Best Practice (${bestPracticeCount})</button>
             ` : ''}
             ${complexityCount > 0 ? `
@@ -3925,6 +4910,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Complexity (${complexityCount})</button>
             ` : ''}
         </div>
@@ -3941,6 +4927,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">High (${highCount})</button>
                 ` : ''}
                 ${mediumCount > 0 ? `
@@ -3952,6 +4939,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">Medium (${mediumCount})</button>
                 ` : ''}
                 ${lowCount > 0 ? `
@@ -3963,6 +4951,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">Low (${lowCount})</button>
                 ` : ''}
             </div>
@@ -4034,6 +5023,44 @@ function updateHintsPanel(): void {
     let activeCategory: string | null = null;
     let activeSeverity: string | null = null;
 
+    // Create "Clear filters" button (initially hidden)
+    const clearFiltersBtn = document.createElement('button');
+    clearFiltersBtn.id = 'clear-filters-btn';
+    clearFiltersBtn.innerHTML = '✕ Clear filters';
+    clearFiltersBtn.style.cssText = `
+        display: none;
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 10px;
+        cursor: pointer;
+        margin-left: auto;
+        transition: all 0.15s;
+    `;
+    clearFiltersBtn.addEventListener('mouseenter', () => {
+        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.25)';
+    });
+    clearFiltersBtn.addEventListener('mouseleave', () => {
+        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.15)';
+    });
+    clearFiltersBtn.addEventListener('click', () => {
+        activeCategory = null;
+        activeSeverity = null;
+        filterButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
+        severityButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
+        applyFilters();
+    });
+
+    // Insert clear button after the header
+    const headerDiv = hintsPanel.querySelector('div');
+    if (headerDiv) {
+        headerDiv.style.display = 'flex';
+        headerDiv.style.alignItems = 'center';
+        headerDiv.appendChild(clearFiltersBtn);
+    }
+
     filterButtons.forEach(btn => {
         const btnEl = btn as HTMLElement;
         btnEl.addEventListener('click', () => {
@@ -4070,17 +5097,37 @@ function updateHintsPanel(): void {
         });
     });
 
+    // Create "no matching hints" message element
+    const noMatchesEl = document.createElement('div');
+    noMatchesEl.id = 'no-matches-message';
+    noMatchesEl.innerHTML = createEmptyStateHtml({
+        icon: '🔍',
+        title: 'No matching hints',
+        subtitle: 'Try adjusting your filters'
+    });
+    noMatchesEl.style.display = 'none';
+    const hintsList = hintsPanel.querySelector('.hints-list');
+    if (hintsList) {
+        hintsList.appendChild(noMatchesEl);
+    }
+
     function applyFilters() {
+        // Show/hide clear filters button based on active filters
+        const hasActiveFilters = activeCategory !== null || activeSeverity !== null;
+        clearFiltersBtn.style.display = hasActiveFilters ? 'block' : 'none';
+
+        let visibleCount = 0;
         hintItems.forEach(item => {
             const itemEl = item as HTMLElement;
             const itemCategory = itemEl.getAttribute('data-category') || 'other';
             const itemSeverity = itemEl.getAttribute('data-severity') || '';
-            
+
             const categoryMatch = !activeCategory || itemCategory === activeCategory;
             const severityMatch = !activeSeverity || itemSeverity === activeSeverity;
-            
+
             if (categoryMatch && severityMatch) {
                 itemEl.style.display = '';
+                visibleCount++;
             } else {
                 itemEl.style.display = 'none';
             }
@@ -4093,25 +5140,29 @@ function updateHintsPanel(): void {
                 const itemEl = item as HTMLElement;
                 return itemEl.style.display !== 'none';
             });
-            
+
             if (visibleItems.length === 0) {
                 groupEl.style.display = 'none';
             } else {
                 groupEl.style.display = '';
             }
         });
+
+        // Show/hide "no matches" message
+        noMatchesEl.style.display = (hasActiveFilters && visibleCount === 0) ? 'block' : 'none';
     }
 }
 
 function fitView(): void {
-    if (!svg || currentNodes.length === 0) { return; }
+    const nodesForFit = renderNodes.length > 0 ? renderNodes : currentNodes;
+    if (!svg || nodesForFit.length === 0) { return; }
 
     const rect = svg.getBoundingClientRect();
     const padding = 80;
 
     // Calculate bounds including nodes and expanded cloud containers
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const node of currentNodes) {
+    for (const node of nodesForFit) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
@@ -4157,6 +5208,7 @@ function fitView(): void {
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
     state.scale = Math.min(scaleX, scaleY, 1.5);
+    fitViewScale = state.scale; // Treat this as 100% for the zoom indicator
 
     // Center the graph
     state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
@@ -4167,6 +5219,7 @@ function fitView(): void {
     state.previousZoomState = null;
 
     updateTransform();
+    updateZoomIndicator();
 }
 
 function zoomToNode(node: FlowNode): void {
@@ -4174,7 +5227,7 @@ function zoomToNode(node: FlowNode): void {
 
     // Simple toggle behavior: if already zoomed to any node, restore to fit view
     if (state.zoomedNodeId !== null) {
-        // Show all nodes and edges again
+        // Show all nodes, edges, and cloud containers again
         const allNodes = mainGroup.querySelectorAll('.node');
         allNodes.forEach(nodeEl => {
             (nodeEl as SVGGElement).style.display = '';
@@ -4185,7 +5238,12 @@ function zoomToNode(node: FlowNode): void {
             (edgeEl as SVGPathElement).style.display = '';
             (edgeEl as SVGPathElement).style.opacity = '1';
         });
-        
+        const allClouds = mainGroup.querySelectorAll('.cloud-container');
+        allClouds.forEach(cloudEl => {
+            (cloudEl as SVGGElement).style.display = '';
+            (cloudEl as SVGGElement).style.opacity = '1';
+        });
+
         // Clear focus mode and restore to fit view (default state)
         clearFocusMode();
         state.focusModeEnabled = false;
@@ -4232,6 +5290,18 @@ function zoomToNode(node: FlowNode): void {
         }
     });
 
+    // Show/hide cloud containers based on whether their parent node is visible
+    const allClouds = mainGroup.querySelectorAll('.cloud-container');
+    allClouds.forEach(cloudEl => {
+        const nodeId = cloudEl.getAttribute('data-node-id');
+        if (nodeId && immediateNeighbors.has(nodeId)) {
+            (cloudEl as SVGGElement).style.display = '';
+            (cloudEl as SVGGElement).style.opacity = '1';
+        } else {
+            (cloudEl as SVGGElement).style.display = 'none';
+        }
+    });
+
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edgeEl => {
         const source = edgeEl.getAttribute('data-source');
@@ -4245,6 +5315,7 @@ function zoomToNode(node: FlowNode): void {
     });
 
     // Calculate bounds of visible nodes (the clicked node and its immediate neighbors)
+    // Also include expanded cloud containers for CTE/subquery nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const visibleNodes = currentNodes.filter(n => immediateNeighbors.has(n.id));
     for (const n of visibleNodes) {
@@ -4252,27 +5323,56 @@ function zoomToNode(node: FlowNode): void {
         minY = Math.min(minY, n.y);
         maxX = Math.max(maxX, n.x + n.width);
         maxY = Math.max(maxY, n.y + n.height);
+
+        // If this node is an expanded CTE/subquery, include cloud bounds
+        if (n.expanded && (n.type === 'cte' || n.type === 'subquery') && n.children && n.children.length > 0) {
+            const cloudPadding = 15;
+            const cloudGap = 30;
+            // Estimate cloud dimensions (same logic as render)
+            const nodeHeight = n.type === 'subquery' ? 60 : 60;
+            let cloudWidth = 160;
+            let cloudHeight = 150;
+            if (n.children.length > 0) {
+                // Rough estimate: each child adds to height
+                cloudWidth = Math.max(200, n.children.length * 80);
+                cloudHeight = Math.max(150, n.children.length * 50 + 50);
+            }
+            const offset = cloudOffsets.get(n.id) || {
+                offsetX: -cloudWidth - cloudGap,
+                offsetY: -(cloudHeight - nodeHeight) / 2
+            };
+            const cloudX = n.x + offset.offsetX;
+            const cloudY = n.y + offset.offsetY;
+            minX = Math.min(minX, cloudX);
+            minY = Math.min(minY, cloudY);
+            maxX = Math.max(maxX, cloudX + cloudWidth);
+            maxY = Math.max(maxY, cloudY + cloudHeight);
+        }
     }
 
-    // If only one node, use its bounds with some padding
-    if (visibleNodes.length === 1) {
-        const padding = 100;
+    // If only one node (without expanded cloud), use its bounds with generous padding
+    const hasExpandedCloud = node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0;
+    if (visibleNodes.length === 1 && !hasExpandedCloud) {
+        const padding = 220;
         minX = node.x - padding;
         minY = node.y - padding;
         maxX = node.x + node.width + padding;
         maxY = node.y + node.height + padding;
     }
 
-    // Calculate zoom to fit the visible nodes in the viewport
+    // Calculate zoom to fit the visible nodes in the viewport (cap scale to avoid zooming too much)
     const rect = svg.getBoundingClientRect();
     const availableWidth = rect.width - 320; // Account for panels
     const availableHeight = rect.height - 100;
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
-    
+
     const scaleX = (availableWidth * 0.8) / graphWidth; // Use 80% of available space
     const scaleY = (availableHeight * 0.8) / graphHeight;
-    const targetScale = Math.min(scaleX, scaleY, 5.0); // Cap at 5x zoom
+    // Cap at 2.5x raw scale OR 180% of fit view scale (whichever is smaller)
+    const maxScaleAbsolute = 2.5;
+    const maxScaleRelative = fitViewScale > 0 ? fitViewScale * 1.8 : maxScaleAbsolute;
+    const targetScale = Math.min(scaleX, scaleY, maxScaleAbsolute, maxScaleRelative);
 
     // Center the visible nodes
     const centerX = (minX + maxX) / 2;
@@ -4284,6 +5384,7 @@ function zoomToNode(node: FlowNode): void {
     state.zoomedNodeId = node.id;
 
     updateTransform();
+    updateZoomIndicator();
 }
 
 export function zoomIn(): void {
@@ -4299,7 +5400,33 @@ export function zoomOut(): void {
 }
 
 export function getZoomLevel(): number {
-    return Math.round(state.scale * 100);
+    // Display zoom relative to "fit to view" so 100% = fit view, not raw scale 1
+    const base = fitViewScale > 0 ? fitViewScale : 1;
+    const pct = Math.round((state.scale / base) * 100);
+    return Math.min(300, Math.max(10, pct)); // Clamp to sensible range for display
+}
+
+// View state for tab persistence
+export interface TabViewState {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+}
+
+export function getViewState(): TabViewState {
+    return {
+        scale: state.scale,
+        offsetX: state.offsetX,
+        offsetY: state.offsetY
+    };
+}
+
+export function setViewState(viewState: TabViewState): void {
+    state.scale = viewState.scale;
+    state.offsetX = viewState.offsetX;
+    state.offsetY = viewState.offsetY;
+    updateTransform();
+    updateZoomIndicator();
 }
 
 export function resetView(): void {
@@ -4310,6 +5437,7 @@ export function resetView(): void {
 function resetViewportToCenter(): void {
     // Reset transform to center the viewport (for error states when there are no nodes)
     state.scale = 1;
+    fitViewScale = 1;
     state.offsetX = 0;
     state.offsetY = 0;
     updateTransform();
@@ -4328,8 +5456,11 @@ function updateZoomIndicator(): void {
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
 
-export function setSearchBox(input: HTMLInputElement): void {
+let searchCountIndicator: HTMLSpanElement | null = null;
+
+export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanElement): void {
     searchBox = input;
+    searchCountIndicator = countIndicator;
     input.addEventListener('input', () => {
         // Clear any existing debounce timer
         if (searchDebounceTimer) {
@@ -4339,11 +5470,45 @@ export function setSearchBox(input: HTMLInputElement): void {
         // Immediately highlight matches without zooming (for visual feedback)
         highlightMatches(input.value);
 
+        // Update search count indicator
+        updateSearchCountDisplay();
+
         // Debounce the zoom/navigation to first result
         searchDebounceTimer = setTimeout(() => {
             navigateToFirstResult();
         }, SEARCH_DEBOUNCE_DELAY);
     });
+}
+
+function updateSearchCountDisplay(): void {
+    if (!searchCountIndicator) { return; }
+
+    const term = state.searchTerm;
+    const total = state.searchResults.length;
+    const hasNodes = currentNodes.length > 0;
+
+    if (!term) {
+        searchCountIndicator.style.display = 'none';
+        searchCountIndicator.textContent = '';
+        return;
+    }
+
+    searchCountIndicator.style.display = 'block';
+
+    if (total === 0) {
+        // Differentiate: no nodes in graph vs no matching results
+        if (!hasNodes) {
+            searchCountIndicator.textContent = 'No data';
+            searchCountIndicator.style.color = '#94a3b8';
+        } else {
+            searchCountIndicator.textContent = 'No matches';
+            searchCountIndicator.style.color = '#f87171';
+        }
+    } else {
+        const current = state.currentSearchIndex + 1;
+        searchCountIndicator.textContent = `${current > 0 ? current : 1}/${total}`;
+        searchCountIndicator.style.color = '#64748b';
+    }
 }
 
 // Highlight matching nodes without navigating (immediate feedback)
@@ -4402,11 +5567,16 @@ function navigateSearch(delta: number): void {
         state.currentSearchIndex = (state.currentSearchIndex + delta + state.searchResults.length) % state.searchResults.length;
     }
 
+    // Update count display with new position
+    updateSearchCountDisplay();
+
     const nodeId = state.searchResults[state.currentSearchIndex];
     const node = currentNodes.find(n => n.id === nodeId);
     if (node) {
         zoomToNode(node);
         selectNode(nodeId, { skipNavigation: true });
+        // Add pulse animation to draw attention
+        pulseNode(nodeId);
     }
 }
 
@@ -4424,6 +5594,9 @@ function clearSearch(): void {
             rect.removeAttribute('stroke-width');
         }
     });
+
+    // Reset count display
+    updateSearchCountDisplay();
 }
 
 export function getSearchResultCount(): { current: number; total: number } {
@@ -4958,8 +6131,8 @@ function showClipboardNotification(type: 'success' | 'error', message: string): 
 
 function calculateBounds(): { minX: number; minY: number; width: number; height: number } {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    for (const node of currentNodes) {
+    const nodesForBounds = renderNodes.length > 0 ? renderNodes : currentNodes;
+    for (const node of nodesForBounds) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
@@ -4989,7 +6162,8 @@ function getNodeIcon(type: FlowNode['type']): string {
         union: '∪',
         subquery: '⊂',
         window: '▦',
-        case: '⎇'
+        case: '⎇',
+        cluster: '▣'
     };
     return icons[type] || '○';
 }
@@ -5149,7 +6323,15 @@ function updateLegendPanel(): void {
 export function toggleLegend(show?: boolean): void {
     if (!legendPanel) {return;}
     state.legendVisible = show ?? !state.legendVisible;
-    legendPanel.style.display = state.legendVisible ? 'block' : 'none';
+    if (state.legendVisible) {
+        legendPanel.style.opacity = '1';
+        legendPanel.style.visibility = 'visible';
+        legendPanel.style.transform = 'translateY(0)';
+    } else {
+        legendPanel.style.opacity = '0';
+        legendPanel.style.visibility = 'hidden';
+        legendPanel.style.transform = 'translateY(-8px)';
+    }
 }
 
 let statsVisible = true;
@@ -5165,11 +6347,34 @@ let hintsVisible = true;
 export function toggleHints(show?: boolean): void {
     if (!hintsPanel) {return;}
     hintsVisible = show ?? !hintsVisible;
-    hintsPanel.style.display = hintsVisible ? 'block' : 'none';
+    if (hintsVisible) {
+        hintsPanel.style.opacity = '1';
+        hintsPanel.style.visibility = 'visible';
+        hintsPanel.style.transform = 'translateY(0)';
+    } else {
+        hintsPanel.style.opacity = '0';
+        hintsPanel.style.visibility = 'hidden';
+        hintsPanel.style.transform = 'translateY(8px)';
+    }
 }
 
 // Layout order for cycling
 const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
+
+// Loading state helpers
+function showLoading(message?: string): void {
+    if (!loadingOverlay) { return; }
+    const textEl = loadingOverlay.querySelector('span');
+    if (textEl && message) {
+        textEl.textContent = message;
+    }
+    loadingOverlay.style.display = 'flex';
+}
+
+function hideLoading(): void {
+    if (!loadingOverlay) { return; }
+    loadingOverlay.style.display = 'none';
+}
 
 export function toggleLayout(): void {
     const currentIndex = LAYOUT_ORDER.indexOf(state.layoutType || 'vertical');
@@ -5182,74 +6387,90 @@ export function switchLayout(layoutType: LayoutType): void {
         return;
     }
 
-    state.layoutType = layoutType;
-
-    // Re-run layout with selected algorithm
-    switch (layoutType) {
-        case 'horizontal':
-            layoutGraphHorizontal(currentNodes, currentEdges);
-            break;
-        case 'compact':
-            layoutGraphCompact(currentNodes, currentEdges);
-            break;
-        case 'force':
-            layoutGraphForce(currentNodes, currentEdges);
-            break;
-        case 'radial':
-            layoutGraphRadial(currentNodes, currentEdges);
-            break;
-        case 'vertical':
-        default:
-            layoutGraph(currentNodes, currentEdges);
-            break;
+    // Show loading for larger graphs
+    const showLoadingIndicator = currentNodes.length > 15;
+    if (showLoadingIndicator) {
+        showLoading('Calculating layout...');
     }
 
-    // Update node positions in DOM
-    currentNodes.forEach(node => {
-        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
-        if (nodeGroup) {
-            const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-            if (rect) {
-                const origX = parseFloat(rect.getAttribute('x') || '0');
-                const origY = parseFloat(rect.getAttribute('y') || '0');
-                const deltaX = node.x - origX;
-                const deltaY = node.y - origY;
-                nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+    // Use requestAnimationFrame to allow UI to update before heavy computation
+    requestAnimationFrame(() => {
+        state.layoutType = layoutType;
+
+        // Re-run layout with selected algorithm
+        switch (layoutType) {
+            case 'horizontal':
+                layoutGraphHorizontal(currentNodes, currentEdges);
+                break;
+            case 'compact':
+                layoutGraphCompact(currentNodes, currentEdges);
+                break;
+            case 'force':
+                layoutGraphForce(currentNodes, currentEdges);
+                break;
+            case 'radial':
+                layoutGraphRadial(currentNodes, currentEdges);
+                break;
+            case 'vertical':
+            default:
+                layoutGraph(currentNodes, currentEdges);
+                break;
+        }
+
+        // Update node positions in DOM
+        currentNodes.forEach(node => {
+            const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+            if (nodeGroup) {
+                const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+                if (rect) {
+                    const origX = parseFloat(rect.getAttribute('x') || '0');
+                    const origY = parseFloat(rect.getAttribute('y') || '0');
+                    const deltaX = node.x - origX;
+                    const deltaY = node.y - origY;
+                    nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+                }
             }
+        });
+
+        // Show all edges first
+        const allEdges = mainGroup!.querySelectorAll('.edge');
+        allEdges.forEach(edgeEl => {
+            (edgeEl as SVGPathElement).style.display = '';
+        });
+
+        // Update edge paths
+        const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+        edgeElements.forEach(edgeEl => {
+            const sourceId = edgeEl.getAttribute('data-source');
+            const targetId = edgeEl.getAttribute('data-target');
+            if (sourceId && targetId) {
+                const sourceNode = currentNodes.find(n => n.id === sourceId);
+                const targetNode = currentNodes.find(n => n.id === targetId);
+                if (sourceNode && targetNode) {
+                    const path = calculateEdgePath(sourceNode, targetNode, layoutType);
+                    edgeEl.setAttribute('d', path);
+                    (edgeEl as SVGPathElement).style.display = '';
+                } else {
+                    (edgeEl as SVGPathElement).style.display = 'none';
+                }
+            }
+        });
+
+        // Update layout selector if present
+        const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+        if (layoutSelect) {
+            layoutSelect.value = layoutType;
+        }
+
+        fitView();
+
+        // Hide loading after a brief delay to ensure UI updates are visible
+        if (showLoadingIndicator) {
+            requestAnimationFrame(() => {
+                hideLoading();
+            });
         }
     });
-
-    // Show all edges first
-    const allEdges = mainGroup!.querySelectorAll('.edge');
-    allEdges.forEach(edgeEl => {
-        (edgeEl as SVGPathElement).style.display = '';
-    });
-
-    // Update edge paths
-    const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
-    edgeElements.forEach(edgeEl => {
-        const sourceId = edgeEl.getAttribute('data-source');
-        const targetId = edgeEl.getAttribute('data-target');
-        if (sourceId && targetId) {
-            const sourceNode = currentNodes.find(n => n.id === sourceId);
-            const targetNode = currentNodes.find(n => n.id === targetId);
-            if (sourceNode && targetNode) {
-                const path = calculateEdgePath(sourceNode, targetNode, layoutType);
-                edgeEl.setAttribute('d', path);
-                (edgeEl as SVGPathElement).style.display = '';
-            } else {
-                (edgeEl as SVGPathElement).style.display = 'none';
-            }
-        }
-    });
-
-    // Update layout selector if present
-    const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
-    if (layoutSelect) {
-        layoutSelect.value = layoutType;
-    }
-
-    fitView();
 }
 
 export function getCurrentLayout(): LayoutType {
@@ -5559,11 +6780,18 @@ function clearColumnHighlights(): void {
 
 export function toggleSqlPreview(show?: boolean): void {
     if (!sqlPreviewPanel) {return;}
-    const shouldShow = show ?? (sqlPreviewPanel.style.display === 'none');
-    sqlPreviewPanel.style.display = shouldShow ? 'block' : 'none';
+    const isHidden = sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0';
+    const shouldShow = show ?? isHidden;
 
     if (shouldShow) {
         updateSqlPreview();
+        sqlPreviewPanel.style.opacity = '1';
+        sqlPreviewPanel.style.visibility = 'visible';
+        sqlPreviewPanel.style.transform = 'translateY(0)';
+    } else {
+        sqlPreviewPanel.style.opacity = '0';
+        sqlPreviewPanel.style.visibility = 'hidden';
+        sqlPreviewPanel.style.transform = 'translateY(16px)';
     }
 }
 
@@ -5639,6 +6867,7 @@ export function toggleNodeCollapse(nodeId: string): void {
         hints: currentHints,
         sql: currentSql,
         columnLineage: currentColumnLineage,
+        columnFlows: currentColumnFlows,
         tableUsage: currentTableUsage
     };
     render(result);
@@ -5789,8 +7018,9 @@ export function getFormattedSql(): string {
 export function updateMinimap(): void {
     const minimapContainer = document.getElementById('minimap-container');
     const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
+    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!minimapContainer || !minimapSvg || currentNodes.length < 8) {
+    if (!minimapContainer || !minimapSvg || nodesForMinimap.length < 8) {
         // Only show minimap for complex queries (8+ nodes)
         if (minimapContainer) {minimapContainer.style.display = 'none';}
         return;
@@ -5812,7 +7042,7 @@ export function updateMinimap(): void {
     // Render mini nodes
     minimapSvg.innerHTML = '';
 
-    for (const node of currentNodes) {
+    for (const node of nodesForMinimap) {
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String((node.x - bounds.minX) * mapScale + padding));
         rect.setAttribute('y', String((node.y - bounds.minY) * mapScale + padding));
@@ -5830,8 +7060,9 @@ export function updateMinimap(): void {
 function updateMinimapViewport(): void {
     const viewport = document.getElementById('minimap-viewport');
     const minimapContainer = document.getElementById('minimap-container');
+    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!viewport || !minimapContainer || !svg || currentNodes.length < 8) {return;}
+    if (!viewport || !minimapContainer || !svg || nodesForMinimap.length < 8) {return;}
 
     const bounds = calculateBounds();
     const svgRect = svg.getBoundingClientRect();
@@ -6460,6 +7691,7 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
         case 'zoom':
             selectNode(node.id, { skipNavigation: true });
             zoomToNode(node);
+            pulseNode(node.id);
             break;
         case 'focus-upstream':
             selectNode(node.id, { skipNavigation: true });
@@ -6492,6 +7724,7 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
                     hints: currentHints,
                     sql: currentSql,
                     columnLineage: currentColumnLineage,
+                    columnFlows: currentColumnFlows,
                     tableUsage: currentTableUsage
                 };
                 render(result);
@@ -6585,12 +7818,13 @@ export function toggleColumnFlows(show?: boolean): void {
  * Show the column lineage selection panel
  */
 function showColumnLineagePanel(): void {
+    // Always remove existing panel first (fixes stale panel when switching queries)
+    hideColumnLineagePanel();
+
     if (!currentColumnFlows || currentColumnFlows.length === 0) {
+        // No column flows for this query type (e.g., UPDATE, DELETE, INSERT)
         return;
     }
-
-    // Remove existing panel
-    hideColumnLineagePanel();
 
     // Create panel
     columnLineagePanel = document.createElement('div');

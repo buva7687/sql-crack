@@ -10,3 +10,5 @@ export {
     getReferenceTypeColor,
     getWorkspaceNodeColor,
 } from './theme';
+
+export { escapeRegex } from './stringUtils';

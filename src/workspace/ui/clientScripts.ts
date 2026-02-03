@@ -532,6 +532,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         ${getEventDelegationScript()}
         ${getNodeInteractionsScript()}
         ${getTooltipScript()}
+        ${getImpactSummaryScript()}
         ${getImpactFormScript()}
         ${getTableSearchScript()}
         ${getVisualLineageSearchScript()}
@@ -587,6 +588,12 @@ function getViewModeScript(): string {
                 }
             });
             currentViewMode = view;
+
+            // Show/hide header search box (only relevant for Graph tab)
+            const headerSearchBox = document.querySelector('.header-right .search-box');
+            if (headerSearchBox) {
+                headerSearchBox.style.display = view === 'graph' ? '' : 'none';
+            }
 
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
@@ -692,6 +699,27 @@ function getViewModeScript(): string {
 
         updateSidebarSectionsForView();
 
+        // Graph mode help tooltip
+        const helpBtn = document.getElementById('graph-mode-help-btn');
+        const helpTooltip = document.getElementById('graph-mode-help-tooltip');
+        if (helpBtn && helpTooltip) {
+            helpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = helpTooltip.classList.contains('visible');
+                if (!isVisible) {
+                    const rect = helpBtn.getBoundingClientRect();
+                    helpTooltip.style.top = (rect.bottom + 8) + 'px';
+                    helpTooltip.style.right = (window.innerWidth - rect.right) + 'px';
+                }
+                helpTooltip.classList.toggle('visible');
+            });
+            document.addEventListener('click', (e) => {
+                if (!helpBtn.contains(e.target) && !helpTooltip.contains(e.target)) {
+                    helpTooltip.classList.remove('visible');
+                }
+            });
+        }
+
         // Set initial graph-mode-switcher visibility (always in layout; visibility reserves space).
         // This ensures main tabs are in the same position on initial load regardless of active tab.
         if (graphModeSwitcher) {
@@ -740,7 +768,7 @@ function getViewModeScript(): string {
                 if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
                     const prev = tableExplorerHistory.pop();
                     if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
-                    lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                    lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                     vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
                     updateBackButtonText();
                 } else {
@@ -846,7 +874,7 @@ function getContextMenuScript(): string {
                     case 'showUpstream':
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading upstream dependencies...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading upstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
                             vscode.postMessage({
                                 command: 'getUpstream',
@@ -866,7 +894,7 @@ function getContextMenuScript(): string {
                     case 'showDownstream':
                         switchToView('lineage');
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading downstream dependencies...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading downstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
                             vscode.postMessage({
                                 command: 'getDownstream',
@@ -886,7 +914,7 @@ function getContextMenuScript(): string {
                     case 'analyzeImpact':
                         switchToView('impact');
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Analyzing impact...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         vscode.postMessage({
                             command: 'analyzeImpact',
                             type: 'table',
@@ -897,7 +925,7 @@ function getContextMenuScript(): string {
                     case 'exploreTable':
                         switchToView('tableExplorer');
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
-                        if (lineageContent) lineageContent.innerHTML = '<div class="lineage-empty"><p>Loading table details...</p></div>';
+                        if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
                         vscode.postMessage({
                             command: 'exploreTable',
                             tableName: nodeName
@@ -955,6 +983,7 @@ function getMessageHandlingScript(): string {
                         } else {
                             lineageContent.innerHTML = message.data.html;
                         }
+                        setupImpactSummaryDetails();
                     }
                     break;
                 case 'tableExplorerResult':
@@ -1140,18 +1169,18 @@ function getEventDelegationScript(): string {
                         }
                         currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
                         vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
                         break;
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                     case 'show-downstream':
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
-                        lineageContent.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
+                        lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
                         break;
                 }
@@ -1438,6 +1467,60 @@ function getImpactFormScript(): string {
     `;
 }
 
+function getImpactSummaryScript(): string {
+    return `
+        function setupImpactSummaryDetails() {
+            const details = document.getElementById('impact-summary-details');
+            const titleEl = document.getElementById('impact-summary-title');
+            const listEl = document.getElementById('impact-summary-list');
+            const closeBtn = document.getElementById('impact-summary-close');
+            if (!details || !titleEl || !listEl) {
+                return;
+            }
+
+            function escapeHtml(text) {
+                return text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            closeBtn?.addEventListener('click', () => {
+                details.style.display = 'none';
+            });
+
+            document.querySelectorAll('.impact-summary-trigger').forEach(button => {
+                button.addEventListener('click', () => {
+                    const title = button.getAttribute('data-title') || 'Details';
+                    const listRaw = button.getAttribute('data-list') || '[]';
+                    let items = [];
+                    try {
+                        items = JSON.parse(decodeURIComponent(listRaw));
+                    } catch {
+                        items = [];
+                    }
+
+                    titleEl.textContent = title;
+                    if (!items.length) {
+                        listEl.innerHTML = '<div class="summary-item">No items found</div>';
+                    } else {
+                        listEl.innerHTML = items.map(item => {
+                            const label = escapeHtml(item.label || '');
+                            const titleAttr = escapeHtml(item.title || '');
+                            return '<div class="summary-item" title="' + titleAttr + '">' + label + '</div>';
+                        }).join('');
+                    }
+
+                    details.style.display = 'block';
+                    details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
+            });
+        }
+    `;
+}
+
 function getTableSearchScript(): string {
     return `
         // ========== Table Search and Filter Setup ==========
@@ -1446,6 +1529,7 @@ function getTableSearchScript(): string {
             const searchClear = document.getElementById('table-search-clear');
             const typeFilter = document.getElementById('table-type-filter');
             const sortSelect = document.getElementById('table-sort');
+            const clearFilters = document.getElementById('table-clear-filters');
             const tableGrid = document.getElementById('table-list-grid');
             const emptyFilter = document.getElementById('table-list-empty-filter');
             const resultsInfo = document.getElementById('table-list-results-info');
@@ -1533,12 +1617,8 @@ function getTableSearchScript(): string {
                 }
 
                 if (resultsInfo && resultsCount) {
-                    if (visibleItems.length < totalItems || searchQuery || typeValue !== 'all') {
-                        resultsInfo.style.display = 'block';
-                        resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
-                    } else {
-                        resultsInfo.style.display = 'none';
-                    }
+                    resultsInfo.style.display = 'block';
+                    resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
                 }
 
                 if (emptyFilter && emptyMessage) {
@@ -1559,6 +1639,9 @@ function getTableSearchScript(): string {
                 if (searchClear) {
                     searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
                 }
+                if (clearFilters) {
+                    clearFilters.style.display = searchQuery || typeValue !== 'all' ? 'inline-flex' : 'none';
+                }
             }
 
             function debouncedFilter() {
@@ -1570,6 +1653,13 @@ function getTableSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (typeFilter) typeFilter.value = 'all';
+                filterTables();
+                searchInput?.focus();
+            });
+            clearFilters?.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                if (typeFilter) typeFilter.value = 'all';
+                if (sortSelect) sortSelect.value = 'connected';
                 filterTables();
                 searchInput?.focus();
             });
@@ -1999,9 +2089,23 @@ function getLineageGraphScript(): string {
             tooltip.querySelector('.upstream-value').textContent = '-';
             tooltip.querySelector('.downstream-value').textContent = '-';
 
-            const rect = node.getBoundingClientRect();
-            tooltip.style.left = (rect.right + 10) + 'px';
-            tooltip.style.top = rect.top + 'px';
+            // Position near mouse cursor with boundary checks
+            const tooltipWidth = 220;
+            const tooltipHeight = 280;
+            const padding = 15;
+            let left = e.clientX + padding;
+            let top = e.clientY + padding;
+
+            // Keep within viewport
+            if (left + tooltipWidth > window.innerWidth) {
+                left = e.clientX - tooltipWidth - padding;
+            }
+            if (top + tooltipHeight > window.innerHeight) {
+                top = e.clientY - tooltipHeight - padding;
+            }
+
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
             tooltip.style.display = 'block';
         }
 
@@ -2034,6 +2138,25 @@ function getLineageGraphScript(): string {
                 allNodes.forEach(n => n.classList.remove('focused', 'highlighted', 'dimmed'));
             }
             lineageFocusedNode = null;
+        }
+
+        function showCopyFeedback(message) {
+            const existing = document.getElementById('copy-feedback-toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'copy-feedback-toast';
+            toast.textContent = message;
+            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.style.opacity = '1';
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 200);
+                }, 1500);
+            });
         }
 
         function showLineageContextMenu(e, node) {
@@ -2071,7 +2194,11 @@ function getLineageGraphScript(): string {
                 },
                 'copy-name': () => {
                     if (nodeName) {
-                        navigator.clipboard.writeText(nodeName);
+                        navigator.clipboard.writeText(nodeName).then(() => {
+                            showCopyFeedback('Copied!');
+                        }).catch(() => {
+                            showCopyFeedback('Copy failed');
+                        });
                     }
                 }
             };

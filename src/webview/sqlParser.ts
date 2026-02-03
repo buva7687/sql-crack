@@ -511,7 +511,10 @@ export function splitSqlStatements(sql: string): string[] {
         if (char === ';' && !inString && depth === 0) {
             const trimmed = current.trim();
             if (trimmed) {
-                statements.push(trimmed);
+                const withoutComments = stripLeadingComments(trimmed).trim();
+                if (withoutComments) {
+                    statements.push(trimmed);
+                }
             }
             current = '';
         } else {
@@ -522,7 +525,10 @@ export function splitSqlStatements(sql: string): string[] {
     // Add last statement
     const trimmed = current.trim();
     if (trimmed) {
-        statements.push(trimmed);
+        const withoutComments = stripLeadingComments(trimmed).trim();
+        if (withoutComments) {
+            statements.push(trimmed);
+        }
     }
 
     return statements;

@@ -998,8 +998,14 @@ function createPinnedTabsDropdown(
 }
 
 export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; description: string }>): void {
+    // Store the element that had focus before opening modal
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
     const overlay = document.createElement('div');
     overlay.id = 'shortcuts-modal';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'shortcuts-title');
     overlay.style.cssText = `
         position: fixed;
         top: 0;
@@ -1048,14 +1054,16 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     modal.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
-            <button id="close-shortcuts" style="
+            <h3 id="shortcuts-title" style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
+            <button id="close-shortcuts" aria-label="Close dialog" style="
                 background: none;
                 border: none;
                 color: #94a3b8;
                 cursor: pointer;
                 font-size: 20px;
-                padding: 4px;
+                padding: 4px 8px;
+                border-radius: 4px;
+                transition: all 0.15s;
             ">&times;</button>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
@@ -1071,19 +1079,54 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const closeModal = () => overlay.remove();
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {closeModal();}
-    });
-    modal.querySelector('#close-shortcuts')?.addEventListener('click', closeModal);
+    const closeBtn = modal.querySelector('#close-shortcuts') as HTMLButtonElement;
 
-    const escHandler = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', escHandler);
+    // Close modal and restore focus
+    const closeModal = () => {
+        document.removeEventListener('keydown', keyHandler);
+        overlay.remove();
+        // Restore focus to previously focused element
+        if (previouslyFocused && previouslyFocused.focus) {
+            previouslyFocused.focus();
         }
     };
-    document.addEventListener('keydown', escHandler);
+
+    // Click outside to close
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) { closeModal(); }
+    });
+
+    // Close button
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeModal);
+        closeBtn.addEventListener('mouseenter', () => {
+            closeBtn.style.background = 'rgba(148, 163, 184, 0.1)';
+            closeBtn.style.color = '#f1f5f9';
+        });
+        closeBtn.addEventListener('mouseleave', () => {
+            closeBtn.style.background = 'none';
+            closeBtn.style.color = '#94a3b8';
+        });
+    }
+
+    // Keyboard handler for Escape and focus trap
+    const keyHandler = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeModal();
+        } else if (e.key === 'Tab') {
+            // Focus trap - keep focus within modal
+            // Since we only have one focusable element (close button), just prevent Tab from leaving
+            e.preventDefault();
+            closeBtn?.focus();
+        }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    // Focus the close button when modal opens
+    requestAnimationFrame(() => {
+        closeBtn?.focus();
+    });
 }
 
 export function updateToolbarTheme(
