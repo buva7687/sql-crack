@@ -52,6 +52,7 @@ import {
 } from './clustering';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
+import { escapeRegex } from '../shared';
 
 const state: ViewState = {
     scale: 1,
@@ -3810,11 +3811,13 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
                 // This handles cases where line number assignment might have failed
                 if (!lineNumber && node.type === 'table' && currentSql) {
                     const tableName = node.label.toLowerCase();
+                    const escapedTableName = escapeRegex(tableName);
+                    const tableRegex = new RegExp(`\\b${escapedTableName}\\b`);
                     const sqlLines = currentSql.split('\n');
                     for (let i = 0; i < sqlLines.length; i++) {
                         const line = sqlLines[i].toLowerCase();
                         // Look for table name as a word boundary match to avoid partial matches
-                        if (line.match(new RegExp(`\\b${tableName}\\b`))) {
+                        if (tableRegex.test(line)) {
                             lineNumber = i + 1;
                             break;
                         }

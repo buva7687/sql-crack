@@ -406,9 +406,9 @@ export class VisualizationPanel {
      * Uses JSON.stringify for base escaping, then handles HTML-specific sequences
      * that could break out of the script context.
      */
-    private _escapeForInlineScript(str: string): string {
+    private _escapeForInlineScript(value: unknown): string {
         // JSON.stringify handles quotes, backslashes, control chars, and unicode
-        const json = JSON.stringify(str);
+        const json = JSON.stringify(value);
 
         // Escape HTML-specific sequences that could break script context:
         // 1. </script - could close the script tag (case-insensitive)
@@ -465,19 +465,19 @@ export class VisualizationPanel {
     <div id="root"></div>
     <script nonce="${nonce}">
         // Ensure webpack chunk loading uses the CSP nonce
-        window.__webpack_nonce__ = ${JSON.stringify(nonce)};
+        window.__webpack_nonce__ = ${this._escapeForInlineScript(nonce)};
 
-        window.initialSqlCode = ${JSON.stringify(sqlCode)};
-        window.vscodeTheme = ${JSON.stringify(vscodeTheme)};
-        window.defaultDialect = ${JSON.stringify(options.dialect)};
-        window.fileName = ${JSON.stringify(options.fileName)};
-        window.isPinnedView = ${JSON.stringify(this._isPinned)};
-        window.pinId = ${JSON.stringify(this._pinId || null)};
-        window.viewLocation = ${JSON.stringify(viewLocation)};
-        window.defaultLayout = ${JSON.stringify(defaultLayout)};
-        window.persistedPinnedTabs = ${JSON.stringify(pinnedTabs)};
-        window.showDeadColumnHints = ${JSON.stringify(showDeadColumnHints)};
-        window.combineDdlStatements = ${JSON.stringify(combineDdlStatements)};
+        window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
+        window.vscodeTheme = ${this._escapeForInlineScript(vscodeTheme)};
+        window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
+        window.fileName = ${this._escapeForInlineScript(options.fileName)};
+        window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
+        window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
+        window.viewLocation = ${this._escapeForInlineScript(viewLocation)};
+        window.defaultLayout = ${this._escapeForInlineScript(defaultLayout)};
+        window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
+        window.showDeadColumnHints = ${this._escapeForInlineScript(showDeadColumnHints)};
+        window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();

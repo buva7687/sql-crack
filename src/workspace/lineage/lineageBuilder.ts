@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { escapeRegex } from '../../shared';
 import {
     LineageNode,
     LineageEdge,
@@ -865,7 +866,8 @@ export class LineageBuilder implements LineageGraph {
      */
     private getLineNumberFromSQL(sql: string, identifier: string): number {
         // Find the first occurrence of the identifier that's part of a WITH clause
-        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${identifier}\\s+AS`, 'i');
+        const escaped = escapeRegex(identifier);
+        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${escaped}\\s+AS`, 'i');
         const match = withPattern.exec(sql);
         if (match) {
             const beforeMatch = sql.substring(0, match.index);
