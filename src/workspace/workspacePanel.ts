@@ -1134,6 +1134,7 @@ ${bodyContent}
     ): string {
         const statsHtml = this.generateStatsHtml();
         const graphHtml = this.generateGraphAreaHtml(graph, searchFilter);
+        const indexStatus = this.getIndexStatus();
         const filesActive = currentGraphMode === 'files';
         const tablesActive = currentGraphMode === 'tables';
         const hybridActive = currentGraphMode === 'hybrid';
@@ -1249,6 +1250,12 @@ ${bodyContent}
                         <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
+                <button class="icon-btn" id="btn-focus" title="Focus on selected node (neighbors only)" aria-label="Focus on selected node (neighbors only)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                </button>
             </div>
         </header>
 
@@ -1261,6 +1268,11 @@ ${bodyContent}
             <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
             <span class="separator">•</span>
             <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
+            <span class="stats-spacer"></span>
+            <button class="index-status index-status-${indexStatus.level}" data-graph-action="refresh" title="${this.escapeHtml(indexStatus.title)}">
+                <span class="status-dot"></span>
+                <span class="status-text">${this.escapeHtml(indexStatus.text)}</span>
+            </button>
         </div>
         <!-- Issue Banner -->
         ${totalIssues > 0 ? `
@@ -1371,6 +1383,42 @@ ${bodyContent}
             </button>
         </div>
         <div class="sidebar-content">
+            <!-- Selection Section (Graph tab only) -->
+            <div class="sidebar-section" data-sidebar-section="selection" id="selection-section">
+                <div class="section-header expanded" data-section="selection">
+                    <span class="section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                        </svg>
+                        Selection
+                    </span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div id="selection-empty" class="selection-empty">Click a node to see details and paths.</div>
+                    <div id="selection-details" class="selection-details" style="display: none;">
+                        <div class="selection-title" id="selection-title">—</div>
+                        <div class="selection-meta" id="selection-meta">—</div>
+                        <div class="selection-file" id="selection-file" style="display: none;"></div>
+                        <div class="selection-path">
+                            <div class="selection-path-row">
+                                <span class="path-label">Upstream</span>
+                                <span class="path-value" id="selection-upstream">—</span>
+                            </div>
+                            <div class="selection-path-row">
+                                <span class="path-label">Downstream</span>
+                                <span class="path-value" id="selection-downstream">—</span>
+                            </div>
+                        </div>
+                        <div class="selection-actions">
+                            <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
+                            <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Legend Section (Graph tab only) -->
             <div class="sidebar-section" data-sidebar-section="legend">
                 <div class="section-header expanded" data-section="legend">
@@ -1448,8 +1496,24 @@ ${bodyContent}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
-                <div class="empty-state-title">No dependencies found</div>
-                <div>Try refreshing or check your SQL files</div>
+                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'Workspace dependencies at a glance'}</div>
+                <div class="empty-state-desc">
+                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0)
+                        ? 'Try clearing filters or changing your search terms.'
+                        : 'This graph shows how your SQL files, tables, and views connect across the workspace.'}
+                </div>
+                <div class="empty-state-actions">
+                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? `
+                        <button class="action-chip" data-graph-action="clear-search">Clear search</button>
+                        <button class="action-chip" data-graph-action="focus-search">Search again</button>
+                    ` : `
+                        <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
+                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
+                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                        <button class="action-chip" data-graph-action="view-issues">View issues</button>
+                        <button class="action-chip" data-graph-action="refresh">Refresh index</button>
+                    `}
+                </div>
             </div>
             `}
         </div>
@@ -1472,6 +1536,51 @@ ${bodyContent}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
         </div>`;
+    }
+
+    /**
+     * Build index status text for the stats bar badge.
+     */
+    private getIndexStatus(): { text: string; title: string; level: 'fresh' | 'stale' | 'old' | 'missing' } {
+        const index = this._indexManager.getIndex();
+        if (!index) {
+            return {
+                text: 'Index not ready',
+                title: 'No index available yet. Click to refresh.',
+                level: 'missing'
+            };
+        }
+
+        const ageMs = Date.now() - index.lastUpdated;
+        const relative = this.formatRelativeTime(index.lastUpdated);
+        const fileCount = index.fileCount || 0;
+
+        let level: 'fresh' | 'stale' | 'old' = 'fresh';
+        if (ageMs > 60 * 60 * 1000) {
+            level = 'old';
+        } else if (ageMs > 10 * 60 * 1000) {
+            level = 'stale';
+        }
+
+        return {
+            text: `Indexed ${relative}`,
+            title: `Last indexed ${relative} • ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+            level
+        };
+    }
+
+    /**
+     * Format a timestamp as a short relative time string.
+     */
+    private formatRelativeTime(timestamp: number): string {
+        const diffMs = Math.max(0, Date.now() - timestamp);
+        const minutes = Math.floor(diffMs / 60000);
+        if (minutes < 1) {return 'just now';}
+        if (minutes < 60) {return `${minutes}m ago`;}
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) {return `${hours}h ago`;}
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
     }
 
     /**
@@ -1571,6 +1680,9 @@ ${bodyContent}
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
             return `
                 <g class="edge edge-${edge.referenceType}" data-edge-id="${this.escapeHtml(edgeId)}"
+                   data-source="${this.escapeHtml(edge.source)}"
+                   data-target="${this.escapeHtml(edge.target)}"
+                   data-reference-type="${edge.referenceType}"
                    onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>')"
                    onmouseleave="hideTooltip()">
                     <path d="${path}"

@@ -2598,6 +2598,28 @@ export function getGraphStyles(): string {
         .stats-bar .stat { display: flex; align-items: center; gap: 4px; }
         .stats-bar .stat-value { font-weight: 600; color: var(--text-primary); }
         .stats-bar .separator { color: var(--text-dim); }
+        .stats-spacer { flex: 1; }
+        .index-status {
+            display: inline-flex; align-items: center; gap: 6px;
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px; padding: 4px 10px;
+            background: var(--bg-primary); color: var(--text-secondary);
+            font-size: 11px; cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .index-status:hover {
+            border-color: var(--border-color);
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        .index-status .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--text-dim);
+        }
+        .index-status-fresh .status-dot { background: var(--success); }
+        .index-status-stale .status-dot { background: var(--warning); }
+        .index-status-old .status-dot { background: var(--danger); }
+        .index-status-missing .status-dot { background: var(--text-dim); }
         .legend-inline {
             display: flex; align-items: center; gap: 16px; padding: 6px 16px;
             background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
@@ -2640,6 +2662,18 @@ export function getGraphStyles(): string {
         /* ========== Main Layout ========== */
         .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; min-height: 0; }
         .graph-area { flex: 1; position: relative; overflow: hidden; min-height: 0; width: 100%; height: 100%; }
+        .empty-state-desc { margin-top: 6px; max-width: 520px; }
+        .empty-state-actions {
+            display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
+            justify-content: center;
+        }
+        .action-chip {
+            background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); padding: 6px 12px; border-radius: 999px;
+            font-size: 12px; cursor: pointer; transition: all 0.15s;
+        }
+        .action-chip:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-primary); }
+        .action-chip-small { font-size: 11px; padding: 4px 10px; }
 
         /* ========== Sidebar ========== */
         .sidebar {
@@ -2685,6 +2719,59 @@ export function getGraphStyles(): string {
             max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;
         }
         .section-header.expanded + .section-content { max-height: 400px; overflow-y: auto; }
+        .selection-empty {
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 6px 16px 10px;
+        }
+        .selection-details {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 12px;
+            padding: 0 16px 12px;
+        }
+        .selection-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .selection-meta {
+            color: var(--text-muted);
+        }
+        .selection-file {
+            color: var(--text-secondary);
+            font-size: 11px;
+            word-break: break-all;
+        }
+        .selection-path {
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            background: var(--bg-secondary);
+            padding: 8px 10px;
+            display: grid;
+            gap: 6px;
+        }
+        .selection-path-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 11px;
+        }
+        .selection-path-row .path-label {
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .selection-path-row .path-value {
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .selection-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
         /* ========== Legend Items ========== */
         .legend-grid { padding: 8px 16px; }
@@ -2793,6 +2880,8 @@ export function getGraphStyles(): string {
         .node:hover rect { filter: brightness(1.15); }
         .node.highlighted rect { filter: brightness(1.3); stroke: var(--warning-light); stroke-width: 3; }
         .node.dimmed { opacity: 0.25; }
+        .node-selected rect { stroke: var(--accent); stroke-width: 2; }
+        .node-focus-dim { opacity: 0.12; pointer-events: none; }
         .node-file rect { fill: var(--node-file); stroke: var(--node-file-border); stroke-width: 2; }
         .node-table rect { fill: var(--node-table); stroke: var(--node-table-border); stroke-width: 2; }
         .node-view rect { fill: var(--node-view); stroke: var(--node-view-border); stroke-width: 2; }
@@ -2811,6 +2900,7 @@ export function getGraphStyles(): string {
         /* Edge highlight/dim styles for click-to-highlight feature */
         .edge.edge-highlighted path { opacity: 1; stroke-width: 3; }
         .edge.edge-dimmed path { opacity: 0.2; }
+        .edge-focus-dim path { opacity: 0.1; }
 
         /* ========== Tooltip ========== */
         .tooltip {

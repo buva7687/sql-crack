@@ -94,9 +94,16 @@ function countStatements(sql: string): number {
     // Count semicolons
     const semicolons = (cleaned.match(/;/g) || []).length;
 
-    // At minimum, there's 1 statement if there's any content
-    const hasContent = cleaned.trim().length > 0;
-    return hasContent ? Math.max(1, semicolons) : 0;
+    // At minimum, there's 1 statement if there's any content.
+    // If the SQL doesn't end with a semicolon, assume a trailing statement.
+    const trimmed = cleaned.trim();
+    if (!trimmed) {
+        return 0;
+    }
+    if (semicolons === 0) {
+        return 1;
+    }
+    return trimmed.endsWith(';') ? semicolons : semicolons + 1;
 }
 
 /**

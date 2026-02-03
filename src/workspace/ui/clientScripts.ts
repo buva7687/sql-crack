@@ -42,6 +42,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const sidebar = document.getElementById('sidebar');
         const zoomLevel = document.getElementById('zoom-level');
         const tooltip = document.getElementById('tooltip');
+        const focusBtn = document.getElementById('btn-focus');
+        const selectionEmpty = document.getElementById('selection-empty');
+        const selectionDetails = document.getElementById('selection-details');
+        const selectionTitle = document.getElementById('selection-title');
+        const selectionMeta = document.getElementById('selection-meta');
+        const selectionFile = document.getElementById('selection-file');
+        const selectionUpstream = document.getElementById('selection-upstream');
+        const selectionDownstream = document.getElementById('selection-downstream');
+        const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
+
+        // ========== Selection & Focus State ==========
+        let selectedNodeId = null;
+        let focusModeEnabled = false;
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -174,6 +187,129 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
             updateTransform();
         }
+
+        // ========== Selection & Focus Helpers ==========
+        function clearFocusMode() {
+            document.querySelectorAll('.node-focus-dim').forEach(node => node.classList.remove('node-focus-dim'));
+            document.querySelectorAll('.edge-focus-dim').forEach(edge => edge.classList.remove('edge-focus-dim'));
+        }
+
+        function updateFocusButton() {
+            if (!focusBtn) return;
+            focusBtn.classList.toggle('active', focusModeEnabled);
+            focusBtn.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
+        }
+
+        function getNeighbors(nodeId) {
+            const upstream = new Set();
+            const downstream = new Set();
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                if (!source || !target) return;
+                if (target === nodeId) upstream.add(source);
+                if (source === nodeId) downstream.add(target);
+            });
+            return { upstream, downstream };
+        }
+
+        function getNodeLabel(nodeId) {
+            const nodeEl = document.querySelector('.node[data-id="' + CSS.escape(nodeId) + '"]');
+            if (!nodeEl) return nodeId;
+            return nodeEl.getAttribute('data-label') || nodeId;
+        }
+
+        function applyFocusMode() {
+            if (!focusModeEnabled || !selectedNodeId) {
+                clearFocusMode();
+                return;
+            }
+
+            const neighbors = new Set([selectedNodeId]);
+            const { upstream, downstream } = getNeighbors(selectedNodeId);
+            upstream.forEach(id => neighbors.add(id));
+            downstream.forEach(id => neighbors.add(id));
+
+            document.querySelectorAll('.node').forEach(node => {
+                const nodeId = node.getAttribute('data-id');
+                if (!nodeId) return;
+                node.classList.toggle('node-focus-dim', !neighbors.has(nodeId));
+            });
+
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                const keep = source && target && neighbors.has(source) && neighbors.has(target);
+                edge.classList.toggle('edge-focus-dim', !keep);
+            });
+        }
+
+        function setFocusMode(enabled) {
+            focusModeEnabled = enabled;
+            updateFocusButton();
+            applyFocusMode();
+        }
+
+        function clearSelection() {
+            selectedNodeId = null;
+            document.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
+            if (focusModeEnabled) {
+                setFocusMode(false);
+            } else {
+                clearFocusMode();
+            }
+            if (selectionDetails) selectionDetails.style.display = 'none';
+            if (selectionEmpty) {
+                selectionEmpty.textContent = selectionEmptyText;
+                selectionEmpty.style.display = '';
+            }
+        }
+
+        function updateSelectionPanel(node) {
+            const nodeId = node.getAttribute('data-id');
+            if (!nodeId) return;
+
+            selectedNodeId = nodeId;
+            document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
+            node.classList.add('node-selected');
+
+            if (selectionDetails) selectionDetails.style.display = '';
+            if (selectionEmpty) selectionEmpty.style.display = 'none';
+
+            const label = node.getAttribute('data-label') || nodeId;
+            const type = node.getAttribute('data-type') || 'node';
+            const filePath = node.getAttribute('data-filepath') || '';
+
+            const { upstream, downstream } = getNeighbors(nodeId);
+            const connectionCount = upstream.size + downstream.size;
+            const typeLabel = type === 'file' ? 'File' : type === 'table' ? 'Table' : type === 'view' ? 'View' : 'External';
+
+            if (selectionTitle) selectionTitle.textContent = label;
+            if (selectionMeta) {
+                selectionMeta.textContent = typeLabel + ' • ' + connectionCount + ' connection' + (connectionCount === 1 ? '' : 's');
+            }
+
+            if (selectionFile) {
+                if (filePath) {
+                    selectionFile.textContent = filePath;
+                    selectionFile.style.display = '';
+                    selectionFile.title = filePath;
+                } else {
+                    selectionFile.style.display = 'none';
+                    selectionFile.textContent = '';
+                }
+            }
+
+            const upstreamList = Array.from(upstream).map(getNodeLabel);
+            const downstreamList = Array.from(downstream).map(getNodeLabel);
+
+            if (selectionUpstream) selectionUpstream.textContent = upstreamList.length ? upstreamList.join(', ') : 'None';
+            if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
+
+            if (focusModeEnabled) applyFocusMode();
+        }
+
+        updateFocusButton();
 
         // ========== Pan/Zoom Setup ==========
         if (svg && mainGroup) {
@@ -312,16 +448,74 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         function openFile(filePath) { vscode.postMessage({ command: 'openFile', filePath }); }
         function openFileAtLine(filePath, line) { vscode.postMessage({ command: 'openFileAtLine', filePath, line }); }
         function visualizeFile(filePath) { vscode.postMessage({ command: 'visualizeFile', filePath }); }
+        function focusSearch() {
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+
+        function switchGraphModeFromAction(mode) {
+            if (!mode) return;
+            vscode.postMessage({ command: 'switchGraphMode', mode });
+        }
 
         document.getElementById('btn-refresh')?.addEventListener('click', refresh);
         document.getElementById('btn-theme')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'toggleTheme' });
+        });
+        focusBtn?.addEventListener('click', () => {
+            const nextState = !focusModeEnabled;
+            setFocusMode(nextState);
+            if (selectionEmpty) {
+                selectionEmpty.textContent = nextState && !selectedNodeId
+                    ? 'Select a node to focus on its neighbors.'
+                    : selectionEmptyText;
+            }
         });
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
         document.getElementById('btn-all-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
+        });
+
+        document.addEventListener('click', (e) => {
+            const actionEl = e.target.closest('[data-graph-action]');
+            if (!actionEl) return;
+
+            const action = actionEl.getAttribute('data-graph-action');
+            if (!action) return;
+
+            switch (action) {
+                case 'focus-search':
+                    focusSearch();
+                    break;
+                case 'clear-search':
+                    clearSearch();
+                    break;
+                case 'refresh':
+                    refresh();
+                    break;
+                case 'view-issues':
+                    vscode.postMessage({ command: 'switchView', view: 'issues' });
+                    break;
+                case 'switch-graph-mode': {
+                    const mode = actionEl.getAttribute('data-mode');
+                    switchGraphModeFromAction(mode);
+                    break;
+                }
+                case 'focus-selection':
+                    if (selectedNodeId) {
+                        setFocusMode(true);
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node to focus on its neighbors.';
+                    }
+                    break;
+                case 'clear-selection':
+                    clearSelection();
+                    break;
+            }
         });
 
         // ========== Export Buttons ==========
@@ -397,6 +591,7 @@ function getViewModeScript(): string {
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
+                if (focusBtn) focusBtn.style.display = '';
                 if (graphModeSwitcher) {
                     // Use visibility (not display) so switcher always reserves space in layout.
                     // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
@@ -415,6 +610,7 @@ function getViewModeScript(): string {
                 }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
+                if (focusBtn) focusBtn.style.display = 'none';
                 if (graphModeSwitcher) {
                     // Hide switcher but keep it in layout (visibility: hidden) so main tabs don't shift.
                     // pointer-events: none prevents clicks when hidden.
@@ -506,6 +702,9 @@ function getViewModeScript(): string {
                 graphModeSwitcher.style.visibility = 'hidden';
                 graphModeSwitcher.style.pointerEvents = 'none';
             }
+        }
+        if (focusBtn) {
+            focusBtn.style.display = currentViewMode === 'graph' ? '' : 'none';
         }
 
         // Restore initial view if not graph (e.g., after theme change)
@@ -970,7 +1169,9 @@ function getNodeInteractionsScript(): string {
             svg.addEventListener('click', (e) => {
                 var node = e.target.closest('.node');
                 if (!node) return;
-                
+
+                updateSelectionPanel(node);
+
                 var filePath = node.getAttribute('data-filepath');
                 if (!filePath) return;
                 
@@ -1022,6 +1223,7 @@ function getNodeInteractionsScript(): string {
                     const nodeType = node.getAttribute('data-type') || 'file';
                     const filePath = node.getAttribute('data-filepath');
 
+                    updateSelectionPanel(node);
                     showContextMenu(e, {
                         id: nodeId,
                         label: nodeLabel,
