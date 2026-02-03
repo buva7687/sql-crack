@@ -477,6 +477,39 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         }
 
         // ========== Search Functions ==========
+        function applySearchHighlight() {
+            if (!svg) return;
+            const query = searchInput ? searchInput.value.trim() : '';
+            const typeFilter = filterType ? filterType.value : 'all';
+            const searchActive = Boolean(query) || typeFilter !== 'all';
+            const queryLower = query.toLowerCase();
+
+            document.querySelectorAll('.node').forEach(node => {
+                node.classList.remove('node-search-match', 'node-search-dim');
+                if (!searchActive) return;
+
+                const nodeType = node.getAttribute('data-type') || '';
+                if (typeFilter !== 'all' && nodeType !== typeFilter) {
+                    node.classList.add('node-search-dim');
+                    return;
+                }
+
+                if (!query) {
+                    node.classList.add('node-search-match');
+                    return;
+                }
+
+                const label = node.getAttribute('data-label') || '';
+                const filePath = node.getAttribute('data-filepath') || '';
+                const haystack = (label + ' ' + filePath).toLowerCase();
+                if (haystack.includes(queryLower)) {
+                    node.classList.add('node-search-match');
+                } else {
+                    node.classList.add('node-search-dim');
+                }
+            });
+        }
+
         function performSearch() {
             const query = searchInput.value.trim();
             const typeFilter = filterType.value;
@@ -498,6 +531,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
             btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
             updateGraphEmptyState();
+            applySearchHighlight();
         }
 
         function clearSearch() {
@@ -506,6 +540,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             btnClearSearch.classList.remove('visible');
             vscode.postMessage({ command: 'clearSearch' });
             updateGraphEmptyState();
+            applySearchHighlight();
         }
 
         let searchTimeout;
@@ -518,6 +553,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         filterType?.addEventListener('change', performSearch);
         btnClearSearch?.addEventListener('click', clearSearch);
         updateGraphEmptyState();
+        applySearchHighlight();
 
         // ========== Keyboard Shortcuts ==========
         document.addEventListener('keydown', (e) => {

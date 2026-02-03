@@ -3212,6 +3212,9 @@ export function getGraphStyles(): string {
         .node:hover rect { filter: brightness(1.15); }
         .node.highlighted rect { filter: brightness(1.3); stroke: var(--warning-light); stroke-width: 3; }
         .node.dimmed { opacity: 0.25; }
+        .node-search-match rect { filter: brightness(1.2); stroke: var(--accent); stroke-width: 3; }
+        .node-search-match.node-focus-dim { opacity: 0.6; pointer-events: auto; }
+        .node-search-dim { opacity: 0.18; }
         .node-selected rect { stroke: var(--accent); stroke-width: 2; }
         .node-focus-dim { opacity: 0.12; pointer-events: none; }
         .node-file rect { fill: var(--node-file); stroke: var(--node-file-border); stroke-width: 2; }
