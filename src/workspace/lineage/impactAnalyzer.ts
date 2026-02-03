@@ -78,11 +78,20 @@ export class ImpactAnalyzer {
         });
 
         // Separate direct and transitive impacts
-        const directEdges = this.graph.edges.filter(e => e.sourceId === nodeId);
+        // Filter out the table's own columns - they're structural, not downstream dependencies
+        const ownColumnPrefix = `column:${tableName.toLowerCase()}.`;
+        const directEdges = this.graph.edges.filter(e =>
+            e.sourceId === nodeId && !e.targetId.startsWith(ownColumnPrefix)
+        );
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
 
         for (const depNode of downstream.nodes) {
+            // Skip the table's own columns - they're part of the target, not impacts
+            if (depNode.type === 'column' && depNode.id.startsWith(ownColumnPrefix)) {
+                continue;
+            }
+
             const isDirect = directEdges.some(e => e.targetId === depNode.id);
             const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {
