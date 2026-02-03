@@ -86,6 +86,15 @@ export class ImpactAnalyzer {
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
 
+        // Build set of columns that have actual data flow edges (not just structural "contains")
+        // A column is truly impacted only if there's a non-structural edge pointing to it
+        const columnsWithDataFlow = new Set<string>();
+        for (const edge of this.graph.edges) {
+            if (edge.metadata?.relationship !== 'contains' && edge.targetId.startsWith('column:')) {
+                columnsWithDataFlow.add(edge.targetId);
+            }
+        }
+
         for (const depNode of downstream.nodes) {
             // Skip the table's own columns - they're part of the target, not impacts
             if (depNode.type === 'column' && depNode.id.startsWith(ownColumnPrefix)) {
@@ -93,6 +102,13 @@ export class ImpactAnalyzer {
             }
 
             const isDirect = directEdges.some(e => e.targetId === depNode.id);
+
+            // For transitive column impacts, only include if there's actual data flow
+            // (not just structural "contains" relationship from parent table)
+            if (!isDirect && depNode.type === 'column' && !columnsWithDataFlow.has(depNode.id)) {
+                continue;
+            }
+
             const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {
                 node: depNode,
