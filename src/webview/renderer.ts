@@ -3894,10 +3894,16 @@ function pulseNode(nodeId: string): void {
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('filter', 'url(#glow)');
         } else {
-            if (origStroke) rect.setAttribute('stroke', origStroke);
-            else rect.removeAttribute('stroke');
-            if (origStrokeWidth) rect.setAttribute('stroke-width', origStrokeWidth);
-            else rect.removeAttribute('stroke-width');
+            if (origStroke) {
+                rect.setAttribute('stroke', origStroke);
+            } else {
+                rect.removeAttribute('stroke');
+            }
+            if (origStrokeWidth) {
+                rect.setAttribute('stroke-width', origStrokeWidth);
+            } else {
+                rect.removeAttribute('stroke-width');
+            }
             rect.setAttribute('filter', 'url(#shadow)');
         }
     });
@@ -3967,10 +3973,16 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
         // Fade back to original after 2 seconds
         setTimeout(() => {
             rect.style.transition = 'stroke 0.5s ease, stroke-width 0.5s ease, filter 0.5s ease';
-            if (origStroke) rect.setAttribute('stroke', origStroke);
-            else rect.setAttribute('stroke', UI_COLORS.borderWhite);
-            if (origStrokeWidth) rect.setAttribute('stroke-width', origStrokeWidth);
-            else rect.setAttribute('stroke-width', '2');
+            if (origStroke) {
+                rect.setAttribute('stroke', origStroke);
+            } else {
+                rect.setAttribute('stroke', UI_COLORS.borderWhite);
+            }
+            if (origStrokeWidth) {
+                rect.setAttribute('stroke-width', origStrokeWidth);
+            } else {
+                rect.setAttribute('stroke-width', '2');
+            }
             rect.setAttribute('filter', origFilter || 'url(#shadow)');
 
             // Clean up transition after fade
@@ -4629,7 +4641,9 @@ function updateStatsPanel(): void {
             }
             if ((child.type === 'cte' || child.type === 'subquery') && child.children && child.children.length > 0) {
                 const found = findTableInChildren(child.children, child, lowerName);
-                if (found) return found;
+                if (found) {
+                    return found;
+                }
             }
         }
         return null;
@@ -4637,7 +4651,9 @@ function updateStatsPanel(): void {
 
     // Helper to navigate to a table node in the graph
     function navigateToTable(tableName: string) {
-        if (!tableName) return;
+        if (!tableName) {
+            return;
+        }
         const lowerName = tableName.toLowerCase();
 
         let tableNode: FlowNode | undefined;
@@ -4668,7 +4684,9 @@ function updateStatsPanel(): void {
             parentNode = currentNodes.find(n => n.id === tableNode!.parentId);
         }
 
-        if (!tableNode) return;
+        if (!tableNode) {
+            return;
+        }
 
         // Clear zoom state so zoomToNode actually zooms to the target (don't treat as "toggle off" from previous query)
         state.zoomedNodeId = null;
