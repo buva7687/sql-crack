@@ -2,8 +2,8 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseSqlBatch, SqlDialect, BatchParseResult } from './sqlParser';
-import { LayoutType } from './types';
+import { parseBatchAsync } from './parserClient';
+import { BatchParseResult, LayoutType, SqlDialect } from './types';
 import {
     initRenderer,
     render,
@@ -11,6 +11,9 @@ import {
     zoomOut,
     resetView,
     getZoomLevel,
+    getViewState,
+    setViewState,
+    TabViewState,
     exportToPng,
     exportToSvg,
     exportToMermaid,
@@ -77,6 +80,10 @@ let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
+let parseRequestId = 0;
+
+// Store view state per query index for zoom/pan persistence
+const queryViewStates: Map<number, TabViewState> = new Map();
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -117,7 +124,7 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
         dialectSelect.value = currentDialect;
     }
 
-    visualize(sql);
+    void visualize(sql);
     clearStaleIndicator();
 }
 
@@ -176,9 +183,7 @@ function init(): void {
     // Create batch tabs
     createBatchTabs(container, {
         onQuerySelect: (index: number) => {
-            currentQueryIndex = index;
-            renderCurrentQuery();
-            updateBatchTabsUI();
+            switchToQueryIndex(index);
         },
         isDarkTheme
     });
@@ -197,18 +202,14 @@ function init(): void {
         if (e.key === '[') {
             e.preventDefault();
             if (batchResult && currentQueryIndex > 0) {
-                currentQueryIndex--;
-                renderCurrentQuery();
-                updateBatchTabsUI();
+                switchToQueryIndex(currentQueryIndex - 1);
             }
         }
         // ] for next query
         if (e.key === ']') {
             e.preventDefault();
             if (batchResult && currentQueryIndex < batchResult.queries.length - 1) {
-                currentQueryIndex++;
-                renderCurrentQuery();
-                updateBatchTabsUI();
+                switchToQueryIndex(currentQueryIndex + 1);
             }
         }
     });
@@ -216,7 +217,7 @@ function init(): void {
     // Parse and render initial SQL
     const sql = window.initialSqlCode || '';
     if (sql) {
-        visualize(sql);
+        void visualize(sql);
     }
 }
 
@@ -250,7 +251,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             currentDialect = dialect;
             const sql = window.initialSqlCode || '';
             if (sql) {
-                visualize(sql);
+                void visualize(sql);
             }
         },
         onRefresh: () => {
@@ -259,7 +260,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             } else {
                 const sql = window.initialSqlCode || '';
                 if (sql) {
-                    visualize(sql);
+                    void visualize(sql);
                     clearStaleIndicator();
                 }
             }
@@ -310,10 +311,50 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 // Query Visualization
 // ============================================================
 
-function visualize(sql: string): void {
-    batchResult = parseSqlBatch(sql, currentDialect, undefined, {
-        combineDdlStatements: window.combineDdlStatements === true
-    });
+async function visualize(sql: string): Promise<void> {
+    const requestId = ++parseRequestId;
+
+    // Clear view states when loading new SQL
+    queryViewStates.clear();
+
+    try {
+        const result = await parseBatchAsync(
+            sql,
+            currentDialect,
+            undefined,
+            {
+                combineDdlStatements: window.combineDdlStatements === true
+            }
+        );
+        if (requestId !== parseRequestId) {
+            return;
+        }
+        batchResult = result;
+    } catch (error) {
+        if (requestId !== parseRequestId) {
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to parse SQL';
+        updateErrorBadge(1, [{ queryIndex: 0, message }]);
+        batchResult = {
+            queries: [],
+            errorCount: 1,
+            parseErrors: [{ queryIndex: 0, message, sql: '' }],
+            totalStats: {
+                tables: 0,
+                joins: 0,
+                subqueries: 0,
+                ctes: 0,
+                aggregations: 0,
+                windowFunctions: 0,
+                unions: 0,
+                conditions: 0,
+                complexity: 'Simple',
+                complexityScore: 0
+            }
+        };
+        return;
+    }
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer
@@ -355,12 +396,36 @@ function renderCurrentQuery(): void {
     render(query);
 }
 
+/**
+ * Switch to a different query index, preserving view state
+ */
+function switchToQueryIndex(newIndex: number): void {
+    if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
+        return;
+    }
+
+    // Save current view state before switching
+    queryViewStates.set(currentQueryIndex, getViewState());
+
+    // Switch to new query
+    currentQueryIndex = newIndex;
+    renderCurrentQuery();
+    updateBatchTabsUI();
+
+    // Restore view state for the new query if we have one
+    const savedState = queryViewStates.get(newIndex);
+    if (savedState) {
+        // Use requestAnimationFrame to ensure render completes first
+        requestAnimationFrame(() => {
+            setViewState(savedState);
+        });
+    }
+}
+
 function updateBatchTabsUI(): void {
     updateBatchTabs(batchResult, currentQueryIndex, {
         onQuerySelect: (index: number) => {
-            currentQueryIndex = index;
-            renderCurrentQuery();
-            updateBatchTabsUI();
+            switchToQueryIndex(index);
         },
         isDarkTheme
     });
@@ -396,7 +461,7 @@ function handlePinnedTabSwitch(tabId: string | null): void {
     if (tabId === null) {
         const sql = window.initialSqlCode || '';
         if (sql) {
-            visualize(sql);
+            void visualize(sql);
         }
     } else {
         const tab = findPinnedTab(tabId);

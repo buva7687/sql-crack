@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { escapeRegex } from '../../shared';
 import {
     LineageNode,
     LineageEdge,
@@ -141,6 +142,16 @@ export class LineageBuilder implements LineageGraph {
         const tableKey = getQualifiedKey(def.name, def.schema);
         const nodeId = this.getTableNodeId(def.type, tableKey);
         const schemaPrefix = def.schema ? `${def.schema}.` : '';
+        const existing = this.nodes.get(nodeId);
+        if (existing) {
+            const existingFiles = new Set<string>(existing.metadata.definitionFiles || []);
+            existingFiles.add(def.filePath);
+            existing.metadata.definitionFiles = Array.from(existingFiles);
+            const locations = existing.metadata.definitionLocations || [];
+            locations.push({ filePath: def.filePath, lineNumber: def.lineNumber });
+            existing.metadata.definitionLocations = locations;
+            return existing;
+        }
 
         const node: LineageNode = {
             id: nodeId,
@@ -151,7 +162,9 @@ export class LineageBuilder implements LineageGraph {
             metadata: {
                 schema: def.schema,
                 fullName: `${schemaPrefix}${def.name}`,
-                columnCount: def.columns.length
+                columnCount: def.columns.length,
+                definitionFiles: [def.filePath],
+                definitionLocations: [{ filePath: def.filePath, lineNumber: def.lineNumber }]
             }
         };
 
@@ -171,6 +184,15 @@ export class LineageBuilder implements LineageGraph {
 
         for (const column of columns) {
             const columnId = this.getColumnNodeId(tableKey, column.name);
+            const existingColumn = this.nodes.get(columnId);
+            if (existingColumn) {
+                const existingFiles = new Set<string>(existingColumn.metadata.definitionFiles || []);
+                const tableFiles = tableNode.metadata.definitionFiles || [];
+                tableFiles.forEach((filePath: string) => existingFiles.add(filePath));
+                existingColumn.metadata.definitionFiles = Array.from(existingFiles);
+                return;
+            }
+
             const columnNode: LineageNode = {
                 id: columnId,
                 type: 'column',
@@ -179,7 +201,8 @@ export class LineageBuilder implements LineageGraph {
                 metadata: {
                     dataType: column.dataType,
                     nullable: column.nullable,
-                    isPrimaryKey: column.primaryKey
+                    isPrimaryKey: column.primaryKey,
+                    definitionFiles: tableNode.metadata.definitionFiles || []
                 },
                 columnInfo: column
             };
@@ -843,7 +866,8 @@ export class LineageBuilder implements LineageGraph {
      */
     private getLineNumberFromSQL(sql: string, identifier: string): number {
         // Find the first occurrence of the identifier that's part of a WITH clause
-        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${identifier}\\s+AS`, 'i');
+        const escaped = escapeRegex(identifier);
+        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${escaped}\\s+AS`, 'i');
         const match = withPattern.exec(sql);
         if (match) {
             const beforeMatch = sql.substring(0, match.index);

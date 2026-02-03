@@ -135,19 +135,20 @@ export class TableExplorer {
                                 Sort
                             </label>
                             <select id="table-sort" class="view-filter-select">
-                                <option value="connected">Most Connected</option>
+                                <option value="connected">Most Connected (up + down)</option>
                                 <option value="name-asc">Name (A-Z)</option>
                                 <option value="name-desc">Name (Z-A)</option>
                                 <option value="type">Type</option>
                             </select>
                         </div>
+                        <button class="view-filter-clear" id="table-clear-filters" title="Clear search and filters" style="display: none;">Clear filters</button>
                     </div>
                 </div>
 
                 <!-- Content -->
                 <div class="view-content">
-                    <div class="table-list-results-info" id="table-list-results-info" style="display: none;">
-                        <span id="table-results-count">Showing 0 of 0 tables</span>
+                    <div class="table-list-results-info" id="table-list-results-info">
+                        <span id="table-results-count">Showing ${tables.length} of ${tables.length} tables</span>
                     </div>
                     <div class="view-grid" id="table-list-grid">
         `;
@@ -166,9 +167,16 @@ export class TableExplorer {
             const hasConnections = totalConnections > 0;
 
             // Determine connection strength for visual indicator
-            const connectionStrength = totalConnections === 0 ? 'none' : 
-                                     totalConnections < 3 ? 'low' : 
+            const connectionStrength = totalConnections === 0 ? 'none' :
+                                     totalConnections < 3 ? 'low' :
                                      totalConnections < 10 ? 'medium' : 'high';
+            const connectionStrengthHint = connectionStrength === 'low'
+                ? 'Low connection strength (1-2 relationships)'
+                : connectionStrength === 'medium'
+                    ? 'Medium connection strength (3-9 relationships)'
+                    : connectionStrength === 'high'
+                        ? 'High connection strength (10+ relationships)'
+                        : 'No relationships';
 
             html += `
                 <div class="table-list-item ${!hasConnections ? 'no-connections' : ''} connection-${connectionStrength}" 
@@ -180,7 +188,7 @@ export class TableExplorer {
                      title="Click to explore: columns, data sources (upstream), and consumers (downstream)">
                     <div class="table-list-icon-wrapper">
                         <div class="table-list-icon">${typeIcon}</div>
-                        ${hasConnections ? `<div class="connection-indicator connection-${connectionStrength}" title="Connection strength: ${connectionStrength}"></div>` : ''}
+                        ${hasConnections ? `<div class="connection-indicator connection-${connectionStrength}" title="${connectionStrengthHint}"></div>` : ''}
                     </div>
                     <div class="table-list-info">
                         <div class="table-list-header-row">
@@ -198,7 +206,7 @@ export class TableExplorer {
                                     </svg>
                                     ${downstreamCount}
                                 </span>` : ''}
-                            </div>` : '<span class="no-connections-badge" title="This table has no connections to other tables">No connections</span>'}
+                            </div>` : '<span class="no-connections-badge" title="No upstream or downstream relationships">No relationships</span>'}
                         </div>
                         <div class="table-list-meta">
                             <span class="table-list-type-badge type-${table.type}" title="${table.type === 'table' ? 'Database table' : table.type === 'view' ? 'Database view (virtual table)' : 'Common Table Expression (CTE)'}">${table.type}</span>

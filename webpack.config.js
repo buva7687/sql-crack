@@ -75,15 +75,18 @@ const webviewConfig = {
       }
     ]
   },
-  optimization: isProduction ? {
-    minimize: true,
+  optimization: {
+    minimize: isProduction,
     usedExports: true,
     sideEffects: true
-  } : undefined,
+    // Note: Code splitting disabled to avoid CSP issues with dynamically loaded chunks
+    // in VS Code webview. The webview CSP requires nonce on all scripts, and webpack
+    // chunks loaded via dynamic import don't get the nonce attribute.
+  },
   performance: {
     hints: isProduction ? 'warning' : false,
-    maxAssetSize: 1000000, // 1 MB target
-    maxEntrypointSize: 1000000
+    maxAssetSize: 4000000, // 4 MB (node-sql-parser is ~2.4MB)
+    maxEntrypointSize: 4000000
   },
   plugins: [
     new webpack.ProvidePlugin({

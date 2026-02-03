@@ -84,12 +84,13 @@ export class ImpactAnalyzer {
 
         for (const depNode of downstream.nodes) {
             const isDirect = directEdges.some(e => e.targetId === depNode.id);
+            const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {
                 node: depNode,
                 impactType: isDirect ? 'direct' : 'transitive',
                 reason: this.generateImpactReason(depNode, tableName, 'table'),
-                filePath: depNode.filePath || 'Unknown',
-                lineNumber: depNode.lineNumber || 0,
+                filePath: resolved.filePath || 'Unknown',
+                lineNumber: resolved.lineNumber || 0,
                 severity: this.calculateNodeSeverity(depNode, downstream.nodes.length)
             };
 
@@ -152,12 +153,13 @@ export class ImpactAnalyzer {
                 e.sourceId === columnId && e.targetId === depNode.id
             );
 
+            const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {
                 node: depNode,
                 impactType: isDirect ? 'direct' : 'transitive',
                 reason: this.generateImpactReason(depNode, columnName, 'column'),
-                filePath: depNode.filePath || 'Unknown',
-                lineNumber: depNode.lineNumber || 0,
+                filePath: resolved.filePath || 'Unknown',
+                lineNumber: resolved.lineNumber || 0,
                 severity: this.calculateNodeSeverity(depNode, downstream.nodes.length)
             };
 
@@ -323,6 +325,40 @@ export class ImpactAnalyzer {
         }
 
         return suggestions;
+    }
+
+    private resolveImpactLocation(node: LineageNode): { filePath?: string; lineNumber?: number } {
+        if (node.filePath || node.lineNumber) {
+            return { filePath: node.filePath, lineNumber: node.lineNumber };
+        }
+
+        const metadataPath = node.metadata?.filePath;
+        const metadataLine = node.metadata?.lineNumber;
+        if (metadataPath || metadataLine) {
+            return { filePath: metadataPath, lineNumber: metadataLine };
+        }
+
+        const definitionFiles = node.metadata?.definitionFiles;
+        if (Array.isArray(definitionFiles) && definitionFiles.length === 1) {
+            return { filePath: definitionFiles[0] };
+        }
+
+        if (node.parentId) {
+            const parent = this.graph.nodes.get(node.parentId);
+            if (parent?.filePath || parent?.lineNumber) {
+                return { filePath: parent.filePath, lineNumber: parent.lineNumber };
+            }
+        }
+
+        const edgeWithFile = this.graph.edges.find(edge =>
+            (edge.sourceId === node.id || edge.targetId === node.id) &&
+            edge.metadata?.filePath
+        );
+        if (edgeWithFile?.metadata?.filePath) {
+            return { filePath: edgeWithFile.metadata.filePath, lineNumber: edgeWithFile.metadata.lineNumber };
+        }
+
+        return {};
     }
 
     /**

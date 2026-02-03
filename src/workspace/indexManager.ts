@@ -18,6 +18,7 @@ import { logger } from '../logger';
 const INDEX_VERSION = 4; // Bumped for column extraction in schema definitions
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
+const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
 
 /**
  * Manages the workspace SQL index with caching and file watching
@@ -562,7 +563,19 @@ export class IndexManager {
             referenceArray: [...this.index.referenceMap.entries()]
         };
 
-        await this.context.workspaceState.update('sqlWorkspaceIndex', serializable);
+        // Guard against oversized cache entries that can exceed VS Code storage limits
+        const serialized = JSON.stringify(serializable);
+        const sizeBytes = Buffer.byteLength(serialized, 'utf8');
+        if (sizeBytes > DEFAULT_MAX_CACHE_BYTES) {
+            logger.warn(`[IndexManager] Skipping cache persist (${Math.round(sizeBytes / 1024)}KB > ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024)}KB).`);
+            return;
+        }
+
+        try {
+            await this.context.workspaceState.update('sqlWorkspaceIndex', serializable);
+        } catch (error) {
+            logger.warn(`[IndexManager] Failed to persist index cache: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     /**
