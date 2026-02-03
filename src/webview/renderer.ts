@@ -268,7 +268,10 @@ export function initRenderer(container: HTMLElement): void {
         max-width: 350px;
         max-height: 200px;
         overflow-y: auto;
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     container.appendChild(hintsPanel);
 
@@ -287,8 +290,11 @@ export function initRenderer(container: HTMLElement): void {
         font-size: 11px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        display: none;
         max-width: 200px;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     updateLegendPanel();
     container.appendChild(legendPanel);
@@ -310,7 +316,10 @@ export function initRenderer(container: HTMLElement): void {
         font-size: 12px;
         color: ${UI_COLORS.textBright};
         z-index: 150;
-        display: none;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(16px);
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
         overflow-y: auto;
     `;
     container.appendChild(sqlPreviewPanel);
@@ -1416,7 +1425,7 @@ export function render(result: ParseResult): void {
     updateHintsPanel();
 
     // Update SQL preview if visible
-    if (sqlPreviewPanel && sqlPreviewPanel.style.display !== 'none') {
+    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
         updateSqlPreview();
     }
 
@@ -4324,9 +4333,23 @@ function updateStatsPanel(): void {
                         Copy
                     </button>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
-                    ${displayTables.map(([tableName, count]) => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                <div id="table-list" role="listbox" aria-label="Tables used in query" style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
+                    ${displayTables.map(([tableName, count], index) => `
+                        <div class="table-list-item"
+                             role="option"
+                             tabindex="${index === 0 ? '0' : '-1'}"
+                             data-table="${escapeHtml(tableName)}"
+                             style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                font-size: 10px;
+                                padding: 4px 6px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                transition: background 0.15s;
+                             "
+                             title="Click to find ${escapeHtml(tableName)} in graph">
                             <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
                             <span style="
                                 background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
@@ -4435,17 +4458,105 @@ function updateStatsPanel(): void {
             }
         });
     }
+
+    // Add keyboard navigation and click handlers for table list
+    const tableList = statsPanel.querySelector('#table-list');
+    const tableItems = statsPanel.querySelectorAll('.table-list-item');
+
+    if (tableList && tableItems.length > 0) {
+        const hoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.15)';
+        const focusBg = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.15)';
+
+        tableItems.forEach((item, index) => {
+            const itemEl = item as HTMLElement;
+
+            // Hover effects
+            itemEl.addEventListener('mouseenter', () => {
+                if (document.activeElement !== itemEl) {
+                    itemEl.style.background = hoverBg;
+                }
+            });
+            itemEl.addEventListener('mouseleave', () => {
+                if (document.activeElement !== itemEl) {
+                    itemEl.style.background = '';
+                }
+            });
+
+            // Focus effects
+            itemEl.addEventListener('focus', () => {
+                itemEl.style.background = focusBg;
+                itemEl.style.outline = 'none';
+            });
+            itemEl.addEventListener('blur', () => {
+                itemEl.style.background = '';
+            });
+
+            // Click to navigate to table
+            itemEl.addEventListener('click', () => {
+                navigateToTable(itemEl.getAttribute('data-table') || '');
+            });
+
+            // Keyboard navigation
+            itemEl.addEventListener('keydown', (e) => {
+                const key = e.key;
+                let nextIndex = index;
+
+                if (key === 'ArrowDown' || key === 'ArrowRight') {
+                    e.preventDefault();
+                    nextIndex = Math.min(index + 1, tableItems.length - 1);
+                } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+                    e.preventDefault();
+                    nextIndex = Math.max(index - 1, 0);
+                } else if (key === 'Home') {
+                    e.preventDefault();
+                    nextIndex = 0;
+                } else if (key === 'End') {
+                    e.preventDefault();
+                    nextIndex = tableItems.length - 1;
+                } else if (key === 'Enter' || key === ' ') {
+                    e.preventDefault();
+                    navigateToTable(itemEl.getAttribute('data-table') || '');
+                    return;
+                }
+
+                if (nextIndex !== index) {
+                    // Update tabindex for roving tabindex pattern
+                    itemEl.setAttribute('tabindex', '-1');
+                    const nextItem = tableItems[nextIndex] as HTMLElement;
+                    nextItem.setAttribute('tabindex', '0');
+                    nextItem.focus();
+                }
+            });
+        });
+    }
+
+    // Helper to navigate to a table node in the graph
+    function navigateToTable(tableName: string) {
+        if (!tableName) return;
+        const tableNode = currentNodes.find(n =>
+            n.type === 'table' && n.label.toLowerCase() === tableName.toLowerCase()
+        );
+        if (tableNode) {
+            selectNode(tableNode.id, { skipNavigation: true });
+            zoomToNode(tableNode);
+            pulseNode(tableNode.id);
+        }
+    }
 }
 
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
 
     if (!currentHints || currentHints.length === 0) {
-        hintsPanel.style.display = 'none';
+        hintsPanel.style.opacity = '0';
+        hintsPanel.style.visibility = 'hidden';
+        hintsPanel.style.transform = 'translateY(8px)';
         return;
     }
 
-    hintsPanel.style.display = 'block';
+    hintsPanel.style.opacity = '1';
+    hintsPanel.style.visibility = 'visible';
+    hintsPanel.style.transform = 'translateY(0)';
 
     // Theme-aware colors
     const isDark = state.isDarkTheme;
@@ -5913,7 +6024,15 @@ function updateLegendPanel(): void {
 export function toggleLegend(show?: boolean): void {
     if (!legendPanel) {return;}
     state.legendVisible = show ?? !state.legendVisible;
-    legendPanel.style.display = state.legendVisible ? 'block' : 'none';
+    if (state.legendVisible) {
+        legendPanel.style.opacity = '1';
+        legendPanel.style.visibility = 'visible';
+        legendPanel.style.transform = 'translateY(0)';
+    } else {
+        legendPanel.style.opacity = '0';
+        legendPanel.style.visibility = 'hidden';
+        legendPanel.style.transform = 'translateY(-8px)';
+    }
 }
 
 let statsVisible = true;
@@ -5929,7 +6048,15 @@ let hintsVisible = true;
 export function toggleHints(show?: boolean): void {
     if (!hintsPanel) {return;}
     hintsVisible = show ?? !hintsVisible;
-    hintsPanel.style.display = hintsVisible ? 'block' : 'none';
+    if (hintsVisible) {
+        hintsPanel.style.opacity = '1';
+        hintsPanel.style.visibility = 'visible';
+        hintsPanel.style.transform = 'translateY(0)';
+    } else {
+        hintsPanel.style.opacity = '0';
+        hintsPanel.style.visibility = 'hidden';
+        hintsPanel.style.transform = 'translateY(8px)';
+    }
 }
 
 // Layout order for cycling
@@ -6354,11 +6481,18 @@ function clearColumnHighlights(): void {
 
 export function toggleSqlPreview(show?: boolean): void {
     if (!sqlPreviewPanel) {return;}
-    const shouldShow = show ?? (sqlPreviewPanel.style.display === 'none');
-    sqlPreviewPanel.style.display = shouldShow ? 'block' : 'none';
+    const isHidden = sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0';
+    const shouldShow = show ?? isHidden;
 
     if (shouldShow) {
         updateSqlPreview();
+        sqlPreviewPanel.style.opacity = '1';
+        sqlPreviewPanel.style.visibility = 'visible';
+        sqlPreviewPanel.style.transform = 'translateY(0)';
+    } else {
+        sqlPreviewPanel.style.opacity = '0';
+        sqlPreviewPanel.style.visibility = 'hidden';
+        sqlPreviewPanel.style.transform = 'translateY(16px)';
     }
 }
 
