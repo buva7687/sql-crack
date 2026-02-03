@@ -11,6 +11,9 @@ import {
     zoomOut,
     resetView,
     getZoomLevel,
+    getViewState,
+    setViewState,
+    TabViewState,
     exportToPng,
     exportToSvg,
     exportToMermaid,
@@ -78,6 +81,9 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+
+// Store view state per query index for zoom/pan persistence
+const queryViewStates: Map<number, TabViewState> = new Map();
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -177,9 +183,7 @@ function init(): void {
     // Create batch tabs
     createBatchTabs(container, {
         onQuerySelect: (index: number) => {
-            currentQueryIndex = index;
-            renderCurrentQuery();
-            updateBatchTabsUI();
+            switchToQueryIndex(index);
         },
         isDarkTheme
     });
@@ -198,18 +202,14 @@ function init(): void {
         if (e.key === '[') {
             e.preventDefault();
             if (batchResult && currentQueryIndex > 0) {
-                currentQueryIndex--;
-                renderCurrentQuery();
-                updateBatchTabsUI();
+                switchToQueryIndex(currentQueryIndex - 1);
             }
         }
         // ] for next query
         if (e.key === ']') {
             e.preventDefault();
             if (batchResult && currentQueryIndex < batchResult.queries.length - 1) {
-                currentQueryIndex++;
-                renderCurrentQuery();
-                updateBatchTabsUI();
+                switchToQueryIndex(currentQueryIndex + 1);
             }
         }
     });
@@ -314,6 +314,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
 
+    // Clear view states when loading new SQL
+    queryViewStates.clear();
+
     try {
         const result = await parseBatchAsync(
             sql,
@@ -393,12 +396,36 @@ function renderCurrentQuery(): void {
     render(query);
 }
 
+/**
+ * Switch to a different query index, preserving view state
+ */
+function switchToQueryIndex(newIndex: number): void {
+    if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
+        return;
+    }
+
+    // Save current view state before switching
+    queryViewStates.set(currentQueryIndex, getViewState());
+
+    // Switch to new query
+    currentQueryIndex = newIndex;
+    renderCurrentQuery();
+    updateBatchTabsUI();
+
+    // Restore view state for the new query if we have one
+    const savedState = queryViewStates.get(newIndex);
+    if (savedState) {
+        // Use requestAnimationFrame to ensure render completes first
+        requestAnimationFrame(() => {
+            setViewState(savedState);
+        });
+    }
+}
+
 function updateBatchTabsUI(): void {
     updateBatchTabs(batchResult, currentQueryIndex, {
         onQuerySelect: (index: number) => {
-            currentQueryIndex = index;
-            renderCurrentQuery();
-            updateBatchTabsUI();
+            switchToQueryIndex(index);
         },
         isDarkTheme
     });

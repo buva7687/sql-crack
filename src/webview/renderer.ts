@@ -101,6 +101,7 @@ let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
+let loadingOverlay: HTMLDivElement | null = null;
 let currentNodes: FlowNode[] = [];
 let currentEdges: FlowEdge[] = [];
 let renderNodes: FlowNode[] = [];
@@ -389,6 +390,56 @@ export function initRenderer(container: HTMLElement): void {
         box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
     `;
     container.appendChild(contextMenuElement);
+
+    // Create loading overlay for layout switching
+    loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loading-overlay';
+    loadingOverlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 500;
+        pointer-events: none;
+    `;
+    loadingOverlay.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 20px 32px;
+            background: ${UI_COLORS.backgroundPanelSolid};
+            border: 1px solid ${UI_COLORS.border};
+            border-radius: 12px;
+            box-shadow: ${UI_COLORS.shadowMedium};
+        ">
+            <div class="loading-spinner" style="
+                width: 24px;
+                height: 24px;
+                border: 3px solid rgba(99, 102, 241, 0.2);
+                border-top-color: #6366f1;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            "></div>
+            <span style="color: ${UI_COLORS.textMuted}; font-size: 12px;">Calculating layout...</span>
+        </div>
+    `;
+
+    // Add spinner animation
+    const spinnerStyle = document.createElement('style');
+    spinnerStyle.textContent = `
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(spinnerStyle);
+    container.appendChild(loadingOverlay);
 
     // Hide context menu on click outside
     const contextMenuClickHandler = () => {
@@ -1661,6 +1712,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             }
         } else {
             zoomToNode(node);
+            pulseNode(node.id);
         }
         // Focus SVG to ensure keyboard events work
         svg?.focus();
@@ -3595,6 +3647,7 @@ function renderBreadcrumb(): void {
             item.addEventListener('click', () => {
                 selectNode(node.id, { skipNavigation: true });
                 zoomToNode(node);
+                pulseNode(node.id);
             });
         } else {
             // For main query, reset to full view
@@ -3771,6 +3824,74 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
     // Update breadcrumb navigation
     updateBreadcrumb(nodeId);
+}
+
+/**
+ * Add a pulse animation to a node to draw user attention
+ * Called when jumping to a node from search, explore, or table clicks
+ */
+function pulseNode(nodeId: string): void {
+    const nodeGroup = mainGroup?.querySelector(`.node[data-id="${nodeId}"]`) as SVGGElement;
+    if (!nodeGroup) { return; }
+
+    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+    if (!rect) { return; }
+
+    // Save original stroke state
+    const origStroke = rect.getAttribute('stroke') || '';
+    const origStrokeWidth = rect.getAttribute('stroke-width') || '';
+
+    // Add pulse CSS animation
+    rect.style.animation = 'node-pulse 0.6s ease-out';
+
+    // Define keyframes if not already added
+    if (!document.getElementById('pulse-animation-style')) {
+        const style = document.createElement('style');
+        style.id = 'pulse-animation-style';
+        style.textContent = `
+            @keyframes node-pulse {
+                0% {
+                    stroke: #818cf8;
+                    stroke-width: 6px;
+                    filter: url(#glow) brightness(1.3);
+                }
+                50% {
+                    stroke: #6366f1;
+                    stroke-width: 4px;
+                    filter: url(#glow) brightness(1.1);
+                }
+                100% {
+                    stroke: inherit;
+                    stroke-width: inherit;
+                    filter: url(#shadow);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Clean up animation after completion
+    setTimeout(() => {
+        rect.style.animation = '';
+        // Restore original stroke (if node is still selected, selectNode will have set it)
+        if (state.selectedNodeId === nodeId) {
+            rect.setAttribute('stroke', UI_COLORS.white);
+            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('filter', 'url(#glow)');
+        } else {
+            if (origStroke) {
+                rect.setAttribute('stroke', origStroke);
+            } else {
+                rect.removeAttribute('stroke');
+            }
+            if (origStrokeWidth) {
+                rect.setAttribute('stroke-width', origStrokeWidth);
+            } else {
+                rect.removeAttribute('stroke-width');
+            }
+            rect.setAttribute('filter', 'url(#shadow)');
+        }
+    }, 600);
 }
 
 /**
@@ -4110,6 +4231,50 @@ function updateDetailsPanel(nodeId: string | null): void {
     });
 }
 
+/**
+ * Creates consistent empty state HTML for panels
+ */
+function createEmptyStateHtml(options: {
+    icon: string;
+    title: string;
+    subtitle?: string;
+    actionText?: string;
+    actionId?: string;
+}): string {
+    const isDark = state.isDarkTheme;
+    const textColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const subtitleColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const actionColor = isDark ? '#818cf8' : '#6366f1';
+
+    return `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+            text-align: center;
+        ">
+            <span style="font-size: 24px; margin-bottom: 8px; opacity: 0.6;">${options.icon}</span>
+            <span style="color: ${textColor}; font-size: 12px; font-weight: 500;">${options.title}</span>
+            ${options.subtitle ? `<span style="color: ${subtitleColor}; font-size: 11px; margin-top: 4px;">${options.subtitle}</span>` : ''}
+            ${options.actionText && options.actionId ? `
+                <button id="${options.actionId}" style="
+                    margin-top: 12px;
+                    background: rgba(99, 102, 241, 0.15);
+                    color: ${actionColor};
+                    border: 1px solid rgba(99, 102, 241, 0.3);
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                ">${options.actionText}</button>
+            ` : ''}
+        </div>
+    `;
+}
+
 function updateStatsPanel(): void {
     if (!statsPanel || !currentStats) { return; }
 
@@ -4353,6 +4518,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Performance (${perfCount})</button>
             ` : ''}
             ${qualityCount > 0 ? `
@@ -4364,6 +4530,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Quality (${qualityCount})</button>
             ` : ''}
             ${bestPracticeCount > 0 ? `
@@ -4375,6 +4542,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Best Practice (${bestPracticeCount})</button>
             ` : ''}
             ${complexityCount > 0 ? `
@@ -4386,6 +4554,7 @@ function updateHintsPanel(): void {
                     border-radius: 4px;
                     font-size: 10px;
                     cursor: pointer;
+                    transition: all 0.15s;
                 ">Complexity (${complexityCount})</button>
             ` : ''}
         </div>
@@ -4402,6 +4571,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">High (${highCount})</button>
                 ` : ''}
                 ${mediumCount > 0 ? `
@@ -4413,6 +4583,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">Medium (${mediumCount})</button>
                 ` : ''}
                 ${lowCount > 0 ? `
@@ -4424,6 +4595,7 @@ function updateHintsPanel(): void {
                         border-radius: 4px;
                         font-size: 10px;
                         cursor: pointer;
+                        transition: all 0.15s;
                     ">Low (${lowCount})</button>
                 ` : ''}
             </div>
@@ -4495,6 +4667,44 @@ function updateHintsPanel(): void {
     let activeCategory: string | null = null;
     let activeSeverity: string | null = null;
 
+    // Create "Clear filters" button (initially hidden)
+    const clearFiltersBtn = document.createElement('button');
+    clearFiltersBtn.id = 'clear-filters-btn';
+    clearFiltersBtn.innerHTML = '✕ Clear filters';
+    clearFiltersBtn.style.cssText = `
+        display: none;
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 10px;
+        cursor: pointer;
+        margin-left: auto;
+        transition: all 0.15s;
+    `;
+    clearFiltersBtn.addEventListener('mouseenter', () => {
+        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.25)';
+    });
+    clearFiltersBtn.addEventListener('mouseleave', () => {
+        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.15)';
+    });
+    clearFiltersBtn.addEventListener('click', () => {
+        activeCategory = null;
+        activeSeverity = null;
+        filterButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
+        severityButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
+        applyFilters();
+    });
+
+    // Insert clear button after the header
+    const headerDiv = hintsPanel.querySelector('div');
+    if (headerDiv) {
+        headerDiv.style.display = 'flex';
+        headerDiv.style.alignItems = 'center';
+        headerDiv.appendChild(clearFiltersBtn);
+    }
+
     filterButtons.forEach(btn => {
         const btnEl = btn as HTMLElement;
         btnEl.addEventListener('click', () => {
@@ -4531,17 +4741,37 @@ function updateHintsPanel(): void {
         });
     });
 
+    // Create "no matching hints" message element
+    const noMatchesEl = document.createElement('div');
+    noMatchesEl.id = 'no-matches-message';
+    noMatchesEl.innerHTML = createEmptyStateHtml({
+        icon: '🔍',
+        title: 'No matching hints',
+        subtitle: 'Try adjusting your filters'
+    });
+    noMatchesEl.style.display = 'none';
+    const hintsList = hintsPanel.querySelector('.hints-list');
+    if (hintsList) {
+        hintsList.appendChild(noMatchesEl);
+    }
+
     function applyFilters() {
+        // Show/hide clear filters button based on active filters
+        const hasActiveFilters = activeCategory !== null || activeSeverity !== null;
+        clearFiltersBtn.style.display = hasActiveFilters ? 'block' : 'none';
+
+        let visibleCount = 0;
         hintItems.forEach(item => {
             const itemEl = item as HTMLElement;
             const itemCategory = itemEl.getAttribute('data-category') || 'other';
             const itemSeverity = itemEl.getAttribute('data-severity') || '';
-            
+
             const categoryMatch = !activeCategory || itemCategory === activeCategory;
             const severityMatch = !activeSeverity || itemSeverity === activeSeverity;
-            
+
             if (categoryMatch && severityMatch) {
                 itemEl.style.display = '';
+                visibleCount++;
             } else {
                 itemEl.style.display = 'none';
             }
@@ -4554,13 +4784,16 @@ function updateHintsPanel(): void {
                 const itemEl = item as HTMLElement;
                 return itemEl.style.display !== 'none';
             });
-            
+
             if (visibleItems.length === 0) {
                 groupEl.style.display = 'none';
             } else {
                 groupEl.style.display = '';
             }
         });
+
+        // Show/hide "no matches" message
+        noMatchesEl.style.display = (hasActiveFilters && visibleCount === 0) ? 'block' : 'none';
     }
 }
 
@@ -4764,6 +4997,29 @@ export function getZoomLevel(): number {
     return Math.round(state.scale * 100);
 }
 
+// View state for tab persistence
+export interface TabViewState {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+}
+
+export function getViewState(): TabViewState {
+    return {
+        scale: state.scale,
+        offsetX: state.offsetX,
+        offsetY: state.offsetY
+    };
+}
+
+export function setViewState(viewState: TabViewState): void {
+    state.scale = viewState.scale;
+    state.offsetX = viewState.offsetX;
+    state.offsetY = viewState.offsetY;
+    updateTransform();
+    updateZoomIndicator();
+}
+
 export function resetView(): void {
     fitView();
     updateZoomIndicator();
@@ -4790,8 +5046,11 @@ function updateZoomIndicator(): void {
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_DELAY = 600; // ms - wait for user to stop typing
 
-export function setSearchBox(input: HTMLInputElement): void {
+let searchCountIndicator: HTMLSpanElement | null = null;
+
+export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanElement): void {
     searchBox = input;
+    searchCountIndicator = countIndicator;
     input.addEventListener('input', () => {
         // Clear any existing debounce timer
         if (searchDebounceTimer) {
@@ -4801,11 +5060,45 @@ export function setSearchBox(input: HTMLInputElement): void {
         // Immediately highlight matches without zooming (for visual feedback)
         highlightMatches(input.value);
 
+        // Update search count indicator
+        updateSearchCountDisplay();
+
         // Debounce the zoom/navigation to first result
         searchDebounceTimer = setTimeout(() => {
             navigateToFirstResult();
         }, SEARCH_DEBOUNCE_DELAY);
     });
+}
+
+function updateSearchCountDisplay(): void {
+    if (!searchCountIndicator) { return; }
+
+    const term = state.searchTerm;
+    const total = state.searchResults.length;
+    const hasNodes = currentNodes.length > 0;
+
+    if (!term) {
+        searchCountIndicator.style.display = 'none';
+        searchCountIndicator.textContent = '';
+        return;
+    }
+
+    searchCountIndicator.style.display = 'block';
+
+    if (total === 0) {
+        // Differentiate: no nodes in graph vs no matching results
+        if (!hasNodes) {
+            searchCountIndicator.textContent = 'No data';
+            searchCountIndicator.style.color = '#94a3b8';
+        } else {
+            searchCountIndicator.textContent = 'No matches';
+            searchCountIndicator.style.color = '#f87171';
+        }
+    } else {
+        const current = state.currentSearchIndex + 1;
+        searchCountIndicator.textContent = `${current > 0 ? current : 1}/${total}`;
+        searchCountIndicator.style.color = '#64748b';
+    }
 }
 
 // Highlight matching nodes without navigating (immediate feedback)
@@ -4864,11 +5157,16 @@ function navigateSearch(delta: number): void {
         state.currentSearchIndex = (state.currentSearchIndex + delta + state.searchResults.length) % state.searchResults.length;
     }
 
+    // Update count display with new position
+    updateSearchCountDisplay();
+
     const nodeId = state.searchResults[state.currentSearchIndex];
     const node = currentNodes.find(n => n.id === nodeId);
     if (node) {
         zoomToNode(node);
         selectNode(nodeId, { skipNavigation: true });
+        // Add pulse animation to draw attention
+        pulseNode(nodeId);
     }
 }
 
@@ -4886,6 +5184,9 @@ function clearSearch(): void {
             rect.removeAttribute('stroke-width');
         }
     });
+
+    // Reset count display
+    updateSearchCountDisplay();
 }
 
 export function getSearchResultCount(): { current: number; total: number } {
@@ -5634,6 +5935,21 @@ export function toggleHints(show?: boolean): void {
 // Layout order for cycling
 const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
 
+// Loading state helpers
+function showLoading(message?: string): void {
+    if (!loadingOverlay) { return; }
+    const textEl = loadingOverlay.querySelector('span');
+    if (textEl && message) {
+        textEl.textContent = message;
+    }
+    loadingOverlay.style.display = 'flex';
+}
+
+function hideLoading(): void {
+    if (!loadingOverlay) { return; }
+    loadingOverlay.style.display = 'none';
+}
+
 export function toggleLayout(): void {
     const currentIndex = LAYOUT_ORDER.indexOf(state.layoutType || 'vertical');
     const nextIndex = (currentIndex + 1) % LAYOUT_ORDER.length;
@@ -5645,74 +5961,90 @@ export function switchLayout(layoutType: LayoutType): void {
         return;
     }
 
-    state.layoutType = layoutType;
-
-    // Re-run layout with selected algorithm
-    switch (layoutType) {
-        case 'horizontal':
-            layoutGraphHorizontal(currentNodes, currentEdges);
-            break;
-        case 'compact':
-            layoutGraphCompact(currentNodes, currentEdges);
-            break;
-        case 'force':
-            layoutGraphForce(currentNodes, currentEdges);
-            break;
-        case 'radial':
-            layoutGraphRadial(currentNodes, currentEdges);
-            break;
-        case 'vertical':
-        default:
-            layoutGraph(currentNodes, currentEdges);
-            break;
+    // Show loading for larger graphs
+    const showLoadingIndicator = currentNodes.length > 15;
+    if (showLoadingIndicator) {
+        showLoading('Calculating layout...');
     }
 
-    // Update node positions in DOM
-    currentNodes.forEach(node => {
-        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
-        if (nodeGroup) {
-            const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-            if (rect) {
-                const origX = parseFloat(rect.getAttribute('x') || '0');
-                const origY = parseFloat(rect.getAttribute('y') || '0');
-                const deltaX = node.x - origX;
-                const deltaY = node.y - origY;
-                nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+    // Use requestAnimationFrame to allow UI to update before heavy computation
+    requestAnimationFrame(() => {
+        state.layoutType = layoutType;
+
+        // Re-run layout with selected algorithm
+        switch (layoutType) {
+            case 'horizontal':
+                layoutGraphHorizontal(currentNodes, currentEdges);
+                break;
+            case 'compact':
+                layoutGraphCompact(currentNodes, currentEdges);
+                break;
+            case 'force':
+                layoutGraphForce(currentNodes, currentEdges);
+                break;
+            case 'radial':
+                layoutGraphRadial(currentNodes, currentEdges);
+                break;
+            case 'vertical':
+            default:
+                layoutGraph(currentNodes, currentEdges);
+                break;
+        }
+
+        // Update node positions in DOM
+        currentNodes.forEach(node => {
+            const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+            if (nodeGroup) {
+                const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+                if (rect) {
+                    const origX = parseFloat(rect.getAttribute('x') || '0');
+                    const origY = parseFloat(rect.getAttribute('y') || '0');
+                    const deltaX = node.x - origX;
+                    const deltaY = node.y - origY;
+                    nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+                }
             }
+        });
+
+        // Show all edges first
+        const allEdges = mainGroup!.querySelectorAll('.edge');
+        allEdges.forEach(edgeEl => {
+            (edgeEl as SVGPathElement).style.display = '';
+        });
+
+        // Update edge paths
+        const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+        edgeElements.forEach(edgeEl => {
+            const sourceId = edgeEl.getAttribute('data-source');
+            const targetId = edgeEl.getAttribute('data-target');
+            if (sourceId && targetId) {
+                const sourceNode = currentNodes.find(n => n.id === sourceId);
+                const targetNode = currentNodes.find(n => n.id === targetId);
+                if (sourceNode && targetNode) {
+                    const path = calculateEdgePath(sourceNode, targetNode, layoutType);
+                    edgeEl.setAttribute('d', path);
+                    (edgeEl as SVGPathElement).style.display = '';
+                } else {
+                    (edgeEl as SVGPathElement).style.display = 'none';
+                }
+            }
+        });
+
+        // Update layout selector if present
+        const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+        if (layoutSelect) {
+            layoutSelect.value = layoutType;
+        }
+
+        fitView();
+
+        // Hide loading after a brief delay to ensure UI updates are visible
+        if (showLoadingIndicator) {
+            requestAnimationFrame(() => {
+                hideLoading();
+            });
         }
     });
-
-    // Show all edges first
-    const allEdges = mainGroup!.querySelectorAll('.edge');
-    allEdges.forEach(edgeEl => {
-        (edgeEl as SVGPathElement).style.display = '';
-    });
-
-    // Update edge paths
-    const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
-    edgeElements.forEach(edgeEl => {
-        const sourceId = edgeEl.getAttribute('data-source');
-        const targetId = edgeEl.getAttribute('data-target');
-        if (sourceId && targetId) {
-            const sourceNode = currentNodes.find(n => n.id === sourceId);
-            const targetNode = currentNodes.find(n => n.id === targetId);
-            if (sourceNode && targetNode) {
-                const path = calculateEdgePath(sourceNode, targetNode, layoutType);
-                edgeEl.setAttribute('d', path);
-                (edgeEl as SVGPathElement).style.display = '';
-            } else {
-                (edgeEl as SVGPathElement).style.display = 'none';
-            }
-        }
-    });
-
-    // Update layout selector if present
-    const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
-    if (layoutSelect) {
-        layoutSelect.value = layoutType;
-    }
-
-    fitView();
 }
 
 export function getCurrentLayout(): LayoutType {
@@ -6926,6 +7258,7 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
         case 'zoom':
             selectNode(node.id, { skipNavigation: true });
             zoomToNode(node);
+            pulseNode(node.id);
             break;
         case 'focus-upstream':
             selectNode(node.id, { skipNavigation: true });
