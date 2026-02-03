@@ -200,7 +200,7 @@ export class ImpactView {
 
                 ${report.directImpacts.length > 0 ? this.generateImpactList('Direct Impacts', report.directImpacts) : ''}
 
-                ${report.transitiveImpacts.length > 0 ? this.generateImpactList('Transitive Impacts', report.transitiveImpacts) : ''}
+                ${report.transitiveImpacts.length > 0 ? this.generateGroupedTransitiveImpacts(report.transitiveImpacts, report.target.name) : ''}
 
                 ${report.suggestions.length > 0 ? this.generateSuggestions(report.suggestions) : ''}
 
@@ -346,6 +346,99 @@ export class ImpactView {
                     <div class="item-reason">${this.escapeHtml(item.reason)}</div>
                     <div class="item-location" title="${this.escapeHtml(tooltip)}">
                         <span>📄 ${this.escapeHtml(displayFile)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+
+        return html;
+    }
+
+    /**
+     * Generate grouped transitive impacts (columns grouped by parent table)
+     */
+    private generateGroupedTransitiveImpacts(items: ImpactItem[], targetName: string): string {
+        // Group items by parent table
+        const groups = new Map<string, { tableName: string; items: ImpactItem[]; maxSeverity: string }>();
+
+        for (const item of items) {
+            // Extract parent table from column ID (format: column:{tableKey}.{columnName})
+            let parentTable = 'Other';
+            if (item.node.type === 'column' && item.node.id.startsWith('column:')) {
+                const withoutPrefix = item.node.id.substring(7); // Remove 'column:'
+                const dotIndex = withoutPrefix.lastIndexOf('.');
+                if (dotIndex > 0) {
+                    parentTable = withoutPrefix.substring(0, dotIndex);
+                }
+            } else if (item.node.type === 'table' || item.node.type === 'view') {
+                parentTable = item.node.name;
+            }
+
+            if (!groups.has(parentTable)) {
+                groups.set(parentTable, { tableName: parentTable, items: [], maxSeverity: 'low' });
+            }
+            const group = groups.get(parentTable)!;
+            group.items.push(item);
+
+            // Track highest severity in group
+            const severityOrder = { low: 0, medium: 1, high: 2, critical: 3 };
+            if (severityOrder[item.severity as keyof typeof severityOrder] > severityOrder[group.maxSeverity as keyof typeof severityOrder]) {
+                group.maxSeverity = item.severity;
+            }
+        }
+
+        // Sort groups by item count (largest first)
+        const sortedGroups = Array.from(groups.values()).sort((a, b) => b.items.length - a.items.length);
+
+        let html = `
+            <div class="impact-list transitive-grouped">
+                <div class="impact-list-header">
+                    <h3>Transitive Impacts</h3>
+                    <span class="impact-count">${items.length} affected across ${groups.size} tables</span>
+                </div>
+                <div class="transitive-groups">
+        `;
+
+        for (const group of sortedGroups) {
+            const severityIcon = group.maxSeverity === 'high' || group.maxSeverity === 'critical' ? '⚠️' : group.maxSeverity === 'medium' ? '●' : '○';
+            const columnNames = group.items.map(i => i.node.name).join(', ');
+            const truncatedNames = columnNames.length > 60 ? columnNames.substring(0, 60) + '...' : columnNames;
+
+            html += `
+                <div class="transitive-group severity-${group.maxSeverity}">
+                    <button class="transitive-group-header" type="button" aria-expanded="false">
+                        <span class="group-expand-icon">▶</span>
+                        <span class="group-table-name">${this.escapeHtml(group.tableName)}</span>
+                        <span class="group-path">${this.escapeHtml(targetName)} → ${this.escapeHtml(group.tableName)}</span>
+                        <span class="group-count">${group.items.length} column${group.items.length !== 1 ? 's' : ''}</span>
+                        <span class="group-severity">${severityIcon} ${group.maxSeverity}</span>
+                    </button>
+                    <div class="transitive-group-preview">${this.escapeHtml(truncatedNames)}</div>
+                    <div class="transitive-group-content" style="display: none;">
+                        <div class="column-list">
+            `;
+
+            for (const item of group.items) {
+                const fileName = item.filePath && item.filePath !== 'Unknown'
+                    ? item.filePath.split('/').pop() || item.filePath
+                    : '';
+                const location = item.lineNumber > 0 ? `${fileName} • Line ${item.lineNumber}` : fileName;
+
+                html += `
+                            <div class="column-item">
+                                <span class="column-name">${this.escapeHtml(item.node.name)}</span>
+                                ${location ? `<span class="column-location">📄 ${this.escapeHtml(location)}</span>` : ''}
+                            </div>
+                `;
+            }
+
+            html += `
+                        </div>
                     </div>
                 </div>
             `;

@@ -1815,6 +1815,27 @@ function getImpactSummaryScript(): string {
                     details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 });
             });
+
+            // Transitive group expand/collapse
+            document.querySelectorAll('.transitive-group-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const group = header.closest('.transitive-group');
+                    if (!group) return;
+                    const content = group.querySelector('.transitive-group-content');
+                    if (!content) return;
+
+                    const isExpanded = group.classList.contains('expanded');
+                    if (isExpanded) {
+                        group.classList.remove('expanded');
+                        content.style.display = 'none';
+                        header.setAttribute('aria-expanded', 'false');
+                    } else {
+                        group.classList.add('expanded');
+                        content.style.display = 'block';
+                        header.setAttribute('aria-expanded', 'true');
+                    }
+                });
+            });
         }
     `;
 }
