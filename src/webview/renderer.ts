@@ -4537,6 +4537,38 @@ function updateStatsPanel(): void {
             n.type === 'table' && n.label.toLowerCase() === tableName.toLowerCase()
         );
         if (tableNode) {
+            // If table is inside a CTE/subquery, expand the parent first
+            if (tableNode.parentId) {
+                const parentNode = currentNodes.find(n => n.id === tableNode.parentId);
+                if (parentNode && (parentNode.type === 'cte' || parentNode.type === 'subquery')) {
+                    if (!parentNode.expanded) {
+                        // Expand the parent node and re-render
+                        parentNode.expanded = true;
+                        if (parentNode.children) {
+                            parentNode.height = 70 + parentNode.children.length * 30;
+                        }
+                        // Re-render to show expanded cloud
+                        const currentResult: ParseResult = {
+                            nodes: currentNodes,
+                            edges: currentEdges,
+                            stats: currentStats!,
+                            hints: currentHints,
+                            sql: currentSql,
+                            columnLineage: currentColumnLineage,
+                            columnFlows: currentColumnFlows,
+                            tableUsage: currentTableUsage
+                        };
+                        render(currentResult);
+                        // After re-render, find and navigate to the table
+                        requestAnimationFrame(() => {
+                            selectNode(tableNode.id, { skipNavigation: true });
+                            zoomToNode(tableNode);
+                            pulseNode(tableNode.id);
+                        });
+                        return;
+                    }
+                }
+            }
             selectNode(tableNode.id, { skipNavigation: true });
             zoomToNode(tableNode);
             pulseNode(tableNode.id);
