@@ -557,14 +557,49 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
         // ========== Keyboard Shortcuts ==========
         document.addEventListener('keydown', (e) => {
+            const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+            const graphTab = document.querySelector('.tab-btn[data-tab="graph"]');
+            const isGraphTabActive = graphTab?.classList.contains('active');
+
+            // Cmd/Ctrl+F: Focus search
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                 e.preventDefault();
                 searchInput?.focus();
                 searchInput?.select();
+                return;
             }
-            if (e.key === 'Escape' && document.activeElement === searchInput) {
-                searchInput.blur();
-                clearSearch();
+
+            // Escape: Clear search (if in input) or clear selection (if graph active)
+            if (e.key === 'Escape') {
+                if (document.activeElement === searchInput) {
+                    searchInput.blur();
+                    clearSearch();
+                } else if (isGraphTabActive && selectedNodeId) {
+                    clearSelection();
+                }
+                return;
+            }
+
+            // Skip remaining shortcuts if typing in input
+            if (isInputFocused) return;
+
+            // Graph-only shortcuts (when graph tab is active)
+            if (isGraphTabActive) {
+                // F: Toggle focus mode
+                if (e.key === 'f' || e.key === 'F') {
+                    e.preventDefault();
+                    if (selectedNodeId) {
+                        setFocusMode(!focusModeEnabled);
+                    }
+                    return;
+                }
+
+                // R: Reset view (fit to screen)
+                if (e.key === 'r' || e.key === 'R') {
+                    e.preventDefault();
+                    resetView();
+                    return;
+                }
             }
         });
 
