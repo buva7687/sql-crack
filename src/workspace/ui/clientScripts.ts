@@ -633,7 +633,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let searchTimeout;
         function debouncedSearch() {
             clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(performSearch, 300);
+            searchTimeout = setTimeout(performSearch, 500); // 500ms delay for smoother typing
         }
 
         searchInput?.addEventListener('input', debouncedSearch);
@@ -644,11 +644,14 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
         // ========== Keyboard Shortcuts ==========
         document.addEventListener('keydown', (e) => {
-            const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
-            const graphTab = document.querySelector('.tab-btn[data-tab="graph"]');
-            const isGraphTabActive = graphTab?.classList.contains('active');
+            // Skip ALL shortcuts if typing in any input or select
+            const activeEl = document.activeElement;
+            const isTyping = activeEl?.tagName === 'INPUT' ||
+                             activeEl?.tagName === 'TEXTAREA' ||
+                             activeEl?.tagName === 'SELECT' ||
+                             activeEl?.isContentEditable;
 
-            // Cmd/Ctrl+F: Focus search
+            // Cmd/Ctrl+F: Focus search (works even when typing)
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                 e.preventDefault();
                 searchInput?.focus();
@@ -656,37 +659,42 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 return;
             }
 
-            // Escape: Clear search (if in input) or clear selection (if graph active)
+            // Escape: Clear search (if in search input) or clear selection
             if (e.key === 'Escape') {
-                if (document.activeElement === searchInput) {
+                if (activeEl === searchInput) {
                     searchInput.blur();
                     clearSearch();
-                } else if (isGraphTabActive && selectedNodeId) {
+                    return;
+                }
+                // Only clear selection if not typing anywhere
+                if (!isTyping && selectedNodeId) {
                     clearSelection();
                 }
                 return;
             }
 
-            // Skip remaining shortcuts if typing in input
-            if (isInputFocused) return;
+            // Skip all other shortcuts if typing
+            if (isTyping) return;
 
-            // Graph-only shortcuts (when graph tab is active)
-            if (isGraphTabActive) {
-                // F: Toggle focus mode
-                if (e.key === 'f' || e.key === 'F') {
-                    e.preventDefault();
-                    if (selectedNodeId) {
-                        setFocusMode(!focusModeEnabled);
-                    }
-                    return;
-                }
+            // Check if graph view is active
+            const graphTab = document.querySelector('.view-tab[data-view="graph"]');
+            const isGraphTabActive = graphTab?.classList.contains('active');
+            if (!isGraphTabActive) return;
 
-                // R: Reset view (fit to screen)
-                if (e.key === 'r' || e.key === 'R') {
-                    e.preventDefault();
-                    resetView();
-                    return;
+            // F: Toggle focus mode
+            if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                if (selectedNodeId) {
+                    setFocusMode(!focusModeEnabled);
                 }
+                return;
+            }
+
+            // R: Reset view (fit to screen)
+            if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                resetView();
+                return;
             }
         });
 
