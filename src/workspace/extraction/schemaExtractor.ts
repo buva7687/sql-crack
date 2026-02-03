@@ -9,6 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS
 } from './types';
+import { escapeRegex } from '../../shared';
 
 // SQL reserved words that should never be treated as table/view names
 const SQL_RESERVED_WORDS = new Set([
@@ -537,7 +538,7 @@ export class SchemaExtractor {
     ): { lineNumber: number; charIndex: number } {
         const keyword = type === 'table' ? 'TABLE' : 'VIEW';
         // Escape special regex characters in identifier to prevent injection or false matches
-        const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escaped = escapeRegex(identifier);
         // Match exact pattern: CREATE [OR REPLACE] [TEMP] [MATERIALIZED] TABLE/VIEW [IF NOT EXISTS] [schema.]identifier
         const re = new RegExp(
             `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:\\w+\\.)?["'\`]?${escaped}["'\`]?`,
@@ -581,8 +582,9 @@ export class SchemaExtractor {
      */
     private extractStatementSql(sql: string, name: string, type: 'table' | 'view'): string {
         const keyword = type === 'table' ? 'TABLE' : 'VIEW';
+        const escaped = escapeRegex(name);
         const regex = new RegExp(
-            `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:\\w+\\.)?["'\`]?${name}["'\`]?[^;]*;?`,
+            `CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:\\w+\\.)?["'\`]?${escaped}["'\`]?[^;]*;?`,
             'gi'
         );
         const match = regex.exec(sql);

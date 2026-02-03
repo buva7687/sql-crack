@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.3] - 2026-02-02
+
+### Added
+
+- **Keyboard navigation**: Arrow keys navigate between connected nodes; Tab cycles through nodes; focus trap keeps keyboard events in webview.
+- **Panel animations**: Smooth slide-in/out transitions for Node Details and Optimization Hints panels.
+- **Loading overlay**: Visual feedback when switching graph layouts (15+ nodes).
+- **Pulse animation**: Nodes pulse when navigated to via search, zoom, or breadcrumb clicks.
+- **Amber highlight for cloud sub-nodes**: Multi-pulse glow animation when navigating to tables inside CTE/subquery clouds.
+- **Zoom persistence**: Zoom/pan state preserved when switching between query tabs.
+- **"Clear filters" button**: Quick reset in hints panel when filters are active.
+- **Shared `escapeRegex()` utility**: Centralized regex escaping in `src/shared/stringUtils.ts`.
+
+### Changed
+
+- **Zoom indicator**: Now displays percentage relative to "fit to view" (100% = fit view).
+- **Zoom behavior**: Capped at 180% of fit-view scale to prevent excessive zooming; includes expanded cloud bounds in calculation.
+- **Statement counting**: Improved accuracy for SQL without trailing semicolons.
+- **Workspace index caching**: Added 4MB size limit guard and error handling for large workspaces.
+
+### Fixed
+
+- **CTE/subquery navigation**: Clicking a table in "Tables Used" now auto-expands the parent CTE cloud and highlights the table inside.
+- **Broken edge on zoom**: Cloud containers now properly shown/hidden when zooming to expanded CTEs.
+- **Regex injection (P2 security)**: Escaped special characters in dynamic regex patterns in `lineageBuilder.ts`, `schemaExtractor.ts`, and `renderer.ts`.
+- **Script tag breakout (P2 security)**: All user-controlled strings in `visualizationPanel.ts` now use `_escapeForInlineScript()` to prevent `</script>` injection.
+- **Lint warnings**: Expanded one-line if/else statements to multi-line with braces.
+
+### Security
+
+- **P2 #1-3**: Fixed regex metacharacter escaping in identifier lookups to prevent runtime errors with special characters in table/view names.
+- **P2 #4**: Fixed potential script context breakout in webview HTML generation.
+
+---
+
 ## [0.1.2] - 2026-01-31
 
 ### Added
@@ -230,6 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.3]: https://github.com/buva7687/sql-crack/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/buva7687/sql-crack/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/buva7687/sql-crack/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/buva7687/sql-crack/compare/v0.0.9...v0.1.0

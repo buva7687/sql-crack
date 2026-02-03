@@ -2,7 +2,7 @@
 
 import { ColumnInfo } from './lineage';
 
-export type NodeType = 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window' | 'case';
+export type NodeType = 'table' | 'filter' | 'join' | 'aggregate' | 'sort' | 'limit' | 'select' | 'result' | 'cte' | 'union' | 'subquery' | 'window' | 'case' | 'cluster';
 
 export type WarningType = 'unused' | 'dead-column' | 'expensive' | 'fan-out' | 'repeated-scan' | 'complex' | 'filter-pushdown' | 'non-sargable' | 'join-order' | 'index-suggestion';
 

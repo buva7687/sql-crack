@@ -632,4 +632,38 @@ SELECT * FROM orders;`;
       expect(successCount).toBeGreaterThan(0);
     });
   });
+
+  describe('Tables Used navigation (CTE children: table + join)', () => {
+    it('Q2 product_sales CTE: products as table and brands in join label so both are findable for expand', () => {
+      // Same structure as Q2 first CTE in enterprise-complex-queries.sql: FROM products p LEFT JOIN brands b
+      const q2FirstCte = `
+WITH product_sales AS (
+  SELECT p.product_id, b.brand_name
+  FROM products p
+  LEFT JOIN brands b ON p.brand_id = b.brand_id
+  LEFT JOIN categories c ON p.category_id = c.category_id
+)
+SELECT * FROM product_sales LIMIT 10
+`;
+      const result = parseSql(q2FirstCte, 'PostgreSQL');
+      expect(result.error).toBeUndefined();
+      expect(result.nodes).toBeDefined();
+      const nodes = result.nodes!;
+      const cteNodes = nodes.filter(n => n.type === 'cte' && n.children && n.children.length > 0);
+      expect(cteNodes.length).toBeGreaterThan(0);
+      const firstCte = cteNodes[0];
+      const children = firstCte.children!;
+      const productsTable = children.find(c =>
+        c.type === 'table' && c.label.toLowerCase() === 'products'
+      );
+      const brandsInJoin = children.find(c =>
+        c.type === 'join' && c.label.toLowerCase().endsWith(' brands')
+      );
+      expect(productsTable).toBeDefined();
+      expect(brandsInJoin).toBeDefined();
+      expect(result.tableUsage).toBeDefined();
+      expect(result.tableUsage!.has('products')).toBe(true);
+      expect(result.tableUsage!.has('brands')).toBe(true);
+    });
+  });
 });
