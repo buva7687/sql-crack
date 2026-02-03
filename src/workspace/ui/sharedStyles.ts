@@ -3217,6 +3217,8 @@ export function getGraphStyles(): string {
         .node-search-dim { opacity: 0.18; }
         .node-selected rect { stroke: var(--accent); stroke-width: 2; }
         .node-focus-dim { opacity: 0.12; pointer-events: none; }
+        .node-trace-highlight rect { filter: brightness(1.25); stroke: var(--success); stroke-width: 3; }
+        .node-trace-dim { opacity: 0.15; pointer-events: none; }
         .node-file rect { fill: var(--node-file); stroke: var(--node-file-border); stroke-width: 2; }
         .node-table rect { fill: var(--node-table); stroke: var(--node-table-border); stroke-width: 2; }
         .node-view rect { fill: var(--node-view); stroke: var(--node-view-border); stroke-width: 2; }
@@ -3236,6 +3238,8 @@ export function getGraphStyles(): string {
         .edge.edge-highlighted path { opacity: 1; stroke-width: 3; }
         .edge.edge-dimmed path { opacity: 0.2; }
         .edge-focus-dim path { opacity: 0.1; }
+        .edge-trace-highlight path { stroke: var(--success); stroke-width: 3; opacity: 1; }
+        .edge-trace-dim path { opacity: 0.1; }
 
         /* ========== Tooltip ========== */
         .tooltip {

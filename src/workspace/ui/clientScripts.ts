@@ -59,7 +59,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         // ========== Selection & Focus State ==========
         let selectedNodeId = null;
         let focusModeEnabled = false;
+        let traceMode = null; // null, 'upstream', 'downstream'
         let activeEmptyState = null;
+        const traceUpBtn = document.getElementById('btn-trace-up');
+        const traceDownBtn = document.getElementById('btn-trace-down');
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -255,6 +258,85 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             applyFocusMode();
         }
 
+        // ========== Trace Mode (Full Lineage) ==========
+        function traceAllUpstream(nodeId, visited = new Set()) {
+            if (visited.has(nodeId)) return visited;
+            visited.add(nodeId);
+            const { upstream } = getNeighbors(nodeId);
+            upstream.forEach(id => traceAllUpstream(id, visited));
+            return visited;
+        }
+
+        function traceAllDownstream(nodeId, visited = new Set()) {
+            if (visited.has(nodeId)) return visited;
+            visited.add(nodeId);
+            const { downstream } = getNeighbors(nodeId);
+            downstream.forEach(id => traceAllDownstream(id, visited));
+            return visited;
+        }
+
+        function clearTraceMode() {
+            document.querySelectorAll('.node-trace-highlight').forEach(n => n.classList.remove('node-trace-highlight'));
+            document.querySelectorAll('.node-trace-dim').forEach(n => n.classList.remove('node-trace-dim'));
+            document.querySelectorAll('.edge-trace-highlight').forEach(e => e.classList.remove('edge-trace-highlight'));
+            document.querySelectorAll('.edge-trace-dim').forEach(e => e.classList.remove('edge-trace-dim'));
+        }
+
+        function updateTraceButtons() {
+            if (traceUpBtn) {
+                traceUpBtn.classList.toggle('active', traceMode === 'upstream');
+                traceUpBtn.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
+            }
+            if (traceDownBtn) {
+                traceDownBtn.classList.toggle('active', traceMode === 'downstream');
+                traceDownBtn.setAttribute('aria-pressed', traceMode === 'downstream' ? 'true' : 'false');
+            }
+        }
+
+        function applyTraceMode() {
+            clearTraceMode();
+            if (!traceMode || !selectedNodeId) {
+                updateTraceButtons();
+                return;
+            }
+
+            const traced = traceMode === 'upstream'
+                ? traceAllUpstream(selectedNodeId)
+                : traceAllDownstream(selectedNodeId);
+
+            document.querySelectorAll('.node').forEach(node => {
+                const nodeId = node.getAttribute('data-id');
+                if (!nodeId) return;
+                if (traced.has(nodeId)) {
+                    node.classList.add('node-trace-highlight');
+                } else {
+                    node.classList.add('node-trace-dim');
+                }
+            });
+
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                if (source && target && traced.has(source) && traced.has(target)) {
+                    edge.classList.add('edge-trace-highlight');
+                } else {
+                    edge.classList.add('edge-trace-dim');
+                }
+            });
+
+            updateTraceButtons();
+        }
+
+        function setTraceMode(mode) {
+            // Toggle off if same mode, otherwise set new mode
+            traceMode = (traceMode === mode) ? null : mode;
+            // Trace mode is mutually exclusive with focus mode
+            if (traceMode && focusModeEnabled) {
+                setFocusMode(false);
+            }
+            applyTraceMode();
+        }
+
         function clearSelection() {
             selectedNodeId = null;
             document.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
@@ -262,6 +344,11 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 setFocusMode(false);
             } else {
                 clearFocusMode();
+            }
+            if (traceMode) {
+                traceMode = null;
+                clearTraceMode();
+                updateTraceButtons();
             }
             if (selectionDetails) selectionDetails.style.display = 'none';
             if (selectionEmpty) {
@@ -641,12 +728,32 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         });
         focusBtn?.addEventListener('click', () => {
             const nextState = !focusModeEnabled;
+            // Focus mode is mutually exclusive with trace mode
+            if (nextState && traceMode) {
+                traceMode = null;
+                clearTraceMode();
+                updateTraceButtons();
+            }
             setFocusMode(nextState);
             if (selectionEmpty) {
                 selectionEmpty.textContent = nextState && !selectedNodeId
                     ? 'Select a node to focus on its neighbors.'
                     : selectionEmptyText;
             }
+        });
+        traceUpBtn?.addEventListener('click', () => {
+            if (!selectedNodeId) {
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream dependencies.';
+                return;
+            }
+            setTraceMode('upstream');
+        });
+        traceDownBtn?.addEventListener('click', () => {
+            if (!selectedNodeId) {
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream dependents.';
+                return;
+            }
+            setTraceMode('downstream');
         });
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
