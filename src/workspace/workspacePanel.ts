@@ -1083,7 +1083,7 @@ export class WorkspacePanel {
         const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length;
 
         // Generate graph data JSON for client script
-        const graphData = JSON.stringify({
+        const graphData = this.escapeForInlineScript({
             nodes: graph.nodes.map(node => ({
                 id: node.id,
                 label: node.label,
@@ -1726,13 +1726,14 @@ ${bodyContent}
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
+            const tooltipContent = `<div class="tooltip-title">${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class="tooltip-content">Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>`;
+            const tooltipBase64 = Buffer.from(tooltipContent).toString('base64');
             return `
                 <g class="edge edge-${edge.referenceType}" data-edge-id="${this.escapeHtml(edgeId)}"
                    data-source="${this.escapeHtml(edge.source)}"
                    data-target="${this.escapeHtml(edge.target)}"
                    data-reference-type="${edge.referenceType}"
-                   onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>')"
-                   onmouseleave="hideTooltip()">
+                   data-tooltip="${tooltipBase64}">
                     <path d="${path}"
                           fill="none"
                           stroke="${edgeColor}"
@@ -1871,6 +1872,18 @@ ${bodyContent}
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    /**
+     * Safely escape JSON for embedding in an inline script tag.
+     */
+    private escapeForInlineScript(value: unknown): string {
+        const json = JSON.stringify(value);
+        return json
+            .replace(/<\/script/gi, '<\\/script')
+            .replace(/<!--/g, '<\\!--')
+            .replace(/-->/g, '--\\>')
+            .replace(/\]\]>/g, ']\\]>');
     }
 
     /**

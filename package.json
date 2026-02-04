@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "buvan",
   "repository": {
     "type": "git",
@@ -259,10 +259,10 @@
     "package": "webpack --mode production",
     "lint": "eslint src --ext ts",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit",
+    "test": "node scripts/runJest.js",
+    "test:watch": "node scripts/runJest.js --watch",
+    "test:coverage": "node scripts/runJest.js --coverage",
+    "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
     "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"

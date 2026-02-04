@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-02-04
+
+### Added
+
+- **Workspace Graph selection panel** with upstream/downstream context and quick actions.
+- **Index freshness badge** showing when the workspace index was last built.
+- **Empty-state overlay** for first open and no-match search results.
+- **Search highlight** for matching graph nodes.
+- **Lineage trace controls**: Trace Up/Down buttons for full upstream/downstream highlighting.
+- **Impact Analysis grouping**: Transitive impacts grouped by parent table with collapsible UI.
+- **Impact Analysis FK awareness**: Table-level foreign key constraints captured for dependency analysis.
+
+### Changed
+
+- **Impact Analysis paths**: Transitive impacts show `source → target` column paths using lineage edges.
+
+### Fixed
+
+- **Graph shortcuts**: Keyboard shortcuts no longer interfere with search input.
+- **Impact Analysis noise**: Exclude a table's own columns and only show columns with actual data flow.
+- **Cross-file false positives**: Prevent transitive impacts from crossing unrelated schema files with shared table names.
+
 ## [0.1.3] - 2026-02-02
 
 ### Added
@@ -265,6 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.4]: https://github.com/buva7687/sql-crack/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/buva7687/sql-crack/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/buva7687/sql-crack/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/buva7687/sql-crack/compare/v0.1.0...v0.1.1

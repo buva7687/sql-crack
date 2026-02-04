@@ -3563,7 +3563,10 @@ function getClauseTypeColor(clauseType: string): string {
 function escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // Also escape quotes to keep attribute contexts safe.
+    return div.innerHTML
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function updateBreadcrumb(nodeId: string | null): void {
@@ -4311,16 +4314,16 @@ function updateDetailsPanel(nodeId: string | null): void {
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
-                ${getNodeIcon(node.type)} ${node.label}
+                ${getNodeIcon(node.type)} ${escapeHtml(node.label)}
             </div>
             <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
-                ${node.description || ''}
+                ${escapeHtml(node.description || '')}
             </div>
         </div>
         ${detailsSection}
         <div style="color: ${UI_COLORS.textDim}; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
-            ID: ${node.id}
+            ID: ${escapeHtml(node.id)}
         </div>
     `;
 
@@ -4412,8 +4415,6 @@ function updateStatsPanel(): void {
                                 gap: 4px;
                                 transition: all 0.2s;
                             "
-                            onmouseover="this.style.background='${isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.15)'}'"
-                            onmouseout="this.style.background='${isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)'}'"
                             title="Copy all table names to clipboard"
                             data-tables="${escapeHtml(allTableNames)}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
@@ -4510,6 +4511,15 @@ function updateStatsPanel(): void {
     // Add event listener for copy button
     const copyBtn = statsPanel.querySelector('#copy-tables-btn') as HTMLButtonElement | null;
     if (copyBtn) {
+        const baseBg = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+        const hoverBg = isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.15)';
+        copyBtn.addEventListener('mouseenter', () => {
+            copyBtn.style.background = hoverBg;
+        });
+        copyBtn.addEventListener('mouseleave', () => {
+            copyBtn.style.background = baseBg;
+        });
+
         copyBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const tables = copyBtn.getAttribute('data-tables');

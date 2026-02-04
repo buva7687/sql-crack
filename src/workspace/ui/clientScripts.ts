@@ -1527,6 +1527,16 @@ function getNodeInteractionsScript(): string {
             });
 
             svg.addEventListener('mouseover', (e) => {
+                const edge = e.target.closest('.edge');
+                if (edge) {
+                    const base64 = edge.getAttribute('data-tooltip');
+                    if (base64) {
+                        const content = atob(base64);
+                        showTooltip(e, content);
+                    }
+                    return;
+                }
+
                 const node = e.target.closest('.node');
                 if (node) {
                     const base64 = node.getAttribute('data-tooltip');
@@ -1538,8 +1548,9 @@ function getNodeInteractionsScript(): string {
             });
 
             svg.addEventListener('mouseout', (e) => {
+                const edge = e.target.closest('.edge');
                 const node = e.target.closest('.node');
-                if (node) hideTooltip();
+                if (edge || node) hideTooltip();
             });
 
             svg.addEventListener('contextmenu', (e) => {
