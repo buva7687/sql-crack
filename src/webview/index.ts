@@ -65,6 +65,7 @@ declare global {
         pinId?: string | null;
         viewLocation?: string;
         defaultLayout?: string;
+        flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;

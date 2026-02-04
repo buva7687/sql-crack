@@ -149,6 +149,19 @@
           ],
           "description": "Default graph layout direction"
         },
+        "sqlCrack.flowDirection": {
+          "type": "string",
+          "default": "top-down",
+          "enum": [
+            "top-down",
+            "bottom-up"
+          ],
+          "enumDescriptions": [
+            "Data flows from top to bottom (default)",
+            "Data flows from bottom to top (Snowflake query profile style — tables at bottom, results at top)"
+          ],
+          "description": "Direction of data flow in the visualization. Bottom-up matches Snowflake query profile style where table scans start at the bottom and results flow upward."
+        },
         "sqlCrack.autoRefresh": {
           "type": "boolean",
           "default": true,

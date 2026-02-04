@@ -3307,9 +3307,10 @@ function extractTablesFromStatement(stmt: any): string[] {
 function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
     if (nodes.length === 0) { return; }
 
+    const bottomUp = window.flowDirection === 'bottom-up';
     const g = new dagre.graphlib.Graph();
     g.setGraph({
-        rankdir: 'TB',
+        rankdir: bottomUp ? 'BT' : 'TB',
         nodesep: 60,
         ranksep: 80,
         marginx: 40,

@@ -5842,7 +5842,8 @@ ${mermaidCode}
  * Generate Mermaid flowchart code from nodes and edges
  */
 function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
-    const lines: string[] = ['flowchart TD'];
+    const direction = window.flowDirection === 'bottom-up' ? 'BT' : 'TD';
+    const lines: string[] = [`flowchart ${direction}`];
 
     // Group nodes by type for subgraph organization
     const tableNodes = nodes.filter(n => n.type === 'table');
@@ -5919,10 +5920,10 @@ function formatMermaidNode(node: FlowNode): string {
             return `${id}[("${label}")]`;
         case 'filter':
             // Diamond/rhombus for filters
-            return `${id}{{"${label}"}}`;
+            return `${id}{"${label}"}`;
         case 'join':
             // Hexagon for joins
-            return `${id}{{{"${label}"}}}`;
+            return `${id}{{"${label}"}}`;
         case 'aggregate':
             // Subroutine box for aggregates
             return `${id}[["${label}"]]`;
@@ -6408,12 +6409,13 @@ export function switchLayout(layoutType: LayoutType): void {
         state.layoutType = layoutType;
 
         // Re-run layout with selected algorithm
+        const bottomUp = window.flowDirection === 'bottom-up';
         switch (layoutType) {
             case 'horizontal':
-                layoutGraphHorizontal(currentNodes, currentEdges);
+                layoutGraphHorizontal(currentNodes, currentEdges, bottomUp);
                 break;
             case 'compact':
-                layoutGraphCompact(currentNodes, currentEdges);
+                layoutGraphCompact(currentNodes, currentEdges, bottomUp);
                 break;
             case 'force':
                 layoutGraphForce(currentNodes, currentEdges);
@@ -6423,7 +6425,7 @@ export function switchLayout(layoutType: LayoutType): void {
                 break;
             case 'vertical':
             default:
-                layoutGraph(currentNodes, currentEdges);
+                layoutGraph(currentNodes, currentEdges, bottomUp);
                 break;
         }
 

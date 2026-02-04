@@ -1916,7 +1916,9 @@ ${bodyContent}
     private async exportAsMermaid(): Promise<void> {
         if (!this._currentGraph) {return;}
 
-        let mermaid = '```mermaid\ngraph TD\n';
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
+        let mermaid = `\`\`\`mermaid\ngraph ${direction}\n`;
 
         // Add nodes
         for (const node of this._currentGraph.nodes) {
