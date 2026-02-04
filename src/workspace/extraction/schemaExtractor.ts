@@ -406,6 +406,7 @@ export class SchemaExtractor {
      */
     private extractColumnsFromBody(body: string): ColumnInfo[] {
         const columns: ColumnInfo[] = [];
+        const foreignKeyMap = new Map<string, ForeignKeyRef>();
 
         // Split by comma, but be careful about nested parentheses
         const parts = this.splitColumnDefinitions(body);
@@ -416,6 +417,26 @@ export class SchemaExtractor {
 
             // Skip constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, CONSTRAINT)
             if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)/i.test(trimmed)) {
+                // Capture table-level foreign key constraints like:
+                // CONSTRAINT fk_name FOREIGN KEY (col) REFERENCES ref_table(ref_col)
+                const fkMatch = trimmed.match(/FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?\s*\(([^)]+)\)/i);
+                if (fkMatch) {
+                    const columnList = fkMatch[1].split(',').map(col => col.trim().replace(/["'`]/g, ''));
+                    const refSchema = fkMatch[2];
+                    const refTableName = fkMatch[3];
+                    const refTable = refSchema ? `${refSchema}.${refTableName}` : refTableName;
+                    const refColumns = fkMatch[4].split(',').map(col => col.trim().replace(/["'`]/g, ''));
+
+                    columnList.forEach((columnName, index) => {
+                        if (!columnName) {return;}
+                        const refColumn = refColumns[index] || refColumns[0];
+                        if (!refColumn) {return;}
+                        foreignKeyMap.set(columnName.toLowerCase(), {
+                            referencedTable: refTable,
+                            referencedColumn: refColumn
+                        });
+                    });
+                }
                 continue;
             }
 
@@ -436,7 +457,7 @@ export class SchemaExtractor {
                 // Check constraints in the rest
                 const isPrimaryKey = /PRIMARY\s+KEY/i.test(rest);
                 const isNotNull = /NOT\s+NULL/i.test(rest);
-                const hasReferences = /REFERENCES\s+(\w+)\s*\((\w+)\)/i.exec(rest);
+                const hasReferences = /REFERENCES\s+(?:(\w+)\.)?["'`]?(\w+)["'`]?\s*\(\s*["'`]?(\w+)["'`]?\s*\)/i.exec(rest);
 
                 const column: ColumnInfo = {
                     name,
@@ -447,13 +468,25 @@ export class SchemaExtractor {
                 };
 
                 if (hasReferences) {
+                    const refSchema = hasReferences[1];
+                    const refTableName = hasReferences[2];
+                    const refTable = refSchema ? `${refSchema}.${refTableName}` : refTableName;
                     column.foreignKey = {
-                        referencedTable: hasReferences[1],
-                        referencedColumn: hasReferences[2]
+                        referencedTable: refTable,
+                        referencedColumn: hasReferences[3]
                     };
                 }
 
                 columns.push(column);
+            }
+        }
+
+        // Apply foreign keys from table-level constraints to columns
+        for (const column of columns) {
+            if (column.foreignKey) {continue;}
+            const fk = foreignKeyMap.get(column.name.toLowerCase());
+            if (fk) {
+                column.foreignKey = fk;
             }
         }
 

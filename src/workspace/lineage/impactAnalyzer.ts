@@ -2,6 +2,7 @@
 
 import { LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
+import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
 
 /**
  * Type of change being analyzed
@@ -89,6 +90,9 @@ export class ImpactAnalyzer {
         // Build set of columns that have actual data flow edges (not just structural "contains")
         // Check both regular edges and column-level lineage edges
         const columnsWithDataFlow = new Set<string>();
+        const foreignKeyReasons = new Map<string, string>();
+        const foreignKeyColumnsByTableId = new Map<string, Set<string>>();
+        const normalizedTarget = normalizeIdentifier(tableName) || tableName.toLowerCase();
 
         // Check regular edges for non-structural relationships
         for (const edge of this.graph.edges) {
@@ -108,9 +112,38 @@ export class ImpactAnalyzer {
             }
         }
 
+        // Treat foreign key columns pointing to the target table as data flow impacts
+        for (const node of this.graph.nodes.values()) {
+            if (node.type !== 'column' || !node.columnInfo?.foreignKey) {continue;}
+            const fk = node.columnInfo.foreignKey;
+            if (!fk?.referencedTable) {continue;}
+            if (!this.matchesForeignKeyTarget(fk.referencedTable, tableName, normalizedTarget)) {continue;}
+
+            const sourceTableId = this.getTableNodeId(fk.referencedTable);
+            const sourceTable = this.getTableDisplayName(sourceTableId);
+            const targetTable = node.parentId ? this.getTableDisplayName(node.parentId) : this.getTableDisplayNameFromColumnId(node.id);
+            const reason = `${sourceTable}.${fk.referencedColumn} → ${targetTable}.${node.name}`;
+
+            columnsWithDataFlow.add(node.id);
+            foreignKeyReasons.set(node.id, reason);
+            if (node.parentId) {
+                if (!foreignKeyColumnsByTableId.has(node.parentId)) {
+                    foreignKeyColumnsByTableId.set(node.parentId, new Set());
+                }
+                foreignKeyColumnsByTableId.get(node.parentId)!.add(node.id);
+            }
+        }
+
+        const addedImpactNodes = new Set<string>();
+
         for (const depNode of downstream.nodes) {
             // Skip the table's own columns - they're part of the target, not impacts
             if (depNode.type === 'column' && depNode.id.startsWith(ownColumnPrefix)) {
+                continue;
+            }
+
+            if ((depNode.type === 'table' || depNode.type === 'view') && foreignKeyColumnsByTableId.has(depNode.id)) {
+                // Prefer column-level impact items when foreign keys are available
                 continue;
             }
 
@@ -132,9 +165,13 @@ export class ImpactAnalyzer {
                     return targetColId === depNode.id;
                 });
                 if (colEdge) {
-                    const sourceTable = colEdge.sourceTableId.replace(/^(table|view):/, '');
-                    reason = `${sourceTable}.${colEdge.sourceColumnName} → ${depNode.name}`;
+                    const sourceTable = this.getTableDisplayName(colEdge.sourceTableId);
+                    const targetTable = this.getTableDisplayName(colEdge.targetTableId);
+                    reason = `${sourceTable}.${colEdge.sourceColumnName} → ${targetTable}.${depNode.name}`;
                 }
+            }
+            if (depNode.type === 'column' && foreignKeyReasons.has(depNode.id)) {
+                reason = foreignKeyReasons.get(depNode.id) || reason;
             }
 
             const impactItem: ImpactItem = {
@@ -151,6 +188,25 @@ export class ImpactAnalyzer {
             } else {
                 transitiveImpacts.push(impactItem);
             }
+            addedImpactNodes.add(depNode.id);
+        }
+
+        // Ensure foreign key columns are captured even if they weren't in downstream traversal
+        for (const [columnId, reason] of foreignKeyReasons) {
+            if (addedImpactNodes.has(columnId)) {continue;}
+            const node = this.graph.nodes.get(columnId);
+            if (!node) {continue;}
+            const resolved = this.resolveImpactLocation(node);
+            const impactItem: ImpactItem = {
+                node,
+                impactType: 'transitive',
+                reason,
+                filePath: resolved.filePath || 'Unknown',
+                lineNumber: resolved.lineNumber || 0,
+                severity: this.calculateNodeSeverity(node, downstream.nodes.length)
+            };
+            transitiveImpacts.push(impactItem);
+            addedImpactNodes.add(columnId);
         }
 
         // Calculate summary
@@ -457,5 +513,46 @@ export class ImpactAnalyzer {
      */
     private getColumnNodeId(tableName: string, columnName: string): string {
         return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+    }
+
+    private getTableDisplayName(tableId: string): string {
+        const node = this.graph.nodes.get(tableId);
+        if (node?.name) {
+            return node.name;
+        }
+
+        return tableId.replace(/^(table|view|external|cte):/, '');
+    }
+
+    private matchesForeignKeyTarget(fkTable: string, targetTable: string, normalizedTarget: string): boolean {
+        const fkParsed = parseQualifiedKey(fkTable);
+        const targetParsed = parseQualifiedKey(targetTable);
+
+        const fkName = normalizeIdentifier(fkParsed.name || '') || fkParsed.name?.toLowerCase();
+        const targetName = normalizeIdentifier(targetParsed.name || '') || normalizedTarget;
+
+        if (!fkName || !targetName || fkName !== targetName) {
+            return false;
+        }
+
+        if (fkParsed.schema && targetParsed.schema) {
+            const fkSchema = normalizeIdentifier(fkParsed.schema) || fkParsed.schema.toLowerCase();
+            const targetSchema = normalizeIdentifier(targetParsed.schema) || targetParsed.schema.toLowerCase();
+            return fkSchema === targetSchema;
+        }
+
+        return true;
+    }
+
+    private getTableDisplayNameFromColumnId(columnId: string): string {
+        if (!columnId.startsWith('column:')) {
+            return columnId;
+        }
+        const withoutPrefix = columnId.substring(7);
+        const dotIndex = withoutPrefix.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return withoutPrefix;
+        }
+        return withoutPrefix.substring(0, dotIndex);
     }
 }

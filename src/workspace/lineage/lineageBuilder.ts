@@ -190,7 +190,13 @@ export class LineageBuilder implements LineageGraph {
                 const tableFiles = tableNode.metadata.definitionFiles || [];
                 tableFiles.forEach((filePath: string) => existingFiles.add(filePath));
                 existingColumn.metadata.definitionFiles = Array.from(existingFiles);
-                return;
+                if (existingColumn.columnInfo && column.foreignKey && !existingColumn.columnInfo.foreignKey) {
+                    existingColumn.columnInfo = {
+                        ...existingColumn.columnInfo,
+                        foreignKey: column.foreignKey
+                    };
+                }
+                continue;
             }
 
             const columnNode: LineageNode = {
