@@ -81,8 +81,7 @@ export function createToolbar(
         align-items: center;
         gap: 8px;
         z-index: 100;
-        overflow-x: auto;
-        overflow-y: visible;
+        overflow: hidden;
         padding-bottom: 4px;
         scrollbar-width: thin;
         scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
@@ -174,6 +173,9 @@ export function createToolbar(
     // Add the single wrapper to container
     container.appendChild(toolbarWrapper);
 
+    // Set up ResizeObserver for overflow menu
+    const resizeObserver = setupOverflowObserver(actions, toolbarWrapper);
+
     // Set initial dialect value
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
     if (dialectSelect) {
@@ -197,6 +199,14 @@ export function createToolbar(
             document.removeEventListener(type, handler);
         });
         documentListeners.length = 0;
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+        }
+        // Remove the overflow dropdown from root container
+        const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown');
+        if (overflowDropdown) {
+            overflowDropdown.remove();
+        }
     };
 
     return { toolbar, actions, searchContainer, cleanup };
@@ -306,7 +316,266 @@ function createActionButtons(
     // Feature buttons
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
 
+    // Overflow menu container (positioned relative for dropdown)
+    const overflowContainer = document.createElement('div');
+    overflowContainer.id = 'sql-crack-overflow-container';
+    overflowContainer.style.cssText = `
+        position: relative;
+        display: none;
+        flex-shrink: 0;
+    `;
+
+    const overflowBtn = document.createElement('button');
+    overflowBtn.id = 'sql-crack-overflow-btn';
+    overflowBtn.innerHTML = '⋯';
+    overflowBtn.title = 'More actions';
+    overflowBtn.setAttribute('aria-label', 'More actions');
+    overflowBtn.setAttribute('role', 'button');
+    overflowBtn.style.cssText = `
+        ${btnStyle}
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        font-size: 18px;
+        letter-spacing: 1px;
+        line-height: 1;
+        padding: 8px 10px;
+    `;
+    overflowBtn.addEventListener('mouseenter', () => overflowBtn.style.background = 'rgba(148, 163, 184, 0.2)');
+    overflowBtn.addEventListener('mouseleave', () => overflowBtn.style.background = 'rgba(15, 23, 42, 0.95)');
+
+    const overflowDropdown = document.createElement('div');
+    overflowDropdown.id = 'sql-crack-overflow-dropdown';
+    overflowDropdown.style.cssText = `
+        display: none;
+        position: fixed;
+        background: rgba(15, 23, 42, 0.98);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 8px 0;
+        min-width: 200px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+
+    // Append dropdown to root container so it escapes overflow:hidden clipping
+    const rootContainer = document.getElementById('root') || document.body;
+    rootContainer.appendChild(overflowDropdown);
+
+    const positionDropdown = () => {
+        const rect = overflowBtn.getBoundingClientRect();
+        overflowDropdown.style.top = `${rect.bottom + 4}px`;
+        overflowDropdown.style.right = `${window.innerWidth - rect.right}px`;
+    };
+
+    overflowBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = overflowDropdown.style.display === 'none';
+        overflowDropdown.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) {
+            positionDropdown();
+        }
+    });
+
+    const overflowClickHandler = () => {
+        overflowDropdown.style.display = 'none';
+    };
+    document.addEventListener('click', overflowClickHandler);
+    documentListeners.push({ type: 'click', handler: overflowClickHandler });
+
+    overflowContainer.appendChild(overflowBtn);
+    actions.appendChild(overflowContainer);
+
     return actions;
+}
+
+/**
+ * Extract only direct text nodes from an element (ignoring child element text).
+ */
+function getDirectText(el: HTMLElement): string {
+    for (const node of Array.from(el.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+            return node.textContent.trim();
+        }
+    }
+    return '';
+}
+
+/**
+ * Clean up a title for use as a short overflow menu label.
+ * Strips keyboard shortcut hints and common verbose prefixes.
+ */
+function cleanOverflowLabel(title: string): string {
+    return title
+        .replace(/\s*\([^)]*\)\s*$/, '')   // "(L)", "(S)", "(F)", etc.
+        .replace(/^Toggle\s+/i, '')
+        .replace(/^Show\s+/i, '')
+        .replace(/^Export as\s+/i, 'Export ')
+        .trim();
+}
+
+/**
+ * Collects all individually-hideable buttons from export and feature groups.
+ * Returns them in priority order (highest priority first = hidden last).
+ */
+function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElement; label: string; icon: string }> {
+    const result: Array<{ btn: HTMLElement; label: string; icon: string }> = [];
+
+    // Children of actions: [zoomGroup, exportGroup, featureGroup, overflowContainer]
+    const children = Array.from(actions.children) as HTMLElement[];
+    const exportGroup = children[1]; // exportGroup
+    const featureGroup = children[2]; // featureGroup
+
+    if (!exportGroup || !featureGroup) {return result;}
+
+    // Extract icon and label from any toolbar element (button or div container)
+    const extractMeta = (el: HTMLElement): { icon: string; label: string } => {
+        // Try direct text nodes first (avoids grabbing dropdown/child content)
+        let icon = getDirectText(el);
+        let title = el.title || '';
+
+        if (!icon) {
+            // For containers, look for an inner button or select
+            const innerBtn = el.querySelector('button');
+            const select = el.querySelector('select');
+            if (innerBtn) {
+                icon = getDirectText(innerBtn) || innerBtn.innerHTML.trim().slice(0, 3);
+                title = title || innerBtn.title || '';
+            } else if (select) {
+                icon = '📐';
+                title = title || 'Layout';
+            } else {
+                icon = el.textContent?.trim().slice(0, 2) || '';
+            }
+        }
+
+        const label = cleanOverflowLabel(title) || icon;
+        return { icon, label };
+    };
+
+    // Feature group items (lower priority - hidden first, right-to-left)
+    for (const el of Array.from(featureGroup.children) as HTMLElement[]) {
+        const meta = extractMeta(el);
+        result.push({ btn: el, ...meta });
+    }
+
+    // Export group buttons (higher priority - hidden after feature group)
+    for (const el of Array.from(exportGroup.children) as HTMLElement[]) {
+        const meta = extractMeta(el);
+        result.push({ btn: el, ...meta });
+    }
+
+    return result;
+}
+
+/**
+ * Sets up a ResizeObserver that hides overflowing action buttons
+ * and populates the overflow dropdown menu.
+ */
+function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement): ResizeObserver | null {
+    const overflowContainer = actions.querySelector('#sql-crack-overflow-container') as HTMLElement;
+    const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLElement;
+    if (!overflowContainer || !overflowDropdown) {return null;}
+
+    const allButtons = collectOverflowableButtons(actions);
+
+    // Map from button element to its original display style
+    const originalDisplays = new Map<HTMLElement, string>();
+    for (const { btn } of allButtons) {
+        originalDisplays.set(btn, btn.style.display || '');
+    }
+
+    const updateOverflow = () => {
+        // First, restore all buttons so we can measure properly
+        for (const { btn } of allButtons) {
+            btn.style.display = originalDisplays.get(btn) || '';
+        }
+        overflowContainer.style.display = 'none';
+        overflowDropdown.style.display = 'none';
+
+        const wrapperWidth = toolbarWrapper.clientWidth;
+        // scrollWidth tells us total content width
+        const contentWidth = toolbarWrapper.scrollWidth;
+
+        if (contentWidth <= wrapperWidth) {
+            // Everything fits
+            return;
+        }
+
+        // We need to hide buttons. Hide from the end of the allButtons array
+        // (feature group right-to-left first, then export group right-to-left)
+        // Show overflow button first so it factors into width calculation
+        overflowContainer.style.display = 'flex';
+
+        const hiddenButtons: Array<{ btn: HTMLElement; label: string; icon: string }> = [];
+
+        // Hide buttons from the end (lowest priority) until things fit
+        for (let i = allButtons.length - 1; i >= 0; i--) {
+            if (toolbarWrapper.scrollWidth <= wrapperWidth) {
+                break;
+            }
+            const item = allButtons[i];
+            item.btn.style.display = 'none';
+            hiddenButtons.push(item);
+        }
+
+        if (hiddenButtons.length === 0) {
+            overflowContainer.style.display = 'none';
+            return;
+        }
+
+        // Populate the overflow dropdown
+        overflowDropdown.innerHTML = '';
+
+        // Reverse so items appear in natural order (top = first hidden from left)
+        hiddenButtons.reverse();
+
+        for (const { btn, label, icon } of hiddenButtons) {
+            const row = document.createElement('div');
+            row.style.cssText = `
+                padding: 8px 12px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                color: #e2e8f0;
+                transition: background 0.15s;
+                font-size: 12px;
+                white-space: nowrap;
+            `;
+
+            const iconSpan = document.createElement('span');
+            iconSpan.style.cssText = 'font-size: 14px; min-width: 20px; text-align: center;';
+            iconSpan.textContent = icon;
+            row.appendChild(iconSpan);
+
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = label;
+            row.appendChild(labelSpan);
+
+            row.addEventListener('mouseenter', () => row.style.background = 'rgba(148, 163, 184, 0.1)');
+            row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+
+            row.addEventListener('click', (e) => {
+                e.stopPropagation();
+                overflowDropdown.style.display = 'none';
+                // Trigger the original button's click
+                btn.click();
+            });
+
+            overflowDropdown.appendChild(row);
+        }
+    };
+
+    const observer = new ResizeObserver(() => {
+        updateOverflow();
+    });
+    observer.observe(toolbarWrapper);
+
+    // Run once on init
+    requestAnimationFrame(() => updateOverflow());
+
+    return observer;
 }
 
 function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
@@ -1221,7 +1490,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         badge.style.cssText = `
             position: absolute;
             top: 56px;
-            right: 12px;
+            left: 12px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -1229,7 +1498,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
             border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
             padding: 6px 12px;
-            z-index: 99;
+            z-index: 101;
             cursor: pointer;
             transition: background 0.2s;
         `;
