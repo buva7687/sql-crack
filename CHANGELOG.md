@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bottom-up flow direction**: New `sqlCrack.flowDirection` setting with `"top-down"` (default) and `"bottom-up"` options. Bottom-up mimics Snowflake query profile style where table scans start at the bottom and results flow upward. Applies to all dagre-based layouts (vertical, horizontal, compact) and Mermaid export.
 - **Workspace Graph selection panel** with upstream/downstream context and quick actions.
 - **Index freshness badge** showing when the workspace index was last built.
 - **Empty-state overlay** for first open and no-match search results.
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graph shortcuts**: Keyboard shortcuts no longer interfere with search input.
 - **Impact Analysis noise**: Exclude a table's own columns and only show columns with actual data flow.
 - **Cross-file false positives**: Prevent transitive impacts from crossing unrelated schema files with shared table names.
+- **Mermaid JOIN parse error**: Fixed invalid triple-brace `{{{...}}}` syntax for JOIN nodes causing Mermaid parse failures. JOIN nodes now use hexagon `{{...}}` shape; filter nodes use rhombus `{...}`.
 
 ## [0.1.3] - 2026-02-02
 
