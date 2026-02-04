@@ -134,6 +134,28 @@ export class ImpactAnalyzer {
             }
         }
 
+        // Defense-in-depth: collect target's definition files and files with direct edges
+        // to filter out cross-file false positives from shared node IDs
+        const targetDefFiles = new Set<string>(node.metadata?.definitionFiles || []);
+        if (node.filePath) {targetDefFiles.add(node.filePath);}
+
+        // Collect files that have edges originating from the target node
+        const targetEdgeFiles = new Set<string>();
+        for (const edge of this.graph.edges) {
+            if (edge.sourceId === nodeId && edge.metadata?.filePath) {
+                targetEdgeFiles.add(edge.metadata.filePath);
+            }
+        }
+
+        // Collect table/view node IDs that have a foreign key relationship with the target
+        const fkRelatedNodeIds = new Set<string>();
+        for (const [colId, reason] of foreignKeyReasons) {
+            const colNode = this.graph.nodes.get(colId);
+            if (colNode?.parentId) {
+                fkRelatedNodeIds.add(colNode.parentId);
+            }
+        }
+
         const addedImpactNodes = new Set<string>();
 
         for (const depNode of downstream.nodes) {
@@ -153,6 +175,29 @@ export class ImpactAnalyzer {
             // (not just structural "contains" relationship from parent table)
             if (!isDirect && depNode.type === 'column' && !columnsWithDataFlow.has(depNode.id)) {
                 continue;
+            }
+
+            // Cross-file false positive filter for transitive table/view impacts:
+            // Skip if the impacted node's definition files have no overlap with
+            // the target's files/edge files AND there's no FK relationship
+            if (!isDirect && (depNode.type === 'table' || depNode.type === 'view')) {
+                const depDefFiles = depNode.metadata?.definitionFiles as string[] | undefined;
+                if (depDefFiles && depDefFiles.length > 0) {
+                    const hasFileOverlap = depDefFiles.some(
+                        f => targetDefFiles.has(f) || targetEdgeFiles.has(f)
+                    );
+                    // Also check if any edge connecting to this dep originated from a target-related file
+                    const hasSharedFileEdge = this.graph.edges.some(e => {
+                        if (e.targetId !== depNode.id) {return false;}
+                        const edgeFile = e.metadata?.filePath as string | undefined;
+                        return edgeFile ? (targetDefFiles.has(edgeFile) || targetEdgeFiles.has(edgeFile)) : false;
+                    });
+                    const hasFkRelation = fkRelatedNodeIds.has(depNode.id);
+
+                    if (!hasFileOverlap && !hasSharedFileEdge && !hasFkRelation) {
+                        continue;
+                    }
+                }
             }
 
             const resolved = this.resolveImpactLocation(depNode);
