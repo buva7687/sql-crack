@@ -24,12 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Impact Analysis paths**: Transitive impacts show `source → target` column paths using lineage edges.
 
+### Changed
+
+- **Regex escaping**: Consolidated inline regex escaping to use the shared `escapeRegex()` utility in `sqlParser.ts`, `lineNumbers.ts`, and `referenceExtractor.ts`.
+- **Activation events**: Removed `onStartupFinished` to avoid unnecessary early activation when no SQL files are open.
+- **Coverage thresholds**: Raised jest coverage thresholds to 60% (branches: 50%) as a regression guard.
+
 ### Fixed
 
+- **Test failures (145 tests)**: Guarded `window.flowDirection` access in `sqlParser.ts` `layoutGraph` to fix `"window is not defined"` errors in Node.js test environment.
 - **Graph shortcuts**: Keyboard shortcuts no longer interfere with search input.
 - **Impact Analysis noise**: Exclude a table's own columns and only show columns with actual data flow.
 - **Cross-file false positives**: Prevent transitive impacts from crossing unrelated schema files with shared table names.
 - **Mermaid JOIN parse error**: Fixed invalid triple-brace `{{{...}}}` syntax for JOIN nodes causing Mermaid parse failures. JOIN nodes now use hexagon `{{...}}` shape; filter nodes use rhombus `{...}`.
+
+### Improved
+
+- **Debug logging**: Added parse timing logs (debug console) for SQL parsing duration, query count, and dialect.
+- **Workspace logging**: Added index build start/completion/duration logs and error logging for file operation handlers.
+- **Cache size warning**: User-facing notification when workspace index exceeds the 4MB cache limit, with guidance to narrow file scope.
 
 ## [0.1.3] - 2026-02-02
 
