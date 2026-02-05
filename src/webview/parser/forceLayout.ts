@@ -11,13 +11,14 @@ import { FlowNode, FlowEdge } from '../types';
  */
 export function layoutGraphHorizontal(
     nodes: FlowNode[],
-    edges: FlowEdge[]
+    edges: FlowEdge[],
+    bottomUp: boolean = false
 ): void {
     if (nodes.length === 0) { return; }
 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
-        rankdir: 'LR',  // Left to Right (horizontal)
+        rankdir: bottomUp ? 'RL' : 'LR',  // Right to Left when bottom-up, otherwise Left to Right
         nodesep: 50,    // Vertical spacing between nodes
         ranksep: 100,   // Horizontal spacing between ranks
         marginx: 20,
@@ -54,13 +55,14 @@ export function layoutGraphHorizontal(
  */
 export function layoutGraphCompact(
     nodes: FlowNode[],
-    edges: FlowEdge[]
+    edges: FlowEdge[],
+    bottomUp: boolean = false
 ): void {
     if (nodes.length === 0) { return; }
 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
-        rankdir: 'TB',  // Top to Bottom
+        rankdir: bottomUp ? 'BT' : 'TB',  // Bottom to Top when bottom-up
         nodesep: 30,    // Tighter horizontal spacing
         ranksep: 50,    // Tighter vertical spacing
         marginx: 15,

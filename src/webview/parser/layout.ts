@@ -3,12 +3,12 @@
 import dagre from 'dagre';
 import { FlowNode, FlowEdge } from '../types';
 
-export function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
+export function layoutGraph(nodes: FlowNode[], edges: FlowEdge[], bottomUp: boolean = false): void {
     if (nodes.length === 0) { return; }
 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
-        rankdir: 'TB',
+        rankdir: bottomUp ? 'BT' : 'TB',
         nodesep: 60,
         ranksep: 80,
         marginx: 40,

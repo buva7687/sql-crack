@@ -42,6 +42,27 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const sidebar = document.getElementById('sidebar');
         const zoomLevel = document.getElementById('zoom-level');
         const tooltip = document.getElementById('tooltip');
+        const focusBtn = document.getElementById('btn-focus');
+        const selectionEmpty = document.getElementById('selection-empty');
+        const selectionDetails = document.getElementById('selection-details');
+        const selectionTitle = document.getElementById('selection-title');
+        const selectionMeta = document.getElementById('selection-meta');
+        const selectionFile = document.getElementById('selection-file');
+        const selectionUpstream = document.getElementById('selection-upstream');
+        const selectionDownstream = document.getElementById('selection-downstream');
+        const graphEmptyOverlay = document.getElementById('graph-empty-overlay');
+        const graphEmptyTitle = document.getElementById('graph-empty-title');
+        const graphEmptyDesc = document.getElementById('graph-empty-desc');
+        const graphEmptyActions = document.getElementById('graph-empty-actions');
+        const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
+
+        // ========== Selection & Focus State ==========
+        let selectedNodeId = null;
+        let focusModeEnabled = false;
+        let traceMode = null; // null, 'upstream', 'downstream'
+        let activeEmptyState = null;
+        const traceUpBtn = document.getElementById('btn-trace-up');
+        const traceDownBtn = document.getElementById('btn-trace-down');
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -175,6 +196,309 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             updateTransform();
         }
 
+        // ========== Selection & Focus Helpers ==========
+        function clearFocusMode() {
+            document.querySelectorAll('.node-focus-dim').forEach(node => node.classList.remove('node-focus-dim'));
+            document.querySelectorAll('.edge-focus-dim').forEach(edge => edge.classList.remove('edge-focus-dim'));
+        }
+
+        function updateFocusButton() {
+            if (!focusBtn) return;
+            focusBtn.classList.toggle('active', focusModeEnabled);
+            focusBtn.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
+        }
+
+        function getNeighbors(nodeId) {
+            const upstream = new Set();
+            const downstream = new Set();
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                if (!source || !target) return;
+                if (target === nodeId) upstream.add(source);
+                if (source === nodeId) downstream.add(target);
+            });
+            return { upstream, downstream };
+        }
+
+        function getNodeLabel(nodeId) {
+            const nodeEl = document.querySelector('.node[data-id="' + CSS.escape(nodeId) + '"]');
+            if (!nodeEl) return nodeId;
+            return nodeEl.getAttribute('data-label') || nodeId;
+        }
+
+        function applyFocusMode() {
+            if (!focusModeEnabled || !selectedNodeId) {
+                clearFocusMode();
+                return;
+            }
+
+            const neighbors = new Set([selectedNodeId]);
+            const { upstream, downstream } = getNeighbors(selectedNodeId);
+            upstream.forEach(id => neighbors.add(id));
+            downstream.forEach(id => neighbors.add(id));
+
+            document.querySelectorAll('.node').forEach(node => {
+                const nodeId = node.getAttribute('data-id');
+                if (!nodeId) return;
+                node.classList.toggle('node-focus-dim', !neighbors.has(nodeId));
+            });
+
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                const keep = source && target && neighbors.has(source) && neighbors.has(target);
+                edge.classList.toggle('edge-focus-dim', !keep);
+            });
+        }
+
+        function setFocusMode(enabled) {
+            focusModeEnabled = enabled;
+            updateFocusButton();
+            applyFocusMode();
+        }
+
+        // ========== Trace Mode (Full Lineage) ==========
+        function traceAllUpstream(nodeId, visited = new Set()) {
+            if (visited.has(nodeId)) return visited;
+            visited.add(nodeId);
+            const { upstream } = getNeighbors(nodeId);
+            upstream.forEach(id => traceAllUpstream(id, visited));
+            return visited;
+        }
+
+        function traceAllDownstream(nodeId, visited = new Set()) {
+            if (visited.has(nodeId)) return visited;
+            visited.add(nodeId);
+            const { downstream } = getNeighbors(nodeId);
+            downstream.forEach(id => traceAllDownstream(id, visited));
+            return visited;
+        }
+
+        function clearTraceMode() {
+            document.querySelectorAll('.node-trace-highlight').forEach(n => n.classList.remove('node-trace-highlight'));
+            document.querySelectorAll('.node-trace-dim').forEach(n => n.classList.remove('node-trace-dim'));
+            document.querySelectorAll('.edge-trace-highlight').forEach(e => e.classList.remove('edge-trace-highlight'));
+            document.querySelectorAll('.edge-trace-dim').forEach(e => e.classList.remove('edge-trace-dim'));
+        }
+
+        function updateTraceButtons() {
+            if (traceUpBtn) {
+                traceUpBtn.classList.toggle('active', traceMode === 'upstream');
+                traceUpBtn.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
+            }
+            if (traceDownBtn) {
+                traceDownBtn.classList.toggle('active', traceMode === 'downstream');
+                traceDownBtn.setAttribute('aria-pressed', traceMode === 'downstream' ? 'true' : 'false');
+            }
+        }
+
+        function applyTraceMode() {
+            clearTraceMode();
+            if (!traceMode || !selectedNodeId) {
+                updateTraceButtons();
+                return;
+            }
+
+            const traced = traceMode === 'upstream'
+                ? traceAllUpstream(selectedNodeId)
+                : traceAllDownstream(selectedNodeId);
+
+            document.querySelectorAll('.node').forEach(node => {
+                const nodeId = node.getAttribute('data-id');
+                if (!nodeId) return;
+                if (traced.has(nodeId)) {
+                    node.classList.add('node-trace-highlight');
+                } else {
+                    node.classList.add('node-trace-dim');
+                }
+            });
+
+            document.querySelectorAll('.edge').forEach(edge => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                if (source && target && traced.has(source) && traced.has(target)) {
+                    edge.classList.add('edge-trace-highlight');
+                } else {
+                    edge.classList.add('edge-trace-dim');
+                }
+            });
+
+            updateTraceButtons();
+        }
+
+        function setTraceMode(mode) {
+            // Toggle off if same mode, otherwise set new mode
+            traceMode = (traceMode === mode) ? null : mode;
+            // Trace mode is mutually exclusive with focus mode
+            if (traceMode && focusModeEnabled) {
+                setFocusMode(false);
+            }
+            applyTraceMode();
+        }
+
+        function clearSelection() {
+            selectedNodeId = null;
+            document.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
+            if (focusModeEnabled) {
+                setFocusMode(false);
+            } else {
+                clearFocusMode();
+            }
+            if (traceMode) {
+                traceMode = null;
+                clearTraceMode();
+                updateTraceButtons();
+            }
+            if (selectionDetails) selectionDetails.style.display = 'none';
+            if (selectionEmpty) {
+                selectionEmpty.textContent = selectionEmptyText;
+                selectionEmpty.style.display = '';
+            }
+        }
+
+        function updateSelectionPanel(node) {
+            const nodeId = node.getAttribute('data-id');
+            if (!nodeId) return;
+
+            selectedNodeId = nodeId;
+            document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
+            node.classList.add('node-selected');
+
+            if (selectionDetails) selectionDetails.style.display = '';
+            if (selectionEmpty) selectionEmpty.style.display = 'none';
+
+            const label = node.getAttribute('data-label') || nodeId;
+            const type = node.getAttribute('data-type') || 'node';
+            const filePath = node.getAttribute('data-filepath') || '';
+
+            const { upstream, downstream } = getNeighbors(nodeId);
+            const connectionCount = upstream.size + downstream.size;
+            const typeLabel = type === 'file' ? 'File' : type === 'table' ? 'Table' : type === 'view' ? 'View' : 'External';
+
+            if (selectionTitle) selectionTitle.textContent = label;
+            if (selectionMeta) {
+                selectionMeta.textContent = typeLabel + ' • ' + connectionCount + ' connection' + (connectionCount === 1 ? '' : 's');
+            }
+
+            if (selectionFile) {
+                if (filePath) {
+                    selectionFile.textContent = filePath;
+                    selectionFile.style.display = '';
+                    selectionFile.title = filePath;
+                } else {
+                    selectionFile.style.display = 'none';
+                    selectionFile.textContent = '';
+                }
+            }
+
+            const upstreamList = Array.from(upstream).map(getNodeLabel);
+            const downstreamList = Array.from(downstream).map(getNodeLabel);
+
+            if (selectionUpstream) selectionUpstream.textContent = upstreamList.length ? upstreamList.join(', ') : 'None';
+            if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
+
+            if (focusModeEnabled) applyFocusMode();
+        }
+
+        function markWelcomeSeen() {
+            const state = vscode.getState() || {};
+            if (!state.workspaceDepsWelcomeSeen) {
+                state.workspaceDepsWelcomeSeen = true;
+                vscode.setState(state);
+            }
+        }
+
+        function setGraphEmptyState(state) {
+            if (!graphEmptyOverlay || !graphEmptyTitle || !graphEmptyDesc || !graphEmptyActions) return;
+            if (!state) {
+                graphEmptyOverlay.classList.add('is-hidden');
+                graphEmptyOverlay.setAttribute('aria-hidden', 'true');
+                activeEmptyState = null;
+                return;
+            }
+
+            graphEmptyTitle.textContent = state.title;
+            graphEmptyDesc.textContent = state.description || '';
+            graphEmptyDesc.style.display = state.description ? '' : 'none';
+            graphEmptyActions.innerHTML = state.actionsHtml || '';
+            graphEmptyOverlay.classList.remove('is-hidden');
+            graphEmptyOverlay.setAttribute('aria-hidden', 'false');
+            activeEmptyState = state.id;
+        }
+
+        function getSearchMatchCount(query, typeFilter) {
+            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return 0;
+            const trimmedQuery = (query || '').trim();
+            const hasQuery = trimmedQuery.length > 0;
+            const queryLower = trimmedQuery.toLowerCase();
+            let count = 0;
+
+            for (const node of graphData.nodes) {
+                if (!node) continue;
+                if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+                if (!hasQuery) {
+                    count += 1;
+                    continue;
+                }
+
+                const label = (node.label || node.id || '').toString();
+                const filePath = (node.filePath || '').toString();
+                const haystack = (label + ' ' + filePath).toLowerCase();
+                if (haystack.includes(queryLower)) {
+                    count += 1;
+                }
+            }
+
+            return count;
+        }
+
+        function updateGraphEmptyState() {
+            if (!graphEmptyOverlay) return;
+            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+                setGraphEmptyState(null);
+                return;
+            }
+
+            const query = searchInput ? searchInput.value.trim() : '';
+            const typeFilter = filterType ? filterType.value : 'all';
+            const searchActive = Boolean(query) || typeFilter !== 'all';
+
+            if (searchActive) {
+                const matchCount = getSearchMatchCount(query, typeFilter);
+                if (matchCount === 0) {
+                    setGraphEmptyState({
+                        id: 'no-matches',
+                        title: 'No matches for this search',
+                        description: 'Try clearing filters or changing your search terms.',
+                        actionsHtml: '<button class="action-chip" data-graph-action="clear-search">Clear search</button>' +
+                            '<button class="action-chip" data-graph-action="focus-search">Search again</button>'
+                    });
+                    return;
+                }
+            }
+
+            const state = vscode.getState() || {};
+            if (!searchActive && !state.workspaceDepsWelcomeSeen) {
+                setGraphEmptyState({
+                    id: 'welcome',
+                    title: 'Workspace dependencies at a glance',
+                    description: 'This graph shows how your SQL files, tables, and views connect across the workspace.',
+                    actionsHtml: '<button class="action-chip" data-graph-action="focus-search">Search for a table</button>' +
+                        '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>' +
+                        '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>' +
+                        '<button class="action-chip" data-graph-action="view-issues">View issues</button>' +
+                        '<button class="action-chip" data-graph-action="refresh">Refresh index</button>' +
+                        '<button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>'
+                });
+                return;
+            }
+
+            setGraphEmptyState(null);
+        }
+
+        updateFocusButton();
+
         // ========== Pan/Zoom Setup ==========
         if (svg && mainGroup) {
             updateTransform();
@@ -240,6 +564,39 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         }
 
         // ========== Search Functions ==========
+        function applySearchHighlight() {
+            if (!svg) return;
+            const query = searchInput ? searchInput.value.trim() : '';
+            const typeFilter = filterType ? filterType.value : 'all';
+            const searchActive = Boolean(query) || typeFilter !== 'all';
+            const queryLower = query.toLowerCase();
+
+            document.querySelectorAll('.node').forEach(node => {
+                node.classList.remove('node-search-match', 'node-search-dim');
+                if (!searchActive) return;
+
+                const nodeType = node.getAttribute('data-type') || '';
+                if (typeFilter !== 'all' && nodeType !== typeFilter) {
+                    node.classList.add('node-search-dim');
+                    return;
+                }
+
+                if (!query) {
+                    node.classList.add('node-search-match');
+                    return;
+                }
+
+                const label = node.getAttribute('data-label') || '';
+                const filePath = node.getAttribute('data-filepath') || '';
+                const haystack = (label + ' ' + filePath).toLowerCase();
+                if (haystack.includes(queryLower)) {
+                    node.classList.add('node-search-match');
+                } else {
+                    node.classList.add('node-search-dim');
+                }
+            });
+        }
+
         function performSearch() {
             const query = searchInput.value.trim();
             const typeFilter = filterType.value;
@@ -260,6 +617,8 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             });
 
             btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
+            updateGraphEmptyState();
+            applySearchHighlight();
         }
 
         function clearSearch() {
@@ -267,28 +626,75 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             filterType.value = 'all';
             btnClearSearch.classList.remove('visible');
             vscode.postMessage({ command: 'clearSearch' });
+            updateGraphEmptyState();
+            applySearchHighlight();
         }
 
         let searchTimeout;
         function debouncedSearch() {
             clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(performSearch, 300);
+            searchTimeout = setTimeout(performSearch, 500); // 500ms delay for smoother typing
         }
 
         searchInput?.addEventListener('input', debouncedSearch);
         filterType?.addEventListener('change', performSearch);
         btnClearSearch?.addEventListener('click', clearSearch);
+        updateGraphEmptyState();
+        applySearchHighlight();
 
         // ========== Keyboard Shortcuts ==========
         document.addEventListener('keydown', (e) => {
+            // Skip ALL shortcuts if typing in any input or select
+            const activeEl = document.activeElement;
+            const isTyping = activeEl?.tagName === 'INPUT' ||
+                             activeEl?.tagName === 'TEXTAREA' ||
+                             activeEl?.tagName === 'SELECT' ||
+                             activeEl?.isContentEditable;
+
+            // Cmd/Ctrl+F: Focus search (works even when typing)
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                 e.preventDefault();
                 searchInput?.focus();
                 searchInput?.select();
+                return;
             }
-            if (e.key === 'Escape' && document.activeElement === searchInput) {
-                searchInput.blur();
-                clearSearch();
+
+            // Escape: Clear search (if in search input) or clear selection
+            if (e.key === 'Escape') {
+                if (activeEl === searchInput) {
+                    searchInput.blur();
+                    clearSearch();
+                    return;
+                }
+                // Only clear selection if not typing anywhere
+                if (!isTyping && selectedNodeId) {
+                    clearSelection();
+                }
+                return;
+            }
+
+            // Skip all other shortcuts if typing
+            if (isTyping) return;
+
+            // Check if graph view is active
+            const graphTab = document.querySelector('.view-tab[data-view="graph"]');
+            const isGraphTabActive = graphTab?.classList.contains('active');
+            if (!isGraphTabActive) return;
+
+            // F: Toggle focus mode
+            if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                if (selectedNodeId) {
+                    setFocusMode(!focusModeEnabled);
+                }
+                return;
+            }
+
+            // R: Reset view (fit to screen)
+            if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                resetView();
+                return;
             }
         });
 
@@ -312,16 +718,102 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         function openFile(filePath) { vscode.postMessage({ command: 'openFile', filePath }); }
         function openFileAtLine(filePath, line) { vscode.postMessage({ command: 'openFileAtLine', filePath, line }); }
         function visualizeFile(filePath) { vscode.postMessage({ command: 'visualizeFile', filePath }); }
+        function focusSearch() {
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+
+        function switchGraphModeFromAction(mode) {
+            if (!mode) return;
+            vscode.postMessage({ command: 'switchGraphMode', mode });
+        }
 
         document.getElementById('btn-refresh')?.addEventListener('click', refresh);
         document.getElementById('btn-theme')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'toggleTheme' });
+        });
+        focusBtn?.addEventListener('click', () => {
+            const nextState = !focusModeEnabled;
+            // Focus mode is mutually exclusive with trace mode
+            if (nextState && traceMode) {
+                traceMode = null;
+                clearTraceMode();
+                updateTraceButtons();
+            }
+            setFocusMode(nextState);
+            if (selectionEmpty) {
+                selectionEmpty.textContent = nextState && !selectedNodeId
+                    ? 'Select a node to focus on its neighbors.'
+                    : selectionEmptyText;
+            }
+        });
+        traceUpBtn?.addEventListener('click', () => {
+            if (!selectedNodeId) {
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream dependencies.';
+                return;
+            }
+            setTraceMode('upstream');
+        });
+        traceDownBtn?.addEventListener('click', () => {
+            if (!selectedNodeId) {
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream dependents.';
+                return;
+            }
+            setTraceMode('downstream');
         });
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
         document.getElementById('btn-all-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
+        });
+
+        document.addEventListener('click', (e) => {
+            const actionEl = e.target.closest('[data-graph-action]');
+            if (!actionEl) return;
+
+            const action = actionEl.getAttribute('data-graph-action');
+            if (!action) return;
+
+            if (activeEmptyState === 'welcome' && actionEl.closest('#graph-empty-overlay')) {
+                markWelcomeSeen();
+            }
+
+            switch (action) {
+                case 'focus-search':
+                    focusSearch();
+                    break;
+                case 'clear-search':
+                    clearSearch();
+                    break;
+                case 'refresh':
+                    refresh();
+                    break;
+                case 'view-issues':
+                    vscode.postMessage({ command: 'switchView', view: 'issues' });
+                    break;
+                case 'switch-graph-mode': {
+                    const mode = actionEl.getAttribute('data-mode');
+                    switchGraphModeFromAction(mode);
+                    break;
+                }
+                case 'focus-selection':
+                    if (selectedNodeId) {
+                        setFocusMode(true);
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node to focus on its neighbors.';
+                    }
+                    break;
+                case 'clear-selection':
+                    clearSelection();
+                    break;
+                case 'dismiss-welcome':
+                    markWelcomeSeen();
+                    updateGraphEmptyState();
+                    break;
+            }
         });
 
         // ========== Export Buttons ==========
@@ -404,6 +896,7 @@ function getViewModeScript(): string {
             if (view === 'graph') {
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
+                if (focusBtn) focusBtn.style.display = '';
                 if (graphModeSwitcher) {
                     // Use visibility (not display) so switcher always reserves space in layout.
                     // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
@@ -422,6 +915,7 @@ function getViewModeScript(): string {
                 }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
+                if (focusBtn) focusBtn.style.display = 'none';
                 if (graphModeSwitcher) {
                     // Hide switcher but keep it in layout (visibility: hidden) so main tabs don't shift.
                     // pointer-events: none prevents clicks when hidden.
@@ -534,6 +1028,9 @@ function getViewModeScript(): string {
                 graphModeSwitcher.style.visibility = 'hidden';
                 graphModeSwitcher.style.pointerEvents = 'none';
             }
+        }
+        if (focusBtn) {
+            focusBtn.style.display = currentViewMode === 'graph' ? '' : 'none';
         }
 
         // Restore initial view if not graph (e.g., after theme change)
@@ -999,7 +1496,9 @@ function getNodeInteractionsScript(): string {
             svg.addEventListener('click', (e) => {
                 var node = e.target.closest('.node');
                 if (!node) return;
-                
+
+                updateSelectionPanel(node);
+
                 var filePath = node.getAttribute('data-filepath');
                 if (!filePath) return;
                 
@@ -1028,6 +1527,16 @@ function getNodeInteractionsScript(): string {
             });
 
             svg.addEventListener('mouseover', (e) => {
+                const edge = e.target.closest('.edge');
+                if (edge) {
+                    const base64 = edge.getAttribute('data-tooltip');
+                    if (base64) {
+                        const content = atob(base64);
+                        showTooltip(e, content);
+                    }
+                    return;
+                }
+
                 const node = e.target.closest('.node');
                 if (node) {
                     const base64 = node.getAttribute('data-tooltip');
@@ -1039,8 +1548,9 @@ function getNodeInteractionsScript(): string {
             });
 
             svg.addEventListener('mouseout', (e) => {
+                const edge = e.target.closest('.edge');
                 const node = e.target.closest('.node');
-                if (node) hideTooltip();
+                if (edge || node) hideTooltip();
             });
 
             svg.addEventListener('contextmenu', (e) => {
@@ -1051,6 +1561,7 @@ function getNodeInteractionsScript(): string {
                     const nodeType = node.getAttribute('data-type') || 'file';
                     const filePath = node.getAttribute('data-filepath');
 
+                    updateSelectionPanel(node);
                     showContextMenu(e, {
                         id: nodeId,
                         label: nodeLabel,
@@ -1313,6 +1824,27 @@ function getImpactSummaryScript(): string {
 
                     details.style.display = 'block';
                     details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
+            });
+
+            // Transitive group expand/collapse
+            document.querySelectorAll('.transitive-group-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const group = header.closest('.transitive-group');
+                    if (!group) return;
+                    const content = group.querySelector('.transitive-group-content');
+                    if (!content) return;
+
+                    const isExpanded = group.classList.contains('expanded');
+                    if (isExpanded) {
+                        group.classList.remove('expanded');
+                        content.style.display = 'none';
+                        header.setAttribute('aria-expanded', 'false');
+                    } else {
+                        group.classList.add('expanded');
+                        content.style.display = 'block';
+                        header.setAttribute('aria-expanded', 'true');
+                    }
                 });
             });
         }

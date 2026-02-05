@@ -2,6 +2,7 @@
 
 import { LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
+import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
 
 /**
  * Type of change being analyzed
@@ -78,17 +79,150 @@ export class ImpactAnalyzer {
         });
 
         // Separate direct and transitive impacts
-        const directEdges = this.graph.edges.filter(e => e.sourceId === nodeId);
+        // Filter out the table's own columns - they're structural, not downstream dependencies
+        const ownColumnPrefix = `column:${tableName.toLowerCase()}.`;
+        const directEdges = this.graph.edges.filter(e =>
+            e.sourceId === nodeId && !e.targetId.startsWith(ownColumnPrefix)
+        );
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
 
+        // Build set of columns that have actual data flow edges (not just structural "contains")
+        // Check both regular edges and column-level lineage edges
+        const columnsWithDataFlow = new Set<string>();
+        const foreignKeyReasons = new Map<string, string>();
+        const foreignKeyColumnsByTableId = new Map<string, Set<string>>();
+        const normalizedTarget = normalizeIdentifier(tableName) || tableName.toLowerCase();
+
+        // Check regular edges for non-structural relationships
+        for (const edge of this.graph.edges) {
+            if (edge.metadata?.relationship !== 'contains' && edge.targetId.startsWith('column:')) {
+                columnsWithDataFlow.add(edge.targetId);
+            }
+        }
+
+        // Check column lineage edges (column-to-column data flow)
+        if (this.graph.columnEdges) {
+            for (const colEdge of this.graph.columnEdges) {
+                // Add both source and target columns as having data flow
+                const sourceColId = `column:${colEdge.sourceTableId.replace(/^(table|view):/, '')}.${colEdge.sourceColumnName.toLowerCase()}`;
+                const targetColId = `column:${colEdge.targetTableId.replace(/^(table|view):/, '')}.${colEdge.targetColumnName.toLowerCase()}`;
+                columnsWithDataFlow.add(sourceColId);
+                columnsWithDataFlow.add(targetColId);
+            }
+        }
+
+        // Treat foreign key columns pointing to the target table as data flow impacts
+        for (const node of this.graph.nodes.values()) {
+            if (node.type !== 'column' || !node.columnInfo?.foreignKey) {continue;}
+            const fk = node.columnInfo.foreignKey;
+            if (!fk?.referencedTable) {continue;}
+            if (!this.matchesForeignKeyTarget(fk.referencedTable, tableName, normalizedTarget)) {continue;}
+
+            const sourceTableId = this.getTableNodeId(fk.referencedTable);
+            const sourceTable = this.getTableDisplayName(sourceTableId);
+            const targetTable = node.parentId ? this.getTableDisplayName(node.parentId) : this.getTableDisplayNameFromColumnId(node.id);
+            const reason = `${sourceTable}.${fk.referencedColumn} → ${targetTable}.${node.name}`;
+
+            columnsWithDataFlow.add(node.id);
+            foreignKeyReasons.set(node.id, reason);
+            if (node.parentId) {
+                if (!foreignKeyColumnsByTableId.has(node.parentId)) {
+                    foreignKeyColumnsByTableId.set(node.parentId, new Set());
+                }
+                foreignKeyColumnsByTableId.get(node.parentId)!.add(node.id);
+            }
+        }
+
+        // Defense-in-depth: collect target's definition files and files with direct edges
+        // to filter out cross-file false positives from shared node IDs
+        const targetDefFiles = new Set<string>(node.metadata?.definitionFiles || []);
+        if (node.filePath) {targetDefFiles.add(node.filePath);}
+
+        // Collect files that have edges originating from the target node
+        const targetEdgeFiles = new Set<string>();
+        for (const edge of this.graph.edges) {
+            if (edge.sourceId === nodeId && edge.metadata?.filePath) {
+                targetEdgeFiles.add(edge.metadata.filePath);
+            }
+        }
+
+        // Collect table/view node IDs that have a foreign key relationship with the target
+        const fkRelatedNodeIds = new Set<string>();
+        for (const [colId, reason] of foreignKeyReasons) {
+            const colNode = this.graph.nodes.get(colId);
+            if (colNode?.parentId) {
+                fkRelatedNodeIds.add(colNode.parentId);
+            }
+        }
+
+        const addedImpactNodes = new Set<string>();
+
         for (const depNode of downstream.nodes) {
+            // Skip the table's own columns - they're part of the target, not impacts
+            if (depNode.type === 'column' && depNode.id.startsWith(ownColumnPrefix)) {
+                continue;
+            }
+
+            if ((depNode.type === 'table' || depNode.type === 'view') && foreignKeyColumnsByTableId.has(depNode.id)) {
+                // Prefer column-level impact items when foreign keys are available
+                continue;
+            }
+
             const isDirect = directEdges.some(e => e.targetId === depNode.id);
+
+            // For transitive column impacts, only include if there's actual data flow
+            // (not just structural "contains" relationship from parent table)
+            if (!isDirect && depNode.type === 'column' && !columnsWithDataFlow.has(depNode.id)) {
+                continue;
+            }
+
+            // Cross-file false positive filter for transitive table/view impacts:
+            // Skip if the impacted node's definition files have no overlap with
+            // the target's files/edge files AND there's no FK relationship
+            if (!isDirect && (depNode.type === 'table' || depNode.type === 'view')) {
+                const depDefFiles = depNode.metadata?.definitionFiles as string[] | undefined;
+                if (depDefFiles && depDefFiles.length > 0) {
+                    const hasFileOverlap = depDefFiles.some(
+                        f => targetDefFiles.has(f) || targetEdgeFiles.has(f)
+                    );
+                    // Also check if any edge connecting to this dep originated from a target-related file
+                    const hasSharedFileEdge = this.graph.edges.some(e => {
+                        if (e.targetId !== depNode.id) {return false;}
+                        const edgeFile = e.metadata?.filePath as string | undefined;
+                        return edgeFile ? (targetDefFiles.has(edgeFile) || targetEdgeFiles.has(edgeFile)) : false;
+                    });
+                    const hasFkRelation = fkRelatedNodeIds.has(depNode.id);
+
+                    if (!hasFileOverlap && !hasSharedFileEdge && !hasFkRelation) {
+                        continue;
+                    }
+                }
+            }
+
             const resolved = this.resolveImpactLocation(depNode);
+
+            // For column nodes, try to find source column info from column lineage
+            let reason = this.generateImpactReason(depNode, tableName, 'table');
+            if (depNode.type === 'column' && this.graph.columnEdges) {
+                const colEdge = this.graph.columnEdges.find(e => {
+                    const targetColId = `column:${e.targetTableId.replace(/^(table|view):/, '')}.${e.targetColumnName.toLowerCase()}`;
+                    return targetColId === depNode.id;
+                });
+                if (colEdge) {
+                    const sourceTable = this.getTableDisplayName(colEdge.sourceTableId);
+                    const targetTable = this.getTableDisplayName(colEdge.targetTableId);
+                    reason = `${sourceTable}.${colEdge.sourceColumnName} → ${targetTable}.${depNode.name}`;
+                }
+            }
+            if (depNode.type === 'column' && foreignKeyReasons.has(depNode.id)) {
+                reason = foreignKeyReasons.get(depNode.id) || reason;
+            }
+
             const impactItem: ImpactItem = {
                 node: depNode,
                 impactType: isDirect ? 'direct' : 'transitive',
-                reason: this.generateImpactReason(depNode, tableName, 'table'),
+                reason,
                 filePath: resolved.filePath || 'Unknown',
                 lineNumber: resolved.lineNumber || 0,
                 severity: this.calculateNodeSeverity(depNode, downstream.nodes.length)
@@ -99,6 +233,25 @@ export class ImpactAnalyzer {
             } else {
                 transitiveImpacts.push(impactItem);
             }
+            addedImpactNodes.add(depNode.id);
+        }
+
+        // Ensure foreign key columns are captured even if they weren't in downstream traversal
+        for (const [columnId, reason] of foreignKeyReasons) {
+            if (addedImpactNodes.has(columnId)) {continue;}
+            const node = this.graph.nodes.get(columnId);
+            if (!node) {continue;}
+            const resolved = this.resolveImpactLocation(node);
+            const impactItem: ImpactItem = {
+                node,
+                impactType: 'transitive',
+                reason,
+                filePath: resolved.filePath || 'Unknown',
+                lineNumber: resolved.lineNumber || 0,
+                severity: this.calculateNodeSeverity(node, downstream.nodes.length)
+            };
+            transitiveImpacts.push(impactItem);
+            addedImpactNodes.add(columnId);
         }
 
         // Calculate summary
@@ -405,5 +558,46 @@ export class ImpactAnalyzer {
      */
     private getColumnNodeId(tableName: string, columnName: string): string {
         return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+    }
+
+    private getTableDisplayName(tableId: string): string {
+        const node = this.graph.nodes.get(tableId);
+        if (node?.name) {
+            return node.name;
+        }
+
+        return tableId.replace(/^(table|view|external|cte):/, '');
+    }
+
+    private matchesForeignKeyTarget(fkTable: string, targetTable: string, normalizedTarget: string): boolean {
+        const fkParsed = parseQualifiedKey(fkTable);
+        const targetParsed = parseQualifiedKey(targetTable);
+
+        const fkName = normalizeIdentifier(fkParsed.name || '') || fkParsed.name?.toLowerCase();
+        const targetName = normalizeIdentifier(targetParsed.name || '') || normalizedTarget;
+
+        if (!fkName || !targetName || fkName !== targetName) {
+            return false;
+        }
+
+        if (fkParsed.schema && targetParsed.schema) {
+            const fkSchema = normalizeIdentifier(fkParsed.schema) || fkParsed.schema.toLowerCase();
+            const targetSchema = normalizeIdentifier(targetParsed.schema) || targetParsed.schema.toLowerCase();
+            return fkSchema === targetSchema;
+        }
+
+        return true;
+    }
+
+    private getTableDisplayNameFromColumnId(columnId: string): string {
+        if (!columnId.startsWith('column:')) {
+            return columnId;
+        }
+        const withoutPrefix = columnId.substring(7);
+        const dotIndex = withoutPrefix.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return withoutPrefix;
+        }
+        return withoutPrefix.substring(0, dotIndex);
     }
 }

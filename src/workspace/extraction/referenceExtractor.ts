@@ -10,6 +10,7 @@ import {
     DEFAULT_EXTRACTION_OPTIONS
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
+import { escapeRegex } from '../../shared';
 
 // SQL reserved words that should never be treated as table names
 const SQL_RESERVED_WORDS = new Set([
@@ -985,7 +986,7 @@ export class ReferenceExtractor {
      * @returns Line number (1-based) where the table is referenced, or 1 if not found
      */
     private findTableLine(sql: string, tableName: string): number {
-        const escaped = this.escapeRegex(tableName);
+        const escaped = escapeRegex(tableName);
         const lines = sql.split('\n');
         
         // Patterns to match table references in correct SQL contexts
@@ -1030,12 +1031,6 @@ export class ReferenceExtractor {
         return 1;
     }
 
-    /**
-     * Escape special regex characters
-     */
-    private escapeRegex(str: string): string {
-        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
 
     /**
      * Regex-based fallback for reference extraction
@@ -1250,8 +1245,8 @@ export class ReferenceExtractor {
         context: string,
         schema?: string
     ): { lineNumber: number; charIndex: number } | null {
-        const escaped = this.escapeRegex(tableName);
-        const schemaPart = schema ? `${this.escapeRegex(schema)}\\.` : '(?:\\w+\\.)?';
+        const escaped = escapeRegex(tableName);
+        const schemaPart = schema ? `${escapeRegex(schema)}\\.` : '(?:\\w+\\.)?';
         const lines = sql.split('\n');
         
         let pattern: RegExp;
