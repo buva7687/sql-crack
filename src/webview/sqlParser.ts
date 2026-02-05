@@ -2,6 +2,7 @@ import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 import { getAggregateFunctions, getWindowFunctions } from '../dialects';
+import { escapeRegex } from '../shared';
 
 // Import types from centralized type definitions
 import {
@@ -1016,7 +1017,7 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     const line = sqlLines[i].toLowerCase();
                     // Check if this line contains the table name as a word boundary
                     // Also check for table aliases (e.g., "employees e" or "employees AS e")
-                    const tableRegex = new RegExp(`\\b${tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                    const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
                     if (tableRegex.test(line)) {
                         // Make sure it's in a FROM or JOIN context
                         if (i >= searchStartLine - 1 || 
@@ -1734,7 +1735,7 @@ function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string
                     if (isUsed) {break;}
                     
                     // Escape special regex characters to prevent regex injection
-                    const escapedColName = nameToCheck.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const escapedColName = escapeRegex(nameToCheck);
                     // Use word boundary pattern to ensure exact column name matches
                     // (prevents matching partial names like "order_id" matching "order")
                     const wordBoundaryPattern = new RegExp(`\\b${escapedColName}\\b`, 'i');
@@ -3307,7 +3308,7 @@ function extractTablesFromStatement(stmt: any): string[] {
 function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
     if (nodes.length === 0) { return; }
 
-    const bottomUp = window.flowDirection === 'bottom-up';
+    const bottomUp = typeof window !== 'undefined' && window.flowDirection === 'bottom-up';
     const g = new dagre.graphlib.Graph();
     g.setGraph({
         rankdir: bottomUp ? 'BT' : 'TB',
