@@ -65,6 +65,7 @@ declare global {
         pinId?: string | null;
         viewLocation?: string;
         defaultLayout?: string;
+        flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
@@ -318,6 +319,7 @@ async function visualize(sql: string): Promise<void> {
     queryViewStates.clear();
 
     try {
+        const t0 = performance.now();
         const result = await parseBatchAsync(
             sql,
             currentDialect,
@@ -326,6 +328,8 @@ async function visualize(sql: string): Promise<void> {
                 combineDdlStatements: window.combineDdlStatements === true
             }
         );
+        const t1 = performance.now();
+        console.debug(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${currentDialect})`);
         if (requestId !== parseRequestId) {
             return;
         }

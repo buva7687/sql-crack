@@ -13,6 +13,7 @@ import {
     MissingDefinitionDetail
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
+import { logger } from '../logger';
 import { getDisplayName } from './identifiers';
 
 // Lineage modules
@@ -253,6 +254,7 @@ export class WorkspacePanel {
 
                 const startTime = Date.now();
                 let lastFile = '';
+                logger.debug('[Workspace] Starting index build...');
 
                 await this._indexManager.buildIndex((current, total, fileName) => {
                     lastFile = fileName;
@@ -268,10 +270,14 @@ export class WorkspacePanel {
                         increment: (1 / total) * 100
                     });
                 }, cancellationToken);
+
+                const duration = Date.now() - startTime;
+                logger.debug(`[Workspace] Index build completed in ${this.formatDuration(duration)} (${this._indexManager.getIndex()?.fileCount ?? 0} files)`);
             }
         );
 
         if (wasCancelled) {
+            logger.info('[Workspace] Index build was cancelled by user');
             vscode.window.showWarningMessage('Workspace indexing was cancelled. Partial results may be available.');
         }
     }
@@ -439,6 +445,7 @@ export class WorkspacePanel {
                     const doc = await vscode.workspace.openTextDocument(uri);
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to open file: ${message.filePath}`, error);
                     vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
                 }
                 break;
@@ -455,6 +462,7 @@ export class WorkspacePanel {
                         vscode.TextEditorRevealType.InCenter
                     );
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to open file at line: ${message.filePath}:${message.line}`, error);
                     vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
                 }
                 break;
@@ -466,6 +474,7 @@ export class WorkspacePanel {
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
                     await vscode.commands.executeCommand('sql-crack.visualize');
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to visualize file: ${message.filePath}`, error);
                     vscode.window.showErrorMessage(`Could not visualize file: ${message.filePath}`);
                 }
                 break;
@@ -1083,7 +1092,7 @@ export class WorkspacePanel {
         const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length;
 
         // Generate graph data JSON for client script
-        const graphData = JSON.stringify({
+        const graphData = this.escapeForInlineScript({
             nodes: graph.nodes.map(node => ({
                 id: node.id,
                 label: node.label,
@@ -1134,6 +1143,7 @@ ${bodyContent}
     ): string {
         const statsHtml = this.generateStatsHtml();
         const graphHtml = this.generateGraphAreaHtml(graph, searchFilter);
+        const indexStatus = this.getIndexStatus();
         const filesActive = currentGraphMode === 'files';
         const tablesActive = currentGraphMode === 'tables';
         const hybridActive = currentGraphMode === 'hybrid';
@@ -1257,6 +1267,22 @@ ${bodyContent}
                         <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
+                <button class="icon-btn" id="btn-focus" title="Focus on selected node (neighbors only) [F]" aria-label="Focus on selected node (neighbors only)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream dependencies">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M12 19V5M5 12l7-7 7 7"/>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream dependents">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M12 5v14M5 12l7 7 7-7"/>
+                    </svg>
+                </button>
             </div>
         </header>
 
@@ -1269,6 +1295,11 @@ ${bodyContent}
             <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
             <span class="separator">•</span>
             <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
+            <span class="stats-spacer"></span>
+            <button class="index-status index-status-${indexStatus.level}" data-graph-action="refresh" title="${this.escapeHtml(indexStatus.title)}">
+                <span class="status-dot"></span>
+                <span class="status-text">${this.escapeHtml(indexStatus.text)}</span>
+            </button>
         </div>
         <!-- Issue Banner -->
         ${totalIssues > 0 ? `
@@ -1379,6 +1410,42 @@ ${bodyContent}
             </button>
         </div>
         <div class="sidebar-content">
+            <!-- Selection Section (Graph tab only) -->
+            <div class="sidebar-section" data-sidebar-section="selection" id="selection-section">
+                <div class="section-header expanded" data-section="selection">
+                    <span class="section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                        </svg>
+                        Selection
+                    </span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div id="selection-empty" class="selection-empty">Click a node to see details and paths.</div>
+                    <div id="selection-details" class="selection-details" style="display: none;">
+                        <div class="selection-title" id="selection-title">—</div>
+                        <div class="selection-meta" id="selection-meta">—</div>
+                        <div class="selection-file" id="selection-file" style="display: none;"></div>
+                        <div class="selection-path">
+                            <div class="selection-path-row">
+                                <span class="path-label">Upstream</span>
+                                <span class="path-value" id="selection-upstream">—</span>
+                            </div>
+                            <div class="selection-path-row">
+                                <span class="path-label">Downstream</span>
+                                <span class="path-value" id="selection-downstream">—</span>
+                            </div>
+                        </div>
+                        <div class="selection-actions">
+                            <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
+                            <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Legend Section (Graph tab only) -->
             <div class="sidebar-section" data-sidebar-section="legend">
                 <div class="section-header expanded" data-section="legend">
@@ -1450,14 +1517,49 @@ ${bodyContent}
      */
     private generateGraphAreaHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter): string {
         return `
-        <div id="graph-container" style="width: 100%; height: 100%;">
-            ${graph.nodes.length > 0 ? this.renderGraph(graph) : `
+        <div id="graph-container" style="width: 100%; height: 100%; position: relative;">
+            ${graph.nodes.length > 0 ? `
+                ${this.renderGraph(graph)}
+                <div class="graph-empty-overlay is-hidden" id="graph-empty-overlay" aria-hidden="true">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                        <div class="empty-state-title" id="graph-empty-title">Workspace dependencies at a glance</div>
+                        <div class="empty-state-desc" id="graph-empty-desc">This graph shows how your SQL files, tables, and views connect across the workspace.</div>
+                        <div class="empty-state-actions" id="graph-empty-actions">
+                            <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
+                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
+                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                            <button class="action-chip" data-graph-action="view-issues">View issues</button>
+                            <button class="action-chip" data-graph-action="refresh">Refresh index</button>
+                            <button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+            ` : `
             <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
-                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'No dependencies found'}</div>
-                <div>${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'Try clearing filters or changing your search terms.' : 'Try refreshing or check your SQL files.'}</div>
+                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'Workspace dependencies at a glance'}</div>
+                <div class="empty-state-desc">
+                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0)
+                        ? 'Try clearing filters or changing your search terms.'
+                        : 'This graph shows how your SQL files, tables, and views connect across the workspace.'}
+                </div>
+                <div class="empty-state-actions">
+                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? `
+                        <button class="action-chip" data-graph-action="clear-search">Clear search</button>
+                        <button class="action-chip" data-graph-action="focus-search">Search again</button>
+                    ` : `
+                        <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
+                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
+                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                        <button class="action-chip" data-graph-action="view-issues">View issues</button>
+                        <button class="action-chip" data-graph-action="refresh">Refresh index</button>
+                    `}
+                </div>
             </div>
             `}
         </div>
@@ -1491,6 +1593,51 @@ ${bodyContent}
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
         </div>`;
+    }
+
+    /**
+     * Build index status text for the stats bar badge.
+     */
+    private getIndexStatus(): { text: string; title: string; level: 'fresh' | 'stale' | 'old' | 'missing' } {
+        const index = this._indexManager.getIndex();
+        if (!index) {
+            return {
+                text: 'Index not ready',
+                title: 'No index available yet. Click to refresh.',
+                level: 'missing'
+            };
+        }
+
+        const ageMs = Date.now() - index.lastUpdated;
+        const relative = this.formatRelativeTime(index.lastUpdated);
+        const fileCount = index.fileCount || 0;
+
+        let level: 'fresh' | 'stale' | 'old' = 'fresh';
+        if (ageMs > 60 * 60 * 1000) {
+            level = 'old';
+        } else if (ageMs > 10 * 60 * 1000) {
+            level = 'stale';
+        }
+
+        return {
+            text: `Indexed ${relative}`,
+            title: `Last indexed ${relative} • ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+            level
+        };
+    }
+
+    /**
+     * Format a timestamp as a short relative time string.
+     */
+    private formatRelativeTime(timestamp: number): string {
+        const diffMs = Math.max(0, Date.now() - timestamp);
+        const minutes = Math.floor(diffMs / 60000);
+        if (minutes < 1) {return 'just now';}
+        if (minutes < 60) {return `${minutes}m ago`;}
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) {return `${hours}h ago`;}
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
     }
 
     /**
@@ -1588,10 +1735,14 @@ ${bodyContent}
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
+            const tooltipContent = `<div class="tooltip-title">${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class="tooltip-content">Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>`;
+            const tooltipBase64 = Buffer.from(tooltipContent).toString('base64');
             return `
                 <g class="edge edge-${edge.referenceType}" data-edge-id="${this.escapeHtml(edgeId)}"
-                   onmouseenter="showTooltip(event, '<div class=tooltip-title>${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class=tooltip-content>Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>')"
-                   onmouseleave="hideTooltip()">
+                   data-source="${this.escapeHtml(edge.source)}"
+                   data-target="${this.escapeHtml(edge.target)}"
+                   data-reference-type="${edge.referenceType}"
+                   data-tooltip="${tooltipBase64}">
                     <path d="${path}"
                           fill="none"
                           stroke="${edgeColor}"
@@ -1733,6 +1884,18 @@ ${bodyContent}
     }
 
     /**
+     * Safely escape JSON for embedding in an inline script tag.
+     */
+    private escapeForInlineScript(value: unknown): string {
+        const json = JSON.stringify(value);
+        return json
+            .replace(/<\/script/gi, '<\\/script')
+            .replace(/<!--/g, '<\\!--')
+            .replace(/-->/g, '--\\>')
+            .replace(/\]\]>/g, ']\\]>');
+    }
+
+    /**
      * Handle export functionality
      */
     private async handleExport(format: string): Promise<void> {
@@ -1762,7 +1925,9 @@ ${bodyContent}
     private async exportAsMermaid(): Promise<void> {
         if (!this._currentGraph) {return;}
 
-        let mermaid = '```mermaid\ngraph TD\n';
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
+        let mermaid = `\`\`\`mermaid\ngraph ${direction}\n`;
 
         // Add nodes
         for (const node of this._currentGraph.nodes) {

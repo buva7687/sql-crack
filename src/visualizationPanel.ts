@@ -435,6 +435,7 @@ export class VisualizationPanel {
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'beside';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
+        const flowDirection = config.get<string>('flowDirection') || 'top-down';
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
@@ -475,6 +476,7 @@ export class VisualizationPanel {
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
         window.viewLocation = ${this._escapeForInlineScript(viewLocation)};
         window.defaultLayout = ${this._escapeForInlineScript(defaultLayout)};
+        window.flowDirection = ${this._escapeForInlineScript(flowDirection)};
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
         window.showDeadColumnHints = ${this._escapeForInlineScript(showDeadColumnHints)};
         window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};

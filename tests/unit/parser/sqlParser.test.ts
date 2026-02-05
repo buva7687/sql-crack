@@ -55,6 +55,17 @@ describe('SQL Parser', () => {
       expect((result?.details?.actual as number)).toBeGreaterThan(50);
     });
 
+    it('counts trailing statements without semicolons', () => {
+      const sql = 'SELECT 1; SELECT 2';
+      const result = validateSql(sql, {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 1,
+      });
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('query_count_limit');
+      expect(result?.details?.actual).toBe(2);
+    });
+
     it('uses DEFAULT_VALIDATION_LIMITS when limits not provided', () => {
       const result = validateSql('SELECT 1');
       expect(result).toBeNull();

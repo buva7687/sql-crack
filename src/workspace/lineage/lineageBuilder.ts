@@ -190,7 +190,13 @@ export class LineageBuilder implements LineageGraph {
                 const tableFiles = tableNode.metadata.definitionFiles || [];
                 tableFiles.forEach((filePath: string) => existingFiles.add(filePath));
                 existingColumn.metadata.definitionFiles = Array.from(existingFiles);
-                return;
+                if (existingColumn.columnInfo && column.foreignKey && !existingColumn.columnInfo.foreignKey) {
+                    existingColumn.columnInfo = {
+                        ...existingColumn.columnInfo,
+                        foreignKey: column.foreignKey
+                    };
+                }
+                continue;
             }
 
             const columnNode: LineageNode = {
@@ -289,26 +295,63 @@ export class LineageBuilder implements LineageGraph {
             }
         }
 
-        // Handle definitions (views, CTAS) - associate with statement 0 or their own bucket
+        // Handle definitions (views, CTAS) - match to correct statement bucket by line proximity
+        // Build a map of statementIndex → {min, max} line numbers from references
+        const stmtLineRanges = new Map<number, { min: number; max: number }>();
+        for (const ref of analysis.references) {
+            const stmtIndex = ref.statementIndex ?? 0;
+            const existing = stmtLineRanges.get(stmtIndex);
+            if (existing) {
+                existing.min = Math.min(existing.min, ref.lineNumber);
+                existing.max = Math.max(existing.max, ref.lineNumber);
+            } else {
+                stmtLineRanges.set(stmtIndex, { min: ref.lineNumber, max: ref.lineNumber });
+            }
+        }
+
         for (const def of analysis.definitions) {
             const tableKey = getQualifiedKey(def.name, def.schema);
+            const isView = def.type === 'view';
+            const isCtas = def.type === 'table' && def.sql && /\bAS\s+(?:SELECT|\()/i.test(def.sql);
 
-            // Find a statement bucket that has inputs (for views/CTAS)
-            // Views and CTAS derive from SELECT queries, so we need to find which statement they belong to
+            if (!isView && !isCtas) {continue;}
+
+            // Find the statement bucket whose reference line numbers are closest to
+            // (and at or after) the definition's lineNumber
+            let bestStmtIndex: number | null = null;
+            let bestDistance = Infinity;
+
             for (const [stmtIndex, stmtBucket] of statementRefs) {
-                // Views always derive from a SELECT query
-                if (def.type === 'view' && stmtBucket.inputs.size > 0) {
-                    stmtBucket.outputs.add(tableKey);
-                    break; // Only add to one statement
+                if (stmtBucket.inputs.size === 0) {continue;}
+                const lineRange = stmtLineRanges.get(stmtIndex);
+                if (!lineRange) {continue;}
+
+                // The definition's CREATE line should precede or be near the SELECT references
+                // Pick the bucket whose min reference line is closest to (and >= ) the def line
+                const distance = lineRange.min - def.lineNumber;
+                if (distance >= 0 && distance < bestDistance) {
+                    bestDistance = distance;
+                    bestStmtIndex = stmtIndex;
                 }
-                // For tables, only treat as output if it's a CTAS
-                else if (def.type === 'table' && def.sql && stmtBucket.inputs.size > 0) {
-                    const ctasPattern = /\bAS\s+(?:SELECT|\()/i;
-                    if (ctasPattern.test(def.sql)) {
-                        stmtBucket.outputs.add(tableKey);
-                        break;
+            }
+
+            // Fallback: if no bucket has references after the definition, pick the closest one before
+            if (bestStmtIndex === null) {
+                for (const [stmtIndex, stmtBucket] of statementRefs) {
+                    if (stmtBucket.inputs.size === 0) {continue;}
+                    const lineRange = stmtLineRanges.get(stmtIndex);
+                    if (!lineRange) {continue;}
+
+                    const distance = def.lineNumber - lineRange.max;
+                    if (distance >= 0 && distance < bestDistance) {
+                        bestDistance = distance;
+                        bestStmtIndex = stmtIndex;
                     }
                 }
+            }
+
+            if (bestStmtIndex !== null) {
+                statementRefs.get(bestStmtIndex)!.outputs.add(tableKey);
             }
         }
 

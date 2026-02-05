@@ -51,7 +51,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 Analyze cross-file dependencies across your entire SQL project with four powerful views:
 
 #### Graph View
-Dependency graph showing file and table relationships with color-coded edges for SELECT, JOIN, INSERT, UPDATE, and DELETE operations.
+Dependency graph showing file and table relationships with color-coded edges for SELECT, JOIN, INSERT, UPDATE, and DELETE operations. Includes a selection panel with upstream/downstream context, focus mode, and an index freshness badge, plus guided empty-state prompts when the graph is empty or search yields no matches.
 
 #### Lineage View
 Explore data lineage across tables, views, and CTEs with:
@@ -60,12 +60,13 @@ Explore data lineage across tables, views, and CTEs with:
 - **Mini-Map** — Overview panel for navigating large graphs
 - **Column Type Colors** — Primary (Gold), Numeric (Blue), Text (Green), DateTime (Purple), JSON (Teal)
 - **Focus Modes** — View upstream only (`U`), downstream only (`D`), or all connections (`A`)
+- **Trace Controls** — Trace Up/Down buttons to highlight full upstream/downstream lineage
 
 #### Table Explorer
 Browse all tables and views with schema details, column information, and cross-references.
 
 #### Impact Analysis
-Analyze change impact (MODIFY/RENAME/DROP) with severity indicators and affected dependencies.
+Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped transitive impacts, and source → target column paths.
 
 **Common Features** (all views):
 - Click nodes to open files, double-click to visualize SQL
@@ -180,6 +181,15 @@ Analyze cross-file dependencies:
 | `F` | Toggle fullscreen |
 | `[` / `]` | Previous/next query |
 | `?` | Show all shortcuts |
+
+### Workspace Graph
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd/Ctrl + F` | Focus graph search |
+| `Escape` | Clear search or selection |
+| `F` | Toggle focus mode (neighbors only) |
+| `R` | Reset view (fit to screen) |
 
 ### Lineage View
 
