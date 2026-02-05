@@ -13,6 +13,7 @@ import {
     MissingDefinitionDetail
 } from './types';
 import { SqlDialect } from '../webview/types/parser';
+import { logger } from '../logger';
 import { getDisplayName } from './identifiers';
 
 // Lineage modules
@@ -253,6 +254,7 @@ export class WorkspacePanel {
 
                 const startTime = Date.now();
                 let lastFile = '';
+                logger.debug('[Workspace] Starting index build...');
 
                 await this._indexManager.buildIndex((current, total, fileName) => {
                     lastFile = fileName;
@@ -268,10 +270,14 @@ export class WorkspacePanel {
                         increment: (1 / total) * 100
                     });
                 }, cancellationToken);
+
+                const duration = Date.now() - startTime;
+                logger.debug(`[Workspace] Index build completed in ${this.formatDuration(duration)} (${this._indexManager.getIndex()?.fileCount ?? 0} files)`);
             }
         );
 
         if (wasCancelled) {
+            logger.info('[Workspace] Index build was cancelled by user');
             vscode.window.showWarningMessage('Workspace indexing was cancelled. Partial results may be available.');
         }
     }
@@ -439,6 +445,7 @@ export class WorkspacePanel {
                     const doc = await vscode.workspace.openTextDocument(uri);
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to open file: ${message.filePath}`, error);
                     vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
                 }
                 break;
@@ -455,6 +462,7 @@ export class WorkspacePanel {
                         vscode.TextEditorRevealType.InCenter
                     );
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to open file at line: ${message.filePath}:${message.line}`, error);
                     vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
                 }
                 break;
@@ -466,6 +474,7 @@ export class WorkspacePanel {
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
                     await vscode.commands.executeCommand('sql-crack.visualize');
                 } catch (error) {
+                    logger.error(`[Workspace] Failed to visualize file: ${message.filePath}`, error);
                     vscode.window.showErrorMessage(`Could not visualize file: ${message.filePath}`);
                 }
                 break;
