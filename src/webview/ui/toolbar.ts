@@ -563,12 +563,17 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
 
     // Feature group items (lower priority - hidden first, right-to-left)
     for (const el of Array.from(featureGroup.children) as HTMLElement[]) {
+        // Keep complex popover controls visible; hidden popovers cannot be opened reliably from overflow.
+        if (el.dataset.overflowKeepVisible === 'true') {continue;}
+        if (el.tagName !== 'BUTTON') {continue;}
         const meta = extractMeta(el);
         result.push({ btn: el, ...meta });
     }
 
     // Export group buttons (higher priority - hidden after feature group)
     for (const el of Array.from(exportGroup.children) as HTMLElement[]) {
+        if (el.dataset.overflowKeepVisible === 'true') {continue;}
+        if (el.tagName !== 'BUTTON') {continue;}
         const meta = extractMeta(el);
         result.push({ btn: el, ...meta });
     }
@@ -869,12 +874,6 @@ function createFeatureGroup(
         featureGroup.appendChild(pinnedContainer);
     }
 
-    // Legend button
-    const legendBtn = createButton('🎨', callbacks.onToggleLegend, 'Show color legend');
-    legendBtn.title = 'Show color legend (L)';
-    legendBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    featureGroup.appendChild(legendBtn);
-
     // Focus Mode button
     let focusModeActive = false;
     const focusBtn = createButton('👁', () => {
@@ -1001,6 +1000,8 @@ function createFocusModeSelector(
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const container = document.createElement('div');
+    container.id = 'focus-mode-selector';
+    container.dataset.overflowKeepVisible = 'true';
     container.style.cssText = `position: relative; display: flex; align-items: center;`;
 
     const btn = document.createElement('button');
@@ -1143,6 +1144,8 @@ function createViewLocationButton(
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const viewLocBtn = document.createElement('button');
+    viewLocBtn.id = 'view-location-btn';
+    viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
     viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';

@@ -6835,16 +6835,22 @@ function updateSqlPreview(): void {
 
     const formattedSql = formatSql(currentSql);
     const highlightedSql = highlightSql(formattedSql);
+    const sqlHeaderColor = state.isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;
+    const sqlBodyColor = state.isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;
+    const sqlCopyButtonBg = state.isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.12)';
+    const sqlCopyButtonBorder = state.isDarkTheme ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.22)';
+    const sqlCopyButtonText = state.isDarkTheme ? UI_COLORS.focusText : UI_COLORS.focusTextLight;
+    const sqlCloseButtonText = state.isDarkTheme ? UI_COLORS.textDim : UI_COLORS.textLightMuted;
 
     sqlPreviewPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">SQL Query</span>
+            <span style="font-weight: 600; color: ${sqlHeaderColor}; font-size: 12px;">SQL Query</span>
             <div style="display: flex; gap: 8px;">
                 <button id="copy-sql" style="
-                    background: rgba(99, 102, 241, 0.2);
-                    border: 1px solid rgba(99, 102, 241, 0.3);
+                    background: ${sqlCopyButtonBg};
+                    border: 1px solid ${sqlCopyButtonBorder};
                     border-radius: 4px;
-                    color: ${UI_COLORS.focusText};
+                    color: ${sqlCopyButtonText};
                     padding: 4px 10px;
                     font-size: 10px;
                     cursor: pointer;
@@ -6852,7 +6858,7 @@ function updateSqlPreview(): void {
                 <button id="close-sql-preview" style="
                     background: none;
                     border: none;
-                    color: ${UI_COLORS.textDim};
+                    color: ${sqlCloseButtonText};
                     cursor: pointer;
                     font-size: 16px;
                 ">&times;</button>
@@ -6865,6 +6871,7 @@ function updateSqlPreview(): void {
             line-height: 1.5;
             max-height: 150px;
             overflow-y: auto;
+            color: ${sqlBodyColor};
         ">${highlightedSql}</pre>
     `;
 

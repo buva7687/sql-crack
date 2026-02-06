@@ -58,4 +58,11 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain("if (e.key === 's' || e.key === 'S')");
         expect(rendererSource).toContain('toggleSqlPreview();');
     });
+
+    it('uses theme-aware SQL preview heading and body text colors', () => {
+        expect(rendererSource).toContain('const sqlHeaderColor = state.isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;');
+        expect(rendererSource).toContain('const sqlBodyColor = state.isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;');
+        expect(rendererSource).toContain('color: ${sqlHeaderColor}');
+        expect(rendererSource).toContain('color: ${sqlBodyColor};');
+    });
 });
