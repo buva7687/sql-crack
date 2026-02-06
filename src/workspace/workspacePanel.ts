@@ -170,11 +170,12 @@ export class WorkspacePanel {
             this.rebuildAndRenderGraph();
         });
 
-        // Listen for VS Code theme changes
+        // Listen for VS Code theme changes — hot-swap CSS to avoid flicker
         vscode.window.onDidChangeActiveColorTheme(
-            (theme) => {
+            () => {
                 this._isDarkTheme = this.getThemeFromSettings();
-                this.renderCurrentView();
+                const css = getWebviewStyles(this._isDarkTheme);
+                this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
             this._disposables
@@ -185,7 +186,8 @@ export class WorkspacePanel {
             (e) => {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
-                    this.renderCurrentView();
+                    const css = getWebviewStyles(this._isDarkTheme);
+                    this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
             },
             null,
@@ -346,6 +348,7 @@ export class WorkspacePanel {
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
+            getThemeCss: (isDark) => getWebviewStyles(isDark),
             buildIndexWithProgress: () => this.buildIndexWithProgress(),
             rebuildAndRenderGraph: () => this.rebuildAndRenderGraph(),
             buildLineageGraph: () => this.buildLineageGraph(),

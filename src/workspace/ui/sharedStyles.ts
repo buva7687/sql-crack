@@ -49,6 +49,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-insert: #34d399;
                 --edge-update: #fcd34d;
                 --edge-delete: #fca5a5;
+                --edge-subquery: #a78bfa;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -107,6 +108,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-insert: #10b981;
                 --edge-update: #fbbf24;
                 --edge-delete: #f87171;
+                --edge-subquery: #8b5cf6;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -3720,6 +3722,13 @@ export function getGraphStyles(): string {
         .edge-update path { stroke: var(--edge-update); }
         .edge-delete path { stroke: var(--edge-delete); }
         .edge-label { fill: var(--text-muted); font-size: 10px; }
+        /* Arrow marker fills - CSS overrides inline fill for theme hot-swap */
+        #arrowhead-select polygon { fill: var(--edge-select); }
+        #arrowhead-join polygon { fill: var(--edge-join); }
+        #arrowhead-insert polygon { fill: var(--edge-insert); }
+        #arrowhead-update polygon { fill: var(--edge-update); }
+        #arrowhead-delete polygon { fill: var(--edge-delete); }
+        #arrowhead-subquery polygon { fill: var(--edge-subquery); }
         /* Edge highlight/dim styles for click-to-highlight feature */
         .edge.edge-highlighted path { opacity: 1; stroke-width: 3; stroke: var(--edge-hover); }
         .edge.edge-dimmed path { opacity: 0.2; }
