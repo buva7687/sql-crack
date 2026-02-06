@@ -38,6 +38,7 @@ import {
     createLegendBar,
     toggleLegendBar,
     isLegendBarVisible,
+    getLegendBarHeight,
     createCommandBar,
     showCommandBar,
     hideCommandBar,
@@ -252,6 +253,17 @@ export function initRenderer(container: HTMLElement): void {
 
     // Create bottom legend bar (replaces old top-left legend panel)
     legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
+
+    // Dynamically shift stats & hints panels above the legend bar when it toggles
+    document.addEventListener('legend-bar-toggle', ((e: CustomEvent) => {
+        adjustPanelBottoms(e.detail.visible ? e.detail.height : 0);
+    }) as EventListener);
+
+    // Apply initial offset if legend starts visible
+    if (isLegendBarVisible()) {
+        // Defer so the legend bar has rendered and has a measurable height
+        requestAnimationFrame(() => adjustPanelBottoms(getLegendBarHeight()));
+    }
 
     // Create SQL preview panel
     sqlPreviewPanel = document.createElement('div');
@@ -6482,6 +6494,18 @@ export function toggleHints(show?: boolean): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
     }
+}
+
+const PANEL_BASE_BOTTOM = 16; // default bottom offset for stats & hints panels
+
+/**
+ * Shift stats and hints panels up so they sit above the legend bar.
+ * Called whenever the legend bar toggles or on initial render.
+ */
+function adjustPanelBottoms(legendHeight: number): void {
+    const bottom = `${PANEL_BASE_BOTTOM + legendHeight}px`;
+    if (statsPanel) { statsPanel.style.bottom = bottom; }
+    if (hintsPanel) { hintsPanel.style.bottom = bottom; }
 }
 
 // Layout order for cycling

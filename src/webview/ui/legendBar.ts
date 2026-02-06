@@ -133,6 +133,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
 
 /**
  * Toggle legend bar visibility. Optionally force show/hide.
+ * Dispatches 'legend-bar-toggle' event so other panels can adjust their bottom offset.
  */
 export function toggleLegendBar(show?: boolean): void {
     legendVisible = show ?? !legendVisible;
@@ -152,6 +153,19 @@ export function toggleLegendBar(show?: boolean): void {
         legendBarElement.style.opacity = '0';
         legendBarElement.style.pointerEvents = 'none';
     }
+
+    // Notify other panels so they can shift above the legend bar
+    document.dispatchEvent(new CustomEvent('legend-bar-toggle', {
+        detail: { visible: legendVisible, height: getLegendBarHeight() }
+    }));
+}
+
+/**
+ * Get the current rendered height of the legend bar (0 when hidden).
+ */
+export function getLegendBarHeight(): number {
+    if (!legendBarElement || !legendVisible) { return 0; }
+    return legendBarElement.offsetHeight;
 }
 
 /**

@@ -31,7 +31,7 @@ export {
     PinnedTabsCallbacks
 } from './pinnedTabs';
 
-export { createLegendBar, toggleLegendBar, isLegendBarVisible } from './legendBar';
+export { createLegendBar, toggleLegendBar, isLegendBarVisible, getLegendBarHeight } from './legendBar';
 export type { LegendBarCallbacks } from './legendBar';
 
 export { createExportDropdown } from './exportDropdown';
