@@ -22,6 +22,7 @@ export const ICONS = {
     close: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
     pin: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9 2L6 5v2L3 10h3v4l2-3h2l3-3-2-2h2L9 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
     help: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M6 6a2 2 0 0 1 3.5 1.5c0 1-1.5 1-1.5 2M8 12v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    columnLineage: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 3v4M12 9v4M4 7c0 1.5 8-1.5 8 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="3" r="1.5" fill="currentColor"/><circle cx="12" cy="13" r="1.5" fill="currentColor"/></svg>',
 } as const;
 
 /**

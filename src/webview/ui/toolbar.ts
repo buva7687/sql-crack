@@ -4,6 +4,7 @@ import { SqlDialect } from '../sqlParser';
 import { FocusMode, LayoutType } from '../types';
 import { createExportDropdown } from './exportDropdown';
 import { createLayoutPicker } from './layoutPicker';
+import { ICONS } from '../../shared/icons';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -44,6 +45,8 @@ export interface ToolbarCallbacks {
 
 let hintsSummaryBtn: HTMLButtonElement | null = null;
 const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
+const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
+let lineagePulseApplied = false;
 
 function getOverflowPalette(dark: boolean): {
     background: string;
@@ -895,15 +898,34 @@ function createFeatureGroup(
     sqlBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(sqlBtn);
 
-    // Column Lineage toggle button
+    // Column Lineage toggle button (SVG icon, one-time pulse on first activation)
     let columnFlowActive = false;
-    const columnFlowBtn = createButton('📊', () => {
+    const columnFlowBtn = createButton(ICONS.columnLineage, () => {
         columnFlowActive = !columnFlowActive;
         callbacks.onToggleColumnFlows(columnFlowActive);
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : '';
+        // One-time pulse on first activation
+        if (columnFlowActive && !lineagePulseApplied && !isReducedMotionPreferred()) {
+            lineagePulseApplied = true;
+            if (!document.getElementById(LINEAGE_PULSE_STYLE_ID)) {
+                const style = document.createElement('style');
+                style.id = LINEAGE_PULSE_STYLE_ID;
+                style.textContent = `
+                    .sql-crack-lineage-pulse {
+                        animation: sql-crack-help-pulse 1.1s ease-out 2;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            columnFlowBtn.classList.add('sql-crack-lineage-pulse');
+            const stop = () => columnFlowBtn.classList.remove('sql-crack-lineage-pulse');
+            window.setTimeout(stop, 2400);
+        }
     }, 'Toggle column lineage');
     columnFlowBtn.title = 'Toggle column lineage (C)';
     columnFlowBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    columnFlowBtn.style.color = '#94a3b8'; // muted gray when inactive
     featureGroup.appendChild(columnFlowBtn);
 
     // Theme Toggle button

@@ -68,12 +68,13 @@ export function createExportDropdown(
     const textColor = isDark ? '#e2e8f0' : '#1e293b';
     const hoverBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
 
+    const modKey = navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+';
     const items = [
-        { label: 'Copy to Clipboard', shortcut: 'Ctrl+C', action: callbacks.onCopyToClipboard },
+        { label: 'Copy to clipboard (PNG)', shortcut: `${modKey}C`, action: callbacks.onCopyToClipboard },
+        { label: 'Save as PNG', shortcut: `${modKey}S`, action: callbacks.onExportPng },
         { type: 'separator' as const },
-        { label: 'Export PNG', shortcut: '', action: callbacks.onExportPng },
-        { label: 'Export SVG', shortcut: '', action: callbacks.onExportSvg },
-        { label: 'Export Mermaid', shortcut: '', action: callbacks.onExportMermaid },
+        { label: 'SVG', shortcut: '', action: callbacks.onExportSvg },
+        { label: 'Mermaid', shortcut: '', action: callbacks.onExportMermaid },
     ];
 
     items.forEach(item => {
