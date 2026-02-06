@@ -839,6 +839,9 @@ export function parseSqlBatch(
 
                 // Adjust line numbers by adding the offset
                 const lineOffset = stmtStartLine - 1;
+                if (result.error) {
+                    result.error = offsetErrorLineNumber(result.error, lineOffset);
+                }
                 for (const node of result.nodes) {
                     if (node.startLine) {
                         node.startLine += lineOffset;
@@ -1111,6 +1114,118 @@ function getLeadingKeyword(sql: string): string | null {
     return match ? match[1].toUpperCase() : null;
 }
 
+interface ParseErrorLocation {
+    line: number;
+    column?: number;
+}
+
+function getLineColumnFromOffset(sql: string, offset: number): ParseErrorLocation {
+    const safeOffset = Math.max(0, Math.min(offset, sql.length));
+    const before = sql.slice(0, safeOffset);
+    const line = before.split('\n').length;
+    const lastNewline = before.lastIndexOf('\n');
+    const column = safeOffset - lastNewline;
+    return { line, column };
+}
+
+function inferErrorOffsetFromToken(sql: string, token: string): number | null {
+    const trimmed = token.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const isWordToken = /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed);
+    if (isWordToken) {
+        const pattern = trimmed.length === 1
+            ? new RegExp(`\\b${escapeRegex(trimmed)}[A-Za-z0-9_]*\\b`, 'i')
+            : new RegExp(`\\b${escapeRegex(trimmed)}\\b`, 'i');
+        const wordMatch = pattern.exec(sql);
+        if (wordMatch && typeof wordMatch.index === 'number') {
+            return wordMatch.index;
+        }
+    }
+
+    const directIndex = sql.toUpperCase().indexOf(trimmed.toUpperCase());
+    return directIndex >= 0 ? directIndex : null;
+}
+
+function extractParseErrorLocation(
+    err: unknown,
+    originalError: string,
+    sql: string,
+    syntaxHint: string | null
+): ParseErrorLocation | null {
+    const errorObj = err as any;
+
+    const structuredLocation = errorObj?.location?.start;
+    if (structuredLocation && typeof structuredLocation.line === 'number') {
+        return {
+            line: structuredLocation.line,
+            column: typeof structuredLocation.column === 'number' ? structuredLocation.column : undefined,
+        };
+    }
+
+    const hashLocation = errorObj?.hash?.loc;
+    if (hashLocation && typeof hashLocation.first_line === 'number') {
+        return {
+            line: hashLocation.first_line,
+            column: typeof hashLocation.first_column === 'number' ? hashLocation.first_column : undefined,
+        };
+    }
+
+    if (typeof errorObj?.lineNumber === 'number') {
+        return {
+            line: errorObj.lineNumber,
+            column: typeof errorObj?.columnNumber === 'number' ? errorObj.columnNumber : undefined,
+        };
+    }
+
+    const lineInfoMatch = originalError.match(/(?:line\s+|at\s+line\s+)(\d+)/i);
+    if (lineInfoMatch) {
+        const line = parseInt(lineInfoMatch[1], 10);
+        const colInfoMatch = originalError.match(/(?:column\s+|col\s+)(\d+)/i);
+        const column = colInfoMatch ? parseInt(colInfoMatch[1], 10) : undefined;
+        return { line, column };
+    }
+
+    if (syntaxHint) {
+        const inferredOffset = inferErrorOffsetFromToken(sql, syntaxHint);
+        if (inferredOffset !== null) {
+            return getLineColumnFromOffset(sql, inferredOffset);
+        }
+    }
+
+    return null;
+}
+
+function formatErrorLocationPrefix(location: ParseErrorLocation | null): string {
+    if (!location) {
+        return '';
+    }
+    return `Line ${location.line}${location.column ? `, column ${location.column}` : ''}`;
+}
+
+function offsetErrorLineNumber(message: string, lineOffset: number): string {
+    if (lineOffset <= 0) {
+        return message;
+    }
+
+    const prefixMatch = message.match(/^Line\s+(\d+)(,\s*column\s+\d+)?\s*:\s*/i);
+    if (!prefixMatch) {
+        return message;
+    }
+
+    const relativeLine = parseInt(prefixMatch[1], 10);
+    if (!Number.isFinite(relativeLine)) {
+        return message;
+    }
+
+    const absoluteLine = relativeLine + lineOffset;
+    const columnPart = prefixMatch[2] || '';
+    const remainder = message.slice(prefixMatch[0].length);
+    return `Line ${absoluteLine}${columnPart}: ${remainder}`;
+}
+
 function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
     // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
     // Fall back to PostgreSQL AST parsing for these statements so visualization can still render.
@@ -1238,15 +1353,6 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(sql);
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
 
-        // Extract line/column position from parser error message if available
-        const lineInfoMatch = originalError.match(/(?:line\s+|at\s+line\s+)(\d+)/i);
-        const colInfoMatch = originalError.match(/(?:column\s+|col\s+)(\d+)/i);
-        if (lineInfoMatch) {
-            const lineNum = lineInfoMatch[1];
-            const colNum = colInfoMatch ? `:${colInfoMatch[1]}` : '';
-            message = `Line ${lineNum}${colNum}: ${originalError}`;
-        }
-
         // Extract specific syntax issue from error message
         // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"
         // We want to extract what was found (the problematic token)
@@ -1256,6 +1362,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const syntaxHint = butFoundMatch ? butFoundMatch[1] :
                           (quotedFoundMatch ? quotedFoundMatch[1] :
                           (unexpectedMatch ? unexpectedMatch[1] : null));
+        const parseLocation = extractParseErrorLocation(err, originalError, sql, syntaxHint);
 
         // Check for || concatenation operator failure
         const hasPipeConcat = /\|\|/.test(sql);
@@ -1290,6 +1397,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             else {
                 message = `SQL syntax not recognized by ${ctx.dialect} parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
             }
+        }
+
+        const locationPrefix = formatErrorLocationPrefix(parseLocation);
+        if (locationPrefix && !/^Line\s+\d+/i.test(message)) {
+            message = `${locationPrefix}: ${message}`;
         }
 
         return { nodes: [], edges: [], stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: message };

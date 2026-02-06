@@ -127,6 +127,18 @@ describe('Demo Showcase E2E Tests', () => {
     });
 
     describe('Edge Cases', () => {
+        it('reports batch parse errors with absolute line and column context', () => {
+            const brokenSql = `SELECT 1;
+SELECT
+  customer_id
+FROOM orders;`;
+            const broken = parseSqlBatch(brokenSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
+
+            expect(broken.errorCount).toBe(1);
+            expect(broken.parseErrors?.[0].line).toBe(4);
+            expect(broken.parseErrors?.[0].message).toMatch(/^Line 4, column \d+:/i);
+        });
+
         it('should handle queries with window functions', () => {
             // Check if any query has window function stats or window nodes
             const hasWindowFunctions = result.queries.some(q =>

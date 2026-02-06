@@ -561,6 +561,18 @@ describe('SQL Parser', () => {
       // Should suggest trying PostgreSQL for INTERVAL syntax
       expect(result.error).toMatch(/PostgreSQL|dialect/i);
     });
+
+    it('includes parser line and column details in syntax errors', () => {
+      const sql = `SELECT
+  customer_id
+FROM orders
+WHERE`;
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/^Line \d+, column \d+:/i);
+      expect(result.error).toMatch(/Snowflake parser/i);
+    });
   });
 
   describe('Batch Parsing', () => {
@@ -597,6 +609,19 @@ SELECT * FROM orders;`;
 
       expect(result.queryLineRanges).toBeDefined();
       expect(result.queryLineRanges?.length).toBe(2);
+    });
+
+    it('offsets parse error line numbers to absolute lines in batch mode', () => {
+      const sql = `SELECT 1;
+SELECT
+  customer_id
+FROOM orders;`;
+      const result = parseSqlBatch(sql, 'Snowflake');
+
+      expect(result.errorCount).toBe(1);
+      expect(result.parseErrors).toBeDefined();
+      expect(result.parseErrors?.[0].line).toBe(4);
+      expect(result.queries[1].error).toMatch(/^Line 4, column \d+:/i);
     });
 
     it('parses empty batch gracefully', () => {
