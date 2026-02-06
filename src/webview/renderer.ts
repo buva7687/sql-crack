@@ -1463,7 +1463,6 @@ export function render(result: ParseResult): void {
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
-
     // Reset highlight state
     state.highlightedColumnSources = [];
 
