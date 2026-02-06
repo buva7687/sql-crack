@@ -3635,7 +3635,12 @@ export function getGraphStyles(): string {
             height: 100%;
             position: relative;
             overflow: hidden;
-            background: var(--bg-primary);
+            background-color: var(--canvas-bg);
+            background-image:
+                radial-gradient(circle, var(--grid-color) 1px, transparent 1px),
+                linear-gradient(to right, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px),
+                linear-gradient(to bottom, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px);
+            background-size: 24px 24px, 24px 24px, 24px 24px;
         }
 
         /* ========== SVG Container ========== */

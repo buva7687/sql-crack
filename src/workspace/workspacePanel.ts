@@ -1775,7 +1775,8 @@ ${bodyContent}
                    data-type="${node.type}"
                    data-filepath="${node.filePath ? this.escapeHtml(node.filePath) : ''}"
                    data-tooltip="${Buffer.from(tooltipContent).toString('base64')}">
-                    <rect width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
+                    <rect class="node-bg" width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
+                    <rect class="node-accent" x="0" y="0" width="4" height="${node.height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
                     <text x="${node.width/2}" y="28" class="node-label" text-anchor="middle">${this.escapeHtml(node.label)}</text>
                     ${sublabel ? `<text x="${node.width/2}" y="46" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
                 </g>

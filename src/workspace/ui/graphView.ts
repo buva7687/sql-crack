@@ -167,7 +167,7 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
             ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
         </div>
 
-        <div class="graph-container">
+        <div id="graph-container" class="graph-container">
             <svg id="graph-svg" class="graph-svg">
                 <g id="main-group">
                     ${generateSVGContent(graph)}

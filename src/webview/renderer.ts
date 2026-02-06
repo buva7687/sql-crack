@@ -7553,7 +7553,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
     // Add keyboard hint
     content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#475569' : '#94a3b8'}; margin-top: 8px; border-top: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
-        Click to select • Double-click to zoom
+        Click to select • Double-click to zoom • Right-click for actions
     </div>`;
 
     tooltipElement.innerHTML = content;
