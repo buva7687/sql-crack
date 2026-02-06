@@ -43,4 +43,11 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('#column-lineage-panel::-webkit-scrollbar');
         expect(rendererSource).toContain('scrollbar-color:');
     });
+
+    it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
+        expect(rendererSource).toContain('if (sqlSnippet.truncated)');
+        expect(rendererSource).toContain('Press S for full SQL');
+        expect(rendererSource).toContain("if (e.key === 's' || e.key === 'S')");
+        expect(rendererSource).toContain('toggleSqlPreview();');
+    });
 });

@@ -7489,6 +7489,12 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
             content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
                 📍 ${sqlSnippet.lineLabel}
             </div>`;
+
+            if (sqlSnippet.truncated) {
+                content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#93c5fd' : '#1d4ed8'}; margin-top: 4px;">
+                    Press S for full SQL
+                </div>`;
+            }
         }
     }
 

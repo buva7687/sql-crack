@@ -14,6 +14,17 @@ describe('sqlSnippet', () => {
         expect(snippet).toEqual({
             snippet: 'FROM users u\nJOIN orders o ON u.id = o.user_id\nWHERE o.total > 100',
             lineLabel: 'Line 2-4',
+            truncated: false,
+        });
+    });
+
+    it('marks snippet as truncated when maxChars is exceeded', () => {
+        const sql = 'SELECT id, user_name, email_address, created_at, updated_at FROM users';
+        const snippet = extractSqlSnippet(sql, 1, 1, 3, 24);
+        expect(snippet).toEqual({
+            snippet: 'SELECT id, user_name, em...',
+            lineLabel: 'Line 1',
+            truncated: true,
         });
     });
 

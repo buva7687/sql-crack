@@ -1,6 +1,7 @@
 export interface SqlSnippet {
     snippet: string;
     lineLabel: string;
+    truncated: boolean;
 }
 
 export function extractSqlSnippet(
@@ -27,9 +28,10 @@ export function extractSqlSnippet(
         return null;
     }
 
-    const snippet = rawSnippet.length > maxChars ? `${rawSnippet.slice(0, maxChars)}...` : rawSnippet;
+    const truncated = rawSnippet.length > maxChars;
+    const snippet = truncated ? `${rawSnippet.slice(0, maxChars)}...` : rawSnippet;
     const resolvedEndLine = endLine && endLine >= startLine ? endLine : startLine + selectedLines.length - 1;
     const lineLabel = resolvedEndLine > startLine ? `Line ${startLine}-${resolvedEndLine}` : `Line ${startLine}`;
 
-    return { snippet, lineLabel };
+    return { snippet, lineLabel, truncated };
 }
