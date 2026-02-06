@@ -2,6 +2,8 @@
 
 import { SqlDialect } from '../sqlParser';
 import { FocusMode, LayoutType } from '../types';
+import { createExportDropdown } from './exportDropdown';
+import { createLayoutPicker } from './layoutPicker';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -310,11 +312,11 @@ function createActionButtons(
     // Zoom controls
     actions.appendChild(createZoomGroup(callbacks));
 
-    // Export buttons
-    actions.appendChild(createExportGroup(callbacks));
-
     // Feature buttons
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
+
+    // Export dropdown (consolidated) — placed last so dropdown opens cleanly
+    actions.appendChild(createExportGroup(callbacks, documentListeners));
 
     // Overflow menu container (positioned relative for dropdown)
     const overflowContainer = document.createElement('div');
@@ -627,44 +629,30 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     return zoomGroup;
 }
 
-function createExportGroup(callbacks: ToolbarCallbacks): HTMLElement {
+function createExportGroup(
+    callbacks: ToolbarCallbacks,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
+    const isDark = callbacks.isDarkTheme();
     const exportGroup = document.createElement('div');
     exportGroup.style.cssText = `
         display: flex;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
-        overflow: hidden;
+        overflow: visible;
     `;
 
-    const copyBtn = createButton('📋', () => {
-        callbacks.onCopyToClipboard();
-        copyBtn.innerHTML = '✓';
-        setTimeout(() => copyBtn.innerHTML = '📋', 1500);
-    }, 'Copy to clipboard');
-    copyBtn.title = 'Copy to clipboard';
-    exportGroup.appendChild(copyBtn);
+    // Use the consolidated export dropdown
+    const exportDropdown = createExportDropdown({
+        onExportPng: callbacks.onExportPng,
+        onExportSvg: callbacks.onExportSvg,
+        onExportMermaid: callbacks.onExportMermaid,
+        onCopyToClipboard: callbacks.onCopyToClipboard,
+        isDarkTheme: callbacks.isDarkTheme,
+    }, documentListeners);
 
-    const pngBtn = createButton('PNG', callbacks.onExportPng, 'Export as PNG image');
-    pngBtn.title = 'Export as PNG';
-    pngBtn.style.fontSize = '11px';
-    pngBtn.style.fontWeight = '600';
-    pngBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(pngBtn);
-
-    const svgBtn = createButton('SVG', callbacks.onExportSvg, 'Export as SVG vector');
-    svgBtn.title = 'Export as SVG';
-    svgBtn.style.fontSize = '11px';
-    svgBtn.style.fontWeight = '600';
-    svgBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(svgBtn);
-
-    const mermaidBtn = createButton('MMD', callbacks.onExportMermaid, 'Export as Mermaid diagram');
-    mermaidBtn.title = 'Export as Mermaid flowchart';
-    mermaidBtn.style.fontSize = '11px';
-    mermaidBtn.style.fontWeight = '600';
-    mermaidBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(mermaidBtn);
+    exportGroup.appendChild(exportDropdown);
 
     return exportGroup;
 }
@@ -805,56 +793,13 @@ function createFeatureGroup(
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
 
-    // Layout selector dropdown
-    const layoutContainer = document.createElement('div');
-    layoutContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        border-left: 1px solid rgba(148, 163, 184, 0.2);
-        padding: 0 8px;
-    `;
-
-    const layoutIcon = document.createElement('span');
-    layoutIcon.textContent = '📐';
-    layoutIcon.style.cssText = 'font-size: 14px; margin-right: 4px;';
-    layoutContainer.appendChild(layoutIcon);
-
-    const layoutSelect = document.createElement('select');
-    layoutSelect.id = 'layout-select';
-    const isDark = callbacks.isDarkTheme();
-    layoutSelect.style.cssText = `
-        background: ${isDark ? '#1e293b' : '#f1f5f9'};
-        color: ${isDark ? '#f1f5f9' : '#1e293b'};
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 4px;
-        padding: 4px 6px;
-        font-size: 10px;
-        cursor: pointer;
-        outline: none;
-    `;
-
-    const layouts: { value: LayoutType; label: string }[] = [
-        { value: 'vertical', label: 'Vertical' },
-        { value: 'horizontal', label: 'Horizontal' },
-        { value: 'compact', label: 'Compact' },
-        { value: 'force', label: 'Force' },
-        { value: 'radial', label: 'Radial' },
-    ];
-
-    layouts.forEach(layout => {
-        const option = document.createElement('option');
-        option.value = layout.value;
-        option.textContent = layout.label;
-        layoutSelect.appendChild(option);
-    });
-
-    layoutSelect.value = callbacks.getCurrentLayout();
-    layoutSelect.addEventListener('change', (e) => {
-        callbacks.onLayoutChange((e.target as HTMLSelectElement).value as LayoutType);
-    });
-    layoutSelect.title = 'Layout algorithm (H to cycle)';
-    layoutContainer.appendChild(layoutSelect);
-    featureGroup.appendChild(layoutContainer);
+    // Layout picker popover (replaces old <select>)
+    const layoutPicker = createLayoutPicker({
+        onLayoutChange: callbacks.onLayoutChange,
+        getCurrentLayout: callbacks.getCurrentLayout,
+        isDarkTheme: callbacks.isDarkTheme,
+    }, documentListeners);
+    featureGroup.appendChild(layoutPicker);
 
     // Fullscreen button
     const fullscreenBtn = createButton('⛶', () => {
@@ -875,7 +820,7 @@ function createFeatureGroup(
 
     // Help button
     const helpBtn = createButton('?', () => {
-        showKeyboardShortcutsHelp(callbacks.getKeyboardShortcuts());
+        showKeyboardShortcutsHelp(callbacks.getKeyboardShortcuts(), callbacks.isDarkTheme());
     }, 'Show keyboard shortcuts');
     helpBtn.title = 'Keyboard shortcuts';
     helpBtn.style.fontWeight = '700';
@@ -1266,9 +1211,23 @@ function createPinnedTabsDropdown(
     return dropdown;
 }
 
-export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; description: string }>): void {
+export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; description: string }>, isDark: boolean = true): void {
     // Store the element that had focus before opening modal
     const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    // Theme-aware colors
+    const overlayBg = isDark ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.4)';
+    const modalBg = isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+    const modalBorder = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.1)';
+    const titleColor = isDark ? '#f1f5f9' : '#1e293b';
+    const descColor = isDark ? '#94a3b8' : '#64748b';
+    const closeBtnColor = isDark ? '#94a3b8' : '#64748b';
+    const closeBtnHoverColor = isDark ? '#f1f5f9' : '#1e293b';
+    const closeBtnHoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+    const rowBorder = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(0, 0, 0, 0.06)';
+    const kbdBg = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+    const kbdBorder = isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)';
+    const kbdColor = isDark ? '#a5b4fc' : '#6366f1';
 
     const overlay = document.createElement('div');
     overlay.id = 'shortcuts-modal';
@@ -1281,7 +1240,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
         left: 0;
         width: 100vw;
         height: 100vh;
-        background: rgba(0, 0, 0, 0.7);
+        background: ${overlayBg};
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1290,13 +1249,15 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     const modal = document.createElement('div');
     modal.style.cssText = `
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${modalBg};
+        border: 1px solid ${modalBorder};
         border-radius: 12px;
         padding: 24px;
         min-width: 500px;
         max-width: 600px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, ${isDark ? '0.4' : '0.15'});
     `;
 
     // Split shortcuts into two columns
@@ -1305,14 +1266,14 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
     const rightColumn = shortcuts.slice(midpoint);
 
     const renderShortcut = (s: { key: string; description: string }) => `
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-            <span style="color: #94a3b8; font-size: 12px;">${s.description}</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid ${rowBorder};">
+            <span style="color: ${descColor}; font-size: 12px;">${s.description}</span>
             <kbd style="
-                background: rgba(99, 102, 241, 0.2);
-                border: 1px solid rgba(99, 102, 241, 0.3);
+                background: ${kbdBg};
+                border: 1px solid ${kbdBorder};
                 border-radius: 4px;
                 padding: 3px 6px;
-                color: #a5b4fc;
+                color: ${kbdColor};
                 font-size: 10px;
                 font-family: monospace;
                 margin-left: 8px;
@@ -1323,11 +1284,11 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     modal.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 id="shortcuts-title" style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
+            <h3 id="shortcuts-title" style="margin: 0; color: ${titleColor}; font-size: 15px;">Keyboard Shortcuts</h3>
             <button id="close-shortcuts" aria-label="Close dialog" style="
                 background: none;
                 border: none;
-                color: #94a3b8;
+                color: ${closeBtnColor};
                 cursor: pointer;
                 font-size: 20px;
                 padding: 4px 8px;
@@ -1369,12 +1330,12 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
     if (closeBtn) {
         closeBtn.addEventListener('click', closeModal);
         closeBtn.addEventListener('mouseenter', () => {
-            closeBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-            closeBtn.style.color = '#f1f5f9';
+            closeBtn.style.background = closeBtnHoverBg;
+            closeBtn.style.color = closeBtnHoverColor;
         });
         closeBtn.addEventListener('mouseleave', () => {
             closeBtn.style.background = 'none';
-            closeBtn.style.color = '#94a3b8';
+            closeBtn.style.color = closeBtnColor;
         });
     }
 

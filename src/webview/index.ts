@@ -50,6 +50,7 @@ import {
     switchToTab,
     getActiveTabId,
     setActiveTabId,
+    showFirstRunOverlay,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './ui';
@@ -68,6 +69,9 @@ declare global {
         flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
+        gridStyle?: string;
+        nodeAccentPosition?: string;
+        isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -219,6 +223,19 @@ function init(): void {
     const sql = window.initialSqlCode || '';
     if (sql) {
         void visualize(sql);
+    }
+
+    // Show first-run onboarding overlay
+    if (window.isFirstRun) {
+        requestAnimationFrame(() => {
+            showFirstRunOverlay(container, {
+                isDarkTheme,
+                onDismiss: () => {
+                    // Notify extension to persist dismissal
+                    window.vscodeApi?.postMessage({ type: 'firstRunDismissed' });
+                },
+            });
+        });
     }
 }
 

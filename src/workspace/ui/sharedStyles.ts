@@ -9,12 +9,12 @@ export function getCssVariables(dark: boolean = true): string {
     if (dark) {
         return `
             :root {
-                --bg-primary: #0f172a;
-                --bg-secondary: #1e293b;
-                --bg-tertiary: #334155;
-                --bg-hover: #475569;
-                --border-color: #475569;
-                --border-subtle: #334155;
+                --bg-primary: #111111;
+                --bg-secondary: #1a1a1a;
+                --bg-tertiary: #222222;
+                --bg-hover: #2a2a2a;
+                --border-color: rgba(255, 255, 255, 0.12);
+                --border-subtle: rgba(255, 255, 255, 0.08);
                 --text-primary: #f1f5f9;
                 --text-secondary: #e2e8f0;
                 --text-muted: #94a3b8;
@@ -27,34 +27,44 @@ export function getCssVariables(dark: boolean = true): string {
                 --warning-light: #fbbf24;
                 --error: #ef4444;
                 --error-light: #f87171;
-                --node-file: #3b82f6;
-                --node-file-border: #60a5fa;
-                --node-table: #10b981;
-                --node-table-border: #34d399;
-                --node-view: #8b5cf6;
-                --node-view-border: #a78bfa;
-                --node-external: #475569;
+                --node-file: #60a5fa;
+                --node-file-border: #3b82f6;
+                --node-table: #34d399;
+                --node-table-border: #10b981;
+                --node-view: #a78bfa;
+                --node-view-border: #8b5cf6;
+                --node-external: #94a3b8;
                 --node-external-border: #64748b;
+                --node-fill: #1a1a1a;
+                --node-border: #2a2a2a;
+                --node-text: #f1f5f9;
+                --grid-color: rgba(255, 255, 255, 0.06);
+                --canvas-bg: #111111;
+                --bg-overlay: rgba(17, 17, 17, 0.9);
+                --node-cte: #c084fc;
+                --edge-default: #333333;
+                --edge-hover: #6366f1;
+                --shadow-node: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
                 --radius-sm: 4px;
                 --radius-md: 6px;
                 --radius-lg: 8px;
                 --radius-xl: 12px;
-                --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
-                --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
-                --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
-                --overlay-scrim: rgba(15, 23, 42, 0.7);
+                --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+                --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+                --shadow-lg: 0 10px 40px rgba(0,0,0,0.5);
+                --overlay-scrim: rgba(17, 17, 17, 0.7);
             }
         `;
     } else {
         // Light theme
         return `
             :root {
-                --bg-primary: #ffffff;
-                --bg-secondary: #f8fafc;
+                --bg-primary: #fafafa;
+                --bg-secondary: #ffffff;
                 --bg-tertiary: #f1f5f9;
                 --bg-hover: #e2e8f0;
-                --border-color: #cbd5e1;
-                --border-subtle: #e2e8f0;
+                --border-color: rgba(0, 0, 0, 0.12);
+                --border-subtle: rgba(0, 0, 0, 0.08);
                 --text-primary: #0f172a;
                 --text-secondary: #1e293b;
                 --text-muted: #64748b;
@@ -67,14 +77,24 @@ export function getCssVariables(dark: boolean = true): string {
                 --warning-light: #f59e0b;
                 --error: #dc2626;
                 --error-light: #ef4444;
-                --node-file: #2563eb;
-                --node-file-border: #3b82f6;
-                --node-table: #059669;
-                --node-table-border: #10b981;
-                --node-view: #7c3aed;
-                --node-view-border: #8b5cf6;
+                --node-file: #3b82f6;
+                --node-file-border: #2563eb;
+                --node-table: #10b981;
+                --node-table-border: #059669;
+                --node-view: #8b5cf6;
+                --node-view-border: #7c3aed;
                 --node-external: #64748b;
-                --node-external-border: #94a3b8;
+                --node-external-border: #475569;
+                --node-fill: #ffffff;
+                --node-border: #e2e8f0;
+                --node-text: #1e293b;
+                --grid-color: rgba(0, 0, 0, 0.06);
+                --canvas-bg: #fafafa;
+                --bg-overlay: rgba(255, 255, 255, 0.9);
+                --node-cte: #a855f7;
+                --edge-default: #cbd5e1;
+                --edge-hover: #6366f1;
+                --shadow-node: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
                 --radius-sm: 4px;
                 --radius-md: 6px;
                 --radius-lg: 8px;
@@ -82,7 +102,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
                 --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
                 --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
-                --overlay-scrim: rgba(248, 250, 252, 0.85);
+                --overlay-scrim: rgba(250, 250, 250, 0.85);
             }
         `;
     }
@@ -305,6 +325,30 @@ export function getBaseStyles(): string {
                 animation-duration: 0.01ms !important;
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
+            }
+            .lineage-edge {
+                stroke-dasharray: none !important;
+                animation: none !important;
+            }
+        }
+
+        /* High Contrast Mode */
+        @media (prefers-contrast: more) {
+            :root {
+                --border-color: rgba(255, 255, 255, 0.4);
+                --border-subtle: rgba(255, 255, 255, 0.25);
+            }
+            .node .node-bg {
+                stroke-width: 2 !important;
+            }
+            .lineage-node .node-bg {
+                stroke-width: 2 !important;
+            }
+            .edge path, .lineage-edge {
+                stroke-width: 2.5 !important;
+            }
+            .node-label, .lineage-node .node-name {
+                font-weight: 700 !important;
             }
         }
     `;
@@ -2339,30 +2383,36 @@ export function getLineageNodeStyles(): string {
             transition: opacity 0.2s, filter 0.2s;
         }
         .lineage-node .node-bg {
-            stroke-width: 2;
-            transition: all 0.2s;
+            fill: var(--node-fill);
+            stroke: var(--node-border);
+            stroke-width: 1;
+            transition: stroke 0.15s, stroke-width 0.15s;
         }
-        .lineage-node-table .node-bg {
+        .lineage-node .node-accent {
+            transition: fill 0.15s;
+        }
+        .lineage-node-table .node-accent {
             fill: var(--node-table);
-            stroke: var(--node-table-border);
         }
-        .lineage-node-view .node-bg {
+        .lineage-node-view .node-accent {
             fill: var(--node-view);
-            stroke: var(--node-view-border);
         }
-        .lineage-node-cte .node-bg {
-            fill: var(--accent);
-            stroke: var(--accent-hover);
+        .lineage-node-cte .node-accent {
+            fill: var(--node-cte);
+        }
+        .lineage-node-external .node-accent {
+            fill: var(--node-external);
         }
         .lineage-node-external .node-bg {
-            fill: var(--node-external);
-            stroke: var(--node-external-border);
+            stroke-dasharray: 5,3;
         }
         .lineage-node:hover .node-bg {
-            filter: brightness(1.1);
+            stroke: var(--accent);
+            stroke-width: 1.5;
         }
         .lineage-node.focused .node-bg {
             stroke-width: 3;
+            stroke: var(--accent);
             filter: drop-shadow(0 0 8px var(--accent));
         }
         .lineage-node.center .node-bg {
@@ -2378,23 +2428,23 @@ export function getLineageNodeStyles(): string {
         }
         .lineage-node .node-icon {
             font-size: 14px;
-            fill: white;
+            fill: var(--node-text);
         }
         .lineage-node .node-name {
             font-size: 12px;
             font-weight: 600;
-            fill: white;
+            fill: var(--node-text);
         }
         .lineage-node .node-type {
             font-size: 10px;
-            fill: rgba(255, 255, 255, 0.75);
+            fill: var(--text-muted);
         }
         .lineage-node .node-divider {
-            stroke: rgba(255, 255, 255, 0.2);
+            stroke: var(--border-subtle);
             stroke-width: 1;
         }
         .lineage-node .column-dot {
-            fill: rgba(255, 255, 255, 0.5);
+            fill: var(--text-dim);
         }
         .lineage-node .column-dot.primary {
             fill: var(--warning-light);
@@ -2560,13 +2610,15 @@ export function getLineageNodeStyles(): string {
         }
         .lineage-edge {
             fill: none;
-            stroke: var(--text-dim);
-            stroke-width: 2;
-            stroke-dasharray: 8, 4;
-            animation: flowAnimation 1s linear infinite;
-            transition: stroke 0.2s, stroke-width 0.2s;
+            stroke: var(--edge-default);
+            stroke-width: 1.5;
+            transition: stroke 0.15s, stroke-width 0.15s;
         }
-        .lineage-edge-direct { stroke: #64748b; }
+        .lineage-edge:hover {
+            stroke: var(--edge-hover);
+            stroke-width: 2;
+        }
+        .lineage-edge-direct { stroke: var(--edge-default); }
         .lineage-edge-join { stroke: #a78bfa; }
         .lineage-edge-transform { stroke: #f59e0b; }
         .lineage-edge.highlighted {
@@ -3315,33 +3367,38 @@ export function getGraphStyles(): string {
 
         /* ========== Node Styles ========== */
         .node { cursor: pointer; transition: opacity 0.2s; }
-        .node:hover rect { filter: brightness(1.15); }
-        .node.highlighted rect { filter: brightness(1.3); stroke: var(--warning-light); stroke-width: 3; }
+        .node .node-bg { fill: var(--node-fill); stroke: var(--node-border); stroke-width: 1; transition: stroke 0.15s; box-shadow: var(--shadow-node); }
+        .node:hover .node-bg { stroke: var(--accent); stroke-width: 1.5; }
+        .node.highlighted .node-bg { stroke: var(--warning-light); stroke-width: 3; }
         .node.dimmed { opacity: 0.25; }
-        .node-search-match rect { filter: brightness(1.2); stroke: var(--accent); stroke-width: 3; }
+        .node-search-match .node-bg { stroke: var(--accent); stroke-width: 3; }
         .node-search-match.node-focus-dim { opacity: 0.6; pointer-events: auto; }
         .node-search-dim { opacity: 0.18; }
-        .node-selected rect { stroke: var(--accent); stroke-width: 2; }
+        .node-selected .node-bg { stroke: var(--accent); stroke-width: 2; }
         .node-focus-dim { opacity: 0.12; pointer-events: none; }
-        .node-trace-highlight rect { filter: brightness(1.25); stroke: var(--success); stroke-width: 3; }
+        .node-trace-highlight .node-bg { stroke: var(--success); stroke-width: 3; }
         .node-trace-dim { opacity: 0.15; pointer-events: none; }
-        .node-file rect { fill: var(--node-file); stroke: var(--node-file-border); stroke-width: 2; }
-        .node-table rect { fill: var(--node-table); stroke: var(--node-table-border); stroke-width: 2; }
-        .node-view rect { fill: var(--node-view); stroke: var(--node-view-border); stroke-width: 2; }
-        .node-external rect { fill: var(--node-external); stroke: var(--node-external-border); stroke-width: 2; stroke-dasharray: 5,3; }
-        .node-label { fill: #fff; font-size: 12px; font-weight: 600; }
-        .node-sublabel { fill: rgba(255,255,255,0.75); font-size: 10px; }
+        .node .node-accent { transition: fill 0.15s; }
+        .node-file .node-accent { fill: var(--node-file); }
+        .node-table .node-accent { fill: var(--node-table); }
+        .node-view .node-accent { fill: var(--node-view); }
+        .node-external .node-accent { fill: var(--node-external); }
+        .node-external .node-bg { stroke-dasharray: 5,3; }
+        .node-label { fill: var(--node-text); font-size: 12px; font-weight: 600; }
+        .node-sublabel { fill: var(--text-muted); font-size: 10px; }
 
         /* ========== Edge Styles ========== */
-        .edge { fill: none; stroke-width: 2; cursor: pointer; }
-        .edge-select { stroke: #64748b; }
-        .edge-join { stroke: #a78bfa; }
-        .edge-insert { stroke: #10b981; }
-        .edge-update { stroke: #fbbf24; }
-        .edge-delete { stroke: #f87171; }
+        .edge { fill: none; stroke-width: 1.5; cursor: pointer; transition: stroke 0.15s, stroke-width 0.15s; }
+        .edge path { stroke: var(--edge-default); }
+        .edge:hover path { stroke: var(--edge-hover); stroke-width: 2; }
+        .edge-select path { stroke: var(--edge-default); }
+        .edge-join path { stroke: #a78bfa; }
+        .edge-insert path { stroke: #10b981; }
+        .edge-update path { stroke: #fbbf24; }
+        .edge-delete path { stroke: #f87171; }
         .edge-label { fill: var(--text-muted); font-size: 10px; }
         /* Edge highlight/dim styles for click-to-highlight feature */
-        .edge.edge-highlighted path { opacity: 1; stroke-width: 3; }
+        .edge.edge-highlighted path { opacity: 1; stroke-width: 3; stroke: var(--edge-hover); }
         .edge.edge-dimmed path { opacity: 0.2; }
         .edge-focus-dim path { opacity: 0.1; }
         .edge-trace-highlight path { stroke: var(--success); stroke-width: 3; opacity: 1; }

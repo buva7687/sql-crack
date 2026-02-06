@@ -848,6 +848,27 @@ function getViewModeScript(): string {
         let lineageDetailView = false;
         let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
         let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
+
+        // Navigation state stack for cross-view navigation
+        const navStack = [];
+        // Per-view zoom/pan state preservation
+        const viewStates = {};
+
+        function saveCurrentViewState() {
+            if (currentViewMode === 'graph' && typeof currentTransform !== 'undefined') {
+                viewStates['graph'] = { transform: { ...currentTransform } };
+            }
+        }
+
+        function restoreViewState(view) {
+            if (view === 'graph' && viewStates['graph'] && typeof currentTransform !== 'undefined') {
+                Object.assign(currentTransform, viewStates['graph'].transform);
+                if (svg && mainGroup) {
+                    mainGroup.setAttribute('transform',
+                        'translate(' + currentTransform.x + ',' + currentTransform.y + ') scale(' + currentTransform.k + ')');
+                }
+            }
+        }
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
@@ -878,6 +899,14 @@ function getViewModeScript(): string {
         function switchToView(view, skipMessage = false) {
             if (view === currentViewMode) return;
 
+            // Save state of current view before switching
+            saveCurrentViewState();
+
+            // Push current view to nav stack for back navigation
+            if (!skipMessage) {
+                navStack.push(currentViewMode);
+            }
+
             viewTabs.forEach(t => {
                 if (t.getAttribute('data-view') === view) {
                     t.classList.add('active');
@@ -885,6 +914,17 @@ function getViewModeScript(): string {
                     t.classList.remove('active');
                 }
             });
+
+            // Crossfade transition
+            const container = lineagePanel || graphArea;
+            if (container) {
+                container.style.transition = 'opacity 0.2s ease';
+                container.style.opacity = '0';
+                setTimeout(() => {
+                    container.style.opacity = '1';
+                }, 50);
+            }
+
             currentViewMode = view;
 
             // Show/hide header search box (only relevant for Graph tab)
@@ -904,9 +944,12 @@ function getViewModeScript(): string {
                     graphModeSwitcher.style.visibility = 'visible';
                     graphModeSwitcher.style.pointerEvents = 'auto';
                 }
-                // Reset zoom and fit graph when switching back to Graph tab.
-                // This ensures proper view after returning from other tabs (fixes zoom state persistence bug).
-                if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+                // Restore graph zoom/pan state when switching back to Graph tab
+                if (viewStates['graph']) {
+                    requestAnimationFrame(() => {
+                        restoreViewState('graph');
+                    });
+                } else if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             fitToScreen();
@@ -1051,11 +1094,12 @@ function getViewModeScript(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
+            const tabNames = { graph: 'Graph', lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
             if (lineageDetailView && currentViewMode !== 'graph') {
-                const tabNames = { lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
             } else {
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph';
+                const prevView = navStack.length > 0 ? navStack[navStack.length - 1] : 'graph';
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph');
             }
         }
 
@@ -1087,7 +1131,9 @@ function getViewModeScript(): string {
                     }
                 }
             } else {
-                switchToView('graph');
+                // Use nav stack to go back to previous view
+                const previousView = navStack.length > 0 ? navStack.pop() : 'graph';
+                switchToView(previousView, true); // skipMessage=true since we're navigating back
             }
         });
     `;
@@ -1397,7 +1443,7 @@ function getMessageHandlingScript(): string {
                 bgRect.setAttribute('y', bbox.y - padding);
                 bgRect.setAttribute('width', width);
                 bgRect.setAttribute('height', height);
-                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#0f172a' : '#ffffff');
+                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#111111' : '#fafafa');
                 svgClone.insertBefore(bgRect, svgClone.firstChild);
 
                 // Serialize SVG

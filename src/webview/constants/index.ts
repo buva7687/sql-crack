@@ -13,7 +13,10 @@ export {
     GLOW_COLORS,
     STATUS_COLORS,
     CLOSE_BUTTON_COLORS,
+    NODE_SURFACE,
+    NODE_ACCENT_COLORS,
     getNodeColor,
+    getNodeAccentColor,
     getWarningColor,
     getTransformationColor,
 } from './colors';

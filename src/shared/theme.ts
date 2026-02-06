@@ -31,8 +31,17 @@ export const WORKSPACE_NODE_COLORS: Record<string, string> = {
     file: '#3b82f6',     // Blue - SQL files
     table: '#10b981',    // Emerald - tables
     view: '#8b5cf6',     // Purple - views
-    external: '#475569', // Slate - external references
-    default: '#475569',  // Slate - fallback
+    external: '#64748b', // Slate - external references
+    default: '#64748b',  // Slate - fallback
+} as const;
+
+/** Dark theme accent variants (400-level, brighter) */
+export const WORKSPACE_NODE_COLORS_DARK: Record<string, string> = {
+    file: '#60a5fa',     // Blue-400
+    table: '#34d399',    // Emerald-400
+    view: '#a78bfa',     // Violet-400
+    external: '#94a3b8', // Slate-400
+    default: '#94a3b8',  // Slate-400
 } as const;
 
 // ============================================================
@@ -42,23 +51,23 @@ export const WORKSPACE_NODE_COLORS: Record<string, string> = {
 export const UI_THEME = {
     // Dark theme
     dark: {
-        background: '#0f172a',
-        backgroundSecondary: '#1e293b',
-        backgroundPanel: 'rgba(15, 23, 42, 0.95)',
+        background: '#111111',
+        backgroundSecondary: '#1a1a1a',
+        backgroundPanel: 'rgba(17, 17, 17, 0.95)',
         text: '#f1f5f9',
         textMuted: '#94a3b8',
         textDim: '#64748b',
-        border: 'rgba(148, 163, 184, 0.2)',
+        border: 'rgba(255, 255, 255, 0.08)',
     },
     // Light theme
     light: {
-        background: '#ffffff',
-        backgroundSecondary: '#f8fafc',
+        background: '#fafafa',
+        backgroundSecondary: '#ffffff',
         backgroundPanel: 'rgba(255, 255, 255, 0.95)',
         text: '#1e293b',
         textMuted: '#64748b',
         textDim: '#94a3b8',
-        border: 'rgba(148, 163, 184, 0.3)',
+        border: 'rgba(0, 0, 0, 0.08)',
     },
 } as const;
 

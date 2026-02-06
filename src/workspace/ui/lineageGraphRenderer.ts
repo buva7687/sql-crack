@@ -446,16 +446,19 @@ export class LineageGraphRenderer {
         // Node background
         if (node.type === 'external') {
             svg += `<rect class="node-bg" width="${node.width}" height="${node.height}"
-                         rx="8" ry="8" stroke-dasharray="5,3"/>`;
+                         rx="8" ry="8"/>`;
         } else {
             svg += `<rect class="node-bg" width="${node.width}" height="${node.height}" rx="8" ry="8"/>`;
         }
 
+        // Left accent strip (4px wide)
+        svg += `<rect class="node-accent" x="0" y="0" width="4" height="${node.height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>`;
+
         // Node header
         svg += `
-            <text class="node-icon" x="12" y="24">${icon}</text>
-            <text class="node-name" x="36" y="22">${this.escapeHtml(this.truncateName(node.name, 18))}</text>
-            <text class="node-type" x="36" y="40">${typeLabel}${node.metadata.columnCount ? ` \u00B7 ${node.metadata.columnCount} columns` : ''}</text>
+            <text class="node-icon" x="14" y="24">${icon}</text>
+            <text class="node-name" x="38" y="22">${this.escapeHtml(this.truncateName(node.name, 18))}</text>
+            <text class="node-type" x="38" y="40">${typeLabel}${node.metadata.columnCount ? ` \u00B7 ${node.metadata.columnCount} columns` : ''}</text>
         `;
 
         // Expand/collapse button

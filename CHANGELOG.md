@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-02-05
+
+### Added
+
+- **UX redesign**: Complete visual overhaul across query flow and workspace views (8-phase rewrite).
+- **Theme token system**: New `src/shared/themeTokens.ts` — single source of truth for all theme colors, grid config, and accent colors.
+- **SVG icon library**: `src/shared/icons.ts` with 18 SVG icons (16px) replacing emoji in UI elements.
+- **Grid patterns**: Configurable canvas background — dots, lines, or none (`sqlCrack.gridStyle` setting).
+- **Node accent strips**: Nodes use neutral fill + colored left accent strip instead of full-fill pastels (`sqlCrack.nodeAccentPosition` setting for left/bottom).
+- **Bottom legend bar**: Frosted-glass legend strip at bottom of canvas with node type accent dots. Toggle with `L` key.
+- **Export dropdown**: Consolidated export menu (PNG, SVG, Mermaid, Clipboard) replacing 4 separate toolbar buttons.
+- **Layout picker**: Visual popover showing all 5 layouts with descriptions and keyboard shortcuts (1–5 keys), replacing blind `H` cycling.
+- **Command bar**: `Ctrl+Shift+P` / `/` command palette with fuzzy-match filtering inside the webview.
+- **Breadcrumb bar**: Filter/state indicator below toolbar showing active focus mode, search term, column trace, and CTE context.
+- **First-run overlay**: Welcome overlay on first visualization open with feature callouts.
+- **VS Code walkthrough**: 4-step onboarding walkthrough in `contributes.walkthroughs`.
+- **Workspace navigation stack**: Back button with originating view name, per-view zoom/pan state preservation, crossfade transitions between views.
+- **Accessibility**: `prefers-reduced-motion` support disabling all animations; `prefers-contrast: more` support with increased borders and high-contrast text colors; ARIA labels on interactive elements.
+- **Renderer modularization**: Extracted `canvasSetup.ts`, `edgeRenderer.ts`, and barrel `index.ts` from renderer.ts into `src/webview/rendering/`.
+
+### Changed
+
+- **Dark theme background**: `#111111` (neutral) replacing `#0f172a` (blue-tinted) across all views.
+- **Light theme background**: `#FAFAFA` replacing `#FFFFFF`.
+- **Node design**: Neutral fill (`#FFFFFF` light / `#1A1A1A` dark) + 4px left accent strip (type-colored) for all node types including aggregate, window, case, CTE, and subquery nodes.
+- **Edge colors**: `#CBD5E1` light / `#333333` dark default; `#6366F1` indigo on hover.
+- **CTE/subquery clouds**: Theme-aware containers with neutral fill and accent-colored edges.
+- **Toolbar**: Export dropdown and layout picker use `position: fixed` appended to `document.body` to escape `overflow: hidden` clipping.
+- **Workspace views**: Unified theme with query flow — neutral-fill nodes, accent strips, theme-aware edges, updated sidebar/tooltip/search styles.
+- **Keyboard shortcuts panel**: Fully theme-aware (light/dark) with updated colors and styling.
+- **Stats/Hints panels**: Added subtle border and box-shadow for light theme visibility.
+- **Column lineage panel**: Updated from blue-tinted to neutral theme colors for backgrounds, search input, column items, and hover states.
+
+### Fixed
+
+- **Export dropdown clipping**: Dropdown was hidden behind toolbar due to `overflow: hidden` — now appends to `document.body` with fixed positioning.
+- **Layout picker clipping**: Same fix as export dropdown — uses body-appended fixed positioning.
+- **Export dropdown theme switching**: Text color, separator backgrounds, and kbd badge colors now update on theme change.
+- **Shortcuts panel always dark**: Fixed missed call site in toolbar help button that wasn't passing theme state.
+- **Lineage path code elements**: Aggregate function expressions now have explicit styled backgrounds instead of inheriting dark webview defaults.
+- **Cloud child node hover reset**: Aggregate/window/case nodes inside CTE/subquery clouds properly reset to neutral fill on mouseleave.
+
+---
+
 ## [0.1.4] - 2026-02-04
 
 ### Added
@@ -302,6 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.0]: https://github.com/buva7687/sql-crack/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/buva7687/sql-crack/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/buva7687/sql-crack/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/buva7687/sql-crack/compare/v0.1.1...v0.1.2
