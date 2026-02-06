@@ -32,6 +32,8 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain("breadcrumbPanel.style.display = 'none';");
         expect(rendererSource).toContain('if (state.selectedNodeId) {');
         expect(rendererSource).toContain('updateBreadcrumb(state.selectedNodeId);');
+        expect(rendererSource).toContain('right: auto;');
+        expect(rendererSource).toContain('pointer-events: none;');
     });
 
     it('adds panel close affordance and themed scrollbar styles for column lineage panel', () => {

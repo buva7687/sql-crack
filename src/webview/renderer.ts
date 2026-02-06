@@ -227,7 +227,7 @@ export function initRenderer(container: HTMLElement): void {
         position: absolute;
         top: 62px;
         left: 16px;
-        right: 16px;
+        right: auto;
         z-index: 140;
         display: none;
         align-items: center;
@@ -237,9 +237,11 @@ export function initRenderer(container: HTMLElement): void {
         border-radius: 8px;
         font-size: 12px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: min(70vw, 520px);
+        pointer-events: none;
     `;
     columnLineageBanner.innerHTML = `
-        <span>🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        <span style="pointer-events: none;">🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
         <button id="column-lineage-banner-close" style="
             border: none;
             background: transparent;
@@ -247,6 +249,7 @@ export function initRenderer(container: HTMLElement): void {
             font-size: 14px;
             line-height: 1;
             padding: 0 4px;
+            pointer-events: auto;
         " aria-label="Close column lineage banner">×</button>
     `;
     container.appendChild(columnLineageBanner);
