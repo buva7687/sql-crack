@@ -30,4 +30,20 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("navigationOriginLabel = '';");
         expect(script).toContain("navigationOriginType = '';");
     });
+
+    it('renders actionable workspace breadcrumb segments for context-preserving navigation', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('workspace-breadcrumb-segment is-clickable');
+        expect(script).toContain('data-breadcrumb-action');
+        expect(script).toContain("workspaceBreadcrumb?.addEventListener('click'");
+        expect(script).toContain("action === 'detail-root'");
+        expect(script).toContain("action === 'clear-column-trace'");
+    });
 });

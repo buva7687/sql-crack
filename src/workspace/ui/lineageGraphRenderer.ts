@@ -503,7 +503,7 @@ export class LineageGraphRenderer {
                 const dotClass = column.isPrimaryKey ? 'primary' : typeCategory;
 
                 svg += `
-                    <g class="${columnClasses}" data-column-name="${this.escapeHtml(column.name)}" data-action="selectColumn">
+                    <g class="${columnClasses}" data-column-name="${this.escapeHtml(column.name)}" data-action="selectColumn" tabindex="0" role="button" focusable="true" aria-label="${this.escapeHtml(node.name + '.' + column.name)}">
                         <rect x="8" y="${columnY - 16}" width="${node.width - 16}" height="20" rx="4" class="column-row-bg ${columnIndex % 2 === 0 ? 'even' : 'odd'}"/>
                         <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot ${dotClass}"/>
                         <text x="20" y="${columnY}" text-anchor="middle" class="column-state">${dotChar}</text>

@@ -16,4 +16,20 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('buildColumnFlowSummary');
         expect(script).toContain('Clear trace');
     });
+
+    it('supports keyboard navigation through expanded column rows', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('moveColumnRowFocus');
+        expect(script).toContain("event.key === 'ArrowDown'");
+        expect(script).toContain("event.key === 'ArrowUp'");
+        expect(script).toContain("event.key === 'Enter' || event.key === ' '");
+        expect(script).toContain('Press Enter to trace lineage');
+    });
 });

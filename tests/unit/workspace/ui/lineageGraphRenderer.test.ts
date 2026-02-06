@@ -50,6 +50,8 @@ describe('LineageGraphRenderer UX markup', () => {
         expect(svg).toContain('data-column-count="2"');
         expect(svg).toContain('column-row-bg even');
         expect(svg).toContain('column-row-bg odd');
+        expect(svg).toContain('tabindex="0"');
+        expect(svg).toContain('role="button"');
         expect(svg).toContain('data-upstream-count=');
         expect(svg).toContain('data-downstream-count=');
     });

@@ -334,24 +334,29 @@ export class LineageView {
                                 <span class="legend-dot legend-json"></span>
                                 <span class="legend-label">JSON</span>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Keyboard Shortcuts Hint -->
-                    <div class="keyboard-hints" id="keyboard-hints">
-                        <div class="hint-item">
-                            <kbd>C</kbd>
-                            <span>Columns</span>
-                        </div>
-                        <div class="hint-divider"></div>
-                        <div class="hint-item">
-                            <kbd>Scroll</kbd>
-                            <span>Zoom</span>
-                        </div>
-                        <div class="hint-divider"></div>
-                        <div class="hint-item">
-                            <kbd>Drag</kbd>
-                            <span>Pan</span>
+                            <div class="legend-divider"></div>
+                            <div class="legend-section-title">Keyboard</div>
+                            <div class="legend-keyboard-hints" id="lineage-keyboard-hints">
+                                <div class="hint-item">
+                                    <kbd>C</kbd>
+                                    <span>Columns</span>
+                                </div>
+                                <div class="hint-divider"></div>
+                                <div class="hint-item">
+                                    <kbd>↑↓</kbd>
+                                    <span>Columns</span>
+                                </div>
+                                <div class="hint-divider"></div>
+                                <div class="hint-item">
+                                    <kbd>↵</kbd>
+                                    <span>Trace</span>
+                                </div>
+                                <div class="hint-divider"></div>
+                                <div class="hint-item">
+                                    <kbd>Scroll</kbd>
+                                    <span>Zoom</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

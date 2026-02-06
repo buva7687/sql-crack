@@ -24,6 +24,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
         let currentGraphMode = '${currentGraphMode}';
+        const prefersReducedMotion = typeof window !== 'undefined'
+            && typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const motionDurationMs = prefersReducedMotion ? 0 : 200;
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -546,7 +550,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             if (graphArea) {
                 // Hide graph during fit calculation to prevent flicker
                 graphArea.style.opacity = '0';
-                graphArea.style.transition = 'opacity 0.2s ease-in';
+                graphArea.style.transition = prefersReducedMotion ? 'none' : 'opacity 0.2s ease-in';
             }
             
             // Use requestAnimationFrame to ensure DOM is ready, then fit immediately
@@ -932,11 +936,22 @@ function getViewModeScript(): string {
             });
         }
 
+        function escapeBreadcrumbText(value) {
+            return (value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function escapeBreadcrumbAttr(value) {
+            return escapeBreadcrumbText(value).replace(/"/g, '&quot;');
+        }
+
         function updateWorkspaceBreadcrumb() {
             if (!workspaceBreadcrumb) return;
             if (currentViewMode === 'graph') {
                 workspaceBreadcrumb.style.display = 'none';
-                workspaceBreadcrumb.textContent = '';
+                workspaceBreadcrumb.innerHTML = '';
                 return;
             }
 
@@ -945,23 +960,60 @@ function getViewModeScript(): string {
                 tableExplorer: 'Tables',
                 impact: 'Impact'
             };
-            const segments = ['Graph'];
+            const segments = [{
+                label: 'Graph',
+                action: 'view',
+                value: 'graph',
+                clickable: true,
+            }];
 
             if (navigationOriginLabel) {
                 const originTypeLabel = navigationOriginType ? ' (' + navigationOriginType + ')' : '';
-                segments.push(navigationOriginLabel + originTypeLabel);
+                segments.push({
+                    label: navigationOriginLabel + originTypeLabel,
+                    action: 'origin',
+                    value: navigationOriginLabel,
+                    clickable: true,
+                });
             }
 
-            segments.push(viewLabels[currentViewMode] || 'View');
+            segments.push({
+                label: viewLabels[currentViewMode] || 'View',
+                action: 'view',
+                value: currentViewMode,
+                clickable: currentViewMode !== 'graph',
+            });
 
             if (lineageDetailView && lineageTitle && lineageTitle.textContent) {
                 const titleText = lineageTitle.textContent.trim();
                 if (titleText && titleText !== 'Data Lineage' && titleText !== 'Table Explorer' && titleText !== 'Impact Analysis') {
-                    segments.push(titleText);
+                    segments.push({
+                        label: titleText,
+                        action: 'detail-root',
+                        value: currentViewMode,
+                        clickable: true,
+                    });
                 }
             }
 
-            workspaceBreadcrumb.textContent = segments.join(' › ');
+            const activeColumnLabel = (window && window.__workspaceSelectedColumnLabel) ? window.__workspaceSelectedColumnLabel : '';
+            if (activeColumnLabel) {
+                segments.push({
+                    label: 'Column: ' + activeColumnLabel,
+                    action: 'clear-column-trace',
+                    value: activeColumnLabel,
+                    clickable: true,
+                });
+            }
+
+            workspaceBreadcrumb.innerHTML = segments.map((segment, index) => {
+                const className = segment.clickable ? 'workspace-breadcrumb-segment is-clickable' : 'workspace-breadcrumb-segment';
+                const actionAttr = segment.clickable
+                    ? ' data-breadcrumb-action="' + escapeBreadcrumbAttr(segment.action) + '" data-breadcrumb-value="' + escapeBreadcrumbAttr(segment.value) + '"'
+                    : '';
+                const separator = index < segments.length - 1 ? '<span class="workspace-breadcrumb-separator">›</span>' : '';
+                return '<button type="button" class="' + className + '"' + actionAttr + '>' + escapeBreadcrumbText(segment.label) + '</button>' + separator;
+            }).join('');
             workspaceBreadcrumb.style.display = 'block';
         }
 
@@ -997,11 +1049,15 @@ function getViewModeScript(): string {
             // Crossfade transition
             const container = lineagePanel || graphArea;
             if (container) {
-                container.style.transition = 'opacity 0.2s ease';
-                container.style.opacity = '0';
-                setTimeout(() => {
-                    container.style.opacity = '1';
-                }, 50);
+                if (prefersReducedMotion) {
+                    container.style.transition = 'none';
+                } else {
+                    container.style.transition = 'opacity 0.2s ease';
+                    container.style.opacity = '0';
+                    setTimeout(() => {
+                        container.style.opacity = '1';
+                    }, 50);
+                }
             }
 
             currentViewMode = view;
@@ -1036,7 +1092,7 @@ function getViewModeScript(): string {
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             fitToScreen();
-                        }, 100);
+                        }, prefersReducedMotion ? 0 : 100);
                     });
                 }
             } else {
@@ -1079,6 +1135,49 @@ function getViewModeScript(): string {
                 const view = tab.getAttribute('data-view');
                 switchToView(view);
             });
+        });
+
+        workspaceBreadcrumb?.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-breadcrumb-action]');
+            if (!target) return;
+
+            e.stopPropagation();
+            const action = target.getAttribute('data-breadcrumb-action');
+            const value = target.getAttribute('data-breadcrumb-value');
+
+            if (action === 'view' && value) {
+                switchToView(value, true);
+                return;
+            }
+
+            if (action === 'origin') {
+                switchToView('graph', true);
+                return;
+            }
+
+            if (action === 'detail-root') {
+                lineageDetailView = false;
+                tableExplorerHistory = [];
+                currentExploredTable = null;
+                updateBackButtonText();
+                if (currentViewMode === 'lineage') {
+                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (currentViewMode === 'tableExplorer') {
+                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (currentViewMode === 'impact') {
+                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+                updateWorkspaceBreadcrumb();
+                return;
+            }
+
+            if (action === 'clear-column-trace' && typeof window.clearWorkspaceColumnTrace === 'function') {
+                window.clearWorkspaceColumnTrace();
+                updateWorkspaceBreadcrumb();
+            }
         });
 
         /**
@@ -1569,13 +1668,13 @@ function getMessageHandlingScript(): string {
                                 const toast = document.createElement('div');
                                 toast.id = 'copy-feedback-toast';
                                 toast.textContent = 'PNG copied to clipboard';
-                                toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+                                toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
                                 document.body.appendChild(toast);
                                 requestAnimationFrame(() => {
                                     toast.style.opacity = '1';
                                     setTimeout(() => {
                                         toast.style.opacity = '0';
-                                        setTimeout(() => toast.remove(), 200);
+                                        setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
                                     }, 1500);
                                 });
                             })
@@ -2433,7 +2532,7 @@ function getLineageGraphScript(): string {
             if (!svg || !graphContainer) return;
 
             requestAnimationFrame(() => {
-                setTimeout(() => fitToContainer(true), 100);
+                setTimeout(() => fitToContainer(true), prefersReducedMotion ? 0 : 100);
             });
 
             svg.addEventListener('wheel', (e) => {
@@ -2465,8 +2564,65 @@ function getLineageGraphScript(): string {
                 if (svg) svg.style.cursor = 'grab';
             });
 
+            function getColumnRows() {
+                return Array.from(svg.querySelectorAll('.column-row'));
+            }
+
+            function triggerColumnTraceFromRow(row) {
+                const nodeEl = row.closest('.lineage-node');
+                const nodeId = nodeEl ? nodeEl.getAttribute('data-node-id') : null;
+                const columnName = row.getAttribute('data-column-name');
+                if (!nodeId || !columnName) return;
+                vscode.postMessage({
+                    command: 'selectColumn',
+                    tableId: nodeId,
+                    columnName: columnName
+                });
+            }
+
+            function moveColumnRowFocus(fromRow, delta) {
+                const rows = getColumnRows();
+                if (rows.length === 0) return;
+                const currentIndex = rows.indexOf(fromRow);
+                if (currentIndex === -1) {
+                    rows[0].focus();
+                    return;
+                }
+                const nextIndex = (currentIndex + delta + rows.length) % rows.length;
+                rows[nextIndex].focus();
+            }
+
             const nodes = svg.querySelectorAll('.lineage-node');
             nodes.forEach(node => {
+                const columnRows = node.querySelectorAll('.column-row');
+                columnRows.forEach(row => {
+                    row.setAttribute('tabindex', '0');
+                    row.setAttribute('role', 'button');
+                    row.setAttribute('focusable', 'true');
+                    const columnName = row.getAttribute('data-column-name') || 'column';
+                    const tableName = node.getAttribute('data-node-name') || 'table';
+                    row.setAttribute('aria-label', tableName + '.' + columnName + '. Press Enter to trace lineage.');
+                    row.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            triggerColumnTraceFromRow(row);
+                            return;
+                        }
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            moveColumnRowFocus(row, 1);
+                            return;
+                        }
+                        if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            moveColumnRowFocus(row, -1);
+                        }
+                    });
+                });
+
                 node.addEventListener('mouseenter', (e) => {
                     showLineageTooltip(e, node);
                 });
@@ -2570,7 +2726,7 @@ function getLineageGraphScript(): string {
 
             setTimeout(() => {
                 if (zoomFitBtn) zoomFitBtn.click();
-            }, 100);
+            }, prefersReducedMotion ? 0 : 100);
 
             maybeRenderColumnTraceHint();
         }
@@ -2729,14 +2885,14 @@ function getLineageGraphScript(): string {
             const toast = document.createElement('div');
             toast.id = 'copy-feedback-toast';
             toast.textContent = message;
-            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
             document.body.appendChild(toast);
 
             requestAnimationFrame(() => {
                 toast.style.opacity = '1';
                 setTimeout(() => {
                     toast.style.opacity = '0';
-                    setTimeout(() => toast.remove(), 200);
+                    setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
                 }, 1500);
             });
         }
@@ -2903,6 +3059,19 @@ function getLineageGraphScript(): string {
             // Ignore if typing in an input
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                const activeEl = document.activeElement;
+                const isColumnRowActive = activeEl && activeEl.classList && activeEl.classList.contains('column-row');
+                if (!isColumnRowActive) {
+                    const firstRow = lineageContainer.querySelector('.column-row');
+                    if (firstRow) {
+                        e.preventDefault();
+                        firstRow.focus();
+                        return;
+                    }
+                }
+            }
+
             if (e.key === 'c' || e.key === 'C') {
                 e.preventDefault();
                 toggleAllColumns();
@@ -2914,7 +3083,8 @@ function getLineageGraphScript(): string {
         const legendPanel = document.getElementById('lineage-legend');
         if (legendToggle && legendPanel) {
             legendToggle.addEventListener('click', () => {
-                legendPanel.classList.toggle('collapsed');
+                const collapsed = legendPanel.classList.toggle('collapsed');
+                legendToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             });
         }
 
@@ -3054,6 +3224,10 @@ function getColumnLineageScript(): string {
             const { tableId, columnName, upstream, downstream } = data;
 
             selectedColumn = { tableId, columnName };
+            window.__workspaceSelectedColumnLabel = columnName;
+            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                updateWorkspaceBreadcrumb();
+            }
             dismissColumnTraceHint();
 
             clearColumnHighlighting();
@@ -3264,6 +3438,7 @@ function getColumnLineageScript(): string {
 
         function clearColumnHighlighting() {
             selectedColumn = null;
+            window.__workspaceSelectedColumnLabel = '';
 
             const svg = document.querySelector('.lineage-graph-svg');
             if (!svg) return;
@@ -3286,6 +3461,9 @@ function getColumnLineageScript(): string {
             });
 
             hideColumnLineageInfo();
+            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                updateWorkspaceBreadcrumb();
+            }
         }
 
         function buildColumnFlowSummary(tableName, columnName, upstream, downstream) {
@@ -3367,6 +3545,8 @@ function getColumnLineageScript(): string {
                 infoPanel.style.display = 'none';
             }
         }
+
+        window.clearWorkspaceColumnTrace = clearColumnHighlighting;
     `;
 }
 

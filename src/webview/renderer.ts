@@ -160,6 +160,12 @@ let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 
+function isReducedMotionPreferred(): boolean {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
     const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
@@ -515,10 +521,32 @@ export function initRenderer(container: HTMLElement): void {
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
             }
+            .edge,
+            .column-lineage-edge {
+                animation: none !important;
+                stroke-dasharray: none !important;
+            }
+            .details-panel,
+            .stats-panel,
+            .hints-panel,
+            .legend-panel,
+            .sql-preview-panel {
+                transition: none !important;
+            }
         }
         @media (prefers-contrast: more) {
             .node-rect { stroke-width: 2 !important; }
-            .edge { stroke-width: 2.5 !important; }
+            .node-accent { width: 6px !important; }
+            .edge,
+            .column-lineage-edge { stroke-width: 2 !important; }
+            .details-panel,
+            .stats-panel,
+            .hints-panel,
+            .legend-panel,
+            .sql-preview-panel,
+            #sql-crack-breadcrumb-bar {
+                border-width: 2px !important;
+            }
         }
     `;
     document.head.appendChild(reducedMotionStyle);
@@ -1407,6 +1435,21 @@ export function render(result: ParseResult): void {
 
     // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
     selectNode(null);
+    clearFocusMode();
+    state.focusModeEnabled = false;
+    state.selectedColumn = null;
+    selectedColumnLineage = null;
+    clearLineageHighlights();
+    hideColumnLineagePanel();
+    state.showColumnFlows = false;
+    setColumnLineageBannerVisible(false);
+    updateLegendPanel();
+
+    if (searchBox && searchBox.value) {
+        searchBox.value = '';
+    }
+    clearSearch();
+    clearBreadcrumbBar();
 
     currentNodes = result.nodes;
     currentEdges = result.edges;
@@ -4101,6 +4144,10 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
 /** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
 function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
+    if (isReducedMotionPreferred()) {
+        restoreStroke();
+        return;
+    }
     rect.style.animation = 'node-pulse 0.6s ease-out';
     if (!document.getElementById('pulse-animation-style')) {
         const style = document.createElement('style');
@@ -4173,6 +4220,7 @@ function pulseNode(nodeId: string): void {
  * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
  */
 function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
+    if (isReducedMotionPreferred()) { return; }
     const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
     if (!cloudContainer) { return; }
 

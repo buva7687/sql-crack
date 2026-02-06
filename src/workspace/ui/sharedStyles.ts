@@ -327,9 +327,17 @@ export function getBaseStyles(): string {
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
             }
-            .lineage-edge {
+            .lineage-edge,
+            .lineage-edge.highlighted,
+            .column-lineage-edge {
                 stroke-dasharray: none !important;
                 animation: none !important;
+            }
+            .lineage-panel,
+            .lineage-legend,
+            .lineage-tooltip,
+            .column-lineage-info {
+                transition: none !important;
             }
         }
 
@@ -345,11 +353,21 @@ export function getBaseStyles(): string {
             .lineage-node .node-bg {
                 stroke-width: 2 !important;
             }
-            .edge path, .lineage-edge {
-                stroke-width: 2.5 !important;
+            .node .node-accent,
+            .lineage-node .node-accent {
+                width: 6px !important;
+            }
+            .edge, .edge path, .lineage-edge, .column-lineage-edge {
+                stroke-width: 2 !important;
             }
             .node-label, .lineage-node .node-name {
                 font-weight: 700 !important;
+            }
+            .lineage-tooltip,
+            .lineage-legend,
+            .column-lineage-info,
+            .workspace-breadcrumb {
+                border-width: 2px !important;
             }
         }
     `;
@@ -456,6 +474,28 @@ export function getLineagePanelStyles(): string {
             background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
             overflow-x: auto;
             white-space: nowrap;
+        }
+        .workspace-breadcrumb-segment {
+            border: none;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            padding: 0;
+            margin: 0;
+            cursor: default;
+        }
+        .workspace-breadcrumb-segment.is-clickable {
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .workspace-breadcrumb-segment.is-clickable:hover {
+            color: var(--text-primary);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .workspace-breadcrumb-separator {
+            color: var(--text-dim);
+            margin: 0 6px;
         }
         .lineage-back-btn {
             display: flex; align-items: center; gap: 6px; padding: 8px 12px;
@@ -2617,6 +2657,14 @@ export function getLineageNodeStyles(): string {
         .lineage-node .column-row:hover .column-row-bg {
             fill: rgba(99, 102, 241, 0.16);
         }
+        .lineage-node .column-row:focus-visible .column-row-bg {
+            fill: rgba(99, 102, 241, 0.24);
+            stroke: color-mix(in srgb, var(--accent) 55%, white);
+            stroke-width: 1.5;
+        }
+        .lineage-node .column-row:focus-visible .column-name {
+            fill: white;
+        }
         .lineage-node .column-row:hover .column-name {
             fill: white;
         }
@@ -2988,6 +3036,38 @@ export function getLineageNodeStyles(): string {
         .lineage-legend .legend-text { background: #4ade80; }
         .lineage-legend .legend-datetime { background: #c084fc; }
         .lineage-legend .legend-json { background: #2dd4bf; }
+        .lineage-legend .legend-keyboard-hints {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+        .lineage-legend .legend-keyboard-hints .hint-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .lineage-legend .legend-keyboard-hints .hint-divider {
+            width: 1px;
+            height: 12px;
+            background: var(--border-subtle);
+        }
+        .lineage-legend .legend-keyboard-hints kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 5px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 9px;
+            font-weight: 600;
+            font-family: inherit;
+        }
 
         /* Keyboard Shortcuts Hint */
         .keyboard-hints {
