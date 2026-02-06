@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-02-06
+
+### Added
+
+- **CREATE TABLE AS SELECT (CTAS)**: Inner SELECT is now processed to generate flow nodes and optimization hints, matching CREATE VIEW behavior.
+- **Recursive CTE labels**: CTE nodes show `WITH RECURSIVE <name>` and "Recursive Common Table Expression" description when the recursive flag is set.
+- **`||` dialect suggestion**: Parse errors involving the `||` concatenation operator now suggest switching to PostgreSQL or MySQL dialect.
+- **Error line numbers**: Parse error badge tooltips show `Q1 (line 12): <message>` when line information is available.
+- **Hints hierarchy module** (`hintsHierarchy.ts`): Sorts optimization hints by severity/type impact; provides compact badge state (ok/warning/error) for toolbar summary.
+- **Warning indicator module** (`warningIndicator.ts`): Isolates performance warning logic; renders inline top-right triangle markers on nodes instead of floating circles.
+- **Column lineage UX module** (`columnLineageUx.ts`): Centralizes column lineage discoverability (banner text, enable/trace guards).
+- **SQL snippet module** (`sqlSnippet.ts`): Extracts SQL fragments for node tooltips with line labels.
+- **Toolbar hints summary badge**: `⚡` button in toolbar showing hint count with color-coded status.
+- **Column lineage active banner**: Non-blocking banner below toolbar indicating active column lineage mode.
+- **Workspace export consolidation** (`exportUtils.ts`): Unified export dropdown with Copy Mermaid option; `generateWorkspaceMermaid()` utility.
+- **Workspace SVG icons**: Replaced emoji icons with inline SVG across graph, lineage, table explorer, and impact views.
+- **Workspace column trace onboarding**: One-time "Click a column to trace lineage across tables" hint on first column expand, persisted via localStorage.
+- **Workspace expand-columns tooltip**: Collapsed lineage nodes show "Click to focus · Double-click to expand columns" on hover.
+- **Workspace column lineage info panel**: Shows column name + source table, upstream/downstream counts, mini flow summary (`users.id → orders.user_id → report.customer_id`), and "Clear trace" button.
+- **Workspace keyboard navigation**: Expanded column rows are keyboard-focusable with Enter to trace.
+- **Workspace lineage legend + keyboard hints**: Integrated keyboard shortcut hints into lineage view legend.
+- **One-time help button pulse**: Toolbar `?` button pulses once on first run to aid discoverability.
+- **Full SQL preview tooltip cue**: Node tooltips mention the `S` shortcut for full SQL preview.
+
+### Changed
+
+- **Node tooltips**: Footer now shows "Click to select · Double-click to zoom · Right-click for actions".
+- **Warning badges on nodes**: Replaced floating circle badges with compact top-right triangle indicators.
+- **Render state reset**: Switching queries now fully resets column lineage, search, breadcrumbs, and focus mode.
+- **Overflow menu**: Fully theme-aware in light mode (button, dropdown rows, hover states).
+- **Breadcrumb bar**: Uses theme-aware colors; suppresses legacy popup during column lineage mode.
+- **Column lineage panel**: Themed scrollbar; explicit close button in header.
+- **Workspace graph nodes**: Added `node-bg` class and `node-accent` strip so CSS theme variables apply correctly.
+- **Workspace graph background**: Uses dot-grid pattern matching lineage view instead of solid background.
+
+### Fixed
+
+- **Phantom LIMIT node**: PostgreSQL, Snowflake, Trino, and Redshift no longer show a spurious LIMIT node when no LIMIT clause exists. The "No LIMIT clause" optimization hint now correctly appears for these dialects.
+- **Click-outside zoom reset**: Clicking empty canvas now restores the full view when zoomed into a node (previously required Escape).
+- **Auto-refresh for non-`.sql` files**: `.hql`, `.ddl`, `.pgsql`, untitled files, and other non-`.sql` documents now trigger auto-refresh when the visualization panel is open.
+- **Stats & hints panel overlap**: Panels dynamically shift above the legend bar when it is visible instead of being hidden behind it.
+- **Column lineage banner overlap**: Banner no longer stretches full-width or captures clicks across query tabs; uses `pointer-events: none` with only the close button interactive.
+- **Column lineage Escape dismiss**: Escape now closes column lineage mode from any focus context (SVG, document, or the lineage panel itself).
+- **Snowflake DELETE parsing**: Snowflake DELETE/MERGE statements that fail native grammar now fall back to PostgreSQL AST parsing.
+- **Light-theme toolbar**: Overflow button and dropdown rows use correct light-mode colors.
+- **Breadcrumb/filter state**: Filter chips no longer leak stale state across re-renders.
+
+---
+
 ## [0.2.0] - 2026-02-05
 
 ### Added
@@ -346,6 +395,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.1]: https://github.com/buva7687/sql-crack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/buva7687/sql-crack/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/buva7687/sql-crack/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/buva7687/sql-crack/compare/v0.1.2...v0.1.3
