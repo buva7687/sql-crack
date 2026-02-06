@@ -175,6 +175,19 @@ export const CLOSE_BUTTON_COLORS = {
     border: 'rgba(255, 255, 255, 0.3)',
 } as const;
 
+export const SCROLLBAR_COLORS = {
+    dark: {
+        thumb: 'rgba(148, 163, 184, 0.42)',
+        thumbHover: 'rgba(148, 163, 184, 0.58)',
+        track: 'rgba(15, 23, 42, 0.35)',
+    },
+    light: {
+        thumb: 'rgba(100, 116, 139, 0.32)',
+        thumbHover: 'rgba(71, 85, 105, 0.42)',
+        track: 'rgba(148, 163, 184, 0.12)',
+    },
+} as const;
+
 export const NODE_COLORS: Record<NodeType, string> = {
     table: '#93c5fd',      // light blue (blue-300)
     filter: '#c4b5fd',     // light purple (purple-300)
@@ -254,4 +267,8 @@ export function getNodeColor(type: NodeType): string {
 
 export function getWarningColor(severity: Severity): string {
     return WARNING_COLORS[severity] || WARNING_COLORS.low;
+}
+
+export function getScrollbarColors(isDarkTheme: boolean): { thumb: string; thumbHover: string; track: string } {
+    return isDarkTheme ? SCROLLBAR_COLORS.dark : SCROLLBAR_COLORS.light;
 }

@@ -44,6 +44,14 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('scrollbar-color:');
     });
 
+    it('applies theme-aware scrollbar styling for performance hints in light and dark modes', () => {
+        expect(rendererSource).toContain('ensureHintsPanelScrollbarStyles');
+        expect(rendererSource).toContain('getScrollbarColors(state.isDarkTheme)');
+        expect(rendererSource).toContain('hints-panel-scroll-style');
+        expect(rendererSource).toContain('.hints-panel::-webkit-scrollbar');
+        expect(rendererSource).toContain('.hints-panel .hints-list::-webkit-scrollbar');
+    });
+
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
         expect(rendererSource).toContain('if (sqlSnippet.truncated)');
         expect(rendererSource).toContain('Press S for full SQL');

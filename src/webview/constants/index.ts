@@ -13,10 +13,12 @@ export {
     GLOW_COLORS,
     STATUS_COLORS,
     CLOSE_BUTTON_COLORS,
+    SCROLLBAR_COLORS,
     NODE_SURFACE,
     NODE_ACCENT_COLORS,
     getNodeColor,
     getNodeAccentColor,
     getWarningColor,
     getTransformationColor,
+    getScrollbarColors,
 } from './colors';

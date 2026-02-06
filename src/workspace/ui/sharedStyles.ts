@@ -58,6 +58,9 @@ export function getCssVariables(dark: boolean = true): string {
                 --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
                 --shadow-lg: 0 10px 40px rgba(0,0,0,0.5);
                 --overlay-scrim: rgba(17, 17, 17, 0.7);
+                --scrollbar-thumb: rgba(148, 163, 184, 0.42);
+                --scrollbar-thumb-hover: rgba(148, 163, 184, 0.58);
+                --scrollbar-track: rgba(15, 23, 42, 0.35);
             }
         `;
     } else {
@@ -113,6 +116,9 @@ export function getCssVariables(dark: boolean = true): string {
                 --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
                 --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
                 --overlay-scrim: rgba(250, 250, 250, 0.85);
+                --scrollbar-thumb: rgba(100, 116, 139, 0.32);
+                --scrollbar-thumb-hover: rgba(71, 85, 105, 0.42);
+                --scrollbar-track: rgba(148, 163, 184, 0.12);
             }
         `;
     }
@@ -132,6 +138,28 @@ export function getBaseStyles(): string {
             font-size: 13px;
         }
         #app { width: 100%; height: 100%; display: flex; flex-direction: column; }
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+        }
+        *::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        *::-webkit-scrollbar-track {
+            background: var(--scrollbar-track);
+            border-radius: 8px;
+        }
+        *::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+            background: var(--scrollbar-thumb-hover);
+            background-clip: padding-box;
+        }
 
         /* ========== Header ========== */
         .header {
@@ -3740,6 +3768,28 @@ export function getIssuesPanelStyles(): string {
     return `
         /* Issues Panel Styles */
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+        }
+        *::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        *::-webkit-scrollbar-track {
+            background: var(--scrollbar-track);
+            border-radius: 8px;
+        }
+        *::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+            background: var(--scrollbar-thumb-hover);
+            background-clip: padding-box;
+        }
         body, html {
             width: 100%; height: 100vh; overflow: auto;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

@@ -53,7 +53,7 @@ import {
 } from './ui';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
-import { getNodeAccentColor, NODE_SURFACE } from './constants/colors';
+import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors } from './constants/colors';
 import type { GridStyle } from '../shared/themeTokens';
 import {
     getViewportBounds,
@@ -299,6 +299,7 @@ export function initRenderer(container: HTMLElement): void {
         transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     container.appendChild(hintsPanel);
+    ensureHintsPanelScrollbarStyles();
 
     // Create bottom legend bar (replaces old top-left legend panel)
     legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
@@ -7409,6 +7410,7 @@ function applyTheme(dark: boolean): void {
         }
     });
     updateColumnLineageBannerStyle();
+    ensureHintsPanelScrollbarStyles();
     if (columnLineagePanel) {
         ensureColumnLineagePanelScrollbarStyles();
     }
@@ -7856,6 +7858,45 @@ function setColumnLineageBannerVisible(visible: boolean): void {
     columnLineageBanner.style.display = visible ? 'flex' : 'none';
 }
 
+function ensureHintsPanelScrollbarStyles(): void {
+    const styleId = 'hints-panel-scroll-style';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+    const { thumb, thumbHover, track } = getScrollbarColors(state.isDarkTheme);
+    style.textContent = `
+        .hints-panel,
+        .hints-panel .hints-list {
+            scrollbar-width: thin;
+            scrollbar-color: ${thumb} ${track};
+        }
+        .hints-panel::-webkit-scrollbar,
+        .hints-panel .hints-list::-webkit-scrollbar {
+            width: 10px;
+        }
+        .hints-panel::-webkit-scrollbar-track,
+        .hints-panel .hints-list::-webkit-scrollbar-track {
+            background: ${track};
+            border-radius: 8px;
+        }
+        .hints-panel::-webkit-scrollbar-thumb,
+        .hints-panel .hints-list::-webkit-scrollbar-thumb {
+            background: ${thumb};
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        .hints-panel::-webkit-scrollbar-thumb:hover,
+        .hints-panel .hints-list::-webkit-scrollbar-thumb:hover {
+            background: ${thumbHover};
+            background-clip: padding-box;
+        }
+    `;
+}
+
 function ensureColumnLineagePanelScrollbarStyles(): void {
     const styleId = 'column-lineage-panel-scroll-style';
     let style = document.getElementById(styleId) as HTMLStyleElement | null;
@@ -7864,9 +7905,7 @@ function ensureColumnLineagePanelScrollbarStyles(): void {
         style.id = styleId;
         document.head.appendChild(style);
     }
-    const thumb = state.isDarkTheme ? 'rgba(148, 163, 184, 0.42)' : 'rgba(100, 116, 139, 0.32)';
-    const thumbHover = state.isDarkTheme ? 'rgba(148, 163, 184, 0.58)' : 'rgba(71, 85, 105, 0.42)';
-    const track = state.isDarkTheme ? 'rgba(15, 23, 42, 0.35)' : 'rgba(148, 163, 184, 0.12)';
+    const { thumb, thumbHover, track } = getScrollbarColors(state.isDarkTheme);
     style.textContent = `
         #column-lineage-panel {
             scrollbar-width: thin;
