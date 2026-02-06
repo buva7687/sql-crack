@@ -1,6 +1,7 @@
 // Export Dropdown — Consolidated export menu with all formats
 // Replaces separate PNG, SVG, MMD, clipboard buttons
 // Uses position: fixed and appends to body to escape overflow:hidden clipping
+import { getComponentUiColors } from '../constants';
 
 export interface ExportDropdownCallbacks {
     onExportPng: () => void;
@@ -27,6 +28,7 @@ export function createExportDropdown(
     container.style.cssText = 'display: flex; align-items: center;';
 
     const isDark = callbacks.isDarkTheme();
+    const theme = getComponentUiColors(isDark);
 
     // Trigger button
     const btn = document.createElement('button');
@@ -39,7 +41,7 @@ export function createExportDropdown(
     btn.style.cssText = `
         background: transparent;
         border: none;
-        color: ${isDark ? '#f1f5f9' : '#1e293b'};
+        color: ${theme.text};
         padding: 8px 12px;
         cursor: pointer;
         font-size: 11px;
@@ -59,14 +61,14 @@ export function createExportDropdown(
         z-index: 10000;
         padding: 6px 0;
         border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, ${isDark ? '0.4' : '0.15'});
-        background: ${isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
-        border: 1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};
+        box-shadow: ${theme.shadow};
+        background: ${theme.surfaceElevated};
+        border: 1px solid ${theme.border};
         backdrop-filter: blur(8px);
     `;
 
-    const textColor = isDark ? '#e2e8f0' : '#1e293b';
-    const hoverBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
+    const textColor = theme.textBright;
+    const hoverBg = theme.hover;
 
     const modKey = navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+';
     const items = [
@@ -83,7 +85,7 @@ export function createExportDropdown(
             sep.style.cssText = `
                 height: 1px;
                 margin: 4px 8px;
-                background: ${isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)'};
+                background: ${theme.subtleBg};
             `;
             dropdown.appendChild(sep);
             return;
@@ -112,11 +114,11 @@ export function createExportDropdown(
             const kbd = document.createElement('kbd');
             kbd.textContent = (item as any).shortcut;
             kbd.style.cssText = `
-                background: ${isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)'};
+                background: ${theme.accentBg};
                 border-radius: 3px;
                 padding: 2px 6px;
                 font-size: 10px;
-                color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                color: ${theme.accentSoft};
                 font-family: monospace;
             `;
             row.appendChild(kbd);
@@ -144,7 +146,7 @@ export function createExportDropdown(
         }
     });
 
-    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(148, 163, 184, 0.1)'; });
+    btn.addEventListener('mouseenter', () => { btn.style.background = theme.hover; });
     btn.addEventListener('mouseleave', () => {
         if (!isOpen) { btn.style.background = 'transparent'; }
     });
@@ -173,12 +175,13 @@ export function createExportDropdown(
     // Theme update listener — update all colors including row text
     document.addEventListener('theme-change', ((e: CustomEvent) => {
         const dark = e.detail.dark;
-        btn.style.color = dark ? '#f1f5f9' : '#1e293b';
-        dropdown.style.background = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-        dropdown.style.borderColor = dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
-        dropdown.style.boxShadow = `0 4px 16px rgba(0, 0, 0, ${dark ? '0.4' : '0.15'})`;
+        const nextTheme = getComponentUiColors(dark);
+        btn.style.color = nextTheme.text;
+        dropdown.style.background = nextTheme.surfaceElevated;
+        dropdown.style.borderColor = nextTheme.border;
+        dropdown.style.boxShadow = nextTheme.shadow;
         // Update row text colors
-        const newTextColor = dark ? '#e2e8f0' : '#1e293b';
+        const newTextColor = nextTheme.textBright;
         dropdown.querySelectorAll('[role="menuitem"]').forEach(row => {
             (row as HTMLElement).style.color = newTextColor;
         });
@@ -186,13 +189,13 @@ export function createExportDropdown(
         dropdown.querySelectorAll('div:not([role])').forEach(el => {
             const h = (el as HTMLElement).style.height;
             if (h === '1px') {
-                (el as HTMLElement).style.background = dark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
+                (el as HTMLElement).style.background = nextTheme.subtleBg;
             }
         });
         // Update kbd badges
         dropdown.querySelectorAll('kbd').forEach(kbd => {
-            kbd.style.background = dark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)';
-            kbd.style.color = dark ? '#a5b4fc' : '#6366f1';
+            kbd.style.background = nextTheme.accentBg;
+            kbd.style.color = nextTheme.accentSoft;
         });
     }) as EventListener);
 

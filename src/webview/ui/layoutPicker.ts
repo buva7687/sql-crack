@@ -3,6 +3,7 @@
 // Uses position: fixed and appends to body to escape overflow:hidden clipping
 
 import type { LayoutType } from '../types';
+import { getComponentUiColors } from '../constants';
 
 export interface LayoutPickerCallbacks {
     onLayoutChange: (layout: LayoutType) => void;
@@ -34,6 +35,7 @@ export function createLayoutPicker(
     container.style.cssText = 'display: flex; align-items: center;';
 
     const isDark = callbacks.isDarkTheme();
+    const theme = getComponentUiColors(isDark);
     const currentLayout = callbacks.getCurrentLayout();
 
     // Trigger button
@@ -46,12 +48,12 @@ export function createLayoutPicker(
     btn.style.cssText = `
         background: transparent;
         border: none;
-        color: ${isDark ? '#f1f5f9' : '#1e293b'};
+        color: ${theme.text};
         padding: 8px 12px;
         cursor: pointer;
         font-size: 14px;
         transition: background 0.15s;
-        border-left: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+        border-left: 1px solid ${theme.border};
     `;
     triggerBtn = btn;
 
@@ -68,9 +70,9 @@ export function createLayoutPicker(
         z-index: 10000;
         padding: 6px 0;
         border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, ${isDark ? '0.4' : '0.15'});
-        background: ${isDark ? 'rgba(17,17,17,0.98)' : 'rgba(255,255,255,0.98)'};
-        border: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+        box-shadow: ${theme.shadow};
+        background: ${theme.surfaceElevated};
+        border: 1px solid ${theme.border};
         backdrop-filter: blur(8px);
     `;
 
@@ -85,7 +87,7 @@ export function createLayoutPicker(
         }
     });
 
-    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(148,163,184,0.1)'; });
+    btn.addEventListener('mouseenter', () => { btn.style.background = theme.hover; });
     btn.addEventListener('mouseleave', () => {
         if (!isOpen) { btn.style.background = 'transparent'; }
     });
@@ -102,11 +104,12 @@ export function createLayoutPicker(
     // Listen for theme changes
     document.addEventListener('theme-change', ((e: CustomEvent) => {
         const dark = e.detail.dark;
-        btn.style.color = dark ? '#f1f5f9' : '#1e293b';
-        btn.style.borderLeftColor = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-        dropdown.style.background = dark ? 'rgba(17,17,17,0.98)' : 'rgba(255,255,255,0.98)';
-        dropdown.style.borderColor = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-        dropdown.style.boxShadow = `0 4px 16px rgba(0, 0, 0, ${dark ? '0.4' : '0.15'})`;
+        const nextTheme = getComponentUiColors(dark);
+        btn.style.color = nextTheme.text;
+        btn.style.borderLeftColor = nextTheme.border;
+        dropdown.style.background = nextTheme.surfaceElevated;
+        dropdown.style.borderColor = nextTheme.border;
+        dropdown.style.boxShadow = nextTheme.shadow;
     }) as EventListener);
 
     return container;
@@ -135,9 +138,10 @@ function closePicker(): void {
 
 function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbacks): void {
     const isDark = callbacks.isDarkTheme();
+    const theme = getComponentUiColors(isDark);
     const current = callbacks.getCurrentLayout();
-    const textColor = isDark ? '#E2E8F0' : '#1E293B';
-    const activeColor = isDark ? '#818CF8' : '#6366F1';
+    const textColor = theme.textBright;
+    const activeColor = theme.accent;
 
     dropdown.innerHTML = '';
 
@@ -147,7 +151,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
         padding: 4px 12px 6px;
         font-size: 10px;
         text-transform: uppercase;
-        color: ${isDark ? '#64748B' : '#94A3B8'};
+        color: ${theme.textDim};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
@@ -164,7 +168,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
             align-items: center;
             gap: 10px;
             color: ${isActive ? activeColor : textColor};
-            background: ${isActive ? (isDark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.08)') : 'transparent'};
+            background: ${isActive ? theme.accentBgSoft : 'transparent'};
             transition: background 0.1s;
             font-size: 12px;
         `;
@@ -173,14 +177,14 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
             <span style="font-size: 14px; min-width: 18px; text-align: center;">${layout.icon}</span>
             <div style="flex: 1;">
                 <div style="font-weight: 500;">${layout.label}</div>
-                <div style="font-size: 10px; color: ${isDark ? '#64748B' : '#94A3B8'};">${layout.desc}</div>
+                <div style="font-size: 10px; color: ${theme.textDim};">${layout.desc}</div>
             </div>
             <kbd style="
-                background: ${isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)'};
+                background: ${theme.accentBg};
                 border-radius: 3px;
                 padding: 2px 6px;
                 font-size: 10px;
-                color: ${isDark ? '#A5B4FC' : '#6366F1'};
+                color: ${theme.accentSoft};
                 font-family: monospace;
             ">${layout.key}</kbd>
             ${isActive ? `<span style="color: ${activeColor};">&#x2713;</span>` : ''}
@@ -188,7 +192,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
 
         item.addEventListener('mouseenter', () => {
             if (!isActive) {
-                item.style.background = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
+                item.style.background = theme.subtleBgAlt;
             }
         });
         item.addEventListener('mouseleave', () => {

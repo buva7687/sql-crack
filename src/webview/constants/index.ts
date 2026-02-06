@@ -14,6 +14,7 @@ export {
     STATUS_COLORS,
     CLOSE_BUTTON_COLORS,
     SCROLLBAR_COLORS,
+    COMPONENT_UI_COLORS,
     NODE_SURFACE,
     NODE_ACCENT_COLORS,
     getNodeColor,
@@ -21,4 +22,5 @@ export {
     getWarningColor,
     getTransformationColor,
     getScrollbarColors,
+    getComponentUiColors,
 } from './colors';

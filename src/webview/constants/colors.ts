@@ -188,6 +188,65 @@ export const SCROLLBAR_COLORS = {
     },
 } as const;
 
+export const COMPONENT_UI_COLORS = {
+    dark: {
+        surface: 'rgba(15, 23, 42, 0.95)',
+        surfaceElevated: 'rgba(15, 23, 42, 0.98)',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#f1f5f9',
+        textBright: '#e2e8f0',
+        textMuted: '#94a3b8',
+        textDim: '#64748b',
+        hover: 'rgba(148, 163, 184, 0.1)',
+        hoverStrong: 'rgba(148, 163, 184, 0.2)',
+        accent: '#818cf8',
+        accentSoft: '#a5b4fc',
+        accentBg: 'rgba(99, 102, 241, 0.15)',
+        accentBgSoft: 'rgba(99, 102, 241, 0.12)',
+        accentBgStrong: 'rgba(99, 102, 241, 0.3)',
+        subtleBg: 'rgba(255, 255, 255, 0.06)',
+        subtleBgAlt: 'rgba(255, 255, 255, 0.04)',
+        overlayBg: 'rgba(0, 0, 0, 0.7)',
+        modalBg: 'rgba(17, 17, 17, 0.98)',
+        modalBorder: 'rgba(255, 255, 255, 0.08)',
+        rowBorder: 'rgba(148, 163, 184, 0.1)',
+        selectBg: '#1e293b',
+        shadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        shadowSoft: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        errorBg: 'rgba(239, 68, 68, 0.15)',
+        errorBgHover: 'rgba(239, 68, 68, 0.25)',
+        warningBg: 'rgba(234, 179, 8, 0.3)',
+    },
+    light: {
+        surface: 'rgba(255, 255, 255, 0.95)',
+        surfaceElevated: 'rgba(255, 255, 255, 0.98)',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        textBright: '#1e293b',
+        textMuted: '#64748b',
+        textDim: '#94a3b8',
+        hover: 'rgba(0, 0, 0, 0.04)',
+        hoverStrong: 'rgba(15, 23, 42, 0.06)',
+        accent: '#6366f1',
+        accentSoft: '#6366f1',
+        accentBg: 'rgba(99, 102, 241, 0.1)',
+        accentBgSoft: 'rgba(99, 102, 241, 0.08)',
+        accentBgStrong: 'rgba(99, 102, 241, 0.15)',
+        subtleBg: 'rgba(0, 0, 0, 0.06)',
+        subtleBgAlt: 'rgba(0, 0, 0, 0.03)',
+        overlayBg: 'rgba(0, 0, 0, 0.4)',
+        modalBg: 'rgba(255, 255, 255, 0.98)',
+        modalBorder: 'rgba(0, 0, 0, 0.1)',
+        rowBorder: 'rgba(0, 0, 0, 0.06)',
+        selectBg: '#f1f5f9',
+        shadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        shadowSoft: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        errorBg: 'rgba(220, 38, 38, 0.1)',
+        errorBgHover: 'rgba(220, 38, 38, 0.16)',
+        warningBg: 'rgba(234, 179, 8, 0.2)',
+    },
+} as const;
+
 export const NODE_COLORS: Record<NodeType, string> = {
     table: '#93c5fd',      // light blue (blue-300)
     filter: '#c4b5fd',     // light purple (purple-300)
@@ -271,4 +330,37 @@ export function getWarningColor(severity: Severity): string {
 
 export function getScrollbarColors(isDarkTheme: boolean): { thumb: string; thumbHover: string; track: string } {
     return isDarkTheme ? SCROLLBAR_COLORS.dark : SCROLLBAR_COLORS.light;
+}
+
+export function getComponentUiColors(
+    isDarkTheme: boolean
+): {
+    surface: string;
+    surfaceElevated: string;
+    border: string;
+    text: string;
+    textBright: string;
+    textMuted: string;
+    textDim: string;
+    hover: string;
+    hoverStrong: string;
+    accent: string;
+    accentSoft: string;
+    accentBg: string;
+    accentBgSoft: string;
+    accentBgStrong: string;
+    subtleBg: string;
+    subtleBgAlt: string;
+    overlayBg: string;
+    modalBg: string;
+    modalBorder: string;
+    rowBorder: string;
+    selectBg: string;
+    shadow: string;
+    shadowSoft: string;
+    errorBg: string;
+    errorBgHover: string;
+    warningBg: string;
+} {
+    return isDarkTheme ? COMPONENT_UI_COLORS.dark : COMPONENT_UI_COLORS.light;
 }

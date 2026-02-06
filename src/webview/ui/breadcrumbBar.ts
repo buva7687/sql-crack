@@ -1,6 +1,7 @@
 // Breadcrumb Bar — Filter/state indicator below toolbar
 // Shows active focus mode, search term, column trace, CTE context
 // Each segment is clickable to clear that filter. "x" clears all.
+import { getComponentUiColors } from '../constants';
 
 export interface BreadcrumbSegment {
     id: string;
@@ -28,6 +29,7 @@ export function createBreadcrumbBar(
 ): HTMLDivElement {
     callbacks = cb;
     const isDark = cb.isDarkTheme();
+    const theme = getComponentUiColors(isDark);
 
     barElement = document.createElement('div');
     barElement.id = 'sql-crack-breadcrumb-bar';
@@ -43,8 +45,8 @@ export function createBreadcrumbBar(
         gap: 6px;
         padding: 6px 12px;
         border-radius: 8px;
-        background: ${isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
-        border: 1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};
+        background: ${theme.surface};
+        border: 1px solid ${theme.border};
         backdrop-filter: blur(8px);
         z-index: 99;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -58,8 +60,9 @@ export function createBreadcrumbBar(
     document.addEventListener('theme-change', ((e: CustomEvent) => {
         if (!barElement) { return; }
         const dark = e.detail.dark;
-        barElement.style.background = dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
-        barElement.style.borderColor = dark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+        const nextTheme = getComponentUiColors(dark);
+        barElement.style.background = nextTheme.surface;
+        barElement.style.borderColor = nextTheme.border;
         renderSegments();
     }) as EventListener);
 
@@ -124,10 +127,12 @@ function renderSegments(): void {
     barElement.innerHTML = '';
 
     const isDark = callbacks.isDarkTheme();
-    const textColor = isDark ? '#E2E8F0' : '#1E293B';
-    const mutedColor = isDark ? '#64748B' : '#94A3B8';
-    const chipBg = isDark ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.08)';
-    const chipColor = isDark ? '#A5B4FC' : '#6366F1';
+    const theme = getComponentUiColors(isDark);
+    const textColor = theme.textBright;
+    const mutedColor = theme.textDim;
+    const chipBg = theme.accentBgSoft;
+    const chipHoverBg = theme.accentBg;
+    const chipColor = theme.accentSoft;
 
     // Label
     const label = document.createElement('span');
@@ -181,7 +186,7 @@ function renderSegments(): void {
         chip.appendChild(closeIcon);
 
         chip.addEventListener('mouseenter', () => {
-            chip.style.background = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.15)';
+            chip.style.background = chipHoverBg;
         });
         chip.addEventListener('mouseleave', () => {
             chip.style.background = chipBg;
@@ -218,7 +223,7 @@ function renderSegments(): void {
 
         clearAll.addEventListener('mouseenter', () => {
             clearAll.style.color = textColor;
-            clearAll.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+            clearAll.style.background = theme.hover;
         });
         clearAll.addEventListener('mouseleave', () => {
             clearAll.style.color = mutedColor;
