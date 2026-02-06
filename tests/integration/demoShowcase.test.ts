@@ -25,6 +25,19 @@ describe('Demo Showcase E2E Tests', () => {
         result = parseSqlBatch(demoSql, 'PostgreSQL', DEFAULT_VALIDATION_LIMITS, {});
     });
 
+    describe('Snowflake write-query compatibility', () => {
+        it('parses QUERY 8 DELETE statement without Snowflake near-W failure', () => {
+            const snowflakeResult = parseSqlBatch(demoSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
+            const deleteQuery = snowflakeResult.queries.find(q =>
+                /DELETE\s+FROM\s+test_orders/i.test(q.sql)
+            );
+
+            expect(deleteQuery).toBeDefined();
+            expect(deleteQuery?.error).toBeUndefined();
+            expect(deleteQuery?.nodes.some(n => n.label === 'DELETE')).toBe(true);
+        });
+    });
+
     describe('Batch Parsing', () => {
         it('should parse multiple queries', () => {
             // demo-showcase.sql has multiple queries (9+ depending on how semicolons are handled)

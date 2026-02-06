@@ -545,14 +545,12 @@ describe('SQL Parser', () => {
       expect(result.nodes).toEqual([]);
     });
 
-    it('includes problematic syntax hint in error message', () => {
-      // This SQL uses INTERVAL syntax that Snowflake parser doesn't recognize
+    it('parses Snowflake DELETE via dialect fallback when native grammar fails', () => {
       const sql = `DELETE FROM test_orders WHERE created_at < CURRENT_DATE - INTERVAL '90 days'`;
       const result = parseSql(sql, 'Snowflake');
 
-      expect(result.error).toBeDefined();
-      // Error should include hint about what syntax failed, not just generic message
-      expect(result.error).toMatch(/near|syntax/i);
+      expect(result.error).toBeUndefined();
+      expect(result.nodes.some(n => n.label === 'DELETE')).toBe(true);
     });
 
     it('provides dialect suggestion in error message', () => {

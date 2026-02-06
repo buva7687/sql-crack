@@ -1105,6 +1105,31 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     }
 }
 
+function getLeadingKeyword(sql: string): string | null {
+    const stripped = stripLeadingComments(sql);
+    const match = stripped.match(/^\s*([A-Za-z_]+)/);
+    return match ? match[1].toUpperCase() : null;
+}
+
+function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
+    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
+    // Fall back to PostgreSQL AST parsing for these statements so visualization can still render.
+    if (dialect !== 'Snowflake') {
+        return null;
+    }
+
+    const keyword = getLeadingKeyword(sql);
+    if (!keyword || !['DELETE', 'MERGE'].includes(keyword)) {
+        return null;
+    }
+
+    try {
+        return parser.astify(sql, { database: 'PostgreSQL' });
+    } catch {
+        return null;
+    }
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     // Reset all parser state atomically by creating a fresh context
     ctx = createFreshContext(dialect);
@@ -1124,7 +1149,16 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const parser = new Parser();
 
     try {
-        const ast = parser.astify(sql, { database: dialect });
+        let ast: any;
+        try {
+            ast = parser.astify(sql, { database: dialect });
+        } catch (parseError) {
+            const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, dialect);
+            if (!fallbackAst) {
+                throw parseError;
+            }
+            ast = fallbackAst;
+        }
         const statements = Array.isArray(ast) ? ast : [ast];
 
         for (const stmt of statements) {
