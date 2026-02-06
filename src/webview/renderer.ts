@@ -743,6 +743,11 @@ function setupEventListeners(): void {
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
+            // Dismiss column lineage first if active
+            if (state.showColumnFlows) {
+                toggleColumnFlows(false);
+                return;
+            }
             selectNode(null);
             clearFocusMode();
             hideContextMenu();
@@ -785,6 +790,11 @@ function setupEventListeners(): void {
 
         // Escape to close panels, exit fullscreen, and reset view
         if (e.key === 'Escape') {
+            // Dismiss column lineage mode first if active
+            if (state.showColumnFlows) {
+                toggleColumnFlows(false);
+                return;
+            }
             if (state.isFullscreen) {
                 toggleFullscreen(false);
             }
@@ -7889,7 +7899,6 @@ export function toggleColumnFlows(show?: boolean): void {
             return;
         }
         showColumnLineagePanel();
-        setColumnLineageBannerVisible(true);
         if (breadcrumbPanel) {
             breadcrumbPanel.style.display = 'none';
         }
@@ -7899,6 +7908,8 @@ export function toggleColumnFlows(show?: boolean): void {
             icon: '\u2502',
             onClear: () => { toggleColumnFlows(false); },
         });
+        // Banner is redundant when the breadcrumb chip is visible
+        setColumnLineageBannerVisible(false);
     } else {
         hideColumnLineagePanel();
         setColumnLineageBannerVisible(false);
@@ -7979,6 +7990,16 @@ function showColumnLineagePanel(): void {
     columnLineagePanel.appendChild(header);
     const panelCloseBtn = header.querySelector('#column-lineage-panel-close') as HTMLButtonElement | null;
     panelCloseBtn?.addEventListener('click', () => toggleColumnFlows(false));
+
+    // Allow Escape to dismiss column lineage when the panel itself has focus
+    columnLineagePanel.setAttribute('tabindex', '-1');
+    columnLineagePanel.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleColumnFlows(false);
+        }
+    });
 
     // Column search input
     const searchContainer = document.createElement('div');
