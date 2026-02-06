@@ -300,6 +300,7 @@ export function createToolbar(
     const cleanup: ToolbarCleanup = () => {
         documentListeners.forEach(({ type, handler }) => {
             document.removeEventListener(type, handler);
+            window.removeEventListener(type, handler);
         });
         documentListeners.length = 0;
         if (resizeObserver) {
@@ -310,6 +311,9 @@ export function createToolbar(
         if (overflowDropdown) {
             overflowDropdown.remove();
         }
+        document.querySelectorAll('.sql-crack-floating-toolbar-menu').forEach((menu) => {
+            (menu as HTMLElement).remove();
+        });
     };
 
     return { toolbar, actions, searchContainer, cleanup };
@@ -529,10 +533,10 @@ function cleanOverflowLabel(title: string): string {
 function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElement; label: string; icon: string }> {
     const result: Array<{ btn: HTMLElement; label: string; icon: string }> = [];
 
-    // Children of actions: [zoomGroup, exportGroup, featureGroup, overflowContainer]
+    // Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]
     const children = Array.from(actions.children) as HTMLElement[];
-    const exportGroup = children[1]; // exportGroup
-    const featureGroup = children[2]; // featureGroup
+    const featureGroup = children[1];
+    const exportGroup = children[2];
 
     if (!exportGroup || !featureGroup) {return result;}
 
@@ -704,6 +708,7 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
+        flex-shrink: 0;
         align-items: center;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
@@ -757,6 +762,7 @@ function createExportGroup(
     const exportGroup = document.createElement('div');
     exportGroup.style.cssText = `
         display: flex;
+        flex-shrink: 0;
         background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
@@ -791,6 +797,7 @@ function createFeatureGroup(
     const featureGroup = document.createElement('div');
     featureGroup.style.cssText = `
         display: flex;
+        flex-shrink: 0;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
@@ -830,7 +837,7 @@ function createFeatureGroup(
 
         // Pinned tabs button
         if (options.persistedPinnedTabs.length > 0) {
-            const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs);
+            const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs, documentListeners);
             featureGroup.appendChild(pinsBtn);
         }
     } else {
@@ -1002,7 +1009,7 @@ function createFocusModeSelector(
     const container = document.createElement('div');
     container.id = 'focus-mode-selector';
     container.dataset.overflowKeepVisible = 'true';
-    container.style.cssText = `position: relative; display: flex; align-items: center;`;
+    container.style.cssText = `display: flex; align-items: center;`;
 
     const btn = document.createElement('button');
     btn.id = 'focus-mode-btn';
@@ -1011,17 +1018,17 @@ function createFocusModeSelector(
     btn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = document.createElement('div');
+    dropdown.id = 'focus-mode-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1096,7 +1103,16 @@ function createFocusModeSelector(
 
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
 
     btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
@@ -1112,8 +1128,18 @@ function createFocusModeSelector(
     document.addEventListener('click', focusModeClickHandler);
     documentListeners.push({ type: 'click', handler: focusModeClickHandler });
 
+    const focusModeResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', focusModeResizeHandler);
+    documentListeners.push({ type: 'resize', handler: focusModeResizeHandler as EventListener });
+
     container.appendChild(btn);
-    container.appendChild(dropdown);
+    document.body.appendChild(dropdown);
     return container;
 }
 
@@ -1148,15 +1174,23 @@ function createViewLocationButton(
     viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
-    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createViewLocationDropdown(callbacks, currentLocation);
-    viewLocBtn.appendChild(dropdown);
+    document.body.appendChild(dropdown);
 
     viewLocBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isVisible = dropdown.style.display === 'block';
-        dropdown.style.display = isVisible ? 'none' : 'block';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = viewLocBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
 
     const viewLocClickHandler = () => {
@@ -1164,6 +1198,16 @@ function createViewLocationButton(
     };
     document.addEventListener('click', viewLocClickHandler);
     documentListeners.push({ type: 'click', handler: viewLocClickHandler });
+
+    const viewLocResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = viewLocBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', viewLocResizeHandler);
+    documentListeners.push({ type: 'resize', handler: viewLocResizeHandler as EventListener });
 
     viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     viewLocBtn.addEventListener('mouseleave', () => {
@@ -1177,17 +1221,17 @@ function createViewLocationButton(
 
 function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation: string): HTMLElement {
     const dropdown = document.createElement('div');
+    dropdown.id = 'view-location-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1251,23 +1295,48 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
 
 function createPinnedTabsButton(
     callbacks: ToolbarCallbacks,
-    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
+    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>,
+    documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const pinsBtn = document.createElement('button');
     pinsBtn.id = 'pinned-tabs-btn';
     pinsBtn.dataset.overflowKeepVisible = 'true';
     pinsBtn.innerHTML = '📋';
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
-    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins);
-    pinsBtn.appendChild(dropdown);
+    document.body.appendChild(dropdown);
 
     pinsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isVisible = dropdown.style.display === 'block';
-        dropdown.style.display = isVisible ? 'none' : 'block';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = pinsBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
+
+    const pinnedTabsClickHandler = () => {
+        dropdown.style.display = 'none';
+    };
+    document.addEventListener('click', pinnedTabsClickHandler);
+    documentListeners.push({ type: 'click', handler: pinnedTabsClickHandler });
+
+    const pinnedTabsResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = pinsBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', pinnedTabsResizeHandler);
+    documentListeners.push({ type: 'resize', handler: pinnedTabsResizeHandler as EventListener });
 
     pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     pinsBtn.addEventListener('mouseleave', () => {
@@ -1284,11 +1353,11 @@ function createPinnedTabsDropdown(
     pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
 ): HTMLElement {
     const dropdown = document.createElement('div');
+    dropdown.id = 'pinned-tabs-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
@@ -1296,7 +1365,7 @@ function createPinnedTabsDropdown(
         min-width: 220px;
         max-height: 300px;
         overflow-y: auto;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 

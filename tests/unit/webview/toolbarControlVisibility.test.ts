@@ -13,6 +13,28 @@ describe('toolbar control visibility and overflow behavior', () => {
         expect(source).toContain("pinsBtn.dataset.overflowKeepVisible = 'true';");
         expect(source).toContain("if (el.dataset.overflowKeepVisible === 'true') {continue;}");
         expect(source).toContain("if (el.tagName !== 'BUTTON') {continue;}");
+        expect(source).toContain('Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]');
+    });
+
+    it('prevents toolbar group shrink-clipping before overflow handling runs', () => {
+        expect(source).toContain('function createZoomGroup');
+        expect(source).toContain('function createFeatureGroup');
+        expect(source).toContain('function createExportGroup');
+        expect(source).toMatch(/function createZoomGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
+        expect(source).toMatch(/function createFeatureGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
+        expect(source).toMatch(/function createExportGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
+    });
+
+    it('renders focus/view-location/pinned menus as fixed body-mounted overlays', () => {
+        expect(source).toContain("dropdown.id = 'focus-mode-dropdown';");
+        expect(source).toContain("dropdown.id = 'view-location-dropdown';");
+        expect(source).toContain("dropdown.id = 'pinned-tabs-dropdown';");
+        expect(source).toMatch(/function createFocusModeSelector[\s\S]*?position:\s*fixed;/);
+        expect(source).toMatch(/function createViewLocationDropdown[\s\S]*?position:\s*fixed;/);
+        expect(source).toMatch(/function createPinnedTabsDropdown[\s\S]*?position:\s*fixed;/);
+        expect(source).toMatch(/function createFocusModeSelector[\s\S]*?document\.body\.appendChild\(dropdown\);/);
+        expect(source).toMatch(/function createViewLocationButton[\s\S]*?document\.body\.appendChild\(dropdown\);/);
+        expect(source).toMatch(/function createPinnedTabsButton[\s\S]*?document\.body\.appendChild\(dropdown\);/);
     });
 
     it('does not render the redundant legend toolbar button', () => {
