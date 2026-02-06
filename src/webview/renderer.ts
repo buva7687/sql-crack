@@ -642,11 +642,16 @@ function setupEventListeners(): void {
         updateZoomIndicator();
     });
 
-    // Click outside to deselect and reset focus
+    // Click outside to deselect, reset focus, and restore zoom
     svg.addEventListener('click', (e) => {
         if (e.target === svg) {
+            const wasZoomed = state.zoomedNodeId !== null;
             selectNode(null);
             clearFocusMode();
+            if (wasZoomed) {
+                fitView();
+                updateZoomIndicator();
+            }
         }
     });
 

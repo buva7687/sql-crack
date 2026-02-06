@@ -1204,6 +1204,15 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(sql);
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
 
+        // Extract line/column position from parser error message if available
+        const lineInfoMatch = originalError.match(/(?:line\s+|at\s+line\s+)(\d+)/i);
+        const colInfoMatch = originalError.match(/(?:column\s+|col\s+)(\d+)/i);
+        if (lineInfoMatch) {
+            const lineNum = lineInfoMatch[1];
+            const colNum = colInfoMatch ? `:${colInfoMatch[1]}` : '';
+            message = `Line ${lineNum}${colNum}: ${originalError}`;
+        }
+
         // Extract specific syntax issue from error message
         // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"
         // We want to extract what was found (the problematic token)
@@ -1214,8 +1223,13 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                           (quotedFoundMatch ? quotedFoundMatch[1] :
                           (unexpectedMatch ? unexpectedMatch[1] : null));
 
+        // Check for || concatenation operator failure
+        const hasPipeConcat = /\|\|/.test(sql);
+
         if (originalError.includes('found') || originalError.includes('Expected')) {
-            if (ctx.dialect === 'MySQL') {
+            if (hasPipeConcat && (syntaxHint === '|' || syntaxHint === '||' || originalError.includes('||'))) {
+                message = `|| concatenation operator failed to parse in ${ctx.dialect}. Try PostgreSQL or MySQL dialect which supports || concatenation.`;
+            } else if (ctx.dialect === 'MySQL') {
                 // MySQL-specific issues - check in order of likelihood
                 if (hasParenthesizedUnion && hasIntervalQuoted) {
                     message = `This query uses PostgreSQL syntax (INTERVAL '...' and parenthesized UNION). Try PostgreSQL dialect.`;
@@ -1999,6 +2013,33 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
 
             return rootId;
         }
+
+        // For CREATE TABLE AS SELECT (CTAS), process the inner SELECT for optimization hints
+        if (stmt.keyword === 'table' && (stmt.select || stmt.as) && objectName) {
+            const innerSelect = stmt.select || stmt.as;
+            const selectRootId = processSelect(innerSelect, nodes, edges);
+
+            const tableNodeWidth = Math.max(160, objectName.length * 10 + 60);
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `TABLE ${objectName}`,
+                description: `Create table as select: ${objectName}`,
+                accessMode: 'write',
+                operationType: 'CREATE_TABLE_AS',
+                x: 0, y: 0, width: tableNodeWidth, height: 60
+            });
+
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
     }
 
     // Calculate width based on label length
@@ -2094,11 +2135,16 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const containerWidth = Math.max(200, cteChildren.length > 0 ? 220 : 160);
             const containerHeight = cteChildren.length > 0 ? 80 + cteChildren.length * 35 : 60;
 
+            // Check if this CTE is recursive (node-sql-parser sets recursive flag on the CTE or parent)
+            const isRecursive = cte.recursive === true || cte.prefix?.toLowerCase() === 'recursive';
+            const cteLabel = isRecursive ? `WITH RECURSIVE ${cteName}` : `WITH ${cteName}`;
+            const cteDescription = isRecursive ? 'Recursive Common Table Expression' : 'Common Table Expression';
+
             nodes.push({
                 id: cteId,
                 type: 'cte',
-                label: `WITH ${cteName}`,
-                description: 'Common Table Expression',
+                label: cteLabel,
+                description: cteDescription,
                 children: cteChildren.length > 0 ? cteChildren : undefined,
                 childEdges: cteChildren.length > 0 ? cteChildEdges : undefined, // Keep empty array if children exist
                 expanded: false, // Start collapsed, expand on click to show subflow
@@ -2441,8 +2487,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
         previousId = sortId;
     }
 
-    // Process LIMIT
-    if (stmt.limit) {
+    // Process LIMIT — guard against phantom objects from node-sql-parser
+    // (PostgreSQL, Snowflake, Trino, Redshift return { seperator: "", value: [] } when no LIMIT exists)
+    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         ctx.hasNoLimit = false;
         const limitId = genId('limit');
         const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;

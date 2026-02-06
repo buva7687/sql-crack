@@ -398,7 +398,8 @@ async function visualize(sql: string): Promise<void> {
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
         const errorDetails = batchResult.parseErrors?.map(e => ({
             queryIndex: e.queryIndex,
-            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message
+            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
+            line: e.line
         }));
         updateErrorBadge(batchResult.errorCount, errorDetails);
     } else {

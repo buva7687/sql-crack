@@ -1431,7 +1431,7 @@ export function clearRefreshButtonStale(): void {
  * Update or hide the error notification badge in the toolbar
  * Shows number of failed queries when errors exist
  */
-export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string }>): void {
+export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number }>): void {
     const existingBadge = document.getElementById('sql-crack-error-badge');
 
     if (errorCount === 0) {
@@ -1477,8 +1477,11 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         }
     }
 
-    // Build tooltip content
-    const tooltipText = errors?.map(e => `Q${e.queryIndex + 1}: ${e.message}`).join('\n') ||
+    // Build tooltip content — include line numbers when available
+    const tooltipText = errors?.map(e => {
+        const prefix = e.line ? `Q${e.queryIndex + 1} (line ${e.line})` : `Q${e.queryIndex + 1}`;
+        return `${prefix}: ${e.message}`;
+    }).join('\n') ||
         `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 
     badge.innerHTML = `

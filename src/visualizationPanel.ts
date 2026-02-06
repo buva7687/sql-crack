@@ -225,6 +225,10 @@ export class VisualizationPanel {
         }
     }
 
+    public static get sourceDocumentUri(): vscode.Uri | undefined {
+        return VisualizationPanel.currentPanel?._sourceDocumentUri;
+    }
+
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');

@@ -297,7 +297,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for document changes with debounced auto-refresh
     let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
-        if (isSqlLikeDocument(e.document) && VisualizationPanel.currentPanel) {
+        const isSourceDoc = VisualizationPanel.sourceDocumentUri &&
+            e.document.uri.toString() === VisualizationPanel.sourceDocumentUri.toString();
+        if ((isSqlLikeDocument(e.document) || isSourceDoc) && VisualizationPanel.currentPanel) {
             const config = getConfig();
             const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
             const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
