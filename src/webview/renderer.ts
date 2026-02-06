@@ -3867,6 +3867,10 @@ function escapeHtml(text: string): string {
 
 function updateBreadcrumb(nodeId: string | null): void {
     if (!breadcrumbPanel) { return; }
+    if (state.showColumnFlows) {
+        breadcrumbPanel.style.display = 'none';
+        return;
+    }
 
     if (!nodeId) {
         // Hide breadcrumb if no node selected
@@ -3931,6 +3935,14 @@ function renderBreadcrumb(): void {
     breadcrumbPanel.style.display = 'flex';
     breadcrumbPanel.style.alignItems = 'center';
     breadcrumbPanel.style.gap = '8px';
+    breadcrumbPanel.style.background = state.isDarkTheme ? UI_COLORS.backgroundPanel : UI_COLORS.backgroundPanelLight;
+    breadcrumbPanel.style.borderColor = state.isDarkTheme ? UI_COLORS.border : 'rgba(0, 0, 0, 0.1)';
+    breadcrumbPanel.style.color = state.isDarkTheme ? UI_COLORS.textSubtle : '#475569';
+
+    const crumbText = state.isDarkTheme ? '#f1f5f9' : '#0f172a';
+    const crumbMuted = state.isDarkTheme ? '#94a3b8' : '#475569';
+    const crumbHover = state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(15, 23, 42, 0.08)';
+    const separatorColor = state.isDarkTheme ? '#64748b' : '#94a3b8';
 
     state.breadcrumbPath.forEach((node, index) => {
         // Create breadcrumb item
@@ -3941,13 +3953,13 @@ function renderBreadcrumb(): void {
             border-radius: 4px;
             transition: background 0.2s;
             font-weight: ${index === state.breadcrumbPath.length - 1 ? '600' : '400'};
-            color: ${index === state.breadcrumbPath.length - 1 ? '#f1f5f9' : '#94a3b8'};
+            color: ${index === state.breadcrumbPath.length - 1 ? crumbText : crumbMuted};
         `;
         item.textContent = node.label;
 
         // Add hover effect
         item.addEventListener('mouseenter', () => {
-            item.style.background = 'rgba(148, 163, 184, 0.2)';
+            item.style.background = crumbHover;
         });
 
         item.addEventListener('mouseleave', () => {
@@ -3974,7 +3986,7 @@ function renderBreadcrumb(): void {
         // Add separator
         if (index < state.breadcrumbPath.length - 1) {
             const separator = document.createElement('span');
-            separator.style.color = '#64748b';
+            separator.style.color = separatorColor;
             separator.style.fontSize = '10px';
             separator.textContent = '›';
             breadcrumbPanel!.appendChild(separator);
@@ -7373,7 +7385,7 @@ function applyTheme(dark: boolean): void {
     }
 
     // Apply to all panels
-    const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement];
+    const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement, breadcrumbPanel];
     panels.forEach(panel => {
         if (panel) {
             panel.style.background = colors.panelBg;
@@ -7385,6 +7397,9 @@ function applyTheme(dark: boolean): void {
         }
     });
     updateColumnLineageBannerStyle();
+    if (columnLineagePanel) {
+        ensureColumnLineagePanelScrollbarStyles();
+    }
 
     // Apply to minimap
     const minimap = document.getElementById('minimap-container');
@@ -7823,6 +7838,42 @@ function setColumnLineageBannerVisible(visible: boolean): void {
     columnLineageBanner.style.display = visible ? 'flex' : 'none';
 }
 
+function ensureColumnLineagePanelScrollbarStyles(): void {
+    const styleId = 'column-lineage-panel-scroll-style';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+    const thumb = state.isDarkTheme ? 'rgba(148, 163, 184, 0.42)' : 'rgba(100, 116, 139, 0.32)';
+    const thumbHover = state.isDarkTheme ? 'rgba(148, 163, 184, 0.58)' : 'rgba(71, 85, 105, 0.42)';
+    const track = state.isDarkTheme ? 'rgba(15, 23, 42, 0.35)' : 'rgba(148, 163, 184, 0.12)';
+    style.textContent = `
+        #column-lineage-panel {
+            scrollbar-width: thin;
+            scrollbar-color: ${thumb} ${track};
+        }
+        #column-lineage-panel::-webkit-scrollbar {
+            width: 10px;
+        }
+        #column-lineage-panel::-webkit-scrollbar-track {
+            background: ${track};
+            border-radius: 8px;
+        }
+        #column-lineage-panel::-webkit-scrollbar-thumb {
+            background: ${thumb};
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        #column-lineage-panel::-webkit-scrollbar-thumb:hover {
+            background: ${thumbHover};
+            background-clip: padding-box;
+        }
+    `;
+}
+
 /**
  * Toggle column lineage mode
  */
@@ -7837,6 +7888,9 @@ export function toggleColumnFlows(show?: boolean): void {
         }
         showColumnLineagePanel();
         setColumnLineageBannerVisible(true);
+        if (breadcrumbPanel) {
+            breadcrumbPanel.style.display = 'none';
+        }
         addBreadcrumbSegment({
             id: 'column-lineage',
             label: 'Column Lineage',
@@ -7848,6 +7902,9 @@ export function toggleColumnFlows(show?: boolean): void {
         setColumnLineageBannerVisible(false);
         clearLineageHighlights();
         removeBreadcrumbSegment('column-lineage');
+        if (state.selectedNodeId) {
+            updateBreadcrumb(state.selectedNodeId);
+        }
     }
 
     // Update legend
@@ -7860,6 +7917,7 @@ export function toggleColumnFlows(show?: boolean): void {
 function showColumnLineagePanel(): void {
     // Always remove existing panel first (fixes stale panel when switching queries)
     hideColumnLineagePanel();
+    ensureColumnLineagePanelScrollbarStyles();
 
     if (!currentColumnFlows || currentColumnFlows.length === 0) {
         // No column flows for this query type (e.g., UPDATE, DELETE, INSERT)
@@ -7885,6 +7943,7 @@ function showColumnLineagePanel(): void {
         min-width: 200px;
         max-width: 260px;
         backdrop-filter: blur(8px);
+        scrollbar-width: thin;
     `;
 
     // Header
@@ -7902,9 +7961,22 @@ function showColumnLineagePanel(): void {
     `;
     header.innerHTML = `
         <span>Column Lineage</span>
-        <span style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+            <span style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+            <button id="column-lineage-panel-close" type="button" style="
+                border: none;
+                background: transparent;
+                color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};
+                cursor: pointer;
+                font-size: 14px;
+                line-height: 1;
+                padding: 0 2px;
+            " aria-label="Close column lineage panel">×</button>
+        </span>
     `;
     columnLineagePanel.appendChild(header);
+    const panelCloseBtn = header.querySelector('#column-lineage-panel-close') as HTMLButtonElement | null;
+    panelCloseBtn?.addEventListener('click', () => toggleColumnFlows(false));
 
     // Column search input
     const searchContainer = document.createElement('div');

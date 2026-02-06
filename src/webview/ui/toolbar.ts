@@ -44,6 +44,50 @@ export interface ToolbarCallbacks {
 
 let hintsSummaryBtn: HTMLButtonElement | null = null;
 
+function getOverflowPalette(dark: boolean): {
+    background: string;
+    border: string;
+    text: string;
+    hover: string;
+    shadow: string;
+} {
+    return dark ? {
+        background: 'rgba(15, 23, 42, 0.95)',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#e2e8f0',
+        hover: 'rgba(148, 163, 184, 0.2)',
+        shadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+    } : {
+        background: 'rgba(255, 255, 255, 0.98)',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        hover: 'rgba(15, 23, 42, 0.06)',
+        shadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
+    };
+}
+
+function applyOverflowMenuTheme(dark: boolean): void {
+    const overflowBtn = document.getElementById('sql-crack-overflow-btn') as HTMLButtonElement | null;
+    const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLDivElement | null;
+    const palette = getOverflowPalette(dark);
+
+    if (overflowBtn) {
+        overflowBtn.style.background = palette.background;
+        overflowBtn.style.borderColor = palette.border;
+        overflowBtn.style.color = palette.text;
+    }
+
+    if (overflowDropdown) {
+        overflowDropdown.style.background = dark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+        overflowDropdown.style.borderColor = palette.border;
+        overflowDropdown.style.boxShadow = palette.shadow;
+        overflowDropdown.querySelectorAll('[data-overflow-row="true"]').forEach((row) => {
+            const rowEl = row as HTMLElement;
+            rowEl.style.color = palette.text;
+        });
+    }
+}
+
 // Button style constants
 const btnStyle = `
     background: transparent;
@@ -179,7 +223,8 @@ export function createToolbar(
     container.appendChild(toolbarWrapper);
 
     // Set up ResizeObserver for overflow menu
-    const resizeObserver = setupOverflowObserver(actions, toolbarWrapper);
+    const resizeObserver = setupOverflowObserver(actions, toolbarWrapper, callbacks.isDarkTheme);
+    applyOverflowMenuTheme(callbacks.isDarkTheme());
 
     // Set initial dialect value
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -194,6 +239,7 @@ export function createToolbar(
     const themeChangeHandler = ((e: CustomEvent) => {
         const dark = e.detail.dark;
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
+        applyOverflowMenuTheme(dark);
     }) as EventListener;
     document.addEventListener('theme-change', themeChangeHandler);
     documentListeners.push({ type: 'theme-change', handler: themeChangeHandler });
@@ -338,29 +384,33 @@ function createActionButtons(
     overflowBtn.setAttribute('role', 'button');
     overflowBtn.style.cssText = `
         ${btnStyle}
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 8px;
         font-size: 18px;
         letter-spacing: 1px;
         line-height: 1;
         padding: 8px 10px;
     `;
-    overflowBtn.addEventListener('mouseenter', () => overflowBtn.style.background = 'rgba(148, 163, 184, 0.2)');
-    overflowBtn.addEventListener('mouseleave', () => overflowBtn.style.background = 'rgba(15, 23, 42, 0.95)');
+    overflowBtn.addEventListener('mouseenter', () => {
+        overflowBtn.style.background = getOverflowPalette(callbacks.isDarkTheme()).hover;
+    });
+    overflowBtn.addEventListener('mouseleave', () => {
+        applyOverflowMenuTheme(callbacks.isDarkTheme());
+    });
 
     const overflowDropdown = document.createElement('div');
     overflowDropdown.id = 'sql-crack-overflow-dropdown';
     overflowDropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 8px;
         padding: 8px 0;
         min-width: 200px;
         z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: none;
     `;
 
     // Append dropdown to root container so it escapes overflow:hidden clipping
@@ -477,7 +527,11 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
  * Sets up a ResizeObserver that hides overflowing action buttons
  * and populates the overflow dropdown menu.
  */
-function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement): ResizeObserver | null {
+function setupOverflowObserver(
+    actions: HTMLElement,
+    toolbarWrapper: HTMLElement,
+    isDarkTheme: () => boolean
+): ResizeObserver | null {
     const overflowContainer = actions.querySelector('#sql-crack-overflow-container') as HTMLElement;
     const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLElement;
     if (!overflowContainer || !overflowDropdown) {return null;}
@@ -531,19 +585,21 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
 
         // Populate the overflow dropdown
         overflowDropdown.innerHTML = '';
+        const palette = getOverflowPalette(isDarkTheme());
 
         // Reverse so items appear in natural order (top = first hidden from left)
         hiddenButtons.reverse();
 
         for (const { btn, label, icon } of hiddenButtons) {
             const row = document.createElement('div');
+            row.setAttribute('data-overflow-row', 'true');
             row.style.cssText = `
                 padding: 8px 12px;
                 cursor: pointer;
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                color: #e2e8f0;
+                color: ${palette.text};
                 transition: background 0.15s;
                 font-size: 12px;
                 white-space: nowrap;
@@ -558,7 +614,9 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
             labelSpan.textContent = label;
             row.appendChild(labelSpan);
 
-            row.addEventListener('mouseenter', () => row.style.background = 'rgba(148, 163, 184, 0.1)');
+            row.addEventListener('mouseenter', () => {
+                row.style.background = getOverflowPalette(isDarkTheme()).hover;
+            });
             row.addEventListener('mouseleave', () => row.style.background = 'transparent');
 
             row.addEventListener('click', (e) => {
@@ -570,6 +628,7 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
 
             overflowDropdown.appendChild(row);
         }
+        applyOverflowMenuTheme(isDarkTheme());
     };
 
     const observer = new ResizeObserver(() => {
@@ -1417,6 +1476,8 @@ export function updateToolbarTheme(
     actions.querySelectorAll('button').forEach(btn => {
         btn.style.color = textColor;
     });
+
+    applyOverflowMenuTheme(dark);
 }
 
 export function updateHintsSummaryBadge(
