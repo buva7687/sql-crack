@@ -27,6 +27,7 @@ import {
     getFocusMode,
     toggleSqlPreview,
     toggleColumnFlows,
+    toggleHints,
     toggleFullscreen,
     toggleLayout,
     switchLayout,
@@ -255,6 +256,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         getFocusMode: getFocusMode,
         onToggleSqlPreview: toggleSqlPreview,
         onToggleColumnFlows: toggleColumnFlows,
+        onToggleHints: toggleHints,
         onToggleLayout: toggleLayout,
         onLayoutChange: (layout: LayoutType) => {
             switchLayout(layout);

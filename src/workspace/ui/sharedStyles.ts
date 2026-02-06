@@ -133,7 +133,8 @@ export function getBaseStyles(): string {
             box-sizing: border-box;
         }
         .header-left { display: flex; align-items: center; gap: 12px; }
-        .header-icon { font-size: 18px; }
+        .header-icon { font-size: 18px; display: inline-flex; align-items: center; justify-content: center; }
+        .header-icon svg { width: 18px; height: 18px; display: block; }
         .header-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
         /* Header center: Contains view tabs and graph mode switcher.
          * Absolutely positioned and centered to keep tabs in fixed position.
@@ -418,6 +419,13 @@ export function getLineagePanelStyles(): string {
             position: relative;
             overflow: hidden;
             min-height: 0; /* Important for flex children to shrink */
+            background-color: var(--canvas-bg);
+            background-image:
+                radial-gradient(circle, var(--grid-color) 1px, transparent 1px),
+                linear-gradient(to right, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px),
+                linear-gradient(to bottom, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px);
+            background-size: 24px 24px, 24px 24px, 24px 24px;
+            background-position: 0 0, 0 0, 0 0;
         }
         .lineage-panel.visible { display: flex; }
         .lineage-panel h2 { color: var(--text-primary); margin-bottom: 16px; font-size: 18px; }
@@ -437,6 +445,17 @@ export function getLineagePanelStyles(): string {
             display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
             padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle);
             flex-shrink: 0;
+        }
+        .workspace-breadcrumb {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: -8px 0 12px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+            overflow-x: auto;
+            white-space: nowrap;
         }
         .lineage-back-btn {
             display: flex; align-items: center; gap: 6px; padding: 8px 12px;
@@ -494,6 +513,15 @@ export function getSharedViewStyles(): string {
             font-size: 32px;
             line-height: 1;
             flex-shrink: 0;
+            color: var(--text-muted);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .view-header-icon svg {
+            width: 28px;
+            height: 28px;
+            display: block;
         }
         .view-header-content {
             flex: 1;
@@ -1544,8 +1572,22 @@ export function getImpactFormStyles(): string {
             text-transform: capitalize;
         }
         .item-severity {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-weight: 600;
             color: var(--warning-light);
+        }
+        .severity-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: currentColor;
+        }
+        .severity-icon svg {
+            width: 12px;
+            height: 12px;
+            display: block;
         }
         .impact-item.severity-medium .item-severity { color: var(--success-light); }
         .impact-item.severity-low .item-severity { color: var(--text-dim); }
@@ -1559,8 +1601,22 @@ export function getImpactFormStyles(): string {
             color: var(--text-secondary);
         }
         .item-location {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-size: 11px;
             color: var(--text-dim);
+        }
+        .file-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: currentColor;
+        }
+        .file-icon svg {
+            width: 12px;
+            height: 12px;
+            display: block;
         }
         .impact-empty {
             text-align: center; padding: 80px 20px; color: var(--text-muted);
@@ -1680,6 +1736,9 @@ export function getImpactFormStyles(): string {
             color: var(--text-primary);
         }
         .column-location {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-size: 10px;
             color: var(--text-dim);
         }
@@ -1755,8 +1814,20 @@ export function getLineageVisualStyles(): string {
             border: 1px solid var(--border-subtle);
         }
         .flow-panel h3 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             font-size: 16px; font-weight: 600; color: var(--text-primary);
             margin: 0 0 12px 0;
+        }
+        .flow-panel .flow-panel-icon {
+            display: inline-flex;
+            color: var(--text-muted);
+        }
+        .flow-panel .flow-panel-icon svg {
+            width: 14px;
+            height: 14px;
+            display: block;
         }
         .flow-section {
             margin-bottom: 16px;
@@ -1773,6 +1844,12 @@ export function getLineageVisualStyles(): string {
             text-transform: uppercase; letter-spacing: 0.5px;
             margin-bottom: 6px; padding-bottom: 4px;
             border-bottom: 1px solid var(--border-subtle);
+        }
+        .flow-section-title svg {
+            width: 14px;
+            height: 14px;
+            display: block;
+            flex-shrink: 0;
         }
         .flow-section-title .info-icon {
             cursor: help;
@@ -1810,6 +1887,7 @@ export function getLineageVisualStyles(): string {
             opacity: 0.8;
         }
         .flow-node-icon { font-size: 16px; flex-shrink: 0; }
+        .flow-node-icon svg { width: 16px; height: 16px; display: block; }
         .flow-node-name {
             flex: 1; font-weight: 500; color: var(--text-primary);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1886,7 +1964,8 @@ export function getLineageVisualStyles(): string {
             border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
         }
         .node-item:hover { background: var(--bg-tertiary); border-color: var(--accent); }
-        .node-icon { font-size: 16px; }
+        .node-icon { font-size: 16px; display: inline-flex; align-items: center; color: var(--text-muted); }
+        .node-icon svg { width: 16px; height: 16px; display: block; }
         .node-name { flex: 1; font-weight: 500; color: var(--text-primary); }
         .node-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); text-transform: capitalize; }
         .connection-count {
@@ -2245,7 +2324,8 @@ export function getLineageGraphStyles(): string {
             align-items: center;
             gap: 10px;
         }
-        .graph-title .graph-icon { font-size: 20px; }
+        .graph-title .graph-icon { font-size: 20px; display: inline-flex; color: var(--text-muted); }
+        .graph-title .graph-icon svg { width: 20px; height: 20px; display: block; }
         .graph-title h3 { font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0; }
         .node-type-badge {
             font-size: 11px;
@@ -2307,7 +2387,12 @@ export function getLineageGraphStyles(): string {
             flex: 1;
             min-height: 0;
             overflow: hidden;
-            background: var(--bg-primary);
+            background-color: var(--canvas-bg);
+            background-image:
+                radial-gradient(circle, var(--grid-color) 1px, transparent 1px),
+                linear-gradient(to right, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px),
+                linear-gradient(to bottom, color-mix(in srgb, var(--grid-color) 35%, transparent) 1px, transparent 1px);
+            background-size: 24px 24px, 24px 24px, 24px 24px;
             position: relative;
         }
         .lineage-graph-svg {
@@ -2426,9 +2511,13 @@ export function getLineageNodeStyles(): string {
             stroke-width: 3;
             stroke: var(--accent);
         }
-        .lineage-node .node-icon {
-            font-size: 14px;
-            fill: var(--node-text);
+        .lineage-node .node-icon-svg {
+            color: var(--node-text);
+        }
+        .lineage-node .node-icon-svg svg {
+            width: 16px;
+            height: 16px;
+            display: block;
         }
         .lineage-node .node-name {
             font-size: 12px;
@@ -2512,8 +2601,21 @@ export function getLineageNodeStyles(): string {
             cursor: pointer;
             transition: opacity 0.2s;
         }
+        .lineage-node .column-row .column-row-bg {
+            fill: transparent;
+            transition: fill 0.15s;
+        }
+        .lineage-node .column-row .column-row-bg.odd {
+            fill: rgba(148, 163, 184, 0.08);
+        }
+        .lineage-node .column-row .column-row-bg.even {
+            fill: rgba(248, 250, 252, 0.03);
+        }
         .lineage-node .column-row:hover {
             opacity: 1;
+        }
+        .lineage-node .column-row:hover .column-row-bg {
+            fill: rgba(99, 102, 241, 0.16);
         }
         .lineage-node .column-row:hover .column-name {
             fill: white;
@@ -2563,13 +2665,17 @@ export function getLineageNodeStyles(): string {
             gap: 8px;
             margin-bottom: 8px;
         }
-        .column-lineage-info .info-icon { font-size: 14px; }
         .column-lineage-info .info-title {
             font-weight: 600;
             color: var(--text-primary);
             flex: 1;
             font-family: monospace;
             font-size: 13px;
+        }
+        .column-lineage-info .info-source {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
         }
         .column-lineage-info .info-close {
             background: none;
@@ -2601,6 +2707,75 @@ export function getLineageNodeStyles(): string {
         .column-lineage-info .info-hint {
             font-size: 11px;
             color: var(--text-muted);
+        }
+        .column-lineage-info .info-flow-summary {
+            font-size: 11px;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 6px 8px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .column-lineage-info .info-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
+        }
+        .column-lineage-info .info-clear-btn {
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .column-lineage-info .info-clear-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        .column-trace-onboarding {
+            position: absolute;
+            z-index: 120;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 320px;
+            background: var(--bg-secondary);
+            border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border-subtle));
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            padding: 6px 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .column-trace-onboarding .hint-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .column-trace-onboarding .hint-body {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .column-trace-onboarding .hint-close {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0;
+            margin-left: auto;
+        }
+        .column-trace-onboarding .hint-close:hover {
+            color: var(--text-primary);
         }
 
         /* Graph Edge Styles */
@@ -2661,7 +2836,8 @@ export function getLineageNodeStyles(): string {
             gap: 8px;
             margin-bottom: 8px;
         }
-        .lineage-tooltip .tooltip-icon { font-size: 18px; }
+        .lineage-tooltip .tooltip-icon { font-size: 18px; display: inline-flex; color: var(--text-secondary); }
+        .lineage-tooltip .tooltip-icon svg { width: 18px; height: 18px; display: block; }
         .lineage-tooltip .tooltip-name { font-weight: 600; color: var(--text-primary); }
         .lineage-tooltip .tooltip-divider {
             height: 1px;
@@ -3315,17 +3491,39 @@ export function getGraphStyles(): string {
             text-align: center; padding: 8px; font-size: 11px; color: var(--text-dim);
         }
 
-        /* ========== Export Buttons ========== */
-        .export-grid { padding: 8px 16px; display: flex; flex-direction: column; gap: 6px; }
-        .export-btn {
+        /* ========== Export Dropdown ========== */
+        .export-dropdown { padding: 8px 16px; position: relative; }
+        .export-trigger {
             display: flex; align-items: center; gap: 10px; padding: 10px 12px;
             background: var(--bg-primary); border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md); color: var(--text-secondary);
             font-size: 12px; cursor: pointer; transition: all 0.15s; width: 100%;
         }
-        .export-btn:hover { background: var(--bg-tertiary); border-color: var(--border-color); }
-        .export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .export-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .export-trigger:hover { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary); }
+        .export-trigger svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .export-menu {
+            margin-top: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+        }
+        .export-option {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-size: 12px;
+            padding: 8px 10px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .export-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .export-option:last-child { border-bottom: none; }
+        .export-option-advanced { padding-left: 16px; color: var(--text-muted); }
 
         /* ========== Zoom Toolbar ========== */
         /* Positioned top-right to match common UI patterns and avoid content overlap */
@@ -3384,6 +3582,8 @@ export function getGraphStyles(): string {
         .node-view .node-accent { fill: var(--node-view); }
         .node-external .node-accent { fill: var(--node-external); }
         .node-external .node-bg { stroke-dasharray: 5,3; }
+        .node .node-icon-svg { color: var(--text-muted); }
+        .node .node-icon-svg svg { width: 16px; height: 16px; display: block; }
         .node-label { fill: var(--node-text); font-size: 12px; font-weight: 600; }
         .node-sublabel { fill: var(--text-muted); font-size: 10px; }
 

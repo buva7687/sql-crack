@@ -28,4 +28,4 @@ export {
 
 export type { GridStyle, AccentPosition, NodeAccentType } from './themeTokens';
 
-export { ICONS, getNodeTypeIcon } from './icons';
+export { ICONS, getNodeTypeIcon, getWorkspaceNodeIcon } from './icons';

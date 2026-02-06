@@ -4,6 +4,7 @@
 import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } from '../types';
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
+import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Parameters for generating graph view body
@@ -52,7 +53,7 @@ export function generateGraphBody(params: GraphBodyParams): string {
         <!-- Header -->
         <div class="header">
             <div class="header-left">
-                <span class="header-icon">📊</span>
+                <span class="header-icon header-icon-svg">${ICONS.table}</span>
                 <span class="header-title">SQL Workspace Dependencies</span>
                 <span class="header-counts">(${graph.nodes.length} objects, ${graph.edges.length} relationships)</span>
             </div>
@@ -236,7 +237,7 @@ function generateNode(node: WorkspaceNode): string {
             <title>${escapeHtml(node.label)}</title>
             <rect class="node-bg" width="${width}" height="${height}" rx="8"/>
             <rect class="node-accent" x="0" y="0" width="4" height="${height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
-            <text x="14" y="25" class="node-icon">${icon}</text>
+            <g class="node-icon-svg" transform="translate(12, 15)">${icon}</g>
             <text x="42" y="35" class="node-label">${escapeHtml(truncateLabel(node.label, 18))}</text>
         </g>
     `;
@@ -246,13 +247,7 @@ function generateNode(node: WorkspaceNode): string {
  * Get icon for node type
  */
 function getNodeIcon(type: string): string {
-    const icons: Record<string, string> = {
-        'file': '📄',
-        'table': '📊',
-        'view': '👁️',
-        'external': '🌐'
-    };
-    return icons[type] || '📦';
+    return getWorkspaceNodeIcon(type);
 }
 
 /**

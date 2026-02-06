@@ -816,12 +816,34 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             }
         });
 
-        // ========== Export Buttons ==========
-        document.querySelectorAll('.export-btn[data-format]').forEach(btn => {
-            btn.addEventListener('click', () => {
+        // ========== Export Dropdown ==========
+        const exportTrigger = document.getElementById('workspace-export-trigger');
+        const exportMenu = document.getElementById('workspace-export-menu');
+        exportTrigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!exportMenu) { return; }
+            const isOpen = exportMenu.style.display !== 'none';
+            exportMenu.style.display = isOpen ? 'none' : 'block';
+            exportTrigger.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+        });
+        exportMenu?.querySelectorAll('.export-option[data-format]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const format = btn.getAttribute('data-format');
-                if (format) vscode.postMessage({ command: 'export', format });
+                if (format) {
+                    vscode.postMessage({ command: 'export', format });
+                }
+                if (exportMenu) {
+                    exportMenu.style.display = 'none';
+                    exportTrigger?.setAttribute('aria-expanded', 'false');
+                }
             });
+        });
+        document.addEventListener('click', (e) => {
+            if (!exportMenu || !exportTrigger) { return; }
+            if (e.target.closest('#workspace-export-trigger') || e.target.closest('#workspace-export-menu')) { return; }
+            exportMenu.style.display = 'none';
+            exportTrigger.setAttribute('aria-expanded', 'false');
         });
 
         ${getViewModeScript()}
@@ -853,19 +875,32 @@ function getViewModeScript(): string {
         const navStack = [];
         // Per-view zoom/pan state preservation
         const viewStates = {};
+        let navigationOriginLabel = '';
+        let navigationOriginType = '';
 
         function saveCurrentViewState() {
-            if (currentViewMode === 'graph' && typeof currentTransform !== 'undefined') {
-                viewStates['graph'] = { transform: { ...currentTransform } };
+            if (currentViewMode === 'graph') {
+                viewStates['graph'] = {
+                    scale,
+                    offsetX,
+                    offsetY,
+                    selectedNodeId
+                };
             }
         }
 
         function restoreViewState(view) {
-            if (view === 'graph' && viewStates['graph'] && typeof currentTransform !== 'undefined') {
-                Object.assign(currentTransform, viewStates['graph'].transform);
-                if (svg && mainGroup) {
-                    mainGroup.setAttribute('transform',
-                        'translate(' + currentTransform.x + ',' + currentTransform.y + ') scale(' + currentTransform.k + ')');
+            if (view === 'graph' && viewStates['graph']) {
+                const graphState = viewStates['graph'];
+                scale = typeof graphState.scale === 'number' ? graphState.scale : scale;
+                offsetX = typeof graphState.offsetX === 'number' ? graphState.offsetX : offsetX;
+                offsetY = typeof graphState.offsetY === 'number' ? graphState.offsetY : offsetY;
+                updateTransform();
+                if (graphState.selectedNodeId) {
+                    const selectedNode = document.querySelector('.node[data-id="' + graphState.selectedNodeId.replace(/"/g, '\\"') + '"]');
+                    if (selectedNode) {
+                        updateSelectionPanel(selectedNode);
+                    }
                 }
             }
         }
@@ -874,6 +909,7 @@ function getViewModeScript(): string {
         const lineageContent = document.getElementById('lineage-content');
         const lineageTitle = document.getElementById('lineage-title');
         const lineageBackBtn = document.getElementById('lineage-back-btn');
+        const workspaceBreadcrumb = document.getElementById('workspace-breadcrumb');
         const graphArea = document.querySelector('.graph-area');
         const graphModeSwitcher = document.getElementById('graph-mode-switcher');
 
@@ -896,11 +932,54 @@ function getViewModeScript(): string {
             });
         }
 
-        function switchToView(view, skipMessage = false) {
+        function updateWorkspaceBreadcrumb() {
+            if (!workspaceBreadcrumb) return;
+            if (currentViewMode === 'graph') {
+                workspaceBreadcrumb.style.display = 'none';
+                workspaceBreadcrumb.textContent = '';
+                return;
+            }
+
+            const viewLabels = {
+                lineage: 'Lineage',
+                tableExplorer: 'Tables',
+                impact: 'Impact'
+            };
+            const segments = ['Graph'];
+
+            if (navigationOriginLabel) {
+                const originTypeLabel = navigationOriginType ? ' (' + navigationOriginType + ')' : '';
+                segments.push(navigationOriginLabel + originTypeLabel);
+            }
+
+            segments.push(viewLabels[currentViewMode] || 'View');
+
+            if (lineageDetailView && lineageTitle && lineageTitle.textContent) {
+                const titleText = lineageTitle.textContent.trim();
+                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Table Explorer' && titleText !== 'Impact Analysis') {
+                    segments.push(titleText);
+                }
+            }
+
+            workspaceBreadcrumb.textContent = segments.join(' › ');
+            workspaceBreadcrumb.style.display = 'block';
+        }
+
+        function switchToView(view, skipMessage = false, originLabel = '', originType = '') {
             if (view === currentViewMode) return;
 
             // Save state of current view before switching
             saveCurrentViewState();
+
+            const isNavigatingFromGraph = currentViewMode === 'graph';
+            if (originLabel) {
+                navigationOriginLabel = originLabel;
+                navigationOriginType = originType;
+            } else if (isNavigatingFromGraph) {
+                // Manual tab switch from Graph should not keep stale context from older drill-down.
+                navigationOriginLabel = '';
+                navigationOriginType = '';
+            }
 
             // Push current view to nav stack for back navigation
             if (!skipMessage) {
@@ -926,6 +1005,10 @@ function getViewModeScript(): string {
             }
 
             currentViewMode = view;
+            if (view === 'graph') {
+                navigationOriginLabel = '';
+                navigationOriginType = '';
+            }
 
             // Show/hide header search box (only relevant for Graph tab)
             const headerSearchBox = document.querySelector('.header-right .search-box');
@@ -987,6 +1070,7 @@ function getViewModeScript(): string {
                 }
             }
             updateSidebarSectionsForView();
+            updateWorkspaceBreadcrumb();
         }
 
         viewTabs.forEach(tab => {
@@ -1099,7 +1183,8 @@ function getViewModeScript(): string {
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
             } else {
                 const prevView = navStack.length > 0 ? navStack[navStack.length - 1] : 'graph';
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph');
+                const fromLabel = prevView === 'graph' && navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph') + fromLabel;
             }
         }
 
@@ -1135,7 +1220,9 @@ function getViewModeScript(): string {
                 const previousView = navStack.length > 0 ? navStack.pop() : 'graph';
                 switchToView(previousView, true); // skipMessage=true since we're navigating back
             }
+            updateWorkspaceBreadcrumb();
         });
+        updateWorkspaceBreadcrumb();
     `;
 }
 
@@ -1213,10 +1300,11 @@ function getContextMenuScript(): string {
 
                 const action = item.getAttribute('data-action');
                 const nodeName = contextMenuTarget.label || contextMenuTarget.id;
+                const nodeType = contextMenuTarget.type || '';
 
                 switch (action) {
                     case 'showUpstream':
-                        switchToView('lineage');
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading upstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
@@ -1236,7 +1324,7 @@ function getContextMenuScript(): string {
                         }
                         break;
                     case 'showDownstream':
-                        switchToView('lineage');
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading downstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
@@ -1256,7 +1344,7 @@ function getContextMenuScript(): string {
                         }
                         break;
                     case 'analyzeImpact':
-                        switchToView('impact');
+                        switchToView('impact', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         vscode.postMessage({
@@ -1267,7 +1355,7 @@ function getContextMenuScript(): string {
                         });
                         break;
                     case 'exploreTable':
-                        switchToView('tableExplorer');
+                        switchToView('tableExplorer', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
                         vscode.postMessage({
@@ -1405,11 +1493,14 @@ function getMessageHandlingScript(): string {
                     // Handle PNG export request from extension
                     exportToPng();
                     break;
+                case 'exportPngClipboard':
+                    exportToPng(true);
+                    break;
             }
         });
 
         // ========== PNG Export Function ==========
-        function exportToPng() {
+        function exportToPng(copyToClipboard = false) {
             const svgElement = document.getElementById('graph-svg');
             if (!svgElement) {
                 vscode.postMessage({ command: 'exportPngError', error: 'No SVG element found' });
@@ -1464,15 +1555,40 @@ function getMessageHandlingScript(): string {
                     ctx.drawImage(img, 0, 0);
                     URL.revokeObjectURL(svgUrl);
 
-                    // Convert to PNG and send to extension
+                    // Convert to PNG and either copy or send to extension for save
                     const pngDataUrl = canvas.toDataURL('image/png');
                     const base64Data = pngDataUrl.split(',')[1];
 
-                    vscode.postMessage({
-                        command: 'savePng',
-                        data: base64Data,
-                        filename: 'workspace-dependencies-' + Date.now() + '.png'
-                    });
+                    if (copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+                        fetch(pngDataUrl)
+                            .then(res => res.blob())
+                            .then(blob => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]))
+                            .then(() => {
+                                const existing = document.getElementById('copy-feedback-toast');
+                                if (existing) existing.remove();
+                                const toast = document.createElement('div');
+                                toast.id = 'copy-feedback-toast';
+                                toast.textContent = 'PNG copied to clipboard';
+                                toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+                                document.body.appendChild(toast);
+                                requestAnimationFrame(() => {
+                                    toast.style.opacity = '1';
+                                    setTimeout(() => {
+                                        toast.style.opacity = '0';
+                                        setTimeout(() => toast.remove(), 200);
+                                    }, 1500);
+                                });
+                            })
+                            .catch(() => {
+                                vscode.postMessage({ command: 'savePng', data: base64Data, filename: 'workspace-dependencies-' + Date.now() + '.png' });
+                            });
+                    } else {
+                        vscode.postMessage({
+                            command: 'savePng',
+                            data: base64Data,
+                            filename: 'workspace-dependencies-' + Date.now() + '.png'
+                        });
+                    }
                 };
 
                 img.onerror = function(e) {
@@ -2216,6 +2332,9 @@ function getLineageGraphScript(): string {
         let lineageCurrentDirection = 'both';
         let lineageAutoFitNodeId = null;
         let lineageSetupInProgress = false;
+        const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
+        let pendingColumnTraceHintNodeId = null;
+        let columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -2376,6 +2495,7 @@ function getLineageGraphScript(): string {
                             return;
                         } else if (action === 'expand') {
                             if (nodeId) {
+                                maybeQueueColumnTraceHint(nodeId);
                                 vscode.postMessage({
                                     command: 'expandNodeColumns',
                                     nodeId: nodeId
@@ -2398,6 +2518,14 @@ function getLineageGraphScript(): string {
 
                 node.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
+                    const nodeId = node.getAttribute('data-node-id');
+                    const isExpanded = node.getAttribute('data-expanded') === 'true';
+                    const columnCount = parseInt(node.getAttribute('data-column-count') || '0', 10);
+                    if (nodeId && !isExpanded && columnCount > 0) {
+                        maybeQueueColumnTraceHint(nodeId);
+                        expandNodeWithColumns(nodeId);
+                        return;
+                    }
                     const filePath = node.getAttribute('data-file-path');
                     const lineNumber = parseInt(node.getAttribute('data-line-number') || '0');
                     if (filePath) {
@@ -2443,27 +2571,105 @@ function getLineageGraphScript(): string {
             setTimeout(() => {
                 if (zoomFitBtn) zoomFitBtn.click();
             }, 100);
+
+            maybeRenderColumnTraceHint();
+        }
+
+        function getLineageTypeIcon(type) {
+            const icons = {
+                table: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M2 6h12M2 9h12M6 6v7M10 6v7" stroke="currentColor" stroke-width="1"/></svg>',
+                view: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/></svg>',
+                cte: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1-3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 3v2.5h-2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                external: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" stroke="currentColor" stroke-width="1"/></svg>'
+            };
+            return icons[type] || '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 5.5L8 2.5l5.5 3v7L8 15.5l-5.5-3v-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+        }
+
+        function maybeQueueColumnTraceHint(nodeId) {
+            if (!nodeId || columnTraceHintDismissed) return;
+            pendingColumnTraceHintNodeId = nodeId;
+        }
+
+        function dismissColumnTraceHint() {
+            columnTraceHintDismissed = true;
+            pendingColumnTraceHintNodeId = null;
+            localStorage.setItem(columnTraceHintStorageKey, '1');
+            const hint = document.getElementById('column-trace-onboarding');
+            if (hint) hint.remove();
+        }
+
+        function maybeRenderColumnTraceHint() {
+            const existing = document.getElementById('column-trace-onboarding');
+            if (existing) existing.remove();
+
+            if (columnTraceHintDismissed) return;
+
+            const container = document.getElementById('lineage-graph-container');
+            if (!container) return;
+
+            const nodeId = pendingColumnTraceHintNodeId || (lineageExpandedNodes && lineageExpandedNodes.size > 0 ? Array.from(lineageExpandedNodes)[0] : null);
+            if (!nodeId) return;
+
+            const node = container.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
+            if (!node) return;
+
+            const transform = node.getAttribute('transform') || '';
+            const match = /translate\\(([-\\d.]+),\\s*([-\\d.]+)\\)/.exec(transform);
+            const x = match ? parseFloat(match[1]) : 16;
+            const y = match ? parseFloat(match[2]) : 16;
+
+            const hint = document.createElement('div');
+            hint.id = 'column-trace-onboarding';
+            hint.className = 'column-trace-onboarding';
+            hint.style.left = Math.max(8, x + 14) + 'px';
+            hint.style.top = Math.max(8, y + 52) + 'px';
+            hint.innerHTML = '<span class="hint-title">Column trace</span><span class="hint-body">Click a column to trace lineage across tables.</span><button class="hint-close" aria-label="Dismiss column trace hint">×</button>';
+            container.appendChild(hint);
+
+            const closeBtn = hint.querySelector('.hint-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    dismissColumnTraceHint();
+                });
+            }
         }
 
         function showLineageTooltip(e, node) {
             const tooltip = document.getElementById('lineage-tooltip');
             if (!tooltip) return;
 
+            const nodeId = node.getAttribute('data-node-id') || '';
             const name = node.getAttribute('data-node-name') || '';
             const type = node.getAttribute('data-node-type') || '';
             const filePath = node.getAttribute('data-file-path') || '';
             const lineNumber = node.getAttribute('data-line-number') || '';
+            const columnCount = parseInt(node.getAttribute('data-column-count') || '0', 10);
+            const isExpanded = node.getAttribute('data-expanded') === 'true' || (nodeId && lineageExpandedNodes.has(nodeId));
+            const hintText = !isExpanded && columnCount > 0
+                ? 'Click to focus · Double-click to expand columns'
+                : (isExpanded
+                    ? 'Click a column to trace lineage · Right-click for actions'
+                    : 'Click to focus · Double-click to open file');
 
-            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
-
-            tooltip.querySelector('.tooltip-icon').textContent = icons[type] || '📦';
-            tooltip.querySelector('.tooltip-name').textContent = name;
-            tooltip.querySelector('.type-value').textContent = type;
-            tooltip.querySelector('.file-value').textContent = filePath ? filePath.split('/').pop() : 'N/A';
-            tooltip.querySelector('.line-value').textContent = lineNumber || 'N/A';
-            tooltip.querySelector('.columns-value').textContent = '-';
-            tooltip.querySelector('.upstream-value').textContent = '-';
-            tooltip.querySelector('.downstream-value').textContent = '-';
+            const iconEl = tooltip.querySelector('.tooltip-icon');
+            if (iconEl) iconEl.innerHTML = getLineageTypeIcon(type);
+            const nameEl = tooltip.querySelector('.tooltip-name');
+            if (nameEl) nameEl.textContent = name;
+            const typeEl = tooltip.querySelector('.type-value');
+            if (typeEl) typeEl.textContent = type;
+            const fileEl = tooltip.querySelector('.file-value');
+            if (fileEl) fileEl.textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            const lineEl = tooltip.querySelector('.line-value');
+            if (lineEl) lineEl.textContent = lineNumber || 'N/A';
+            const columnsEl = tooltip.querySelector('.columns-value');
+            if (columnsEl) columnsEl.textContent = columnCount > 0 ? String(columnCount) : '-';
+            const upstreamEl = tooltip.querySelector('.upstream-value');
+            if (upstreamEl) upstreamEl.textContent = node.getAttribute('data-upstream-count') || '-';
+            const downstreamEl = tooltip.querySelector('.downstream-value');
+            if (downstreamEl) downstreamEl.textContent = node.getAttribute('data-downstream-count') || '-';
+            const hintEl = tooltip.querySelector('.tooltip-hint');
+            if (hintEl) hintEl.textContent = hintText;
 
             // Position near mouse cursor with boundary checks
             const tooltipWidth = 220;
@@ -2565,6 +2771,7 @@ function getLineageGraphScript(): string {
                 },
                 'expand-columns': () => {
                     if (nodeId) {
+                        maybeQueueColumnTraceHint(nodeId);
                         vscode.postMessage({ command: 'expandNodeColumns', nodeId });
                     }
                 },
@@ -2594,6 +2801,7 @@ function getLineageGraphScript(): string {
                 return;
             }
 
+            maybeQueueColumnTraceHint(nodeId);
             if (!lineageExpandedNodes) {
                 lineageExpandedNodes = new Set();
             }
@@ -2646,12 +2854,20 @@ function getLineageGraphScript(): string {
             if (!svg || !lineageCurrentNodeId) return;
 
             const nodes = svg.querySelectorAll('.lineage-node');
+            let firstExpandedNodeId = null;
             nodes.forEach(node => {
                 const nodeId = node.getAttribute('data-node-id');
                 if (nodeId) {
+                    if (!firstExpandedNodeId) {
+                        firstExpandedNodeId = nodeId;
+                    }
                     lineageExpandedNodes.add(nodeId);
                 }
             });
+
+            if (firstExpandedNodeId) {
+                maybeQueueColumnTraceHint(firstExpandedNodeId);
+            }
 
             // Re-render with all nodes expanded
             vscode.postMessage({
@@ -2838,6 +3054,7 @@ function getColumnLineageScript(): string {
             const { tableId, columnName, upstream, downstream } = data;
 
             selectedColumn = { tableId, columnName };
+            dismissColumnTraceHint();
 
             clearColumnHighlighting();
 
@@ -3071,6 +3288,39 @@ function getColumnLineageScript(): string {
             hideColumnLineageInfo();
         }
 
+        function buildColumnFlowSummary(tableName, columnName, upstream, downstream) {
+            const center = tableName + '.' + columnName;
+
+            const firstUpstreamEdge = upstream && upstream[0] && upstream[0].edges && upstream[0].edges[0] ? upstream[0].edges[0] : null;
+            const firstDownstreamEdge = downstream && downstream[0] && downstream[0].edges && downstream[0].edges[0] ? downstream[0].edges[0] : null;
+
+            let upstreamSummary = null;
+            if (firstUpstreamEdge && firstUpstreamEdge.metadata && firstUpstreamEdge.metadata.sourceColumn) {
+                const upstreamNode = upstream[0].nodes && upstream[0].nodes.length > 0 ? upstream[0].nodes[0] : null;
+                const upstreamTable = upstreamNode && upstreamNode.name ? upstreamNode.name : 'upstream';
+                upstreamSummary = upstreamTable + '.' + firstUpstreamEdge.metadata.sourceColumn;
+            }
+
+            let downstreamSummary = null;
+            if (firstDownstreamEdge && firstDownstreamEdge.metadata && firstDownstreamEdge.metadata.targetColumn) {
+                const downstreamNodes = downstream[0].nodes || [];
+                const downstreamNode = downstreamNodes.length > 0 ? downstreamNodes[downstreamNodes.length - 1] : null;
+                const downstreamTable = downstreamNode && downstreamNode.name ? downstreamNode.name : 'downstream';
+                downstreamSummary = downstreamTable + '.' + firstDownstreamEdge.metadata.targetColumn;
+            }
+
+            if (upstreamSummary && downstreamSummary) {
+                return upstreamSummary + ' → ' + center + ' → ' + downstreamSummary;
+            }
+            if (upstreamSummary) {
+                return upstreamSummary + ' → ' + center;
+            }
+            if (downstreamSummary) {
+                return center + ' → ' + downstreamSummary;
+            }
+            return center;
+        }
+
         function showColumnLineageInfo(tableId, columnName, upstream, downstream) {
             let infoPanel = document.getElementById('column-lineage-info');
             if (!infoPanel) {
@@ -3085,17 +3335,29 @@ function getColumnLineageScript(): string {
             const downstreamCount = downstream ? downstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
 
             const tableName = tableId.includes(':') ? tableId.split(':')[1] : tableId;
+            const flowSummary = buildColumnFlowSummary(tableName, columnName, upstream, downstream);
 
             infoPanel.innerHTML = '<div class="info-header">' +
-                    '<span class="info-icon">📝</span>' +
                     '<span class="info-title">' + escapeHtml(tableName) + '.' + escapeHtml(columnName) + '</span>' +
-                    '<button class="info-close" onclick="clearColumnHighlighting()">×</button>' +
+                    '<button class="info-close" aria-label="Close column trace panel">×</button>' +
                 '</div>' +
+                '<div class="info-source">Source table: ' + escapeHtml(tableName) + '</div>' +
                 '<div class="info-stats">' +
                     '<span class="stat upstream" title="Upstream sources">⬆ ' + upstreamCount + ' sources</span>' +
                     '<span class="stat downstream" title="Downstream consumers">⬇ ' + downstreamCount + ' consumers</span>' +
                 '</div>' +
+                '<div class="info-flow-summary" title="' + escapeHtml(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
+                '<div class="info-actions"><button class="info-clear-btn" type="button">Clear trace</button></div>' +
                 '<div class="info-hint">Click another column to trace its lineage, or click background to clear.</div>';
+
+            const closeBtn = infoPanel.querySelector('.info-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => clearColumnHighlighting());
+            }
+            const clearBtn = infoPanel.querySelector('.info-clear-btn');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => clearColumnHighlighting());
+            }
             infoPanel.style.display = 'block';
         }
 

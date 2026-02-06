@@ -3,6 +3,7 @@
 export {
     createToolbar,
     updateToolbarTheme,
+    updateHintsSummaryBadge,
     showKeyboardShortcutsHelp,
     markRefreshButtonStale,
     clearRefreshButtonStale,

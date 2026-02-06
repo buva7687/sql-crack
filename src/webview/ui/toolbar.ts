@@ -21,6 +21,7 @@ export interface ToolbarCallbacks {
     getFocusMode: () => FocusMode;
     onToggleSqlPreview: () => void;
     onToggleColumnFlows: (active: boolean) => void;
+    onToggleHints: () => void;
     onToggleTheme: () => void;
     onToggleFullscreen: () => void;
     onSearchBoxReady: (input: HTMLInputElement, countIndicator: HTMLSpanElement) => void;
@@ -40,6 +41,8 @@ export interface ToolbarCallbacks {
     getKeyboardShortcuts: () => Array<{ key: string; description: string }>;
     getCurrentQuerySql: () => { sql: string; name: string };
 }
+
+let hintsSummaryBtn: HTMLButtonElement | null = null;
 
 // Button style constants
 const btnStyle = `
@@ -682,6 +685,15 @@ function createFeatureGroup(
     refreshBtn.title = 'Refresh visualization';
     refreshBtn.style.fontSize = '16px';
     featureGroup.appendChild(refreshBtn);
+
+    // Optimization hints summary badge
+    hintsSummaryBtn = createButton('⚡ ✓', callbacks.onToggleHints, 'Show optimization hints');
+    hintsSummaryBtn.id = 'hints-summary-btn';
+    hintsSummaryBtn.title = 'Optimization hints';
+    hintsSummaryBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    hintsSummaryBtn.style.fontSize = '12px';
+    hintsSummaryBtn.style.fontWeight = '700';
+    featureGroup.appendChild(hintsSummaryBtn);
 
     // Pin/View location buttons for non-pinned views
     if (!options.isPinnedView) {
@@ -1405,6 +1417,23 @@ export function updateToolbarTheme(
     actions.querySelectorAll('button').forEach(btn => {
         btn.style.color = textColor;
     });
+}
+
+export function updateHintsSummaryBadge(
+    state: { status: 'ok' | 'warning' | 'error'; label: string }
+): void {
+    if (!hintsSummaryBtn) { return; }
+
+    const colors = {
+        ok: { text: '#10b981', bg: 'rgba(16, 185, 129, 0.16)', border: 'rgba(16, 185, 129, 0.35)' },
+        warning: { text: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', border: 'rgba(245, 158, 11, 0.35)' },
+        error: { text: '#ef4444', bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.35)' },
+    };
+    const palette = colors[state.status];
+    hintsSummaryBtn.textContent = `⚡ ${state.label}`;
+    hintsSummaryBtn.style.color = palette.text;
+    hintsSummaryBtn.style.background = palette.bg;
+    hintsSummaryBtn.style.boxShadow = `inset 0 0 0 1px ${palette.border}`;
 }
 
 export function markRefreshButtonStale(): void {

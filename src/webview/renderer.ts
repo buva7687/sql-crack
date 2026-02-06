@@ -49,6 +49,7 @@ import {
     addBreadcrumbSegment,
     removeBreadcrumbSegment,
     clearBreadcrumbBar,
+    updateHintsSummaryBadge,
 } from './ui';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
@@ -72,6 +73,10 @@ import {
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
 import { escapeRegex } from '../shared';
+import { getHintBadgeState, getTopHints, sortHintsByImpact } from './hintsHierarchy';
+import { getWarningIndicatorState } from './warningIndicator';
+import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
+import { extractSqlSnippet } from './sqlSnippet';
 
 const state: ViewState = {
     scale: 1,
@@ -120,6 +125,7 @@ let sqlPreviewPanel: HTMLDivElement | null = null;
 let tooltipElement: HTMLDivElement | null = null;
 let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
+let columnLineageBanner: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
@@ -135,6 +141,7 @@ let clusterNodeMap: Map<string, NodeCluster> = new Map();
 let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
+let hintsShowAll = false;
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
@@ -206,6 +213,39 @@ export function initRenderer(container: HTMLElement): void {
         white-space: nowrap;
     `;
     container.appendChild(breadcrumbPanel);
+
+    // Column lineage active banner
+    columnLineageBanner = document.createElement('div');
+    columnLineageBanner.id = 'column-lineage-banner';
+    columnLineageBanner.style.cssText = `
+        position: absolute;
+        top: 62px;
+        left: 16px;
+        right: 16px;
+        z-index: 140;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+    columnLineageBanner.innerHTML = `
+        <span>🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        <button id="column-lineage-banner-close" style="
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0 4px;
+        " aria-label="Close column lineage banner">×</button>
+    `;
+    container.appendChild(columnLineageBanner);
+    const bannerClose = columnLineageBanner.querySelector('#column-lineage-banner-close');
+    bannerClose?.addEventListener('click', () => toggleColumnFlows(false));
 
     // Create stats panel
     statsPanel = document.createElement('div');
@@ -1372,6 +1412,7 @@ export function render(result: ParseResult): void {
     currentEdges = result.edges;
     currentStats = result.stats;
     currentHints = result.hints;
+    hintsShowAll = false;
     currentSql = result.sql;
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
@@ -1969,41 +2010,39 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         group.appendChild(badgeLabel);
     });
 
-    // Warning badges (top-left corner)
-    if (node.warnings && node.warnings.length > 0) {
-        const warningBadgeSize = 18;
-        const warningX = node.x - 6;
-        const warningY = node.y - 6;
+    // Inline performance warning marker (top-right triangle)
+    const warningIndicator = getWarningIndicatorState(node.warnings);
+    if (warningIndicator) {
+        const triangleSize = 14;
+        const triangleLeft = node.x + node.width - triangleSize - 6;
+        const triangleTop = node.y + 6;
 
-        // Badge background circle
-        const warningCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        warningCircle.setAttribute('cx', String(warningX + warningBadgeSize / 2));
-        warningCircle.setAttribute('cy', String(warningY + warningBadgeSize / 2));
-        warningCircle.setAttribute('r', String(warningBadgeSize / 2));
-        warningCircle.setAttribute('fill', getWarningColor(node.warnings[0].severity));
-        warningCircle.setAttribute('filter', 'url(#shadow)');
-        group.appendChild(warningCircle);
+        const warningTriangle = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        warningTriangle.setAttribute('d', `M ${triangleLeft} ${triangleTop + triangleSize} L ${triangleLeft + triangleSize / 2} ${triangleTop} L ${triangleLeft + triangleSize} ${triangleTop + triangleSize} Z`);
+        warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
+        warningTriangle.setAttribute('opacity', '0.95');
+        warningTriangle.setAttribute('filter', 'url(#shadow)');
+        group.appendChild(warningTriangle);
 
-        // Warning icon
-        const warningIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        warningIcon.setAttribute('x', String(warningX + warningBadgeSize / 2));
-        warningIcon.setAttribute('y', String(warningY + warningBadgeSize / 2 + 5));
-        warningIcon.setAttribute('text-anchor', 'middle');
-        warningIcon.setAttribute('fill', 'white');
-        warningIcon.setAttribute('font-size', '12');
-        warningIcon.setAttribute('font-weight', '700');
-        warningIcon.textContent = getWarningIcon(node.warnings[0].type);
-        group.appendChild(warningIcon);
+        const exclamation = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        exclamation.setAttribute('x', String(triangleLeft + triangleSize / 2));
+        exclamation.setAttribute('y', String(triangleTop + triangleSize - 2));
+        exclamation.setAttribute('text-anchor', 'middle');
+        exclamation.setAttribute('fill', 'white');
+        exclamation.setAttribute('font-size', '9');
+        exclamation.setAttribute('font-weight', '700');
+        exclamation.textContent = '!';
+        group.appendChild(exclamation);
 
-        // If multiple warnings, show count
-        if (node.warnings.length > 1) {
+        if (warningIndicator.count > 1) {
             const countBadge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            countBadge.setAttribute('x', String(warningX + warningBadgeSize + 2));
-            countBadge.setAttribute('y', String(warningY + 10));
-            countBadge.setAttribute('fill', getWarningColor(node.warnings[0].severity));
+            countBadge.setAttribute('x', String(triangleLeft - 2));
+            countBadge.setAttribute('y', String(triangleTop + 8));
+            countBadge.setAttribute('text-anchor', 'end');
+            countBadge.setAttribute('fill', getWarningColor(warningIndicator.severity));
             countBadge.setAttribute('font-size', '9');
             countBadge.setAttribute('font-weight', '700');
-            countBadge.textContent = `+${node.warnings.length - 1}`;
+            countBadge.textContent = `+${warningIndicator.count - 1}`;
             group.appendChild(countBadge);
         }
     }
@@ -4523,6 +4562,21 @@ function updateDetailsPanel(nodeId: string | null): void {
         `;
     }
 
+    const traceColumnsAction = shouldShowTraceColumnsAction(currentColumnFlows?.length || 0) ? `
+        <button id="trace-columns-btn" style="
+            width: 100%;
+            margin-bottom: 10px;
+            background: ${state.isDarkTheme ? 'rgba(129, 140, 248, 0.22)' : 'rgba(99, 102, 241, 0.12)'};
+            color: ${state.isDarkTheme ? '#c7d2fe' : '#4338ca'};
+            border: 1px solid ${state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.35)'};
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        ">🔍 Trace Column Lineage</button>
+    ` : '';
+
     detailsPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <h3 style="margin: 0; color: ${UI_COLORS.text}; font-size: 12px;">Node Details</h3>
@@ -4537,6 +4591,7 @@ function updateDetailsPanel(nodeId: string | null): void {
             </div>
         </div>
         ${detailsSection}
+        ${traceColumnsAction}
         <div style="color: ${UI_COLORS.textDim}; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
             ID: ${escapeHtml(node.id)}
@@ -4546,6 +4601,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Close button handler
     detailsPanel.querySelector('#close-details')?.addEventListener('click', () => {
         selectNode(null);
+    });
+    detailsPanel.querySelector('#trace-columns-btn')?.addEventListener('click', () => {
+        toggleColumnFlows(true);
     });
 }
 
@@ -5018,10 +5076,14 @@ function updateStatsPanel(): void {
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
 
+    const badgeState = getHintBadgeState(currentHints || []);
+    updateHintsSummaryBadge(badgeState);
+
     if (!currentHints || currentHints.length === 0) {
         hintsPanel.style.opacity = '0';
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
+        hintsShowAll = false;
         return;
     }
 
@@ -5029,354 +5091,95 @@ function updateHintsPanel(): void {
     hintsPanel.style.visibility = 'visible';
     hintsPanel.style.transform = 'translateY(0)';
 
-    // Theme-aware colors
     const isDark = state.isDarkTheme;
     const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
     const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
-    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
-
-    // Theme-aware button/badge colors - darker versions for light theme
-    const colors = {
-        blue: isDark ? STATUS_COLORS.info : STATUS_COLORS.infoDark,
-        amber: isDark ? STATUS_COLORS.warningLight : STATUS_COLORS.warningDark,
-        green: isDark ? STATUS_COLORS.successLight : STATUS_COLORS.successDark,
-        violet: isDark ? STATUS_COLORS.violetLight : STATUS_COLORS.violetDark,
-        red: isDark ? STATUS_COLORS.error : STATUS_COLORS.errorDark,
-        slate: isDark ? UI_COLORS.textSubtle : UI_COLORS.textDim
-    };
-
-    // Use centralized HINT_COLORS for consistent styling
     const hintColors = HINT_COLORS;
-
-    // Group hints by category
-    const hintsByCategory: Record<string, OptimizationHint[]> = {
-        'performance': [],
-        'quality': [],
-        'best-practice': [],
-        'complexity': [],
-        'other': []
-    };
-
-    currentHints.forEach(hint => {
-        const category = hint.category || 'other';
-        if (hintsByCategory[category]) {
-            hintsByCategory[category].push(hint);
-        } else {
-            hintsByCategory['other'].push(hint);
-        }
-    });
-
-    // Count hints by category
-    const perfCount = hintsByCategory['performance'].length;
-    const qualityCount = hintsByCategory['quality'].length;
-    const bestPracticeCount = hintsByCategory['best-practice'].length;
-    const complexityCount = hintsByCategory['complexity'].length;
-
-    // Count by severity
-    const highCount = currentHints.filter(h => h.severity === 'high').length;
-    const mediumCount = currentHints.filter(h => h.severity === 'medium').length;
-    const lowCount = currentHints.filter(h => h.severity === 'low').length;
+    const sortedHints = sortHintsByImpact(currentHints);
+    const visibleHints = hintsShowAll ? sortedHints : getTopHints(sortedHints, 3);
+    const remainingCount = Math.max(0, sortedHints.length - visibleHints.length);
 
     hintsPanel.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-            <span style="font-weight: 600; color: ${textColor};">Optimization Hints</span>
-            <span style="
-                background: rgba(245, 158, 11, 0.2);
-                color: ${colors.amber};
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-size: 10px;
-            ">${currentHints.length}</span>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+            <span style="font-weight: 600; color: ${textColor};">⚡ Performance Hints</span>
+            <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
         </div>
-
-        <!-- Category Filters -->
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
-            ${perfCount > 0 ? `
-                <button class="hint-filter-btn" data-category="performance" style="
-                    background: rgba(59, 130, 246, 0.2);
-                    color: ${colors.blue};
-                    border: 1px solid rgba(59, 130, 246, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Performance (${perfCount})</button>
-            ` : ''}
-            ${qualityCount > 0 ? `
-                <button class="hint-filter-btn" data-category="quality" style="
-                    background: rgba(245, 158, 11, 0.2);
-                    color: ${colors.amber};
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Quality (${qualityCount})</button>
-            ` : ''}
-            ${bestPracticeCount > 0 ? `
-                <button class="hint-filter-btn" data-category="best-practice" style="
-                    background: rgba(34, 197, 94, 0.2);
-                    color: ${colors.green};
-                    border: 1px solid rgba(34, 197, 94, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Best Practice (${bestPracticeCount})</button>
-            ` : ''}
-            ${complexityCount > 0 ? `
-                <button class="hint-filter-btn" data-category="complexity" style="
-                    background: rgba(139, 92, 246, 0.2);
-                    color: ${colors.violet};
-                    border: 1px solid rgba(139, 92, 246, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Complexity (${complexityCount})</button>
-            ` : ''}
-        </div>
-
-        <!-- Severity Filters -->
-        ${(highCount > 0 || mediumCount > 0 || lowCount > 0) ? `
-            <div style="display: flex; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
-                ${highCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="high" style="
-                        background: rgba(239, 68, 68, 0.2);
-                        color: ${colors.red};
-                        border: 1px solid rgba(239, 68, 68, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">High (${highCount})</button>
-                ` : ''}
-                ${mediumCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="medium" style="
-                        background: rgba(245, 158, 11, 0.2);
-                        color: ${colors.amber};
-                        border: 1px solid rgba(245, 158, 11, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">Medium (${mediumCount})</button>
-                ` : ''}
-                ${lowCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="low" style="
-                        background: rgba(148, 163, 184, 0.2);
-                        color: ${colors.slate};
-                        border: 1px solid rgba(148, 163, 184, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">Low (${lowCount})</button>
-                ` : ''}
-            </div>
-        ` : ''}
-
-        <!-- Hints List -->
-        <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
-            ${Object.entries(hintsByCategory).map(([category, hints]) => {
-                if (hints.length === 0) {return '';}
-
-                const categoryLabels: Record<string, string> = {
-                    'performance': '⚡ Performance',
-                    'quality': '🔍 Quality',
-                    'best-practice': '✨ Best Practice',
-                    'complexity': '📊 Complexity',
-                    'other': '📝 Other'
-                };
-
+        <div class="hints-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+            ${visibleHints.map(hint => {
+                const style = hintColors[hint.type] || hintColors.info;
+                const severity = hint.severity || 'low';
+                const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
                 return `
-                    <div class="hint-category" data-category="${category}" style="margin-bottom: 12px;">
-                        <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
-                            ${categoryLabels[category] || category} (${hints.length})
+                    <button class="hint-item" data-node-id="${hint.nodeId || ''}" style="
+                        text-align: left;
+                        border: 1px solid ${style.border};
+                        border-left-width: 3px;
+                        background: ${style.bg};
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        cursor: ${hint.nodeId ? 'pointer' : 'default'};
+                    ">
+                        <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
+                            <span>${style.icon}</span>
+                            <span>${escapeHtml(hint.message)}</span>
+                            <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
-                        ${hints.map(hint => {
-                            const style = hintColors[hint.type] || hintColors.info;
-                            const severityBadge = hint.severity ? `
-                                <span style="
-                                    background: ${hint.severity === 'high' ? 'rgba(239, 68, 68, 0.2)' : hint.severity === 'medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
-                                    color: ${hint.severity === 'high' ? colors.red : hint.severity === 'medium' ? colors.amber : colors.slate};
-                                    padding: 2px 6px;
-                                    border-radius: 4px;
-                                    font-size: 9px;
-                                    margin-left: 6px;
-                                    text-transform: uppercase;
-                                ">${hint.severity}</span>
-                            ` : '';
-
-                            return `
-                                <div class="hint-item" data-category="${hint.category || 'other'}" data-severity="${hint.severity || ''}" style="
-                                    background: ${style.bg};
-                                    border-left: 3px solid ${style.border};
-                                    padding: 8px 12px;
-                                    margin-bottom: 8px;
-                                    border-radius: 0 4px 4px 0;
-                                ">
-                                    <div style="color: ${textColor}; font-size: 12px; margin-bottom: 4px; display: flex; align-items: center;">
-                                        ${style.icon} ${hint.message}${severityBadge}
-                                    </div>
-                                    ${hint.suggestion ? `
-                                        <div style="color: ${textColorMuted}; font-size: 11px;">
-                                            ${hint.suggestion}
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
+                        ${hint.suggestion ? `<div style="font-size: 11px; color: ${textColorMuted}; margin-top: 4px;">${escapeHtml(hint.suggestion)}</div>` : ''}
+                    </button>
                 `;
             }).join('')}
+            ${!hintsShowAll && remainingCount > 0 ? `
+                <button id="show-all-hints" style="
+                    border: 1px dashed ${isDark ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'};
+                    background: transparent;
+                    color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 11px;
+                    cursor: pointer;
+                ">Show all ${sortedHints.length} hints...</button>
+            ` : ''}
+            ${hintsShowAll && sortedHints.length > 3 ? `
+                <button id="show-top-hints" style="
+                    border: 1px dashed ${isDark ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'};
+                    background: transparent;
+                    color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 11px;
+                    cursor: pointer;
+                ">Show top 3 only</button>
+            ` : ''}
         </div>
     `;
 
-    // Add filter button event listeners
-    const filterButtons = hintsPanel.querySelectorAll('.hint-filter-btn');
-    const severityButtons = hintsPanel.querySelectorAll('.hint-severity-btn');
-    const hintItems = hintsPanel.querySelectorAll('.hint-item');
-    const categoryGroups = hintsPanel.querySelectorAll('.hint-category');
-
-    let activeCategory: string | null = null;
-    let activeSeverity: string | null = null;
-
-    // Create "Clear filters" button (initially hidden)
-    const clearFiltersBtn = document.createElement('button');
-    clearFiltersBtn.id = 'clear-filters-btn';
-    clearFiltersBtn.innerHTML = '✕ Clear filters';
-    clearFiltersBtn.style.cssText = `
-        display: none;
-        background: rgba(99, 102, 241, 0.15);
-        color: #818cf8;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-size: 10px;
-        cursor: pointer;
-        margin-left: auto;
-        transition: all 0.15s;
-    `;
-    clearFiltersBtn.addEventListener('mouseenter', () => {
-        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.25)';
-    });
-    clearFiltersBtn.addEventListener('mouseleave', () => {
-        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.15)';
-    });
-    clearFiltersBtn.addEventListener('click', () => {
-        activeCategory = null;
-        activeSeverity = null;
-        filterButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
-        severityButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
-        applyFilters();
-    });
-
-    // Insert clear button after the header
-    const headerDiv = hintsPanel.querySelector('div');
-    if (headerDiv) {
-        headerDiv.style.display = 'flex';
-        headerDiv.style.alignItems = 'center';
-        headerDiv.appendChild(clearFiltersBtn);
-    }
-
-    filterButtons.forEach(btn => {
-        const btnEl = btn as HTMLElement;
-        btnEl.addEventListener('click', () => {
-            const category = btnEl.getAttribute('data-category');
-            if (activeCategory === category) {
-                activeCategory = null;
-                btnEl.style.opacity = '1';
-            } else {
-                activeCategory = category;
-                filterButtons.forEach(b => {
-                    (b as HTMLElement).style.opacity = '0.5';
-                });
-                btnEl.style.opacity = '1';
-            }
-            applyFilters();
+    hintsPanel.querySelectorAll('.hint-item').forEach((item) => {
+        const el = item as HTMLButtonElement;
+        const nodeId = el.getAttribute('data-node-id');
+        if (!nodeId) {
+            el.style.cursor = 'default';
+            return;
+        }
+        el.addEventListener('click', () => {
+            const node = currentNodes.find(n => n.id === nodeId);
+            if (!node) { return; }
+            selectNode(node.id, { skipNavigation: true });
+            zoomToNode(node);
+            pulseNode(node.id);
         });
     });
 
-    severityButtons.forEach(btn => {
-        const btnEl = btn as HTMLElement;
-        btnEl.addEventListener('click', () => {
-            const severity = btnEl.getAttribute('data-severity');
-            if (activeSeverity === severity) {
-                activeSeverity = null;
-                btnEl.style.opacity = '1';
-            } else {
-                activeSeverity = severity;
-                severityButtons.forEach(b => {
-                    (b as HTMLElement).style.opacity = '0.5';
-                });
-                btnEl.style.opacity = '1';
-            }
-            applyFilters();
-        });
+    const showAllBtn = hintsPanel.querySelector('#show-all-hints') as HTMLButtonElement | null;
+    showAllBtn?.addEventListener('click', () => {
+        hintsShowAll = true;
+        updateHintsPanel();
     });
 
-    // Create "no matching hints" message element
-    const noMatchesEl = document.createElement('div');
-    noMatchesEl.id = 'no-matches-message';
-    noMatchesEl.innerHTML = createEmptyStateHtml({
-        icon: '🔍',
-        title: 'No matching hints',
-        subtitle: 'Try adjusting your filters'
+    const showTopBtn = hintsPanel.querySelector('#show-top-hints') as HTMLButtonElement | null;
+    showTopBtn?.addEventListener('click', () => {
+        hintsShowAll = false;
+        updateHintsPanel();
     });
-    noMatchesEl.style.display = 'none';
-    const hintsList = hintsPanel.querySelector('.hints-list');
-    if (hintsList) {
-        hintsList.appendChild(noMatchesEl);
-    }
-
-    function applyFilters() {
-        // Show/hide clear filters button based on active filters
-        const hasActiveFilters = activeCategory !== null || activeSeverity !== null;
-        clearFiltersBtn.style.display = hasActiveFilters ? 'block' : 'none';
-
-        let visibleCount = 0;
-        hintItems.forEach(item => {
-            const itemEl = item as HTMLElement;
-            const itemCategory = itemEl.getAttribute('data-category') || 'other';
-            const itemSeverity = itemEl.getAttribute('data-severity') || '';
-
-            const categoryMatch = !activeCategory || itemCategory === activeCategory;
-            const severityMatch = !activeSeverity || itemSeverity === activeSeverity;
-
-            if (categoryMatch && severityMatch) {
-                itemEl.style.display = '';
-                visibleCount++;
-            } else {
-                itemEl.style.display = 'none';
-            }
-        });
-
-        // Hide/show category groups
-        categoryGroups.forEach(group => {
-            const groupEl = group as HTMLElement;
-            const visibleItems = Array.from(groupEl.querySelectorAll('.hint-item')).filter(item => {
-                const itemEl = item as HTMLElement;
-                return itemEl.style.display !== 'none';
-            });
-
-            if (visibleItems.length === 0) {
-                groupEl.style.display = 'none';
-            } else {
-                groupEl.style.display = '';
-            }
-        });
-
-        // Show/hide "no matches" message
-        noMatchesEl.style.display = (hasActiveFilters && visibleCount === 0) ? 'block' : 'none';
-    }
 }
 
 function fitView(): void {
@@ -7359,7 +7162,7 @@ export function toggleFullscreen(enable?: boolean): void {
         }
         
         // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner];
         uiElements.forEach(el => {
             if (el) {
                 el.dataset.originalDisplay = el.style.display || '';
@@ -7421,7 +7224,7 @@ export function toggleFullscreen(enable?: boolean): void {
         }
 
         // Restore UI elements
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner];
         uiElements.forEach(el => {
             if (el && el.dataset.originalDisplay !== undefined) {
                 el.style.display = el.dataset.originalDisplay;
@@ -7533,6 +7336,7 @@ function applyTheme(dark: boolean): void {
                 : '0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04)';
         }
     });
+    updateColumnLineageBannerStyle();
 
     // Apply to minimap
     const minimap = document.getElementById('minimap-container');
@@ -7586,14 +7390,9 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
     }
 
     // Show SQL fragment if we have line numbers
-    if (node.startLine && currentSql) {
-        const sqlLines = currentSql.split('\n');
-        const startIdx = Math.max(0, node.startLine - 1);
-        const endIdx = node.endLine ? Math.min(sqlLines.length, node.endLine) : startIdx + 1;
-        const fragment = sqlLines.slice(startIdx, endIdx).join('\n').trim();
-
-        if (fragment) {
-            const displayFragment = fragment.length > 120 ? fragment.substring(0, 120) + '...' : fragment;
+    if (currentSql) {
+        const sqlSnippet = extractSqlSnippet(currentSql, node.startLine, node.endLine, 3, 180);
+        if (sqlSnippet) {
             content += `
                 <div style="
                     margin-top: 8px;
@@ -7608,12 +7407,12 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     white-space: pre-wrap;
                     word-break: break-all;
                     max-width: 300px;
-                ">${escapeHtml(displayFragment)}</div>
+                ">${escapeHtml(sqlSnippet.snippet)}</div>
             `;
 
             // Add line number reference
             content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                📍 Line ${node.startLine}${node.endLine && node.endLine !== node.startLine ? `-${node.endLine}` : ''}
+                📍 ${sqlSnippet.lineLabel}
             </div>`;
         }
     }
@@ -7955,6 +7754,27 @@ function hideContextMenu(): void {
 let selectedColumnLineage: ColumnFlow | null = null;
 let columnLineagePanel: HTMLElement | null = null;
 
+function updateColumnLineageBannerStyle(): void {
+    if (!columnLineageBanner) { return; }
+    const background = state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)';
+    const border = state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)';
+    const textColor = state.isDarkTheme ? '#c7d2fe' : '#4338ca';
+    const buttonColor = state.isDarkTheme ? '#a5b4fc' : '#4f46e5';
+    columnLineageBanner.style.background = background;
+    columnLineageBanner.style.border = `1px solid ${border}`;
+    columnLineageBanner.style.color = textColor;
+    const closeBtn = columnLineageBanner.querySelector('#column-lineage-banner-close') as HTMLButtonElement | null;
+    if (closeBtn) {
+        closeBtn.style.color = buttonColor;
+    }
+}
+
+function setColumnLineageBannerVisible(visible: boolean): void {
+    if (!columnLineageBanner) { return; }
+    updateColumnLineageBannerStyle();
+    columnLineageBanner.style.display = visible ? 'flex' : 'none';
+}
+
 /**
  * Toggle column lineage mode
  */
@@ -7962,7 +7782,13 @@ export function toggleColumnFlows(show?: boolean): void {
     state.showColumnFlows = show !== undefined ? show : !state.showColumnFlows;
 
     if (state.showColumnFlows) {
+        if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+            state.showColumnFlows = false;
+            setColumnLineageBannerVisible(false);
+            return;
+        }
         showColumnLineagePanel();
+        setColumnLineageBannerVisible(true);
         addBreadcrumbSegment({
             id: 'column-lineage',
             label: 'Column Lineage',
@@ -7971,6 +7797,7 @@ export function toggleColumnFlows(show?: boolean): void {
         });
     } else {
         hideColumnLineagePanel();
+        setColumnLineageBannerVisible(false);
         clearLineageHighlights();
         removeBreadcrumbSegment('column-lineage');
     }

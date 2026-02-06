@@ -4,6 +4,7 @@ import { LineagePath, LineageGraph, LineageNode } from '../lineage/types';
 import { FlowResult, FlowAnalyzer } from '../lineage/flowAnalyzer';
 import { LineageViewOptions } from './types';
 import { LineageGraphRenderer } from './lineageGraphRenderer';
+import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Recent selection for history tracking
@@ -50,7 +51,7 @@ export class LineageView {
             <div class="view-container">
                 <!-- View Header -->
                 <div class="view-header">
-                    <div class="view-header-icon">📈</div>
+                    <div class="view-header-icon">${ICONS.columns}</div>
                     <div class="view-header-content">
                         <h3 class="view-title">Data Lineage</h3>
                         <p class="view-subtitle">Search for a table or view to visualize its data flow and dependencies</p>
@@ -824,15 +825,7 @@ export class LineageView {
      * Get icon for node type
      */
     private getNodeIcon(type: string): string {
-        const icons: Record<string, string> = {
-            'table': '\uD83D\uDCCA',   // 📊
-            'view': '\uD83D\uDC41\uFE0F',    // 👁️
-            'column': '\uD83D\uDCDD',  // 📝
-            'cte': '\uD83D\uDD04',     // 🔄
-            'external': '\uD83C\uDF10' // 🌐
-        };
-
-        return icons[type] || '\uD83D\uDCE6'; // 📦
+        return getWorkspaceNodeIcon(type);
     }
 
     /**

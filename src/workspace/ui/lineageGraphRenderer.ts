@@ -3,6 +3,7 @@
 import * as dagre from 'dagre';
 import { LineageGraph, LineageNode } from '../lineage/types';
 import { FlowAnalyzer } from '../lineage/flowAnalyzer';
+import { getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Graph node for rendering
@@ -424,6 +425,7 @@ export class LineageGraphRenderer {
         const classes = [
             'lineage-node',
             `lineage-node-${node.type}`,
+            node.expanded ? 'expanded' : '',
             isFocused ? 'focused' : '',
             isCenter ? 'center' : '',
             isHighlighted ? 'highlighted' : '',
@@ -438,6 +440,10 @@ export class LineageGraphRenderer {
                data-node-id="${this.escapeHtml(node.id)}"
                data-node-name="${this.escapeHtml(node.name)}"
                data-node-type="${node.type}"
+               data-expanded="${node.expanded ? 'true' : 'false'}"
+               data-column-count="${node.metadata.columnCount || node.columns?.length || 0}"
+               data-upstream-count="${node.upstreamCount}"
+               data-downstream-count="${node.downstreamCount}"
                data-file-path="${this.escapeHtml(node.filePath || '')}"
                data-line-number="${node.lineNumber || 0}"
                transform="translate(${node.x}, ${node.y})">
@@ -456,7 +462,7 @@ export class LineageGraphRenderer {
 
         // Node header
         svg += `
-            <text class="node-icon" x="14" y="24">${icon}</text>
+            <g class="node-icon-svg" transform="translate(10, 12)">${icon}</g>
             <text class="node-name" x="38" y="22">${this.escapeHtml(this.truncateName(node.name, 18))}</text>
             <text class="node-type" x="38" y="40">${typeLabel}${node.metadata.columnCount ? ` \u00B7 ${node.metadata.columnCount} columns` : ''}</text>
         `;
@@ -478,6 +484,7 @@ export class LineageGraphRenderer {
         if (node.expanded && node.columns) {
             svg += `<line x1="0" y1="50" x2="${node.width}" y2="50" class="node-divider"/>`;
             let columnY = 68;
+            let columnIndex = 0;
             for (const column of node.columns) {
                 // Note: dimmed class is applied dynamically via JS when a column is selected
                 // Don't apply dimmed by default - only selected and in-path states come from server
@@ -497,6 +504,7 @@ export class LineageGraphRenderer {
 
                 svg += `
                     <g class="${columnClasses}" data-column-name="${this.escapeHtml(column.name)}" data-action="selectColumn">
+                        <rect x="8" y="${columnY - 16}" width="${node.width - 16}" height="20" rx="4" class="column-row-bg ${columnIndex % 2 === 0 ? 'even' : 'odd'}"/>
                         <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot ${dotClass}"/>
                         <text x="20" y="${columnY}" text-anchor="middle" class="column-state">${dotChar}</text>
                         <text x="32" y="${columnY}" class="column-name">${this.escapeHtml(column.name)}</text>
@@ -504,6 +512,7 @@ export class LineageGraphRenderer {
                     </g>
                 `;
                 columnY += this.NODE_HEIGHT_PER_COLUMN;
+                columnIndex++;
             }
 
             // Close button for expanded nodes (top-right corner)
@@ -566,13 +575,7 @@ export class LineageGraphRenderer {
      * Get icon for node type
      */
     private getNodeIcon(type: string): string {
-        const icons: Record<string, string> = {
-            'table': '\uD83D\uDCCA',  // 📊
-            'view': '\uD83D\uDC41\uFE0F',  // 👁️
-            'cte': '\uD83D\uDD04',  // 🔄
-            'external': '\uD83C\uDF10'  // 🌐
-        };
-        return icons[type] || '\uD83D\uDCE6';  // 📦
+        return getWorkspaceNodeIcon(type);
     }
 
     /**

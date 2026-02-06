@@ -35,7 +35,8 @@ import { getWebviewScript, getIssuesScript, WebviewScriptParams } from './ui/cli
 import { MessageHandler, MessageHandlerContext } from './handlers';
 
 // Shared theme
-import { getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
+import { getReferenceTypeColor, getWorkspaceNodeColor, ICONS } from '../shared';
+import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from './exportUtils';
 
 const AUTO_INDEX_THRESHOLD = 50;
 
@@ -1153,7 +1154,7 @@ ${bodyContent}
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-icon">📊</span>
+                <span class="header-icon header-icon-svg">${ICONS.table}</span>
                 <h1 class="header-title">Workspace Dependencies</h1>
             </div>
 
@@ -1351,6 +1352,7 @@ ${bodyContent}
                     </button>
                     <h2 id="lineage-title">Data Lineage</h2>
                 </div>
+                <div id="workspace-breadcrumb" class="workspace-breadcrumb" style="display: none;"></div>
                 <div class="lineage-content" id="lineage-content">
                     <!-- Dynamic lineage content will be inserted here -->
                 </div>
@@ -1400,6 +1402,12 @@ ${bodyContent}
      * "View Details" opens the full Issues view.
      */
     private generateStatsHtml(): string {
+        const exportOptionsHtml = WORKSPACE_EXPORT_OPTIONS.map((option) => `
+            <button class="export-option ${option.group === 'advanced' ? 'export-option-advanced' : ''}" data-format="${option.format}">
+                ${this.escapeHtml(option.label)}
+            </button>
+        `).join('');
+
         return `
         <div class="sidebar-header">
             <span class="sidebar-title">Panel</span>
@@ -1491,21 +1499,17 @@ ${bodyContent}
                     <span class="section-toggle">▼</span>
                 </div>
                 <div class="section-content">
-                    <div class="export-grid">
-                        <button class="export-btn" data-format="svg">
+                    <div class="export-dropdown">
+                        <button class="export-trigger" id="workspace-export-trigger" aria-expanded="false">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            Export as SVG
+                            Export as...
                         </button>
-                        <button class="export-btn" data-format="mermaid">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            Export as Mermaid
-                        </button>
+                        <div class="export-menu" id="workspace-export-menu" style="display: none;">
+                            ${exportOptionsHtml}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1904,12 +1908,16 @@ ${bodyContent}
             return;
         }
 
-        if (format === 'png') {
+        if (format === 'clipboard-png') {
+            this._panel.webview.postMessage({ command: 'exportPngClipboard' });
+        } else if (format === 'png') {
             // Request PNG export from webview
             // The webview will convert SVG to PNG via canvas and send back the data
             this._panel.webview.postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
+        } else if (format === 'copy-mermaid') {
+            await this.copyMermaidToClipboard();
         } else if (format === 'svg') {
             await this.exportAsSvg();
         } else if (format === 'json') {
@@ -1927,22 +1935,7 @@ ${bodyContent}
 
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
-        let mermaid = `\`\`\`mermaid\ngraph ${direction}\n`;
-
-        // Add nodes
-        for (const node of this._currentGraph.nodes) {
-            const label = node.label.replace(/"/g, '\\"');
-            const shape = node.type === 'file' ? '[' : node.type === 'external' ? '((' : '[]';
-            const endShape = node.type === 'file' ? ']' : node.type === 'external' ? '))' : ']';
-            mermaid += `    ${node.id}${shape}"${label}"${endShape}\n`;
-        }
-
-        // Add edges
-        for (const edge of this._currentGraph.edges) {
-            mermaid += `    ${edge.source} --> ${edge.target}\n`;
-        }
-
-        mermaid += '```';
+        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
 
         // Save to file
         const uri = await vscode.window.showSaveDialog({
@@ -1956,6 +1949,15 @@ ${bodyContent}
             await vscode.workspace.fs.writeFile(uri, Buffer.from(mermaid));
             vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
         }
+    }
+
+    private async copyMermaidToClipboard(): Promise<void> {
+        if (!this._currentGraph) { return; }
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
+        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
+        await vscode.env.clipboard.writeText(mermaid);
+        vscode.window.showInformationMessage('Mermaid copied to clipboard');
     }
 
     /**
