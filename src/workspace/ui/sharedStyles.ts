@@ -2638,15 +2638,15 @@ export function getLineageNodeStyles(): string {
             fill: #2dd4bf;  /* Teal for JSON */
         }
         .lineage-node .column-dot.type-other {
-            fill: rgba(255, 255, 255, 0.5);  /* Gray for unknown */
+            fill: var(--text-dim);  /* Gray for unknown */
         }
         .lineage-node .column-name {
             font-size: 11px;
-            fill: rgba(255, 255, 255, 0.9);
+            fill: var(--node-text);
         }
         .lineage-node .column-type {
             font-size: 10px;
-            fill: rgba(255, 255, 255, 0.6);
+            fill: var(--text-muted);
             font-family: monospace;
         }
         .lineage-node .expand-btn rect {
@@ -2654,7 +2654,7 @@ export function getLineageNodeStyles(): string {
         }
         .lineage-node .expand-text {
             font-size: 10px;
-            fill: rgba(255, 255, 255, 0.7);
+            fill: var(--text-muted);
             cursor: pointer;
         }
         .lineage-node .column-close-btn {
@@ -2703,20 +2703,20 @@ export function getLineageNodeStyles(): string {
             stroke-width: 1.5;
         }
         .lineage-node .column-row:focus-visible .column-name {
-            fill: white;
+            fill: var(--text-primary);
         }
         .lineage-node .column-row:hover .column-name {
-            fill: white;
+            fill: var(--text-primary);
         }
         .lineage-node .column-row.selected .column-name {
-            fill: white;
+            fill: var(--text-primary);
             font-weight: 600;
         }
         .lineage-node .column-row.selected .column-state {
             fill: var(--accent);
         }
         .lineage-node .column-row.in-path .column-name {
-            fill: rgba(255, 255, 255, 0.95);
+            fill: var(--text-primary);
         }
         .lineage-node .column-row.in-path .column-state {
             fill: #22c55e;  /* Green for upstream */
@@ -2729,7 +2729,7 @@ export function getLineageNodeStyles(): string {
         }
         .lineage-node .column-state {
             font-size: 10px;
-            fill: rgba(255, 255, 255, 0.6);
+            fill: var(--text-muted);
         }
 
         /* Column Lineage Info Panel */
@@ -3884,8 +3884,8 @@ export function getIssuesPanelStyles(): string {
             padding: 4px 10px; border-radius: var(--radius-sm); font-size: 10px;
             font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .item-type.table { background: #10b981; color: #fff; }
-        .item-type.view { background: #8b5cf6; color: #fff; }
+        .item-type.table { background: var(--node-table); color: #fff; }
+        .item-type.view { background: var(--node-view); color: #fff; }
 
         .item-info { flex: 1; min-width: 0; }
         .item-name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
