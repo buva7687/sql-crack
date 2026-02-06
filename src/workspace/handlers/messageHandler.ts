@@ -65,6 +65,9 @@ export interface MessageHandlerContext {
     getIsDarkTheme: () => boolean;
     setIsDarkTheme: (dark: boolean) => void;
 
+    // Rebuild state
+    getIsRebuilding: () => boolean;
+
     // Callbacks
     renderCurrentView: () => void;
     getWebviewHtml: (graph: any, searchFilter: SearchFilter) => string;

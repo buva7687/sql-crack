@@ -44,6 +44,11 @@ export function getCssVariables(dark: boolean = true): string {
                 --node-cte: #c084fc;
                 --edge-default: #333333;
                 --edge-hover: #6366f1;
+                --edge-select: #94a3b8;
+                --edge-join: #c4b5fd;
+                --edge-insert: #34d399;
+                --edge-update: #fcd34d;
+                --edge-delete: #fca5a5;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -94,6 +99,11 @@ export function getCssVariables(dark: boolean = true): string {
                 --node-cte: #a855f7;
                 --edge-default: #cbd5e1;
                 --edge-hover: #6366f1;
+                --edge-select: #64748b;
+                --edge-join: #a78bfa;
+                --edge-insert: #10b981;
+                --edge-update: #fbbf24;
+                --edge-delete: #f87171;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -2842,7 +2852,7 @@ export function getLineageNodeStyles(): string {
             stroke-width: 2;
         }
         .lineage-edge-direct { stroke: var(--edge-default); }
-        .lineage-edge-join { stroke: #a78bfa; }
+        .lineage-edge-join { stroke: var(--edge-join); }
         .lineage-edge-transform { stroke: #f59e0b; }
         .lineage-edge.highlighted {
             stroke: var(--accent);
@@ -3364,11 +3374,11 @@ export function getGraphStyles(): string {
         .legend-inline-node.view { background: var(--node-view); border-color: var(--node-view-border); }
         .legend-inline-node.external { background: var(--node-external); border-color: var(--node-external-border); border-style: dashed; }
         .legend-inline-edge { width: 16px; height: 2px; border-radius: 2px; flex-shrink: 0; }
-        .legend-inline-edge.select { background: #64748b; }
-        .legend-inline-edge.join { background: #a78bfa; }
-        .legend-inline-edge.insert { background: #10b981; }
-        .legend-inline-edge.update { background: #fbbf24; }
-        .legend-inline-edge.delete { background: #f87171; }
+        .legend-inline-edge.select { background: var(--edge-select); }
+        .legend-inline-edge.join { background: var(--edge-join); }
+        .legend-inline-edge.insert { background: var(--edge-insert); }
+        .legend-inline-edge.update { background: var(--edge-update); }
+        .legend-inline-edge.delete { background: var(--edge-delete); }
 
         /* ========== Issue Banner ========== */
         .issue-banner {
@@ -3540,11 +3550,11 @@ export function getGraphStyles(): string {
         .legend-node.view { background: var(--node-view); border-color: var(--node-view-border); }
         .legend-node.external { background: var(--node-external); border-color: var(--node-external-border); border-style: dashed; }
         .legend-edge { width: 20px; height: 3px; border-radius: 2px; flex-shrink: 0; }
-        .legend-edge.select { background: #64748b; }
-        .legend-edge.join { background: #a78bfa; }
-        .legend-edge.insert { background: #10b981; }
-        .legend-edge.update { background: #fbbf24; }
-        .legend-edge.delete { background: #f87171; }
+        .legend-edge.select { background: var(--edge-select); }
+        .legend-edge.join { background: var(--edge-join); }
+        .legend-edge.insert { background: var(--edge-insert); }
+        .legend-edge.update { background: var(--edge-update); }
+        .legend-edge.delete { background: var(--edge-delete); }
 
         /* ========== Issue List ========== */
         .issue-list { padding: 0 12px 8px; }
@@ -3676,11 +3686,11 @@ export function getGraphStyles(): string {
         .edge { fill: none; stroke-width: 1.5; cursor: pointer; transition: stroke 0.15s, stroke-width 0.15s; }
         .edge path { stroke: var(--edge-default); }
         .edge:hover path { stroke: var(--edge-hover); stroke-width: 2; }
-        .edge-select path { stroke: var(--edge-default); }
-        .edge-join path { stroke: #a78bfa; }
-        .edge-insert path { stroke: #10b981; }
-        .edge-update path { stroke: #fbbf24; }
-        .edge-delete path { stroke: #f87171; }
+        .edge-select path { stroke: var(--edge-select); }
+        .edge-join path { stroke: var(--edge-join); }
+        .edge-insert path { stroke: var(--edge-insert); }
+        .edge-update path { stroke: var(--edge-update); }
+        .edge-delete path { stroke: var(--edge-delete); }
         .edge-label { fill: var(--text-muted); font-size: 10px; }
         /* Edge highlight/dim styles for click-to-highlight feature */
         .edge.edge-highlighted path { opacity: 1; stroke-width: 3; stroke: var(--edge-hover); }

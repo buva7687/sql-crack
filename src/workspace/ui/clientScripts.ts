@@ -890,6 +890,15 @@ function getViewModeScript(): string {
                     offsetY,
                     selectedNodeId
                 };
+            } else {
+                // Save scroll position for non-graph views (lineage, tableExplorer, impact)
+                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                if (scrollContainer) {
+                    viewStates[currentViewMode] = {
+                        scrollTop: scrollContainer.scrollTop,
+                        scrollLeft: scrollContainer.scrollLeft
+                    };
+                }
             }
         }
 
@@ -905,6 +914,15 @@ function getViewModeScript(): string {
                     if (selectedNode) {
                         updateSelectionPanel(selectedNode);
                     }
+                }
+            } else if (viewStates[view]) {
+                // Restore scroll position for non-graph views
+                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                if (scrollContainer) {
+                    requestAnimationFrame(() => {
+                        scrollContainer.scrollTop = viewStates[view].scrollTop || 0;
+                        scrollContainer.scrollLeft = viewStates[view].scrollLeft || 0;
+                    });
                 }
             }
         }
@@ -1020,22 +1038,32 @@ function getViewModeScript(): string {
         function switchToView(view, skipMessage = false, originLabel = '', originType = '') {
             if (view === currentViewMode) return;
 
+            // Clear column trace when leaving a lineage-related view to prevent stale state
+            if (typeof clearColumnHighlighting === 'function') {
+                clearColumnHighlighting();
+            }
+
             // Save state of current view before switching
             saveCurrentViewState();
 
-            const isNavigatingFromGraph = currentViewMode === 'graph';
             if (originLabel) {
                 navigationOriginLabel = originLabel;
                 navigationOriginType = originType;
-            } else if (isNavigatingFromGraph) {
-                // Manual tab switch from Graph should not keep stale context from older drill-down.
+            } else {
+                // Clear stale origin context on any manual tab switch without explicit origin.
                 navigationOriginLabel = '';
                 navigationOriginType = '';
             }
 
-            // Push current view to nav stack for back navigation
+            // Push current view to nav stack for back navigation (avoid duplicates, cap size)
             if (!skipMessage) {
-                navStack.push(currentViewMode);
+                if (navStack[navStack.length - 1] !== currentViewMode) {
+                    navStack.push(currentViewMode);
+                }
+                // Cap stack depth to prevent unbounded growth from rapid toggling
+                if (navStack.length > 20) {
+                    navStack.splice(0, navStack.length - 20);
+                }
             }
 
             viewTabs.forEach(t => {
@@ -1114,6 +1142,9 @@ function getViewModeScript(): string {
                     lineageContent.innerHTML = viewEmptyStates[view] || '';
                 }
 
+                // Restore scroll position for non-graph views
+                restoreViewState(view);
+
                 // Only send message if not restoring view (skipMessage = false by default)
                 if (!skipMessage) {
                     if (view === 'lineage') {
@@ -1159,6 +1190,10 @@ function getViewModeScript(): string {
                 lineageDetailView = false;
                 tableExplorerHistory = [];
                 currentExploredTable = null;
+                // Clear column trace when resetting to detail root
+                if (typeof clearColumnHighlighting === 'function') {
+                    clearColumnHighlighting();
+                }
                 updateBackButtonText();
                 if (currentViewMode === 'lineage') {
                     if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
@@ -1557,26 +1592,11 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'lineageGraphResult':
                     if (lineageSetupInProgress) {
+                        // Queue the latest message so it's processed after current setup finishes
+                        pendingLineageGraphMessage = message;
                         break;
                     }
-                    if (lineageContent && message.data?.html) {
-                        lineageSetupInProgress = true;
-                        lineageContent.innerHTML = message.data.html;
-                        lineageDetailView = true;
-                        if (message.data.nodeId) {
-                            lineageCurrentNodeId = message.data.nodeId;
-                        }
-                        if (message.data.direction) {
-                            lineageCurrentDirection = message.data.direction;
-                        }
-                        if (message.data.expandedNodes) {
-                            lineageExpandedNodes = new Set(message.data.expandedNodes);
-                        }
-                        updateBackButtonText();
-                        setupLineageGraphInteractions();
-                        setupDirectionButtons();
-                        setTimeout(() => { lineageSetupInProgress = false; }, 200);
-                    }
+                    processLineageGraphResult(message);
                     break;
                 case 'nodeColumnsResult':
                     if (message.data?.nodeId) {
@@ -2431,6 +2451,37 @@ function getLineageGraphScript(): string {
         let lineageCurrentDirection = 'both';
         let lineageAutoFitNodeId = null;
         let lineageSetupInProgress = false;
+        let pendingLineageGraphMessage = null;
+
+        function processLineageGraphResult(message) {
+            if (lineageContent && message.data?.html) {
+                lineageSetupInProgress = true;
+                lineageContent.innerHTML = message.data.html;
+                lineageDetailView = true;
+                if (message.data.nodeId) {
+                    lineageCurrentNodeId = message.data.nodeId;
+                }
+                if (message.data.direction) {
+                    lineageCurrentDirection = message.data.direction;
+                }
+                if (message.data.expandedNodes) {
+                    lineageExpandedNodes = new Set(message.data.expandedNodes);
+                }
+                updateBackButtonText();
+                setupLineageGraphInteractions();
+                setupDirectionButtons();
+                setTimeout(() => {
+                    lineageSetupInProgress = false;
+                    // Process any queued message that arrived during setup
+                    if (pendingLineageGraphMessage) {
+                        const queued = pendingLineageGraphMessage;
+                        pendingLineageGraphMessage = null;
+                        processLineageGraphResult(queued);
+                    }
+                }, 200);
+            }
+        }
+
         const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
         let pendingColumnTraceHintNodeId = null;
         let columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';

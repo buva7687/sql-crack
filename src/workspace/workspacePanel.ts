@@ -74,6 +74,8 @@ export class WorkspacePanel {
     };
     private _detailedStats: DetailedWorkspaceStats | null = null;
     private _showHelp: boolean = false;
+    /** Guard: true while rebuildAndRenderGraph() is running */
+    private _isRebuilding: boolean = false;
 
     // Lineage state
     private _lineageGraph: LineageGraph | null = null;
@@ -338,6 +340,9 @@ export class WorkspacePanel {
             getIsDarkTheme: () => this._isDarkTheme,
             setIsDarkTheme: (dark) => { this._isDarkTheme = dark; },
 
+            // Rebuild state
+            getIsRebuilding: () => this._isRebuilding,
+
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
@@ -360,15 +365,20 @@ export class WorkspacePanel {
             return;
         }
 
-        // Clear cached lineage graph so it rebuilds with new data
-        this._lineageGraph = null;
-        this._lineageBuilder = null;
-        this._flowAnalyzer = null;
-        this._impactAnalyzer = null;
-        this._columnLineageTracker = null;
+        this._isRebuilding = true;
+        try {
+            // Clear cached lineage graph so it rebuilds with new data
+            this._lineageGraph = null;
+            this._lineageBuilder = null;
+            this._flowAnalyzer = null;
+            this._impactAnalyzer = null;
+            this._columnLineageTracker = null;
 
-        this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
-        this.renderCurrentView();
+            this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
+            this.renderCurrentView();
+        } finally {
+            this._isRebuilding = false;
+        }
     }
 
     /**
@@ -1715,10 +1725,16 @@ ${bodyContent}
         const width = Math.max(1200, maxX + 150);
         const height = Math.max(800, maxY + 150);
 
+        // Pre-build node lookup map for O(1) access (avoids O(n) per edge)
+        const nodeMap = new Map<string, WorkspaceNode>();
+        for (const node of graph.nodes) {
+            nodeMap.set(node.id, node);
+        }
+
         // Render edges with improved curvature
         const edgesHtml = graph.edges.map(edge => {
-            const source = graph.nodes.find(n => n.id === edge.source);
-            const target = graph.nodes.find(n => n.id === edge.target);
+            const source = nodeMap.get(edge.source);
+            const target = nodeMap.get(edge.target);
             if (!source || !target) {return '';}
 
             // Calculate connection points
@@ -1735,7 +1751,7 @@ ${bodyContent}
             const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
 
             // Get edge color based on reference type (uses centralized theme)
-            const edgeColor = getReferenceTypeColor(edge.referenceType);
+            const edgeColor = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
@@ -1753,7 +1769,7 @@ ${bodyContent}
                           stroke-width="2"
                           marker-end="url(#arrowhead-${edge.referenceType})"
                           opacity="0.7"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="#94a3b8" font-size="10">${edge.count}</text>` : ''}
+                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="${this._isDarkTheme ? '#94a3b8' : '#64748b'}" font-size="10">${edge.count}</text>` : ''}
                 </g>
             `;
         }).join('');
@@ -1786,17 +1802,10 @@ ${bodyContent}
         // Generate arrow markers for each edge type
         const edgeTypes = ['select', 'join', 'insert', 'update', 'delete', 'subquery'];
         const arrowMarkers = edgeTypes.map(type => {
-            const colors: Record<string, string> = {
-                'select': '#64748b',
-                'join': '#a78bfa',
-                'insert': '#10b981',
-                'update': '#fbbf24',
-                'delete': '#f87171',
-                'subquery': '#8b5cf6'
-            };
+            const markerColor = getReferenceTypeColor(type, this._isDarkTheme);
             return `
                 <marker id="arrowhead-${type}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="${colors[type] || '#64748b'}"/>
+                    <polygon points="0 0, 10 3.5, 0 7" fill="${markerColor}"/>
                 </marker>
             `;
         }).join('');
@@ -1854,7 +1863,7 @@ ${bodyContent}
                 if (ref.columns && ref.columns.length > 0) {
                     const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
                     const moreCount = ref.columns.length - 8;
-                    content += `<br><span style="font-size:9px;color:#94a3b8;">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                    content += `<br><span style="font-size:9px;color:${this._isDarkTheme ? '#94a3b8' : '#64748b'};">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
                 }
 
                 content += '</li>';
@@ -1868,7 +1877,7 @@ ${bodyContent}
         }
 
         if (node.type === 'external') {
-            content += '<div class="tooltip-content" style="color:#fbbf24;">Not defined in workspace</div>';
+            content += `<div class="tooltip-content" style="color:${this._isDarkTheme ? '#fbbf24' : '#f59e0b'};">Not defined in workspace</div>`;
         }
 
         content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
@@ -1904,6 +1913,10 @@ ${bodyContent}
      * Handle export functionality
      */
     private async handleExport(format: string): Promise<void> {
+        if (this._isRebuilding) {
+            vscode.window.showWarningMessage('Graph is being rebuilt. Please try exporting again in a moment.');
+            return;
+        }
         if (!this._currentGraph) {
             vscode.window.showErrorMessage('No graph data to export');
             return;
@@ -2047,36 +2060,19 @@ ${bodyContent}
         dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
         dot += '    edge [fontname="Arial", fontsize=10];\n\n';
 
-        // Define node colors by type
-        const nodeColors: Record<string, string> = {
-            file: '#3b82f6',
-            table: '#10b981',
-            view: '#8b5cf6',
-            external: '#64748b'
-        };
-
         // Add nodes
         dot += '    // Nodes\n';
         for (const node of this._currentGraph.nodes) {
-            const color = nodeColors[node.type] || '#64748b';
+            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
             const label = node.label.replace(/"/g, '\\"');
             dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
         }
 
         dot += '\n    // Edges\n';
 
-        // Define edge colors by reference type
-        const edgeColors: Record<string, string> = {
-            select: '#64748b',
-            join: '#a78bfa',
-            insert: '#10b981',
-            update: '#fbbf24',
-            delete: '#f87171'
-        };
-
         // Add edges
         for (const edge of this._currentGraph.edges) {
-            const color = edgeColors[edge.referenceType] || '#64748b';
+            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
             const label = edge.referenceType || '';
             dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
         }
@@ -2140,10 +2136,16 @@ ${bodyContent}
         const width = Math.max(1200, maxX + 150);
         const height = Math.max(800, maxY + 150);
 
+        // Pre-build node lookup map for O(1) access
+        const nodeMap = new Map<string, WorkspaceNode>();
+        for (const node of graph.nodes) {
+            nodeMap.set(node.id, node);
+        }
+
         // Generate SVG (similar to renderGraph method but without interactivity)
         const edgesHtml = graph.edges.map(edge => {
-            const source = graph.nodes.find(n => n.id === edge.source);
-            const target = graph.nodes.find(n => n.id === edge.target);
+            const source = nodeMap.get(edge.source);
+            const target = nodeMap.get(edge.target);
             if (!source || !target) {return '';}
 
             const x1 = source.x + source.width / 2;
@@ -2152,13 +2154,13 @@ ${bodyContent}
             const y2 = target.y;
 
             const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
-            const color = getReferenceTypeColor(edge.referenceType);
+            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
 
             return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
         }).join('\n');
 
         const nodesHtml = graph.nodes.map(node => {
-            const color = getWorkspaceNodeColor(node.type);
+            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
 
             return `    <g transform="translate(${node.x}, ${node.y})">
         <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>

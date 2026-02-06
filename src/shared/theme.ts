@@ -101,16 +101,33 @@ export const COMPLEXITY_COLORS: Record<string, string> = {
 // Helper Functions
 // ============================================================
 
+/** Dark theme reference type variants (400-level, brighter for dark backgrounds) */
+export const REFERENCE_TYPE_COLORS_DARK: Record<string, string> = {
+    select: '#94a3b8',   // Slate-400
+    join: '#c4b5fd',     // Violet-300
+    insert: '#34d399',   // Emerald-400
+    update: '#fcd34d',   // Amber-300
+    delete: '#fca5a5',   // Red-300
+    subquery: '#a78bfa', // Purple-400
+    default: '#94a3b8',  // Slate-400
+} as const;
+
 /**
- * Get color for a reference type
+ * Get color for a reference type, theme-aware
  */
-export function getReferenceTypeColor(type: string): string {
+export function getReferenceTypeColor(type: string, isDark?: boolean): string {
+    if (isDark) {
+        return REFERENCE_TYPE_COLORS_DARK[type] || REFERENCE_TYPE_COLORS_DARK.default;
+    }
     return REFERENCE_TYPE_COLORS[type] || REFERENCE_TYPE_COLORS.default;
 }
 
 /**
- * Get color for a workspace node type
+ * Get color for a workspace node type, theme-aware
  */
-export function getWorkspaceNodeColor(type: string): string {
+export function getWorkspaceNodeColor(type: string, isDark?: boolean): string {
+    if (isDark) {
+        return WORKSPACE_NODE_COLORS_DARK[type] || WORKSPACE_NODE_COLORS_DARK.default;
+    }
     return WORKSPACE_NODE_COLORS[type] || WORKSPACE_NODE_COLORS.default;
 }
