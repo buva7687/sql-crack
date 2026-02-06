@@ -77,6 +77,7 @@ import { getHintBadgeState, getTopHints, sortHintsByImpact } from './hintsHierar
 import { getWarningIndicatorState } from './warningIndicator';
 import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
+import { shouldShowMinimap } from './minimapVisibility';
 
 const state: ViewState = {
     scale: 1,
@@ -951,14 +952,11 @@ export function cleanupRenderer(): void {
 function updateTransform(): void {
     if (mainGroup) {
         mainGroup.setAttribute('transform', `translate(${state.offsetX}, ${state.offsetY}) scale(${state.scale})`);
-        // Update minimap viewport when panning/zooming
-        const viewport = document.getElementById('minimap-viewport');
-        if (viewport) {
-            requestAnimationFrame(() => {
-                const event = new CustomEvent('transform-update');
-                document.dispatchEvent(event);
-            });
-        }
+        // Update minimap viewport when panning/zooming.
+        // Keep this direct so the viewport box tracks drag/zoom continuously.
+        requestAnimationFrame(() => {
+            updateMinimapViewport();
+        });
         // Trigger virtualized re-render on pan/zoom
         throttledVirtualizedRender();
     }
@@ -7079,8 +7077,8 @@ export function updateMinimap(): void {
     const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
     const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!minimapContainer || !minimapSvg || nodesForMinimap.length < 8) {
-        // Only show minimap for complex queries (8+ nodes)
+    if (!minimapContainer || !minimapSvg || !shouldShowMinimap(nodesForMinimap.length)) {
+        // Hide minimap for trivial/empty graph states.
         if (minimapContainer) {minimapContainer.style.display = 'none';}
         return;
     }
@@ -7121,7 +7119,7 @@ function updateMinimapViewport(): void {
     const minimapContainer = document.getElementById('minimap-container');
     const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!viewport || !minimapContainer || !svg || nodesForMinimap.length < 8) {return;}
+    if (!viewport || !minimapContainer || !svg || !shouldShowMinimap(nodesForMinimap.length)) {return;}
 
     const bounds = calculateBounds();
     const svgRect = svg.getBoundingClientRect();

@@ -2476,6 +2476,7 @@ function getLineageGraphScript(): string {
         let lineageAutoFitNodeId = null;
         let lineageSetupInProgress = false;
         let pendingLineageGraphMessage = null;
+        let refreshLineageMinimapViewport = null;
 
         function processLineageGraphResult(message) {
             if (lineageContent && message.data?.html) {
@@ -2494,6 +2495,7 @@ function getLineageGraphScript(): string {
                 updateBackButtonText();
                 setupLineageGraphInteractions();
                 setupDirectionButtons();
+                setupMinimap();
                 setTimeout(() => {
                     lineageSetupInProgress = false;
                     // Process any queued message that arrived during setup
@@ -2526,6 +2528,7 @@ function getLineageGraphScript(): string {
             lineageScale = 1;
             lineageOffsetX = 0;
             lineageOffsetY = 0;
+            refreshLineageMinimapViewport = null;
 
             function updateLineageTransform() {
                 const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
@@ -2534,6 +2537,9 @@ function getLineageGraphScript(): string {
                 currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
                 if (currentZoomLevel) {
                     currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+                if (typeof refreshLineageMinimapViewport === 'function') {
+                    refreshLineageMinimapViewport();
                 }
             }
 
@@ -3171,7 +3177,10 @@ function getLineageGraphScript(): string {
             const minimapContent = document.getElementById('minimap-content');
             const container = document.getElementById('lineage-graph-container');
 
-            if (!minimap || !minimapSvg || !minimapViewport || !container) return;
+            if (!minimap || !minimapSvg || !minimapViewport || !minimapContent || !container) {
+                refreshLineageMinimapViewport = null;
+                return;
+            }
 
             let minimapDragging = false;
 
@@ -3199,32 +3208,33 @@ function getLineageGraphScript(): string {
                 const visibleWidth = containerRect.width / lineageScale;
                 const visibleHeight = containerRect.height / lineageScale;
 
-                // Scale to minimap coordinates
-                const scaleX = minimapRect.width / graphWidth;
-                const scaleY = minimapRect.height / graphHeight;
-                const scale = Math.min(scaleX, scaleY);
-
                 minimapViewport.setAttribute('x', String(visibleX));
                 minimapViewport.setAttribute('y', String(visibleY));
                 minimapViewport.setAttribute('width', String(visibleWidth));
                 minimapViewport.setAttribute('height', String(visibleHeight));
             }
 
+            refreshLineageMinimapViewport = updateMinimapViewport;
+
+            function onMinimapMouseMove(e) {
+                if (minimapDragging) {
+                    panToMinimapPosition(e);
+                }
+            }
+
+            function onMinimapMouseUp() {
+                minimapDragging = false;
+                document.removeEventListener('mousemove', onMinimapMouseMove);
+                document.removeEventListener('mouseup', onMinimapMouseUp);
+            }
+
             // Handle click on minimap to pan
             minimapContent.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 minimapDragging = true;
+                document.addEventListener('mousemove', onMinimapMouseMove);
+                document.addEventListener('mouseup', onMinimapMouseUp);
                 panToMinimapPosition(e);
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (minimapDragging) {
-                    panToMinimapPosition(e);
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                minimapDragging = false;
             });
 
             function panToMinimapPosition(e) {
@@ -3259,18 +3269,6 @@ function getLineageGraphScript(): string {
                 updateMinimapViewport();
             }
 
-            // Update minimap viewport when zooming/panning
-            const originalUpdateTransform = function() {
-                const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
-                const currentZoomLevel = document.getElementById('lineage-zoom-level');
-                if (!currentGraphContainer) return;
-                currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
-                if (currentZoomLevel) {
-                    currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
-                }
-                updateMinimapViewport();
-            };
-
             // Hook into zoom/pan events to update minimap
             const mainSvg = container.querySelector('.lineage-graph-svg');
             if (mainSvg) {
@@ -3281,9 +3279,6 @@ function getLineageGraphScript(): string {
             // Initial viewport update
             setTimeout(updateMinimapViewport, 200);
         }
-
-        // Initialize minimap after graph is ready
-        setupMinimap();
     `;
 }
 
