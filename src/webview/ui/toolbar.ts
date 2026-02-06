@@ -43,6 +43,7 @@ export interface ToolbarCallbacks {
 }
 
 let hintsSummaryBtn: HTMLButtonElement | null = null;
+const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
 
 function getOverflowPalette(dark: boolean): {
     background: string;
@@ -64,6 +65,53 @@ function getOverflowPalette(dark: boolean): {
         hover: 'rgba(15, 23, 42, 0.06)',
         shadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
     };
+}
+
+function isReducedMotionPreferred(): boolean {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function applyFirstRunHelpPulse(helpBtn: HTMLButtonElement, enabled: boolean): void {
+    if (!enabled || isReducedMotionPreferred()) {
+        return;
+    }
+
+    if (!document.getElementById(HELP_PULSE_STYLE_ID)) {
+        const style = document.createElement('style');
+        style.id = HELP_PULSE_STYLE_ID;
+        style.textContent = `
+            @keyframes sql-crack-help-pulse {
+                0% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45);
+                }
+                55% {
+                    transform: scale(1.06);
+                    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+                }
+                100% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+                }
+            }
+
+            .sql-crack-help-pulse {
+                animation: sql-crack-help-pulse 1.1s ease-out 3;
+                background: rgba(99, 102, 241, 0.18) !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const stopPulse = () => {
+        helpBtn.classList.remove('sql-crack-help-pulse');
+    };
+
+    helpBtn.classList.add('sql-crack-help-pulse');
+    helpBtn.addEventListener('click', stopPulse, { once: true });
+    window.setTimeout(stopPulse, 3600);
 }
 
 function applyOverflowMenuTheme(dark: boolean): void {
@@ -113,6 +161,7 @@ export function createToolbar(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     }
 ): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement; cleanup: ToolbarCleanup } {
     // Store event listeners for cleanup
@@ -346,6 +395,7 @@ function createActionButtons(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
@@ -726,6 +776,7 @@ function createFeatureGroup(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
@@ -897,6 +948,7 @@ function createFeatureGroup(
     helpBtn.style.fontWeight = '700';
     helpBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(helpBtn);
+    applyFirstRunHelpPulse(helpBtn, options.isFirstRun);
 
     return featureGroup;
 }
