@@ -1254,6 +1254,8 @@ function createPinnedTabsButton(
     pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
 ): HTMLElement {
     const pinsBtn = document.createElement('button');
+    pinsBtn.id = 'pinned-tabs-btn';
+    pinsBtn.dataset.overflowKeepVisible = 'true';
     pinsBtn.innerHTML = '📋';
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
     pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';

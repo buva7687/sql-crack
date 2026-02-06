@@ -3789,27 +3789,35 @@ function handleEdgeClick(edge: FlowEdge): void {
 function showSqlClausePanel(edge: FlowEdge): void {
     // Reuse or create a panel for showing SQL clause details
     let clausePanel = document.getElementById('sql-clause-panel') as HTMLDivElement;
+    const isDark = state.isDarkTheme;
+    const panelBg = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;
+    const panelBorder = isDark ? UI_COLORS.borderMedium : 'rgba(15, 23, 42, 0.14)';
+    const panelShadow = isDark ? UI_COLORS.shadowMedium : '0 8px 24px rgba(15, 23, 42, 0.12)';
+    const mutedText = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const headingText = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const clauseBg = isDark ? UI_COLORS.backgroundSubtleDark : 'rgba(15, 23, 42, 0.04)';
+    const clauseBorder = isDark ? UI_COLORS.border : 'rgba(15, 23, 42, 0.1)';
+    const clauseText = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;
 
     if (!clausePanel) {
         clausePanel = document.createElement('div');
         clausePanel.id = 'sql-clause-panel';
-        clausePanel.style.cssText = `
-            position: fixed;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${UI_COLORS.backgroundPanelSolid};
-            border: 1px solid ${UI_COLORS.borderMedium};
-            border-radius: 12px;
-            padding: 16px 20px;
-            max-width: 600px;
-            z-index: 1000;
-            box-shadow: ${UI_COLORS.shadowMedium};
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-        `;
-
         containerElement?.appendChild(clausePanel);
     }
+    clausePanel.style.cssText = `
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${panelBg};
+        border: 1px solid ${panelBorder};
+        border-radius: 12px;
+        padding: 16px 20px;
+        max-width: 600px;
+        z-index: 1000;
+        box-shadow: ${panelShadow};
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    `;
 
     // Build content
     const clauseType = edge.clauseType || 'flow';
@@ -3823,7 +3831,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             right: 8px;
             background: transparent;
             border: none;
-            color: ${UI_COLORS.textMuted};
+            color: ${mutedText};
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
@@ -3838,16 +3846,16 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 font-weight: 700;
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
-            <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
+            <div style="color: ${headingText}; font-size: 13px; font-weight: 600;">
                 ${edge.label || 'Data Flow'}
             </div>
         </div>
         <div style="
-            background: ${UI_COLORS.backgroundSubtleDark};
-            border: 1px solid ${UI_COLORS.border};
+            background: ${clauseBg};
+            border: 1px solid ${clauseBorder};
             border-radius: 8px;
             padding: 12px;
-            color: ${UI_COLORS.textBright};
+            color: ${clauseText};
             font-size: 13px;
             line-height: 1.6;
             white-space: pre-wrap;
@@ -3856,7 +3864,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             overflow-y: auto;
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
-            <div style="color: ${UI_COLORS.textMuted}; font-size: 11px; margin-top: 8px;">
+            <div style="color: ${mutedText}; font-size: 11px; margin-top: 8px;">
                 📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
@@ -4500,6 +4508,15 @@ function updateDetailsPanel(nodeId: string | null): void {
 
     const node = currentNodes.find(n => n.id === nodeId);
     if (!node) { return; }
+    const isDark = state.isDarkTheme;
+    const sectionLabelColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const detailTextColor = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const detailCardBg = isDark ? UI_COLORS.backgroundSubtle : 'rgba(15, 23, 42, 0.04)';
+    const detailDividerColor = isDark ? UI_COLORS.borderLight : 'rgba(15, 23, 42, 0.08)';
+    const sectionBorderColor = isDark ? UI_COLORS.border : 'rgba(15, 23, 42, 0.12)';
+    const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
 
     detailsPanel.style.transform = 'translate(0, -50%)';
 
@@ -4510,28 +4527,28 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.windowDetails && node.windowDetails.functions.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map(func => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
                                 <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
                                 <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
                             <div style="display: flex; align-items: center; gap: 4px;">
                                 <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -4544,23 +4561,23 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map(func => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
-                            <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; font-family: monospace;">
+                            <div style="color: ${sectionLabelColor}; font-size: 10px; font-family: monospace;">
                                 Alias: ${escapeHtml(func.alias)}
                             </div>
                         ` : ''}
                     </div>
                 `).join('')}
                 ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
-                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${UI_COLORS.border};">
-                        <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
-                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${sectionBorderColor};">
+                        <div style="color: ${sectionLabelColor}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
+                        <div style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
                     </div>
                 ` : ''}
             </div>
@@ -4571,9 +4588,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.caseDetails && node.caseDetails.cases.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
                 ${node.caseDetails.cases.map((caseStmt) => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         ${caseStmt.alias ? `
                             <div style="color: ${COMPLEXITY_COLORS.Moderate}; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
                                 ${escapeHtml(caseStmt.alias)}
@@ -4583,18 +4600,18 @@ function updateDetailsPanel(nodeId: string | null): void {
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
                                     <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
-                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
                                     <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
-                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
                                 <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -4606,10 +4623,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.children && node.children.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
-                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px;">
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
+                <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
-                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${UI_COLORS.borderLight};">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
                             <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
                                 ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
                             </span>
@@ -4623,10 +4640,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.details && node.details.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
-                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 8px;">
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
+                <div style="background: ${detailCardBg}; border-radius: 4px; padding: 8px;">
                     ${node.details.map(d => `
-                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 11px; padding: 2px 0; font-family: monospace;">
+                        <div style="color: ${detailTextColor}; font-size: 11px; padding: 2px 0; font-family: monospace;">
                             ${escapeHtml(d)}
                         </div>
                     `).join('')}
@@ -4652,8 +4669,8 @@ function updateDetailsPanel(nodeId: string | null): void {
 
     detailsPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="margin: 0; color: ${UI_COLORS.text}; font-size: 12px;">Node Details</h3>
-            <button id="close-details" style="background: none; border: none; color: ${UI_COLORS.textMuted}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
+            <h3 style="margin: 0; color: ${headingColor}; font-size: 12px;">Node Details</h3>
+            <button id="close-details" style="background: none; border: none; color: ${closeButtonColor}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
@@ -4665,7 +4682,7 @@ function updateDetailsPanel(nodeId: string | null): void {
         </div>
         ${detailsSection}
         ${traceColumnsAction}
-        <div style="color: ${UI_COLORS.textDim}; font-size: 10px; margin-top: 12px;">
+        <div style="color: ${footerColor}; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
             ID: ${escapeHtml(node.id)}
         </div>

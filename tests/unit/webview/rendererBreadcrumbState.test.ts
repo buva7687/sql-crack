@@ -65,4 +65,12 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('color: ${sqlHeaderColor}');
         expect(rendererSource).toContain('color: ${sqlBodyColor};');
     });
+
+    it('uses theme-aware colors for details and SQL clause panels', () => {
+        expect(rendererSource).toContain('const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;');
+        expect(rendererSource).toContain('const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;');
+        expect(rendererSource).toContain('const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;');
+        expect(rendererSource).toContain('const panelBg = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;');
+        expect(rendererSource).toContain('const clauseText = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;');
+    });
 });

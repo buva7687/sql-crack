@@ -10,6 +10,7 @@ describe('toolbar control visibility and overflow behavior', () => {
     it('keeps view-location and focus-direction controls out of overflow hiding', () => {
         expect(source).toContain("viewLocBtn.dataset.overflowKeepVisible = 'true';");
         expect(source).toContain("container.dataset.overflowKeepVisible = 'true';");
+        expect(source).toContain("pinsBtn.dataset.overflowKeepVisible = 'true';");
         expect(source).toContain("if (el.dataset.overflowKeepVisible === 'true') {continue;}");
         expect(source).toContain("if (el.tagName !== 'BUTTON') {continue;}");
     });
