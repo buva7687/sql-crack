@@ -93,7 +93,7 @@ export class LineageGraphRenderer {
 
     // Layout configuration
     private readonly NODE_WIDTH = 200;
-    private readonly NODE_HEIGHT_COLLAPSED = 60;
+    private readonly NODE_HEIGHT_COLLAPSED = 78;
     private readonly NODE_HEIGHT_PER_COLUMN = 24;
     private readonly NODE_SEP = 60;
     private readonly RANK_SEP = 120;
