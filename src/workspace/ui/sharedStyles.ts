@@ -713,36 +713,6 @@ export function getSharedViewStyles(): string {
             letter-spacing: 0.5px;
         }
 
-        /* View Controls - search and filter section */
-        .view-controls {
-            background: var(--bg-secondary);
-            border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle);
-            padding: 20px;
-            margin-bottom: 24px;
-        }
-        .view-controls-header {
-            margin-bottom: 16px;
-        }
-        .view-controls-header h4 {
-            color: var(--text-primary);
-            font-size: 14px;
-            font-weight: 600;
-            margin: 0 0 4px 0;
-        }
-        .view-controls-hint {
-            color: var(--text-muted);
-            font-size: 12px;
-            margin: 0;
-        }
-        .view-controls-hint kbd {
-            background: var(--bg-tertiary);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
-            border: 1px solid var(--border-subtle);
-        }
-
         /* View Search Input */
         .view-search-box {
             display: flex;
@@ -2003,7 +1973,7 @@ export function getImpactFormStyles(): string {
         }
         .transitive-group.severity-high { border-left-color: var(--warning); }
         .transitive-group.severity-medium { border-left-color: var(--success); }
-        .transitive-group.severity-critical { border-left-color: var(--danger); }
+        .transitive-group.severity-critical { border-left-color: var(--error); }
         .transitive-group-header {
             display: flex;
             align-items: center;
@@ -3240,7 +3210,7 @@ export function getLineageNodeStyles(): string {
         }
         .lineage-edge-direct { stroke: var(--edge-default); }
         .lineage-edge-join { stroke: var(--edge-join); }
-        .lineage-edge-transform { stroke: #f59e0b; }
+        .lineage-edge-transform { stroke: var(--warning); }
         .lineage-edge.highlighted {
             stroke: var(--accent);
             stroke-width: 3;
@@ -3754,7 +3724,7 @@ export function getGraphStyles(): string {
         }
         .index-status-fresh .status-dot { background: var(--success); }
         .index-status-stale .status-dot { background: var(--warning); }
-        .index-status-old .status-dot { background: var(--danger); }
+        .index-status-old .status-dot { background: var(--error); }
         .index-status-missing .status-dot { background: var(--text-dim); }
         .workspace-legend-bar {
             position: absolute;

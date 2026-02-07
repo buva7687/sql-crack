@@ -58,4 +58,10 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.view-skeleton-impact');
         expect(css).toContain('@keyframes skeleton-pulse');
     });
+
+    it('avoids stale danger token usage and uses theme variables for transform edges', () => {
+        const css = getWebviewStyles(true);
+        expect(css).not.toContain('var(--danger)');
+        expect(css).toContain('.lineage-edge-transform { stroke: var(--warning); }');
+    });
 });
