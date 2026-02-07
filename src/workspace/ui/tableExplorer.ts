@@ -4,6 +4,7 @@ import { LineageGraph, LineageNode } from '../lineage/types';
 import { ColumnLineageTracker } from '../lineage/columnLineage';
 import { FlowAnalyzer } from '../lineage/flowAnalyzer';
 import { TableExplorerData } from './types';
+import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Generates HTML for table-centric exploration
@@ -25,7 +26,7 @@ export class TableExplorer {
             return `
                 <div class="view-container">
                     <div class="view-header">
-                        <div class="view-header-icon">📋</div>
+                        <div class="view-header-icon">${ICONS.table}</div>
                         <div class="view-header-content">
                             <h3 class="view-title">Table Explorer</h3>
                             <p class="view-subtitle">Browse and explore all tables, views, and CTEs in your workspace</p>
@@ -68,7 +69,7 @@ export class TableExplorer {
             <div class="view-container">
                 <!-- View Header -->
                 <div class="view-header">
-                    <div class="view-header-icon">📋</div>
+                    <div class="view-header-icon">${ICONS.table}</div>
                     <div class="view-header-content">
                         <h3 class="view-title">Table Explorer</h3>
                         <p class="view-subtitle">Browse and explore all tables, views, and CTEs in your workspace</p>
@@ -249,13 +250,7 @@ export class TableExplorer {
      * Get icon for node type
      */
     private getTypeIcon(type: string): string {
-        const icons: Record<string, string> = {
-            'table': '📊',
-            'view': '👁️',
-            'cte': '🔄',
-            'external': '🌐'
-        };
-        return icons[type] || '📦';
+        return getWorkspaceNodeIcon(type);
     }
 
     /**
@@ -330,7 +325,9 @@ export class TableExplorer {
      */
     private generateFlowPanel(direction: 'upstream' | 'downstream', flow: any, targetNodeId: string, graph: LineageGraph): string {
         const title = direction === 'upstream' ? 'Data Sources' : 'Data Consumers';
-        const icon = direction === 'upstream' ? '⬆️' : '⬇️';
+        const icon = direction === 'upstream'
+            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'
+            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>';
 
         // Build a map of node ID to edges (to show which file creates the relationship)
         const nodeToEdges = new Map<string, any[]>();
@@ -380,7 +377,7 @@ export class TableExplorer {
 
         let html = `
             <div class="flow-panel flow-${direction}">
-                <h3>${icon} ${title} (${totalCount})</h3>
+                <h3><span class="flow-panel-icon">${icon}</span>${title} (${totalCount})</h3>
         `;
 
         // Show internal tables/views first
@@ -389,7 +386,7 @@ export class TableExplorer {
                 <div class="flow-section">
                     <div class="flow-section-header">
                         <div class="flow-section-title">
-                            <span>📊 Defined in Workspace (${internalCount})</span>
+                            <span>${this.getTypeIcon('table')} Defined in Workspace (${internalCount})</span>
                         </div>
                         <div class="flow-section-desc">
                             These tables/views have CREATE TABLE or CREATE VIEW statements in your workspace SQL files.
@@ -440,7 +437,7 @@ export class TableExplorer {
                 <div class="flow-section">
                     <div class="flow-section-header">
                         <div class="flow-section-title">
-                            <span>🌐 Referenced but Not Defined in Workspace (${externalMap.size})</span>
+                            <span>${this.getTypeIcon('external')} Referenced but Not Defined in Workspace (${externalMap.size})</span>
                             <svg class="info-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="These tables are referenced in your SQL queries (SELECT, JOIN, etc.) but their CREATE TABLE statements are not found in any .sql file in your workspace. They may exist in other databases, schemas, or repositories.">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M12 16v-4M12 8h.01"/>
@@ -470,7 +467,7 @@ export class TableExplorer {
                 
                 html += `
                     <div class="flow-item flow-item-external" title="${this.escapeHtml(filePathTooltip)}">
-                        <span class="flow-node-icon">🌐</span>
+                        <span class="flow-node-icon">${this.getTypeIcon('external')}</span>
                         <span class="flow-node-name">${this.escapeHtml(name)}</span>
                         <span class="flow-node-type external">external</span>
                         ${filePathDisplay ? `<span class="flow-node-file" title="${this.escapeHtml(filePathTooltip)}">${this.escapeHtml(filePathDisplay)}${filePathList.length > 1 ? ` +${filePathList.length - 1}` : ''}</span>` : ''}

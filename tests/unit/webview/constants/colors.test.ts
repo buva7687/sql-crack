@@ -9,9 +9,11 @@ import {
     NODE_COLORS,
     WARNING_COLORS,
     TRANSFORMATION_COLORS,
+    SCROLLBAR_COLORS,
     getTransformationColor,
     getNodeColor,
-    getWarningColor
+    getWarningColor,
+    getScrollbarColors,
 } from '../../../../src/webview/constants/colors';
 
 describe('Constants Colors', () => {
@@ -114,6 +116,16 @@ describe('Constants Colors', () => {
         it('returns low severity color for unknown severity', () => {
             expect(getWarningColor('unknown' as any)).toBe(WARNING_COLORS.low);
             expect(getWarningColor('' as any)).toBe(WARNING_COLORS.low);
+        });
+    });
+
+    describe('getScrollbarColors', () => {
+        it('returns dark palette when dark theme is enabled', () => {
+            expect(getScrollbarColors(true)).toEqual(SCROLLBAR_COLORS.dark);
+        });
+
+        it('returns light palette when dark theme is disabled', () => {
+            expect(getScrollbarColors(false)).toEqual(SCROLLBAR_COLORS.light);
         });
     });
 });

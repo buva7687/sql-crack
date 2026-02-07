@@ -24,6 +24,11 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
         let currentGraphMode = '${currentGraphMode}';
+        const prefersReducedMotion = typeof window !== 'undefined'
+            && typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const motionDurationMs = prefersReducedMotion ? 0 : 200;
+        let graphLayoutFitTimer = null;
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -54,6 +59,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphEmptyTitle = document.getElementById('graph-empty-title');
         const graphEmptyDesc = document.getElementById('graph-empty-desc');
         const graphEmptyActions = document.getElementById('graph-empty-actions');
+        const graphLegendBar = document.getElementById('workspace-legend-bar');
+        const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
+        const graphLegendToggleBtn = document.getElementById('btn-legend-toggle');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========
@@ -63,6 +71,31 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let activeEmptyState = null;
         const traceUpBtn = document.getElementById('btn-trace-up');
         const traceDownBtn = document.getElementById('btn-trace-down');
+        const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
+
+        function setGraphLegendVisible(visible) {
+            if (!graphLegendBar) return;
+            graphLegendBar.classList.toggle('is-hidden', !visible);
+            graphLegendBar.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            if (graphLegendToggleBtn) {
+                graphLegendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+            }
+            const graphAreaEl = document.getElementById('graph-area') || document.querySelector('.graph-area');
+            if (graphAreaEl) {
+                graphAreaEl.classList.toggle('graph-legend-visible', visible);
+            }
+        }
+
+        function toggleGraphLegend(show) {
+            if (!graphLegendBar) return;
+            const nextVisible = typeof show === 'boolean' ? show : graphLegendBar.classList.contains('is-hidden');
+            setGraphLegendVisible(nextVisible);
+            try {
+                localStorage.setItem(graphLegendStorageKey, nextVisible ? '1' : '0');
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+        }
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -194,6 +227,26 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             offsetY = containerCenterY - bboxCenterY * scale;
 
             updateTransform();
+        }
+
+        function scheduleGraphAutoFit() {
+            // Only auto-fit when Graph tab is active and the main graph is present.
+            const graphTab = document.querySelector('.view-tab[data-view="graph"]');
+            const isGraphTabActive = graphTab?.classList.contains('active');
+            if (!isGraphTabActive || !svg || !mainGroup) {
+                return;
+            }
+
+            if (graphLayoutFitTimer) {
+                clearTimeout(graphLayoutFitTimer);
+            }
+
+            const delay = prefersReducedMotion ? 0 : (motionDurationMs + 40);
+            graphLayoutFitTimer = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    fitToScreen();
+                });
+            }, delay);
         }
 
         // ========== Selection & Focus Helpers ==========
@@ -499,6 +552,29 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
         updateFocusButton();
 
+        if (graphLegendBar) {
+            let showGraphLegend = true;
+            try {
+                const storedLegend = localStorage.getItem(graphLegendStorageKey);
+                if (storedLegend !== null) {
+                    showGraphLegend = storedLegend === '1';
+                }
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+            setGraphLegendVisible(showGraphLegend);
+            graphLegendDismiss?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleGraphLegend(false);
+            });
+            graphLegendToggleBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleGraphLegend();
+            });
+        }
+
         // ========== Pan/Zoom Setup ==========
         if (svg && mainGroup) {
             updateTransform();
@@ -546,7 +622,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             if (graphArea) {
                 // Hide graph during fit calculation to prevent flicker
                 graphArea.style.opacity = '0';
-                graphArea.style.transition = 'opacity 0.2s ease-in';
+                graphArea.style.transition = prefersReducedMotion ? 'none' : 'opacity 0.2s ease-in';
             }
             
             // Use requestAnimationFrame to ensure DOM is ready, then fit immediately
@@ -696,14 +772,23 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 resetView();
                 return;
             }
+
+            // L: Toggle bottom legend bar
+            if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                toggleGraphLegend();
+                return;
+            }
         });
 
         // ========== Sidebar Toggle ==========
         document.getElementById('btn-sidebar')?.addEventListener('click', () => {
             sidebar?.classList.toggle('collapsed');
+            scheduleGraphAutoFit();
         });
         document.getElementById('btn-sidebar-close')?.addEventListener('click', () => {
             sidebar?.classList.add('collapsed');
+            scheduleGraphAutoFit();
         });
 
         // ========== Section Toggles ==========
@@ -816,12 +901,34 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             }
         });
 
-        // ========== Export Buttons ==========
-        document.querySelectorAll('.export-btn[data-format]').forEach(btn => {
-            btn.addEventListener('click', () => {
+        // ========== Export Dropdown ==========
+        const exportTrigger = document.getElementById('workspace-export-trigger');
+        const exportMenu = document.getElementById('workspace-export-menu');
+        exportTrigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!exportMenu) { return; }
+            const isOpen = exportMenu.style.display !== 'none';
+            exportMenu.style.display = isOpen ? 'none' : 'block';
+            exportTrigger.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+        });
+        exportMenu?.querySelectorAll('.export-option[data-format]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const format = btn.getAttribute('data-format');
-                if (format) vscode.postMessage({ command: 'export', format });
+                if (format) {
+                    vscode.postMessage({ command: 'export', format });
+                }
+                if (exportMenu) {
+                    exportMenu.style.display = 'none';
+                    exportTrigger?.setAttribute('aria-expanded', 'false');
+                }
             });
+        });
+        document.addEventListener('click', (e) => {
+            if (!exportMenu || !exportTrigger) { return; }
+            if (e.target.closest('#workspace-export-trigger') || e.target.closest('#workspace-export-menu')) { return; }
+            exportMenu.style.display = 'none';
+            exportTrigger.setAttribute('aria-expanded', 'false');
         });
 
         ${getViewModeScript()}
@@ -848,11 +955,64 @@ function getViewModeScript(): string {
         let lineageDetailView = false;
         let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
         let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
+
+        // Navigation state stack for cross-view navigation
+        const navStack = [];
+        // Per-view zoom/pan state preservation
+        const viewStates = {};
+        let navigationOriginLabel = '';
+        let navigationOriginType = '';
+
+        function saveCurrentViewState() {
+            if (currentViewMode === 'graph') {
+                viewStates['graph'] = {
+                    scale,
+                    offsetX,
+                    offsetY,
+                    selectedNodeId
+                };
+            } else {
+                // Save scroll position for non-graph views (lineage, tableExplorer, impact)
+                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                if (scrollContainer) {
+                    viewStates[currentViewMode] = {
+                        scrollTop: scrollContainer.scrollTop,
+                        scrollLeft: scrollContainer.scrollLeft
+                    };
+                }
+            }
+        }
+
+        function restoreViewState(view) {
+            if (view === 'graph' && viewStates['graph']) {
+                const graphState = viewStates['graph'];
+                scale = typeof graphState.scale === 'number' ? graphState.scale : scale;
+                offsetX = typeof graphState.offsetX === 'number' ? graphState.offsetX : offsetX;
+                offsetY = typeof graphState.offsetY === 'number' ? graphState.offsetY : offsetY;
+                updateTransform();
+                if (graphState.selectedNodeId) {
+                    const selectedNode = document.querySelector('.node[data-id="' + graphState.selectedNodeId.replace(/"/g, '\\"') + '"]');
+                    if (selectedNode) {
+                        updateSelectionPanel(selectedNode);
+                    }
+                }
+            } else if (viewStates[view]) {
+                // Restore scroll position for non-graph views
+                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                if (scrollContainer) {
+                    requestAnimationFrame(() => {
+                        scrollContainer.scrollTop = viewStates[view].scrollTop || 0;
+                        scrollContainer.scrollLeft = viewStates[view].scrollLeft || 0;
+                    });
+                }
+            }
+        }
         const viewTabs = document.querySelectorAll('.view-tab');
         const lineagePanel = document.getElementById('lineage-panel');
         const lineageContent = document.getElementById('lineage-content');
         const lineageTitle = document.getElementById('lineage-title');
         const lineageBackBtn = document.getElementById('lineage-back-btn');
+        const workspaceBreadcrumb = document.getElementById('workspace-breadcrumb');
         const graphArea = document.querySelector('.graph-area');
         const graphModeSwitcher = document.getElementById('graph-mode-switcher');
 
@@ -875,8 +1035,117 @@ function getViewModeScript(): string {
             });
         }
 
-        function switchToView(view, skipMessage = false) {
+        function escapeBreadcrumbText(value) {
+            return (value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function escapeBreadcrumbAttr(value) {
+            return escapeBreadcrumbText(value).replace(/"/g, '&quot;');
+        }
+
+        function updateWorkspaceBreadcrumb() {
+            if (!workspaceBreadcrumb) return;
+            if (currentViewMode === 'graph') {
+                workspaceBreadcrumb.style.display = 'none';
+                workspaceBreadcrumb.innerHTML = '';
+                return;
+            }
+
+            const viewLabels = {
+                lineage: 'Lineage',
+                tableExplorer: 'Tables',
+                impact: 'Impact'
+            };
+            const segments = [{
+                label: 'Graph',
+                action: 'view',
+                value: 'graph',
+                clickable: true,
+            }];
+
+            if (navigationOriginLabel) {
+                const originTypeLabel = navigationOriginType ? ' (' + navigationOriginType + ')' : '';
+                segments.push({
+                    label: navigationOriginLabel + originTypeLabel,
+                    action: 'origin',
+                    value: navigationOriginLabel,
+                    clickable: true,
+                });
+            }
+
+            segments.push({
+                label: viewLabels[currentViewMode] || 'View',
+                action: 'view',
+                value: currentViewMode,
+                clickable: currentViewMode !== 'graph',
+            });
+
+            if (lineageDetailView && lineageTitle && lineageTitle.textContent) {
+                const titleText = lineageTitle.textContent.trim();
+                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Table Explorer' && titleText !== 'Impact Analysis') {
+                    segments.push({
+                        label: titleText,
+                        action: 'detail-root',
+                        value: currentViewMode,
+                        clickable: true,
+                    });
+                }
+            }
+
+            const activeColumnLabel = (window && window.__workspaceSelectedColumnLabel) ? window.__workspaceSelectedColumnLabel : '';
+            if (activeColumnLabel) {
+                segments.push({
+                    label: 'Column: ' + activeColumnLabel,
+                    action: 'clear-column-trace',
+                    value: activeColumnLabel,
+                    clickable: true,
+                });
+            }
+
+            workspaceBreadcrumb.innerHTML = segments.map((segment, index) => {
+                const className = segment.clickable ? 'workspace-breadcrumb-segment is-clickable' : 'workspace-breadcrumb-segment';
+                const actionAttr = segment.clickable
+                    ? ' data-breadcrumb-action="' + escapeBreadcrumbAttr(segment.action) + '" data-breadcrumb-value="' + escapeBreadcrumbAttr(segment.value) + '"'
+                    : '';
+                const separator = index < segments.length - 1 ? '<span class="workspace-breadcrumb-separator">›</span>' : '';
+                return '<button type="button" class="' + className + '"' + actionAttr + '>' + escapeBreadcrumbText(segment.label) + '</button>' + separator;
+            }).join('');
+            workspaceBreadcrumb.style.display = 'block';
+        }
+
+        function switchToView(view, skipMessage = false, originLabel = '', originType = '') {
             if (view === currentViewMode) return;
+
+            // Clear column trace when leaving a lineage-related view to prevent stale state
+            if (typeof clearColumnHighlighting === 'function') {
+                clearColumnHighlighting();
+            }
+
+            // Save state of current view before switching
+            saveCurrentViewState();
+
+            if (originLabel) {
+                navigationOriginLabel = originLabel;
+                navigationOriginType = originType;
+            } else {
+                // Clear stale origin context on any manual tab switch without explicit origin.
+                navigationOriginLabel = '';
+                navigationOriginType = '';
+            }
+
+            // Push current view to nav stack for back navigation (avoid duplicates, cap size)
+            if (!skipMessage) {
+                if (navStack[navStack.length - 1] !== currentViewMode) {
+                    navStack.push(currentViewMode);
+                }
+                // Cap stack depth to prevent unbounded growth from rapid toggling
+                if (navStack.length > 20) {
+                    navStack.splice(0, navStack.length - 20);
+                }
+            }
 
             viewTabs.forEach(t => {
                 if (t.getAttribute('data-view') === view) {
@@ -885,7 +1154,26 @@ function getViewModeScript(): string {
                     t.classList.remove('active');
                 }
             });
+
+            // Crossfade transition
+            const container = lineagePanel || graphArea;
+            if (container) {
+                if (prefersReducedMotion) {
+                    container.style.transition = 'none';
+                } else {
+                    container.style.transition = 'opacity 0.2s ease';
+                    container.style.opacity = '0';
+                    setTimeout(() => {
+                        container.style.opacity = '1';
+                    }, 50);
+                }
+            }
+
             currentViewMode = view;
+            if (view === 'graph') {
+                navigationOriginLabel = '';
+                navigationOriginType = '';
+            }
 
             // Show/hide header search box (only relevant for Graph tab)
             const headerSearchBox = document.querySelector('.header-right .search-box');
@@ -894,6 +1182,8 @@ function getViewModeScript(): string {
             }
 
             if (view === 'graph') {
+                // Sync server-side view state so theme toggle / re-render preserves correct tab
+                vscode.postMessage({ command: 'switchView', view: 'graph' });
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
                 if (focusBtn) focusBtn.style.display = '';
@@ -904,13 +1194,16 @@ function getViewModeScript(): string {
                     graphModeSwitcher.style.visibility = 'visible';
                     graphModeSwitcher.style.pointerEvents = 'auto';
                 }
-                // Reset zoom and fit graph when switching back to Graph tab.
-                // This ensures proper view after returning from other tabs (fixes zoom state persistence bug).
-                if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
+                // Restore graph zoom/pan state when switching back to Graph tab
+                if (viewStates['graph']) {
+                    requestAnimationFrame(() => {
+                        restoreViewState('graph');
+                    });
+                } else if (svg && mainGroup && graphData && graphData.nodes && graphData.nodes.length > 0) {
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             fitToScreen();
-                        }, 100);
+                        }, prefersReducedMotion ? 0 : 100);
                     });
                 }
             } else {
@@ -932,6 +1225,9 @@ function getViewModeScript(): string {
                     lineageContent.innerHTML = viewEmptyStates[view] || '';
                 }
 
+                // Restore scroll position for non-graph views
+                restoreViewState(view);
+
                 // Only send message if not restoring view (skipMessage = false by default)
                 if (!skipMessage) {
                     if (view === 'lineage') {
@@ -944,6 +1240,7 @@ function getViewModeScript(): string {
                 }
             }
             updateSidebarSectionsForView();
+            updateWorkspaceBreadcrumb();
         }
 
         viewTabs.forEach(tab => {
@@ -952,6 +1249,53 @@ function getViewModeScript(): string {
                 const view = tab.getAttribute('data-view');
                 switchToView(view);
             });
+        });
+
+        workspaceBreadcrumb?.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-breadcrumb-action]');
+            if (!target) return;
+
+            e.stopPropagation();
+            const action = target.getAttribute('data-breadcrumb-action');
+            const value = target.getAttribute('data-breadcrumb-value');
+
+            if (action === 'view' && value) {
+                switchToView(value, true);
+                return;
+            }
+
+            if (action === 'origin') {
+                switchToView('graph', true);
+                return;
+            }
+
+            if (action === 'detail-root') {
+                lineageDetailView = false;
+                tableExplorerHistory = [];
+                currentExploredTable = null;
+                // Clear column trace when resetting to detail root
+                if (typeof clearColumnHighlighting === 'function') {
+                    clearColumnHighlighting();
+                }
+                updateBackButtonText();
+                if (currentViewMode === 'lineage') {
+                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (currentViewMode === 'tableExplorer') {
+                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
+                    vscode.postMessage({ command: 'switchToTableExplorer' });
+                } else if (currentViewMode === 'impact') {
+                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                    vscode.postMessage({ command: 'switchToImpactView' });
+                }
+                updateWorkspaceBreadcrumb();
+                return;
+            }
+
+            if (action === 'clear-column-trace' && typeof window.clearWorkspaceColumnTrace === 'function') {
+                window.clearWorkspaceColumnTrace();
+                updateWorkspaceBreadcrumb();
+            }
         });
 
         /**
@@ -1051,11 +1395,13 @@ function getViewModeScript(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
+            const tabNames = { graph: 'Graph', lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
             if (lineageDetailView && currentViewMode !== 'graph') {
-                const tabNames = { lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
             } else {
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph';
+                const prevView = navStack.length > 0 ? navStack[navStack.length - 1] : 'graph';
+                const fromLabel = prevView === 'graph' && navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph') + fromLabel;
             }
         }
 
@@ -1087,9 +1433,13 @@ function getViewModeScript(): string {
                     }
                 }
             } else {
-                switchToView('graph');
+                // Use nav stack to go back to previous view
+                const previousView = navStack.length > 0 ? navStack.pop() : 'graph';
+                switchToView(previousView, true); // skipMessage=true since we're navigating back
             }
+            updateWorkspaceBreadcrumb();
         });
+        updateWorkspaceBreadcrumb();
     `;
 }
 
@@ -1167,10 +1517,11 @@ function getContextMenuScript(): string {
 
                 const action = item.getAttribute('data-action');
                 const nodeName = contextMenuTarget.label || contextMenuTarget.id;
+                const nodeType = contextMenuTarget.type || '';
 
                 switch (action) {
                     case 'showUpstream':
-                        switchToView('lineage');
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading upstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
@@ -1190,7 +1541,7 @@ function getContextMenuScript(): string {
                         }
                         break;
                     case 'showDownstream':
-                        switchToView('lineage');
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading downstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
@@ -1210,7 +1561,7 @@ function getContextMenuScript(): string {
                         }
                         break;
                     case 'analyzeImpact':
-                        switchToView('impact');
+                        switchToView('impact', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         vscode.postMessage({
@@ -1221,7 +1572,7 @@ function getContextMenuScript(): string {
                         });
                         break;
                     case 'exploreTable':
-                        switchToView('tableExplorer');
+                        switchToView('tableExplorer', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
                         vscode.postMessage({
@@ -1324,26 +1675,11 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'lineageGraphResult':
                     if (lineageSetupInProgress) {
+                        // Queue the latest message so it's processed after current setup finishes
+                        pendingLineageGraphMessage = message;
                         break;
                     }
-                    if (lineageContent && message.data?.html) {
-                        lineageSetupInProgress = true;
-                        lineageContent.innerHTML = message.data.html;
-                        lineageDetailView = true;
-                        if (message.data.nodeId) {
-                            lineageCurrentNodeId = message.data.nodeId;
-                        }
-                        if (message.data.direction) {
-                            lineageCurrentDirection = message.data.direction;
-                        }
-                        if (message.data.expandedNodes) {
-                            lineageExpandedNodes = new Set(message.data.expandedNodes);
-                        }
-                        updateBackButtonText();
-                        setupLineageGraphInteractions();
-                        setupDirectionButtons();
-                        setTimeout(() => { lineageSetupInProgress = false; }, 200);
-                    }
+                    processLineageGraphResult(message);
                     break;
                 case 'nodeColumnsResult':
                     if (message.data?.nodeId) {
@@ -1355,15 +1691,40 @@ function getMessageHandlingScript(): string {
                         collapseNodeWithColumns(message.data.nodeId);
                     }
                     break;
+                case 'themeChanged':
+                    // Hot-swap CSS variables without full page reload to avoid flicker
+                    if (message.css) {
+                        let themeStyle = document.getElementById('theme-vars');
+                        if (!themeStyle) {
+                            themeStyle = document.createElement('style');
+                            themeStyle.id = 'theme-vars';
+                            document.head.appendChild(themeStyle);
+                        }
+                        themeStyle.textContent = message.css;
+                        // Update theme toggle button icon
+                        const themeBtn = document.getElementById('btn-theme');
+                        if (themeBtn) {
+                            const isDark = !!message.isDark;
+                            themeBtn.title = 'Toggle theme (' + (isDark ? 'Light' : 'Dark') + ')';
+                            themeBtn.setAttribute('aria-label', 'Toggle theme to ' + (isDark ? 'light' : 'dark') + ' mode');
+                            themeBtn.innerHTML = isDark
+                                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+                                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+                        }
+                    }
+                    break;
                 case 'exportPng':
                     // Handle PNG export request from extension
                     exportToPng();
+                    break;
+                case 'exportPngClipboard':
+                    exportToPng(true);
                     break;
             }
         });
 
         // ========== PNG Export Function ==========
-        function exportToPng() {
+        function exportToPng(copyToClipboard = false) {
             const svgElement = document.getElementById('graph-svg');
             if (!svgElement) {
                 vscode.postMessage({ command: 'exportPngError', error: 'No SVG element found' });
@@ -1397,7 +1758,7 @@ function getMessageHandlingScript(): string {
                 bgRect.setAttribute('y', bbox.y - padding);
                 bgRect.setAttribute('width', width);
                 bgRect.setAttribute('height', height);
-                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#0f172a' : '#ffffff');
+                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#111111' : '#fafafa');
                 svgClone.insertBefore(bgRect, svgClone.firstChild);
 
                 // Serialize SVG
@@ -1418,15 +1779,40 @@ function getMessageHandlingScript(): string {
                     ctx.drawImage(img, 0, 0);
                     URL.revokeObjectURL(svgUrl);
 
-                    // Convert to PNG and send to extension
+                    // Convert to PNG and either copy or send to extension for save
                     const pngDataUrl = canvas.toDataURL('image/png');
                     const base64Data = pngDataUrl.split(',')[1];
 
-                    vscode.postMessage({
-                        command: 'savePng',
-                        data: base64Data,
-                        filename: 'workspace-dependencies-' + Date.now() + '.png'
-                    });
+                    if (copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+                        fetch(pngDataUrl)
+                            .then(res => res.blob())
+                            .then(blob => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]))
+                            .then(() => {
+                                const existing = document.getElementById('copy-feedback-toast');
+                                if (existing) existing.remove();
+                                const toast = document.createElement('div');
+                                toast.id = 'copy-feedback-toast';
+                                toast.textContent = 'PNG copied to clipboard';
+                                toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
+                                document.body.appendChild(toast);
+                                requestAnimationFrame(() => {
+                                    toast.style.opacity = '1';
+                                    setTimeout(() => {
+                                        toast.style.opacity = '0';
+                                        setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
+                                    }, 1500);
+                                });
+                            })
+                            .catch(() => {
+                                vscode.postMessage({ command: 'savePng', data: base64Data, filename: 'workspace-dependencies-' + Date.now() + '.png' });
+                            });
+                    } else {
+                        vscode.postMessage({
+                            command: 'savePng',
+                            data: base64Data,
+                            filename: 'workspace-dependencies-' + Date.now() + '.png'
+                        });
+                    }
                 };
 
                 img.onerror = function(e) {
@@ -2170,6 +2556,44 @@ function getLineageGraphScript(): string {
         let lineageCurrentDirection = 'both';
         let lineageAutoFitNodeId = null;
         let lineageSetupInProgress = false;
+        let pendingLineageGraphMessage = null;
+        let refreshLineageMinimapViewport = null;
+        let lineageShortcutHandler = null;
+        const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
+
+        function processLineageGraphResult(message) {
+            if (lineageContent && message.data?.html) {
+                lineageSetupInProgress = true;
+                lineageContent.innerHTML = message.data.html;
+                lineageDetailView = true;
+                if (message.data.nodeId) {
+                    lineageCurrentNodeId = message.data.nodeId;
+                }
+                if (message.data.direction) {
+                    lineageCurrentDirection = message.data.direction;
+                }
+                if (message.data.expandedNodes) {
+                    lineageExpandedNodes = new Set(message.data.expandedNodes);
+                }
+                updateBackButtonText();
+                setupLineageGraphInteractions();
+                setupDirectionButtons();
+                setupMinimap();
+                setTimeout(() => {
+                    lineageSetupInProgress = false;
+                    // Process any queued message that arrived during setup
+                    if (pendingLineageGraphMessage) {
+                        const queued = pendingLineageGraphMessage;
+                        pendingLineageGraphMessage = null;
+                        processLineageGraphResult(queued);
+                    }
+                }, 200);
+            }
+        }
+
+        const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
+        let pendingColumnTraceHintNodeId = null;
+        let columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -2187,6 +2611,7 @@ function getLineageGraphScript(): string {
             lineageScale = 1;
             lineageOffsetX = 0;
             lineageOffsetY = 0;
+            refreshLineageMinimapViewport = null;
 
             function updateLineageTransform() {
                 const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
@@ -2195,6 +2620,9 @@ function getLineageGraphScript(): string {
                 currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
                 if (currentZoomLevel) {
                     currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
+                }
+                if (typeof refreshLineageMinimapViewport === 'function') {
+                    refreshLineageMinimapViewport();
                 }
             }
 
@@ -2268,7 +2696,7 @@ function getLineageGraphScript(): string {
             if (!svg || !graphContainer) return;
 
             requestAnimationFrame(() => {
-                setTimeout(() => fitToContainer(true), 100);
+                setTimeout(() => fitToContainer(true), prefersReducedMotion ? 0 : 100);
             });
 
             svg.addEventListener('wheel', (e) => {
@@ -2300,8 +2728,65 @@ function getLineageGraphScript(): string {
                 if (svg) svg.style.cursor = 'grab';
             });
 
+            function getColumnRows() {
+                return Array.from(svg.querySelectorAll('.column-row'));
+            }
+
+            function triggerColumnTraceFromRow(row) {
+                const nodeEl = row.closest('.lineage-node');
+                const nodeId = nodeEl ? nodeEl.getAttribute('data-node-id') : null;
+                const columnName = row.getAttribute('data-column-name');
+                if (!nodeId || !columnName) return;
+                vscode.postMessage({
+                    command: 'selectColumn',
+                    tableId: nodeId,
+                    columnName: columnName
+                });
+            }
+
+            function moveColumnRowFocus(fromRow, delta) {
+                const rows = getColumnRows();
+                if (rows.length === 0) return;
+                const currentIndex = rows.indexOf(fromRow);
+                if (currentIndex === -1) {
+                    rows[0].focus();
+                    return;
+                }
+                const nextIndex = (currentIndex + delta + rows.length) % rows.length;
+                rows[nextIndex].focus();
+            }
+
             const nodes = svg.querySelectorAll('.lineage-node');
             nodes.forEach(node => {
+                const columnRows = node.querySelectorAll('.column-row');
+                columnRows.forEach(row => {
+                    row.setAttribute('tabindex', '0');
+                    row.setAttribute('role', 'button');
+                    row.setAttribute('focusable', 'true');
+                    const columnName = row.getAttribute('data-column-name') || 'column';
+                    const tableName = node.getAttribute('data-node-name') || 'table';
+                    row.setAttribute('aria-label', tableName + '.' + columnName + '. Press Enter to trace lineage.');
+                    row.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            triggerColumnTraceFromRow(row);
+                            return;
+                        }
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            moveColumnRowFocus(row, 1);
+                            return;
+                        }
+                        if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            moveColumnRowFocus(row, -1);
+                        }
+                    });
+                });
+
                 node.addEventListener('mouseenter', (e) => {
                     showLineageTooltip(e, node);
                 });
@@ -2330,6 +2815,7 @@ function getLineageGraphScript(): string {
                             return;
                         } else if (action === 'expand') {
                             if (nodeId) {
+                                maybeQueueColumnTraceHint(nodeId);
                                 vscode.postMessage({
                                     command: 'expandNodeColumns',
                                     nodeId: nodeId
@@ -2352,6 +2838,14 @@ function getLineageGraphScript(): string {
 
                 node.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
+                    const nodeId = node.getAttribute('data-node-id');
+                    const isExpanded = node.getAttribute('data-expanded') === 'true';
+                    const columnCount = parseInt(node.getAttribute('data-column-count') || '0', 10);
+                    if (nodeId && !isExpanded && columnCount > 0) {
+                        maybeQueueColumnTraceHint(nodeId);
+                        expandNodeWithColumns(nodeId);
+                        return;
+                    }
                     const filePath = node.getAttribute('data-file-path');
                     const lineNumber = parseInt(node.getAttribute('data-line-number') || '0');
                     if (filePath) {
@@ -2396,28 +2890,164 @@ function getLineageGraphScript(): string {
 
             setTimeout(() => {
                 if (zoomFitBtn) zoomFitBtn.click();
-            }, 100);
+            }, prefersReducedMotion ? 0 : 100);
+
+            maybeRenderColumnTraceHint();
+        }
+
+        function setLineageLegendVisible(visible) {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+            legendPanel.classList.toggle('is-hidden', !visible);
+            legendPanel.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
+            if (legendToggleBtn) {
+                legendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+            }
+
+            const container = document.getElementById('lineage-graph-container');
+            if (container) {
+                container.classList.toggle('lineage-legend-visible', visible);
+            }
+        }
+
+        function toggleLineageLegendBar(show) {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+            const nextVisible = typeof show === 'boolean' ? show : legendPanel.classList.contains('is-hidden');
+            setLineageLegendVisible(nextVisible);
+            try {
+                localStorage.setItem(lineageLegendStorageKey, nextVisible ? '1' : '0');
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+        }
+
+        function initializeLineageLegendBar() {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+
+            let showLegend = true;
+            try {
+                const stored = localStorage.getItem(lineageLegendStorageKey);
+                if (stored !== null) {
+                    showLegend = stored === '1';
+                }
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+
+            setLineageLegendVisible(showLegend);
+
+            const dismissBtn = document.getElementById('legend-dismiss');
+            dismissBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleLineageLegendBar(false);
+            });
+            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
+            legendToggleBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleLineageLegendBar();
+            });
+        }
+
+        function getLineageTypeIcon(type) {
+            const icons = {
+                table: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M2 6h12M2 9h12M6 6v7M10 6v7" stroke="currentColor" stroke-width="1"/></svg>',
+                view: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/></svg>',
+                cte: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1-3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 3v2.5h-2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                external: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" stroke="currentColor" stroke-width="1"/></svg>'
+            };
+            return icons[type] || '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 5.5L8 2.5l5.5 3v7L8 15.5l-5.5-3v-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+        }
+
+        function maybeQueueColumnTraceHint(nodeId) {
+            if (!nodeId || columnTraceHintDismissed) return;
+            pendingColumnTraceHintNodeId = nodeId;
+        }
+
+        function dismissColumnTraceHint() {
+            columnTraceHintDismissed = true;
+            pendingColumnTraceHintNodeId = null;
+            localStorage.setItem(columnTraceHintStorageKey, '1');
+            const hint = document.getElementById('column-trace-onboarding');
+            if (hint) hint.remove();
+        }
+
+        function maybeRenderColumnTraceHint() {
+            const existing = document.getElementById('column-trace-onboarding');
+            if (existing) existing.remove();
+
+            if (columnTraceHintDismissed) return;
+
+            const container = document.getElementById('lineage-graph-container');
+            if (!container) return;
+
+            const nodeId = pendingColumnTraceHintNodeId || (lineageExpandedNodes && lineageExpandedNodes.size > 0 ? Array.from(lineageExpandedNodes)[0] : null);
+            if (!nodeId) return;
+
+            const node = container.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
+            if (!node) return;
+
+            const transform = node.getAttribute('transform') || '';
+            const match = /translate\\(([-\\d.]+),\\s*([-\\d.]+)\\)/.exec(transform);
+            const x = match ? parseFloat(match[1]) : 16;
+            const y = match ? parseFloat(match[2]) : 16;
+
+            const hint = document.createElement('div');
+            hint.id = 'column-trace-onboarding';
+            hint.className = 'column-trace-onboarding';
+            hint.style.left = Math.max(8, x + 14) + 'px';
+            hint.style.top = Math.max(8, y + 52) + 'px';
+            hint.innerHTML = '<span class="hint-title">Column trace</span><span class="hint-body">Click a column to trace lineage across tables.</span><button class="hint-close" aria-label="Dismiss column trace hint">×</button>';
+            container.appendChild(hint);
+
+            const closeBtn = hint.querySelector('.hint-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    dismissColumnTraceHint();
+                });
+            }
         }
 
         function showLineageTooltip(e, node) {
             const tooltip = document.getElementById('lineage-tooltip');
             if (!tooltip) return;
 
+            const nodeId = node.getAttribute('data-node-id') || '';
             const name = node.getAttribute('data-node-name') || '';
             const type = node.getAttribute('data-node-type') || '';
             const filePath = node.getAttribute('data-file-path') || '';
             const lineNumber = node.getAttribute('data-line-number') || '';
+            const columnCount = parseInt(node.getAttribute('data-column-count') || '0', 10);
+            const isExpanded = node.getAttribute('data-expanded') === 'true' || (nodeId && lineageExpandedNodes.has(nodeId));
+            const hintText = !isExpanded && columnCount > 0
+                ? 'Click to focus · Double-click to expand columns'
+                : (isExpanded
+                    ? 'Click a column to trace lineage · Right-click for actions'
+                    : 'Click to focus · Double-click to open file');
 
-            const icons = { table: '📊', view: '👁️', cte: '🔄', external: '🌐' };
-
-            tooltip.querySelector('.tooltip-icon').textContent = icons[type] || '📦';
-            tooltip.querySelector('.tooltip-name').textContent = name;
-            tooltip.querySelector('.type-value').textContent = type;
-            tooltip.querySelector('.file-value').textContent = filePath ? filePath.split('/').pop() : 'N/A';
-            tooltip.querySelector('.line-value').textContent = lineNumber || 'N/A';
-            tooltip.querySelector('.columns-value').textContent = '-';
-            tooltip.querySelector('.upstream-value').textContent = '-';
-            tooltip.querySelector('.downstream-value').textContent = '-';
+            const iconEl = tooltip.querySelector('.tooltip-icon');
+            if (iconEl) iconEl.innerHTML = getLineageTypeIcon(type);
+            const nameEl = tooltip.querySelector('.tooltip-name');
+            if (nameEl) nameEl.textContent = name;
+            const typeEl = tooltip.querySelector('.type-value');
+            if (typeEl) typeEl.textContent = type;
+            const fileEl = tooltip.querySelector('.file-value');
+            if (fileEl) fileEl.textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            const lineEl = tooltip.querySelector('.line-value');
+            if (lineEl) lineEl.textContent = lineNumber || 'N/A';
+            const columnsEl = tooltip.querySelector('.columns-value');
+            if (columnsEl) columnsEl.textContent = columnCount > 0 ? String(columnCount) : '-';
+            const upstreamEl = tooltip.querySelector('.upstream-value');
+            if (upstreamEl) upstreamEl.textContent = node.getAttribute('data-upstream-count') || '-';
+            const downstreamEl = tooltip.querySelector('.downstream-value');
+            if (downstreamEl) downstreamEl.textContent = node.getAttribute('data-downstream-count') || '-';
+            const hintEl = tooltip.querySelector('.tooltip-hint');
+            if (hintEl) hintEl.textContent = hintText;
 
             // Position near mouse cursor with boundary checks
             const tooltipWidth = 220;
@@ -2477,14 +3107,14 @@ function getLineageGraphScript(): string {
             const toast = document.createElement('div');
             toast.id = 'copy-feedback-toast';
             toast.textContent = message;
-            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: opacity 0.2s; box-shadow: var(--shadow-md);';
+            toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
             document.body.appendChild(toast);
 
             requestAnimationFrame(() => {
                 toast.style.opacity = '1';
                 setTimeout(() => {
                     toast.style.opacity = '0';
-                    setTimeout(() => toast.remove(), 200);
+                    setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
                 }, 1500);
             });
         }
@@ -2519,6 +3149,7 @@ function getLineageGraphScript(): string {
                 },
                 'expand-columns': () => {
                     if (nodeId) {
+                        maybeQueueColumnTraceHint(nodeId);
                         vscode.postMessage({ command: 'expandNodeColumns', nodeId });
                     }
                 },
@@ -2548,6 +3179,7 @@ function getLineageGraphScript(): string {
                 return;
             }
 
+            maybeQueueColumnTraceHint(nodeId);
             if (!lineageExpandedNodes) {
                 lineageExpandedNodes = new Set();
             }
@@ -2600,12 +3232,20 @@ function getLineageGraphScript(): string {
             if (!svg || !lineageCurrentNodeId) return;
 
             const nodes = svg.querySelectorAll('.lineage-node');
+            let firstExpandedNodeId = null;
             nodes.forEach(node => {
                 const nodeId = node.getAttribute('data-node-id');
                 if (nodeId) {
+                    if (!firstExpandedNodeId) {
+                        firstExpandedNodeId = nodeId;
+                    }
                     lineageExpandedNodes.add(nodeId);
                 }
             });
+
+            if (firstExpandedNodeId) {
+                maybeQueueColumnTraceHint(firstExpandedNodeId);
+            }
 
             // Re-render with all nodes expanded
             vscode.postMessage({
@@ -2632,29 +3272,48 @@ function getLineageGraphScript(): string {
             });
         }
 
-        // Keyboard handler for 'C' key to toggle all columns
-        document.addEventListener('keydown', (e) => {
+        // Keyboard handler for lineage shortcuts (C/L + column navigation focus)
+        if (lineageShortcutHandler) {
+            document.removeEventListener('keydown', lineageShortcutHandler);
+        }
+        lineageShortcutHandler = (e) => {
             // Only respond if lineage graph is visible
             const lineageContainer = document.getElementById('lineage-graph-container');
             if (!lineageContainer || lineageContainer.offsetParent === null) return;
 
-            // Ignore if typing in an input
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            // Ignore if typing in an input/select/textarea
+            const target = e.target;
+            const targetTag = target && target.tagName ? target.tagName : '';
+            const isTyping = targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT' || (target && target.isContentEditable);
+            if (isTyping) return;
+
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                const activeEl = document.activeElement;
+                const isColumnRowActive = activeEl && activeEl.classList && activeEl.classList.contains('column-row');
+                if (!isColumnRowActive) {
+                    const firstRow = lineageContainer.querySelector('.column-row');
+                    if (firstRow) {
+                        e.preventDefault();
+                        firstRow.focus();
+                        return;
+                    }
+                }
+            }
 
             if (e.key === 'c' || e.key === 'C') {
                 e.preventDefault();
                 toggleAllColumns();
+                return;
             }
-        });
 
-        // ========== Legend Panel Toggle ==========
-        const legendToggle = document.getElementById('legend-toggle');
-        const legendPanel = document.getElementById('lineage-legend');
-        if (legendToggle && legendPanel) {
-            legendToggle.addEventListener('click', () => {
-                legendPanel.classList.toggle('collapsed');
-            });
-        }
+            if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                toggleLineageLegendBar();
+            }
+        };
+        document.addEventListener('keydown', lineageShortcutHandler);
+
+        initializeLineageLegendBar();
 
         // ========== Mini-map Functionality ==========
         function setupMinimap() {
@@ -2664,7 +3323,10 @@ function getLineageGraphScript(): string {
             const minimapContent = document.getElementById('minimap-content');
             const container = document.getElementById('lineage-graph-container');
 
-            if (!minimap || !minimapSvg || !minimapViewport || !container) return;
+            if (!minimap || !minimapSvg || !minimapViewport || !minimapContent || !container) {
+                refreshLineageMinimapViewport = null;
+                return;
+            }
 
             let minimapDragging = false;
 
@@ -2692,32 +3354,33 @@ function getLineageGraphScript(): string {
                 const visibleWidth = containerRect.width / lineageScale;
                 const visibleHeight = containerRect.height / lineageScale;
 
-                // Scale to minimap coordinates
-                const scaleX = minimapRect.width / graphWidth;
-                const scaleY = minimapRect.height / graphHeight;
-                const scale = Math.min(scaleX, scaleY);
-
                 minimapViewport.setAttribute('x', String(visibleX));
                 minimapViewport.setAttribute('y', String(visibleY));
                 minimapViewport.setAttribute('width', String(visibleWidth));
                 minimapViewport.setAttribute('height', String(visibleHeight));
             }
 
+            refreshLineageMinimapViewport = updateMinimapViewport;
+
+            function onMinimapMouseMove(e) {
+                if (minimapDragging) {
+                    panToMinimapPosition(e);
+                }
+            }
+
+            function onMinimapMouseUp() {
+                minimapDragging = false;
+                document.removeEventListener('mousemove', onMinimapMouseMove);
+                document.removeEventListener('mouseup', onMinimapMouseUp);
+            }
+
             // Handle click on minimap to pan
             minimapContent.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 minimapDragging = true;
+                document.addEventListener('mousemove', onMinimapMouseMove);
+                document.addEventListener('mouseup', onMinimapMouseUp);
                 panToMinimapPosition(e);
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (minimapDragging) {
-                    panToMinimapPosition(e);
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                minimapDragging = false;
             });
 
             function panToMinimapPosition(e) {
@@ -2752,18 +3415,6 @@ function getLineageGraphScript(): string {
                 updateMinimapViewport();
             }
 
-            // Update minimap viewport when zooming/panning
-            const originalUpdateTransform = function() {
-                const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
-                const currentZoomLevel = document.getElementById('lineage-zoom-level');
-                if (!currentGraphContainer) return;
-                currentGraphContainer.setAttribute('transform', 'translate(' + lineageOffsetX + ',' + lineageOffsetY + ') scale(' + lineageScale + ')');
-                if (currentZoomLevel) {
-                    currentZoomLevel.textContent = Math.round(lineageScale * 100) + '%';
-                }
-                updateMinimapViewport();
-            };
-
             // Hook into zoom/pan events to update minimap
             const mainSvg = container.querySelector('.lineage-graph-svg');
             if (mainSvg) {
@@ -2774,9 +3425,6 @@ function getLineageGraphScript(): string {
             // Initial viewport update
             setTimeout(updateMinimapViewport, 200);
         }
-
-        // Initialize minimap after graph is ready
-        setupMinimap();
     `;
 }
 
@@ -2792,6 +3440,11 @@ function getColumnLineageScript(): string {
             const { tableId, columnName, upstream, downstream } = data;
 
             selectedColumn = { tableId, columnName };
+            window.__workspaceSelectedColumnLabel = columnName;
+            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                updateWorkspaceBreadcrumb();
+            }
+            dismissColumnTraceHint();
 
             clearColumnHighlighting();
 
@@ -3001,6 +3654,7 @@ function getColumnLineageScript(): string {
 
         function clearColumnHighlighting() {
             selectedColumn = null;
+            window.__workspaceSelectedColumnLabel = '';
 
             const svg = document.querySelector('.lineage-graph-svg');
             if (!svg) return;
@@ -3023,6 +3677,42 @@ function getColumnLineageScript(): string {
             });
 
             hideColumnLineageInfo();
+            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                updateWorkspaceBreadcrumb();
+            }
+        }
+
+        function buildColumnFlowSummary(tableName, columnName, upstream, downstream) {
+            const center = tableName + '.' + columnName;
+
+            const firstUpstreamEdge = upstream && upstream[0] && upstream[0].edges && upstream[0].edges[0] ? upstream[0].edges[0] : null;
+            const firstDownstreamEdge = downstream && downstream[0] && downstream[0].edges && downstream[0].edges[0] ? downstream[0].edges[0] : null;
+
+            let upstreamSummary = null;
+            if (firstUpstreamEdge && firstUpstreamEdge.metadata && firstUpstreamEdge.metadata.sourceColumn) {
+                const upstreamNode = upstream[0].nodes && upstream[0].nodes.length > 0 ? upstream[0].nodes[0] : null;
+                const upstreamTable = upstreamNode && upstreamNode.name ? upstreamNode.name : 'upstream';
+                upstreamSummary = upstreamTable + '.' + firstUpstreamEdge.metadata.sourceColumn;
+            }
+
+            let downstreamSummary = null;
+            if (firstDownstreamEdge && firstDownstreamEdge.metadata && firstDownstreamEdge.metadata.targetColumn) {
+                const downstreamNodes = downstream[0].nodes || [];
+                const downstreamNode = downstreamNodes.length > 0 ? downstreamNodes[downstreamNodes.length - 1] : null;
+                const downstreamTable = downstreamNode && downstreamNode.name ? downstreamNode.name : 'downstream';
+                downstreamSummary = downstreamTable + '.' + firstDownstreamEdge.metadata.targetColumn;
+            }
+
+            if (upstreamSummary && downstreamSummary) {
+                return upstreamSummary + ' → ' + center + ' → ' + downstreamSummary;
+            }
+            if (upstreamSummary) {
+                return upstreamSummary + ' → ' + center;
+            }
+            if (downstreamSummary) {
+                return center + ' → ' + downstreamSummary;
+            }
+            return center;
         }
 
         function showColumnLineageInfo(tableId, columnName, upstream, downstream) {
@@ -3039,17 +3729,29 @@ function getColumnLineageScript(): string {
             const downstreamCount = downstream ? downstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
 
             const tableName = tableId.includes(':') ? tableId.split(':')[1] : tableId;
+            const flowSummary = buildColumnFlowSummary(tableName, columnName, upstream, downstream);
 
             infoPanel.innerHTML = '<div class="info-header">' +
-                    '<span class="info-icon">📝</span>' +
                     '<span class="info-title">' + escapeHtml(tableName) + '.' + escapeHtml(columnName) + '</span>' +
-                    '<button class="info-close" onclick="clearColumnHighlighting()">×</button>' +
+                    '<button class="info-close" aria-label="Close column trace panel">×</button>' +
                 '</div>' +
+                '<div class="info-source">Source table: ' + escapeHtml(tableName) + '</div>' +
                 '<div class="info-stats">' +
                     '<span class="stat upstream" title="Upstream sources">⬆ ' + upstreamCount + ' sources</span>' +
                     '<span class="stat downstream" title="Downstream consumers">⬇ ' + downstreamCount + ' consumers</span>' +
                 '</div>' +
+                '<div class="info-flow-summary" title="' + escapeHtml(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
+                '<div class="info-actions"><button class="info-clear-btn" type="button">Clear trace</button></div>' +
                 '<div class="info-hint">Click another column to trace its lineage, or click background to clear.</div>';
+
+            const closeBtn = infoPanel.querySelector('.info-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => clearColumnHighlighting());
+            }
+            const clearBtn = infoPanel.querySelector('.info-clear-btn');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => clearColumnHighlighting());
+            }
             infoPanel.style.display = 'block';
         }
 
@@ -3059,6 +3761,8 @@ function getColumnLineageScript(): string {
                 infoPanel.style.display = 'none';
             }
         }
+
+        window.clearWorkspaceColumnTrace = clearColumnHighlighting;
     `;
 }
 

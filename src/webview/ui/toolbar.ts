@@ -2,6 +2,11 @@
 
 import { SqlDialect } from '../sqlParser';
 import { FocusMode, LayoutType } from '../types';
+import { createExportDropdown } from './exportDropdown';
+import { createLayoutPicker } from './layoutPicker';
+import { ICONS } from '../../shared/icons';
+import { getComponentUiColors } from '../constants';
+import { repositionBreadcrumbBar } from './breadcrumbBar';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -19,6 +24,7 @@ export interface ToolbarCallbacks {
     getFocusMode: () => FocusMode;
     onToggleSqlPreview: () => void;
     onToggleColumnFlows: (active: boolean) => void;
+    onToggleHints: () => void;
     onToggleTheme: () => void;
     onToggleFullscreen: () => void;
     onSearchBoxReady: (input: HTMLInputElement, countIndicator: HTMLSpanElement) => void;
@@ -37,6 +43,102 @@ export interface ToolbarCallbacks {
     isFullscreen: () => boolean;
     getKeyboardShortcuts: () => Array<{ key: string; description: string }>;
     getCurrentQuerySql: () => { sql: string; name: string };
+}
+
+let hintsSummaryBtn: HTMLButtonElement | null = null;
+const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
+const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
+let lineagePulseApplied = false;
+
+function getOverflowPalette(dark: boolean): {
+    background: string;
+    border: string;
+    text: string;
+    hover: string;
+    shadow: string;
+} {
+    return dark ? {
+        background: 'rgba(15, 23, 42, 0.95)',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#e2e8f0',
+        hover: 'rgba(148, 163, 184, 0.2)',
+        shadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+    } : {
+        background: 'rgba(255, 255, 255, 0.98)',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        hover: 'rgba(15, 23, 42, 0.06)',
+        shadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
+    };
+}
+
+function isReducedMotionPreferred(): boolean {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function applyFirstRunHelpPulse(helpBtn: HTMLButtonElement, enabled: boolean): void {
+    if (!enabled || isReducedMotionPreferred()) {
+        return;
+    }
+
+    if (!document.getElementById(HELP_PULSE_STYLE_ID)) {
+        const style = document.createElement('style');
+        style.id = HELP_PULSE_STYLE_ID;
+        style.textContent = `
+            @keyframes sql-crack-help-pulse {
+                0% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45);
+                }
+                55% {
+                    transform: scale(1.06);
+                    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+                }
+                100% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+                }
+            }
+
+            .sql-crack-help-pulse {
+                animation: sql-crack-help-pulse 1.1s ease-out 3;
+                background: rgba(99, 102, 241, 0.18) !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const stopPulse = () => {
+        helpBtn.classList.remove('sql-crack-help-pulse');
+    };
+
+    helpBtn.classList.add('sql-crack-help-pulse');
+    helpBtn.addEventListener('click', stopPulse, { once: true });
+    window.setTimeout(stopPulse, 3600);
+}
+
+function applyOverflowMenuTheme(dark: boolean): void {
+    const overflowBtn = document.getElementById('sql-crack-overflow-btn') as HTMLButtonElement | null;
+    const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLDivElement | null;
+    const palette = getOverflowPalette(dark);
+
+    if (overflowBtn) {
+        overflowBtn.style.background = palette.background;
+        overflowBtn.style.borderColor = palette.border;
+        overflowBtn.style.color = palette.text;
+    }
+
+    if (overflowDropdown) {
+        overflowDropdown.style.background = dark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+        overflowDropdown.style.borderColor = palette.border;
+        overflowDropdown.style.boxShadow = palette.shadow;
+        overflowDropdown.querySelectorAll('[data-overflow-row="true"]').forEach((row) => {
+            const rowEl = row as HTMLElement;
+            rowEl.style.color = palette.text;
+        });
+    }
 }
 
 // Button style constants
@@ -64,6 +166,7 @@ export function createToolbar(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     }
 ): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement; cleanup: ToolbarCleanup } {
     // Store event listeners for cleanup
@@ -174,7 +277,11 @@ export function createToolbar(
     container.appendChild(toolbarWrapper);
 
     // Set up ResizeObserver for overflow menu
-    const resizeObserver = setupOverflowObserver(actions, toolbarWrapper);
+    const resizeObserver = setupOverflowObserver(actions, toolbarWrapper, callbacks.isDarkTheme);
+    applyOverflowMenuTheme(callbacks.isDarkTheme());
+
+    // Apply initial theme to toolbar elements (covers light-theme startup)
+    updateToolbarTheme(callbacks.isDarkTheme(), toolbar, actions, searchContainer);
 
     // Set initial dialect value
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -189,6 +296,7 @@ export function createToolbar(
     const themeChangeHandler = ((e: CustomEvent) => {
         const dark = e.detail.dark;
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
+        applyOverflowMenuTheme(dark);
     }) as EventListener;
     document.addEventListener('theme-change', themeChangeHandler);
     documentListeners.push({ type: 'theme-change', handler: themeChangeHandler });
@@ -197,6 +305,7 @@ export function createToolbar(
     const cleanup: ToolbarCleanup = () => {
         documentListeners.forEach(({ type, handler }) => {
             document.removeEventListener(type, handler);
+            window.removeEventListener(type, handler);
         });
         documentListeners.length = 0;
         if (resizeObserver) {
@@ -207,6 +316,9 @@ export function createToolbar(
         if (overflowDropdown) {
             overflowDropdown.remove();
         }
+        document.querySelectorAll('.sql-crack-floating-toolbar-menu').forEach((menu) => {
+            (menu as HTMLElement).remove();
+        });
     };
 
     return { toolbar, actions, searchContainer, cleanup };
@@ -295,6 +407,7 @@ function createActionButtons(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
@@ -310,11 +423,11 @@ function createActionButtons(
     // Zoom controls
     actions.appendChild(createZoomGroup(callbacks));
 
-    // Export buttons
-    actions.appendChild(createExportGroup(callbacks));
-
     // Feature buttons
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
+
+    // Export dropdown (consolidated) — placed last so dropdown opens cleanly
+    actions.appendChild(createExportGroup(callbacks, documentListeners));
 
     // Overflow menu container (positioned relative for dropdown)
     const overflowContainer = document.createElement('div');
@@ -333,29 +446,33 @@ function createActionButtons(
     overflowBtn.setAttribute('role', 'button');
     overflowBtn.style.cssText = `
         ${btnStyle}
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 8px;
         font-size: 18px;
         letter-spacing: 1px;
         line-height: 1;
         padding: 8px 10px;
     `;
-    overflowBtn.addEventListener('mouseenter', () => overflowBtn.style.background = 'rgba(148, 163, 184, 0.2)');
-    overflowBtn.addEventListener('mouseleave', () => overflowBtn.style.background = 'rgba(15, 23, 42, 0.95)');
+    overflowBtn.addEventListener('mouseenter', () => {
+        overflowBtn.style.background = getOverflowPalette(callbacks.isDarkTheme()).hover;
+    });
+    overflowBtn.addEventListener('mouseleave', () => {
+        applyOverflowMenuTheme(callbacks.isDarkTheme());
+    });
 
     const overflowDropdown = document.createElement('div');
     overflowDropdown.id = 'sql-crack-overflow-dropdown';
     overflowDropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 8px;
         padding: 8px 0;
         min-width: 200px;
         z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: none;
     `;
 
     // Append dropdown to root container so it escapes overflow:hidden clipping
@@ -421,10 +538,10 @@ function cleanOverflowLabel(title: string): string {
 function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElement; label: string; icon: string }> {
     const result: Array<{ btn: HTMLElement; label: string; icon: string }> = [];
 
-    // Children of actions: [zoomGroup, exportGroup, featureGroup, overflowContainer]
+    // Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]
     const children = Array.from(actions.children) as HTMLElement[];
-    const exportGroup = children[1]; // exportGroup
-    const featureGroup = children[2]; // featureGroup
+    const featureGroup = children[1];
+    const exportGroup = children[2];
 
     if (!exportGroup || !featureGroup) {return result;}
 
@@ -455,12 +572,17 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
 
     // Feature group items (lower priority - hidden first, right-to-left)
     for (const el of Array.from(featureGroup.children) as HTMLElement[]) {
+        // Keep complex popover controls visible; hidden popovers cannot be opened reliably from overflow.
+        if (el.dataset.overflowKeepVisible === 'true') {continue;}
+        if (el.tagName !== 'BUTTON') {continue;}
         const meta = extractMeta(el);
         result.push({ btn: el, ...meta });
     }
 
     // Export group buttons (higher priority - hidden after feature group)
     for (const el of Array.from(exportGroup.children) as HTMLElement[]) {
+        if (el.dataset.overflowKeepVisible === 'true') {continue;}
+        if (el.tagName !== 'BUTTON') {continue;}
         const meta = extractMeta(el);
         result.push({ btn: el, ...meta });
     }
@@ -472,7 +594,11 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
  * Sets up a ResizeObserver that hides overflowing action buttons
  * and populates the overflow dropdown menu.
  */
-function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement): ResizeObserver | null {
+function setupOverflowObserver(
+    actions: HTMLElement,
+    toolbarWrapper: HTMLElement,
+    isDarkTheme: () => boolean
+): ResizeObserver | null {
     const overflowContainer = actions.querySelector('#sql-crack-overflow-container') as HTMLElement;
     const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLElement;
     if (!overflowContainer || !overflowDropdown) {return null;}
@@ -526,19 +652,21 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
 
         // Populate the overflow dropdown
         overflowDropdown.innerHTML = '';
+        const palette = getOverflowPalette(isDarkTheme());
 
         // Reverse so items appear in natural order (top = first hidden from left)
         hiddenButtons.reverse();
 
         for (const { btn, label, icon } of hiddenButtons) {
             const row = document.createElement('div');
+            row.setAttribute('data-overflow-row', 'true');
             row.style.cssText = `
                 padding: 8px 12px;
                 cursor: pointer;
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                color: #e2e8f0;
+                color: ${palette.text};
                 transition: background 0.15s;
                 font-size: 12px;
                 white-space: nowrap;
@@ -553,7 +681,9 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
             labelSpan.textContent = label;
             row.appendChild(labelSpan);
 
-            row.addEventListener('mouseenter', () => row.style.background = 'rgba(148, 163, 184, 0.1)');
+            row.addEventListener('mouseenter', () => {
+                row.style.background = getOverflowPalette(isDarkTheme()).hover;
+            });
             row.addEventListener('mouseleave', () => row.style.background = 'transparent');
 
             row.addEventListener('click', (e) => {
@@ -565,6 +695,7 @@ function setupOverflowObserver(actions: HTMLElement, toolbarWrapper: HTMLElement
 
             overflowDropdown.appendChild(row);
         }
+        applyOverflowMenuTheme(isDarkTheme());
     };
 
     const observer = new ResizeObserver(() => {
@@ -582,6 +713,7 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
+        flex-shrink: 0;
         align-items: center;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
@@ -627,44 +759,31 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     return zoomGroup;
 }
 
-function createExportGroup(callbacks: ToolbarCallbacks): HTMLElement {
+function createExportGroup(
+    callbacks: ToolbarCallbacks,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
+    const isDark = callbacks.isDarkTheme();
     const exportGroup = document.createElement('div');
     exportGroup.style.cssText = `
         display: flex;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        flex-shrink: 0;
+        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
-        overflow: hidden;
+        overflow: visible;
     `;
 
-    const copyBtn = createButton('📋', () => {
-        callbacks.onCopyToClipboard();
-        copyBtn.innerHTML = '✓';
-        setTimeout(() => copyBtn.innerHTML = '📋', 1500);
-    }, 'Copy to clipboard');
-    copyBtn.title = 'Copy to clipboard';
-    exportGroup.appendChild(copyBtn);
+    // Use the consolidated export dropdown
+    const exportDropdown = createExportDropdown({
+        onExportPng: callbacks.onExportPng,
+        onExportSvg: callbacks.onExportSvg,
+        onExportMermaid: callbacks.onExportMermaid,
+        onCopyToClipboard: callbacks.onCopyToClipboard,
+        isDarkTheme: callbacks.isDarkTheme,
+    }, documentListeners);
 
-    const pngBtn = createButton('PNG', callbacks.onExportPng, 'Export as PNG image');
-    pngBtn.title = 'Export as PNG';
-    pngBtn.style.fontSize = '11px';
-    pngBtn.style.fontWeight = '600';
-    pngBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(pngBtn);
-
-    const svgBtn = createButton('SVG', callbacks.onExportSvg, 'Export as SVG vector');
-    svgBtn.title = 'Export as SVG';
-    svgBtn.style.fontSize = '11px';
-    svgBtn.style.fontWeight = '600';
-    svgBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(svgBtn);
-
-    const mermaidBtn = createButton('MMD', callbacks.onExportMermaid, 'Export as Mermaid diagram');
-    mermaidBtn.title = 'Export as Mermaid flowchart';
-    mermaidBtn.style.fontSize = '11px';
-    mermaidBtn.style.fontWeight = '600';
-    mermaidBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    exportGroup.appendChild(mermaidBtn);
+    exportGroup.appendChild(exportDropdown);
 
     return exportGroup;
 }
@@ -676,12 +795,14 @@ function createFeatureGroup(
         pinId: string | null;
         viewLocation: string;
         persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        isFirstRun: boolean;
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const featureGroup = document.createElement('div');
     featureGroup.style.cssText = `
         display: flex;
+        flex-shrink: 0;
         background: rgba(15, 23, 42, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
@@ -694,6 +815,15 @@ function createFeatureGroup(
     refreshBtn.title = 'Refresh visualization';
     refreshBtn.style.fontSize = '16px';
     featureGroup.appendChild(refreshBtn);
+
+    // Optimization hints summary badge
+    hintsSummaryBtn = createButton('⚡ ✓', callbacks.onToggleHints, 'Show optimization hints');
+    hintsSummaryBtn.id = 'hints-summary-btn';
+    hintsSummaryBtn.title = 'Optimization hints';
+    hintsSummaryBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    hintsSummaryBtn.style.fontSize = '12px';
+    hintsSummaryBtn.style.fontWeight = '700';
+    featureGroup.appendChild(hintsSummaryBtn);
 
     // Pin/View location buttons for non-pinned views
     if (!options.isPinnedView) {
@@ -712,7 +842,7 @@ function createFeatureGroup(
 
         // Pinned tabs button
         if (options.persistedPinnedTabs.length > 0) {
-            const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs);
+            const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs, documentListeners);
             featureGroup.appendChild(pinsBtn);
         }
     } else {
@@ -756,12 +886,6 @@ function createFeatureGroup(
         featureGroup.appendChild(pinnedContainer);
     }
 
-    // Legend button
-    const legendBtn = createButton('🎨', callbacks.onToggleLegend, 'Show color legend');
-    legendBtn.title = 'Show color legend (L)';
-    legendBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    featureGroup.appendChild(legendBtn);
-
     // Focus Mode button
     let focusModeActive = false;
     const focusBtn = createButton('👁', () => {
@@ -785,15 +909,34 @@ function createFeatureGroup(
     sqlBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(sqlBtn);
 
-    // Column Lineage toggle button
+    // Column Lineage toggle button (SVG icon, one-time pulse on first activation)
     let columnFlowActive = false;
-    const columnFlowBtn = createButton('📊', () => {
+    const columnFlowBtn = createButton(ICONS.columnLineage, () => {
         columnFlowActive = !columnFlowActive;
         callbacks.onToggleColumnFlows(columnFlowActive);
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : '';
+        // One-time pulse on first activation
+        if (columnFlowActive && !lineagePulseApplied && !isReducedMotionPreferred()) {
+            lineagePulseApplied = true;
+            if (!document.getElementById(LINEAGE_PULSE_STYLE_ID)) {
+                const style = document.createElement('style');
+                style.id = LINEAGE_PULSE_STYLE_ID;
+                style.textContent = `
+                    .sql-crack-lineage-pulse {
+                        animation: sql-crack-help-pulse 1.1s ease-out 2;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            columnFlowBtn.classList.add('sql-crack-lineage-pulse');
+            const stop = () => columnFlowBtn.classList.remove('sql-crack-lineage-pulse');
+            window.setTimeout(stop, 2400);
+        }
     }, 'Toggle column lineage');
     columnFlowBtn.title = 'Toggle column lineage (C)';
     columnFlowBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    columnFlowBtn.style.color = '#94a3b8'; // muted gray when inactive
     featureGroup.appendChild(columnFlowBtn);
 
     // Theme Toggle button
@@ -805,56 +948,13 @@ function createFeatureGroup(
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(themeBtn);
 
-    // Layout selector dropdown
-    const layoutContainer = document.createElement('div');
-    layoutContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        border-left: 1px solid rgba(148, 163, 184, 0.2);
-        padding: 0 8px;
-    `;
-
-    const layoutIcon = document.createElement('span');
-    layoutIcon.textContent = '📐';
-    layoutIcon.style.cssText = 'font-size: 14px; margin-right: 4px;';
-    layoutContainer.appendChild(layoutIcon);
-
-    const layoutSelect = document.createElement('select');
-    layoutSelect.id = 'layout-select';
-    const isDark = callbacks.isDarkTheme();
-    layoutSelect.style.cssText = `
-        background: ${isDark ? '#1e293b' : '#f1f5f9'};
-        color: ${isDark ? '#f1f5f9' : '#1e293b'};
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 4px;
-        padding: 4px 6px;
-        font-size: 10px;
-        cursor: pointer;
-        outline: none;
-    `;
-
-    const layouts: { value: LayoutType; label: string }[] = [
-        { value: 'vertical', label: 'Vertical' },
-        { value: 'horizontal', label: 'Horizontal' },
-        { value: 'compact', label: 'Compact' },
-        { value: 'force', label: 'Force' },
-        { value: 'radial', label: 'Radial' },
-    ];
-
-    layouts.forEach(layout => {
-        const option = document.createElement('option');
-        option.value = layout.value;
-        option.textContent = layout.label;
-        layoutSelect.appendChild(option);
-    });
-
-    layoutSelect.value = callbacks.getCurrentLayout();
-    layoutSelect.addEventListener('change', (e) => {
-        callbacks.onLayoutChange((e.target as HTMLSelectElement).value as LayoutType);
-    });
-    layoutSelect.title = 'Layout algorithm (H to cycle)';
-    layoutContainer.appendChild(layoutSelect);
-    featureGroup.appendChild(layoutContainer);
+    // Layout picker popover (replaces old <select>)
+    const layoutPicker = createLayoutPicker({
+        onLayoutChange: callbacks.onLayoutChange,
+        getCurrentLayout: callbacks.getCurrentLayout,
+        isDarkTheme: callbacks.isDarkTheme,
+    }, documentListeners);
+    featureGroup.appendChild(layoutPicker);
 
     // Fullscreen button
     const fullscreenBtn = createButton('⛶', () => {
@@ -875,12 +975,13 @@ function createFeatureGroup(
 
     // Help button
     const helpBtn = createButton('?', () => {
-        showKeyboardShortcutsHelp(callbacks.getKeyboardShortcuts());
+        showKeyboardShortcutsHelp(callbacks.getKeyboardShortcuts(), callbacks.isDarkTheme());
     }, 'Show keyboard shortcuts');
     helpBtn.title = 'Keyboard shortcuts';
     helpBtn.style.fontWeight = '700';
     helpBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     featureGroup.appendChild(helpBtn);
+    applyFirstRunHelpPulse(helpBtn, options.isFirstRun);
 
     return featureGroup;
 }
@@ -911,7 +1012,9 @@ function createFocusModeSelector(
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const container = document.createElement('div');
-    container.style.cssText = `position: relative; display: flex; align-items: center;`;
+    container.id = 'focus-mode-selector';
+    container.dataset.overflowKeepVisible = 'true';
+    container.style.cssText = `display: flex; align-items: center;`;
 
     const btn = document.createElement('button');
     btn.id = 'focus-mode-btn';
@@ -920,17 +1023,17 @@ function createFocusModeSelector(
     btn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = document.createElement('div');
+    dropdown.id = 'focus-mode-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1005,7 +1108,16 @@ function createFocusModeSelector(
 
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
 
     btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
@@ -1021,8 +1133,18 @@ function createFocusModeSelector(
     document.addEventListener('click', focusModeClickHandler);
     documentListeners.push({ type: 'click', handler: focusModeClickHandler });
 
+    const focusModeResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', focusModeResizeHandler);
+    documentListeners.push({ type: 'resize', handler: focusModeResizeHandler as EventListener });
+
     container.appendChild(btn);
-    container.appendChild(dropdown);
+    document.body.appendChild(dropdown);
     return container;
 }
 
@@ -1053,17 +1175,27 @@ function createViewLocationButton(
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const viewLocBtn = document.createElement('button');
+    viewLocBtn.id = 'view-location-btn';
+    viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
-    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createViewLocationDropdown(callbacks, currentLocation);
-    viewLocBtn.appendChild(dropdown);
+    document.body.appendChild(dropdown);
 
     viewLocBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isVisible = dropdown.style.display === 'block';
-        dropdown.style.display = isVisible ? 'none' : 'block';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = viewLocBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
 
     const viewLocClickHandler = () => {
@@ -1071,6 +1203,16 @@ function createViewLocationButton(
     };
     document.addEventListener('click', viewLocClickHandler);
     documentListeners.push({ type: 'click', handler: viewLocClickHandler });
+
+    const viewLocResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = viewLocBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', viewLocResizeHandler);
+    documentListeners.push({ type: 'resize', handler: viewLocResizeHandler as EventListener });
 
     viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     viewLocBtn.addEventListener('mouseleave', () => {
@@ -1084,17 +1226,17 @@ function createViewLocationButton(
 
 function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation: string): HTMLElement {
     const dropdown = document.createElement('div');
+    dropdown.id = 'view-location-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1158,21 +1300,48 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
 
 function createPinnedTabsButton(
     callbacks: ToolbarCallbacks,
-    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
+    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>,
+    documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
     const pinsBtn = document.createElement('button');
+    pinsBtn.id = 'pinned-tabs-btn';
+    pinsBtn.dataset.overflowKeepVisible = 'true';
     pinsBtn.innerHTML = '📋';
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
-    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2); position: relative;';
+    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins);
-    pinsBtn.appendChild(dropdown);
+    document.body.appendChild(dropdown);
 
     pinsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isVisible = dropdown.style.display === 'block';
-        dropdown.style.display = isVisible ? 'none' : 'block';
+        const isHidden = dropdown.style.display === 'none';
+        if (isHidden) {
+            const rect = pinsBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+            dropdown.style.left = 'auto';
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
     });
+
+    const pinnedTabsClickHandler = () => {
+        dropdown.style.display = 'none';
+    };
+    document.addEventListener('click', pinnedTabsClickHandler);
+    documentListeners.push({ type: 'click', handler: pinnedTabsClickHandler });
+
+    const pinnedTabsResizeHandler = () => {
+        if (dropdown.style.display === 'block') {
+            const rect = pinsBtn.getBoundingClientRect();
+            dropdown.style.top = `${rect.bottom + 4}px`;
+            dropdown.style.right = `${window.innerWidth - rect.right}px`;
+        }
+    };
+    window.addEventListener('resize', pinnedTabsResizeHandler);
+    documentListeners.push({ type: 'resize', handler: pinnedTabsResizeHandler as EventListener });
 
     pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
     pinsBtn.addEventListener('mouseleave', () => {
@@ -1189,11 +1358,11 @@ function createPinnedTabsDropdown(
     pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
 ): HTMLElement {
     const dropdown = document.createElement('div');
+    dropdown.id = 'pinned-tabs-dropdown';
+    dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
-        position: absolute;
-        top: 100%;
-        right: 0;
+        position: fixed;
         background: rgba(15, 23, 42, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
@@ -1201,7 +1370,7 @@ function createPinnedTabsDropdown(
         min-width: 220px;
         max-height: 300px;
         overflow-y: auto;
-        z-index: 1000;
+        z-index: 11000;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1266,9 +1435,23 @@ function createPinnedTabsDropdown(
     return dropdown;
 }
 
-export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; description: string }>): void {
+export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; description: string }>, isDark: boolean = true): void {
     // Store the element that had focus before opening modal
     const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    // Theme-aware colors
+    const overlayBg = isDark ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.4)';
+    const modalBg = isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+    const modalBorder = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.1)';
+    const titleColor = isDark ? '#f1f5f9' : '#1e293b';
+    const descColor = isDark ? '#94a3b8' : '#64748b';
+    const closeBtnColor = isDark ? '#94a3b8' : '#64748b';
+    const closeBtnHoverColor = isDark ? '#f1f5f9' : '#1e293b';
+    const closeBtnHoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+    const rowBorder = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(0, 0, 0, 0.06)';
+    const kbdBg = isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+    const kbdBorder = isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)';
+    const kbdColor = isDark ? '#a5b4fc' : '#6366f1';
 
     const overlay = document.createElement('div');
     overlay.id = 'shortcuts-modal';
@@ -1281,7 +1464,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
         left: 0;
         width: 100vw;
         height: 100vh;
-        background: rgba(0, 0, 0, 0.7);
+        background: ${overlayBg};
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1290,13 +1473,15 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     const modal = document.createElement('div');
     modal.style.cssText = `
-        background: rgba(15, 23, 42, 0.98);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${modalBg};
+        border: 1px solid ${modalBorder};
         border-radius: 12px;
         padding: 24px;
         min-width: 500px;
         max-width: 600px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, ${isDark ? '0.4' : '0.15'});
     `;
 
     // Split shortcuts into two columns
@@ -1305,14 +1490,14 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
     const rightColumn = shortcuts.slice(midpoint);
 
     const renderShortcut = (s: { key: string; description: string }) => `
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-            <span style="color: #94a3b8; font-size: 12px;">${s.description}</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid ${rowBorder};">
+            <span style="color: ${descColor}; font-size: 12px;">${s.description}</span>
             <kbd style="
-                background: rgba(99, 102, 241, 0.2);
-                border: 1px solid rgba(99, 102, 241, 0.3);
+                background: ${kbdBg};
+                border: 1px solid ${kbdBorder};
                 border-radius: 4px;
                 padding: 3px 6px;
-                color: #a5b4fc;
+                color: ${kbdColor};
                 font-size: 10px;
                 font-family: monospace;
                 margin-left: 8px;
@@ -1323,11 +1508,11 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
 
     modal.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 id="shortcuts-title" style="margin: 0; color: #f1f5f9; font-size: 15px;">Keyboard Shortcuts</h3>
+            <h3 id="shortcuts-title" style="margin: 0; color: ${titleColor}; font-size: 15px;">Keyboard Shortcuts</h3>
             <button id="close-shortcuts" aria-label="Close dialog" style="
                 background: none;
                 border: none;
-                color: #94a3b8;
+                color: ${closeBtnColor};
                 cursor: pointer;
                 font-size: 20px;
                 padding: 4px 8px;
@@ -1369,12 +1554,12 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
     if (closeBtn) {
         closeBtn.addEventListener('click', closeModal);
         closeBtn.addEventListener('mouseenter', () => {
-            closeBtn.style.background = 'rgba(148, 163, 184, 0.1)';
-            closeBtn.style.color = '#f1f5f9';
+            closeBtn.style.background = closeBtnHoverBg;
+            closeBtn.style.color = closeBtnHoverColor;
         });
         closeBtn.addEventListener('mouseleave', () => {
             closeBtn.style.background = 'none';
-            closeBtn.style.color = '#94a3b8';
+            closeBtn.style.color = closeBtnColor;
         });
     }
 
@@ -1444,6 +1629,44 @@ export function updateToolbarTheme(
     actions.querySelectorAll('button').forEach(btn => {
         btn.style.color = textColor;
     });
+
+    // Update floating dropdown menus
+    const theme = getComponentUiColors(dark);
+    document.querySelectorAll('.sql-crack-floating-toolbar-menu').forEach(menu => {
+        const el = menu as HTMLElement;
+        el.style.background = theme.surfaceElevated;
+        el.style.borderColor = theme.border;
+        el.style.boxShadow = theme.shadow;
+        // Update menu item text colors
+        el.querySelectorAll<HTMLElement>('div').forEach(child => {
+            const c = child.style.color;
+            if (c && c !== theme.textDim && c !== theme.accent) {
+                // Update non-accent, non-header text to match theme
+                if (c === '#e2e8f0' || c === 'rgb(226, 232, 240)' || c === '#1e293b' || c === 'rgb(30, 41, 59)') {
+                    child.style.color = theme.textBright;
+                }
+            }
+        });
+    });
+
+    applyOverflowMenuTheme(dark);
+}
+
+export function updateHintsSummaryBadge(
+    state: { status: 'ok' | 'warning' | 'error'; label: string }
+): void {
+    if (!hintsSummaryBtn) { return; }
+
+    const colors = {
+        ok: { text: '#10b981', bg: 'rgba(16, 185, 129, 0.16)', border: 'rgba(16, 185, 129, 0.35)' },
+        warning: { text: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', border: 'rgba(245, 158, 11, 0.35)' },
+        error: { text: '#ef4444', bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.35)' },
+    };
+    const palette = colors[state.status];
+    hintsSummaryBtn.textContent = `⚡ ${state.label}`;
+    hintsSummaryBtn.style.color = palette.text;
+    hintsSummaryBtn.style.background = palette.bg;
+    hintsSummaryBtn.style.boxShadow = `inset 0 0 0 1px ${palette.border}`;
 }
 
 export function markRefreshButtonStale(): void {
@@ -1470,7 +1693,7 @@ export function clearRefreshButtonStale(): void {
  * Update or hide the error notification badge in the toolbar
  * Shows number of failed queries when errors exist
  */
-export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string }>): void {
+export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number }>): void {
     const existingBadge = document.getElementById('sql-crack-error-badge');
 
     if (errorCount === 0) {
@@ -1516,8 +1739,11 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         }
     }
 
-    // Build tooltip content
-    const tooltipText = errors?.map(e => `Q${e.queryIndex + 1}: ${e.message}`).join('\n') ||
+    // Build tooltip content — include line numbers when available
+    const tooltipText = errors?.map(e => {
+        const prefix = e.line ? `Q${e.queryIndex + 1} (line ${e.line})` : `Q${e.queryIndex + 1}`;
+        return `${prefix}: ${e.message}`;
+    }).join('\n') ||
         `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 
     badge.innerHTML = `
@@ -1527,6 +1753,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         </span>
     `;
     badge.title = tooltipText;
+    requestAnimationFrame(() => repositionBreadcrumbBar());
 }
 
 /**
@@ -1536,5 +1763,6 @@ export function clearErrorBadge(): void {
     const badge = document.getElementById('sql-crack-error-badge');
     if (badge) {
         badge.remove();
+        repositionBreadcrumbBar();
     }
 }

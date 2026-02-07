@@ -25,6 +25,19 @@ describe('Demo Showcase E2E Tests', () => {
         result = parseSqlBatch(demoSql, 'PostgreSQL', DEFAULT_VALIDATION_LIMITS, {});
     });
 
+    describe('Snowflake write-query compatibility', () => {
+        it('parses QUERY 8 DELETE statement without Snowflake near-W failure', () => {
+            const snowflakeResult = parseSqlBatch(demoSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
+            const deleteQuery = snowflakeResult.queries.find(q =>
+                /DELETE\s+FROM\s+test_orders/i.test(q.sql)
+            );
+
+            expect(deleteQuery).toBeDefined();
+            expect(deleteQuery?.error).toBeUndefined();
+            expect(deleteQuery?.nodes.some(n => n.label === 'DELETE')).toBe(true);
+        });
+    });
+
     describe('Batch Parsing', () => {
         it('should parse multiple queries', () => {
             // demo-showcase.sql has multiple queries (9+ depending on how semicolons are handled)
@@ -114,6 +127,18 @@ describe('Demo Showcase E2E Tests', () => {
     });
 
     describe('Edge Cases', () => {
+        it('reports batch parse errors with absolute line and column context', () => {
+            const brokenSql = `SELECT 1;
+SELECT
+  customer_id
+FROOM orders;`;
+            const broken = parseSqlBatch(brokenSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
+
+            expect(broken.errorCount).toBe(1);
+            expect(broken.parseErrors?.[0].line).toBe(4);
+            expect(broken.parseErrors?.[0].message).toMatch(/^Line 4, column \d+:/i);
+        });
+
         it('should handle queries with window functions', () => {
             // Check if any query has window function stats or window nodes
             const hasWindowFunctions = result.queries.some(q =>

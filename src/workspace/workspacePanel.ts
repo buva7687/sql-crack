@@ -35,7 +35,8 @@ import { getWebviewScript, getIssuesScript, WebviewScriptParams } from './ui/cli
 import { MessageHandler, MessageHandlerContext } from './handlers';
 
 // Shared theme
-import { getReferenceTypeColor, getWorkspaceNodeColor } from '../shared';
+import { getReferenceTypeColor, getWorkspaceNodeColor, ICONS } from '../shared';
+import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from './exportUtils';
 
 const AUTO_INDEX_THRESHOLD = 50;
 
@@ -73,6 +74,8 @@ export class WorkspacePanel {
     };
     private _detailedStats: DetailedWorkspaceStats | null = null;
     private _showHelp: boolean = false;
+    /** Guard: true while rebuildAndRenderGraph() is running */
+    private _isRebuilding: boolean = false;
 
     // Lineage state
     private _lineageGraph: LineageGraph | null = null;
@@ -167,11 +170,12 @@ export class WorkspacePanel {
             this.rebuildAndRenderGraph();
         });
 
-        // Listen for VS Code theme changes
+        // Listen for VS Code theme changes — hot-swap CSS to avoid flicker
         vscode.window.onDidChangeActiveColorTheme(
-            (theme) => {
+            () => {
                 this._isDarkTheme = this.getThemeFromSettings();
-                this.renderCurrentView();
+                const css = getWebviewStyles(this._isDarkTheme);
+                this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
             this._disposables
@@ -182,7 +186,8 @@ export class WorkspacePanel {
             (e) => {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
-                    this.renderCurrentView();
+                    const css = getWebviewStyles(this._isDarkTheme);
+                    this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
             },
             null,
@@ -337,9 +342,13 @@ export class WorkspacePanel {
             getIsDarkTheme: () => this._isDarkTheme,
             setIsDarkTheme: (dark) => { this._isDarkTheme = dark; },
 
+            // Rebuild state
+            getIsRebuilding: () => this._isRebuilding,
+
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
+            getThemeCss: (isDark) => getWebviewStyles(isDark),
             buildIndexWithProgress: () => this.buildIndexWithProgress(),
             rebuildAndRenderGraph: () => this.rebuildAndRenderGraph(),
             buildLineageGraph: () => this.buildLineageGraph(),
@@ -359,15 +368,20 @@ export class WorkspacePanel {
             return;
         }
 
-        // Clear cached lineage graph so it rebuilds with new data
-        this._lineageGraph = null;
-        this._lineageBuilder = null;
-        this._flowAnalyzer = null;
-        this._impactAnalyzer = null;
-        this._columnLineageTracker = null;
+        this._isRebuilding = true;
+        try {
+            // Clear cached lineage graph so it rebuilds with new data
+            this._lineageGraph = null;
+            this._lineageBuilder = null;
+            this._flowAnalyzer = null;
+            this._impactAnalyzer = null;
+            this._columnLineageTracker = null;
 
-        this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
-        this.renderCurrentView();
+            this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
+            this.renderCurrentView();
+        } finally {
+            this._isRebuilding = false;
+        }
     }
 
     /**
@@ -1153,7 +1167,7 @@ ${bodyContent}
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-icon">📊</span>
+                <span class="header-icon header-icon-svg">${ICONS.table}</span>
                 <h1 class="header-title">Workspace Dependencies</h1>
             </div>
 
@@ -1330,7 +1344,7 @@ ${bodyContent}
         <div class="main-layout">
             <!-- Graph Area -->
             <div class="graph-area-container">
-                <div class="graph-area">
+                <div class="graph-area" id="graph-area">
                     ${graphHtml}
                 </div>
             </div>
@@ -1351,6 +1365,7 @@ ${bodyContent}
                     </button>
                     <h2 id="lineage-title">Data Lineage</h2>
                 </div>
+                <div id="workspace-breadcrumb" class="workspace-breadcrumb" style="display: none;"></div>
                 <div class="lineage-content" id="lineage-content">
                     <!-- Dynamic lineage content will be inserted here -->
                 </div>
@@ -1400,6 +1415,12 @@ ${bodyContent}
      * "View Details" opens the full Issues view.
      */
     private generateStatsHtml(): string {
+        const exportOptionsHtml = WORKSPACE_EXPORT_OPTIONS.map((option) => `
+            <button class="export-option ${option.group === 'advanced' ? 'export-option-advanced' : ''}" data-format="${option.format}">
+                ${this.escapeHtml(option.label)}
+            </button>
+        `).join('');
+
         return `
         <div class="sidebar-header">
             <span class="sidebar-title">Panel</span>
@@ -1446,38 +1467,6 @@ ${bodyContent}
                 </div>
             </div>
 
-            <!-- Legend Section (Graph tab only) -->
-            <div class="sidebar-section" data-sidebar-section="legend">
-                <div class="section-header expanded" data-section="legend">
-                    <span class="section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
-                        </svg>
-                        Legend
-                    </span>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-content">
-                    <div class="legend-grid">
-                        <div class="legend-group">
-                            <div class="legend-group-title">Nodes</div>
-                            <div class="legend-item"><div class="legend-node file"></div><span>SQL Files</span></div>
-                            <div class="legend-item"><div class="legend-node table"></div><span>Tables</span></div>
-                            <div class="legend-item"><div class="legend-node view"></div><span>Views</span></div>
-                            <div class="legend-item" title="Referenced in queries but not defined in this workspace"><div class="legend-node external"></div><span>External (not defined here)</span></div>
-                        </div>
-                        <div class="legend-group">
-                            <div class="legend-group-title">Edges</div>
-                            <div class="legend-item"><div class="legend-edge select"></div><span>SELECT</span></div>
-                            <div class="legend-item"><div class="legend-edge join"></div><span>JOIN</span></div>
-                            <div class="legend-item"><div class="legend-edge insert"></div><span>INSERT</span></div>
-                            <div class="legend-item"><div class="legend-edge update"></div><span>UPDATE</span></div>
-                            <div class="legend-item"><div class="legend-edge delete"></div><span>DELETE</span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Export Section (Graph tab only) -->
             <div class="sidebar-section" data-sidebar-section="export">
                 <div class="section-header" data-section="export">
@@ -1491,21 +1480,17 @@ ${bodyContent}
                     <span class="section-toggle">▼</span>
                 </div>
                 <div class="section-content">
-                    <div class="export-grid">
-                        <button class="export-btn" data-format="svg">
+                    <div class="export-dropdown">
+                        <button class="export-trigger" id="workspace-export-trigger" aria-expanded="false">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            Export as SVG
+                            Export as...
                         </button>
-                        <button class="export-btn" data-format="mermaid">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            Export as Mermaid
-                        </button>
+                        <div class="export-menu" id="workspace-export-menu" style="display: none;">
+                            ${exportOptionsHtml}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1581,6 +1566,14 @@ ${bodyContent}
             <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
+            <div class="zoom-divider"></div>
+            <button class="zoom-btn" id="btn-legend-toggle" title="Toggle legend (L)" aria-label="Toggle workspace legend" aria-pressed="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="4" y="5" width="16" height="14" rx="2"/>
+                    <line x1="8" y1="10" x2="16" y2="10"/>
+                    <line x1="8" y1="14" x2="12" y2="14"/>
+                </svg>
+            </button>
         </div>
 
         <!-- Keyboard Shortcuts Hint -->
@@ -1592,6 +1585,31 @@ ${bodyContent}
             <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
+        </div>
+
+        <!-- Bottom Legend Bar -->
+        <div class="workspace-legend-bar" id="workspace-legend-bar" role="complementary" aria-label="Workspace graph legend" aria-hidden="false">
+            <div class="legend-scroll">
+                <div class="legend-inline-group">
+                    <span class="legend-inline-item"><span class="legend-inline-node file"></span><span>SQL Files</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node table"></span><span>Tables</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node view"></span><span>Views</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node external"></span><span>External</span></span>
+                </div>
+                <span class="legend-divider"></span>
+                <div class="legend-inline-group">
+                    <span class="legend-inline-item"><span class="legend-inline-edge select"></span><span>SELECT</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge join"></span><span>JOIN</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge insert"></span><span>INSERT</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge update"></span><span>UPDATE</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge delete"></span><span>DELETE</span></span>
+                </div>
+                <span class="legend-divider"></span>
+                <div class="legend-inline-group">
+                    <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
+                </div>
+            </div>
+            <button class="legend-dismiss" id="workspace-legend-dismiss" title="Dismiss legend (L)" aria-label="Dismiss workspace legend">×</button>
         </div>`;
     }
 
@@ -1711,10 +1729,16 @@ ${bodyContent}
         const width = Math.max(1200, maxX + 150);
         const height = Math.max(800, maxY + 150);
 
+        // Pre-build node lookup map for O(1) access (avoids O(n) per edge)
+        const nodeMap = new Map<string, WorkspaceNode>();
+        for (const node of graph.nodes) {
+            nodeMap.set(node.id, node);
+        }
+
         // Render edges with improved curvature
         const edgesHtml = graph.edges.map(edge => {
-            const source = graph.nodes.find(n => n.id === edge.source);
-            const target = graph.nodes.find(n => n.id === edge.target);
+            const source = nodeMap.get(edge.source);
+            const target = nodeMap.get(edge.target);
             if (!source || !target) {return '';}
 
             // Calculate connection points
@@ -1731,7 +1755,7 @@ ${bodyContent}
             const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
 
             // Get edge color based on reference type (uses centralized theme)
-            const edgeColor = getReferenceTypeColor(edge.referenceType);
+            const edgeColor = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
 
             // Add edge ID for click-to-highlight functionality
             const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
@@ -1749,7 +1773,7 @@ ${bodyContent}
                           stroke-width="2"
                           marker-end="url(#arrowhead-${edge.referenceType})"
                           opacity="0.7"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="#94a3b8" font-size="10">${edge.count}</text>` : ''}
+                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="${this._isDarkTheme ? '#94a3b8' : '#64748b'}" font-size="10">${edge.count}</text>` : ''}
                 </g>
             `;
         }).join('');
@@ -1771,7 +1795,8 @@ ${bodyContent}
                    data-type="${node.type}"
                    data-filepath="${node.filePath ? this.escapeHtml(node.filePath) : ''}"
                    data-tooltip="${Buffer.from(tooltipContent).toString('base64')}">
-                    <rect width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
+                    <rect class="node-bg" width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
+                    <rect class="node-accent" x="0" y="0" width="4" height="${node.height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
                     <text x="${node.width/2}" y="28" class="node-label" text-anchor="middle">${this.escapeHtml(node.label)}</text>
                     ${sublabel ? `<text x="${node.width/2}" y="46" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
                 </g>
@@ -1781,17 +1806,10 @@ ${bodyContent}
         // Generate arrow markers for each edge type
         const edgeTypes = ['select', 'join', 'insert', 'update', 'delete', 'subquery'];
         const arrowMarkers = edgeTypes.map(type => {
-            const colors: Record<string, string> = {
-                'select': '#64748b',
-                'join': '#a78bfa',
-                'insert': '#10b981',
-                'update': '#fbbf24',
-                'delete': '#f87171',
-                'subquery': '#8b5cf6'
-            };
+            const markerColor = getReferenceTypeColor(type, this._isDarkTheme);
             return `
                 <marker id="arrowhead-${type}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="${colors[type] || '#64748b'}"/>
+                    <polygon points="0 0, 10 3.5, 0 7" fill="${markerColor}"/>
                 </marker>
             `;
         }).join('');
@@ -1849,7 +1867,7 @@ ${bodyContent}
                 if (ref.columns && ref.columns.length > 0) {
                     const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
                     const moreCount = ref.columns.length - 8;
-                    content += `<br><span style="font-size:9px;color:#94a3b8;">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                    content += `<br><span style="font-size:9px;color:${this._isDarkTheme ? '#94a3b8' : '#64748b'};">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
                 }
 
                 content += '</li>';
@@ -1863,7 +1881,7 @@ ${bodyContent}
         }
 
         if (node.type === 'external') {
-            content += '<div class="tooltip-content" style="color:#fbbf24;">Not defined in workspace</div>';
+            content += `<div class="tooltip-content" style="color:${this._isDarkTheme ? '#fbbf24' : '#f59e0b'};">Not defined in workspace</div>`;
         }
 
         content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
@@ -1899,17 +1917,25 @@ ${bodyContent}
      * Handle export functionality
      */
     private async handleExport(format: string): Promise<void> {
+        if (this._isRebuilding) {
+            vscode.window.showWarningMessage('Graph is being rebuilt. Please try exporting again in a moment.');
+            return;
+        }
         if (!this._currentGraph) {
             vscode.window.showErrorMessage('No graph data to export');
             return;
         }
 
-        if (format === 'png') {
+        if (format === 'clipboard-png') {
+            this._panel.webview.postMessage({ command: 'exportPngClipboard' });
+        } else if (format === 'png') {
             // Request PNG export from webview
             // The webview will convert SVG to PNG via canvas and send back the data
             this._panel.webview.postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
+        } else if (format === 'copy-mermaid') {
+            await this.copyMermaidToClipboard();
         } else if (format === 'svg') {
             await this.exportAsSvg();
         } else if (format === 'json') {
@@ -1927,22 +1953,7 @@ ${bodyContent}
 
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
-        let mermaid = `\`\`\`mermaid\ngraph ${direction}\n`;
-
-        // Add nodes
-        for (const node of this._currentGraph.nodes) {
-            const label = node.label.replace(/"/g, '\\"');
-            const shape = node.type === 'file' ? '[' : node.type === 'external' ? '((' : '[]';
-            const endShape = node.type === 'file' ? ']' : node.type === 'external' ? '))' : ']';
-            mermaid += `    ${node.id}${shape}"${label}"${endShape}\n`;
-        }
-
-        // Add edges
-        for (const edge of this._currentGraph.edges) {
-            mermaid += `    ${edge.source} --> ${edge.target}\n`;
-        }
-
-        mermaid += '```';
+        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
 
         // Save to file
         const uri = await vscode.window.showSaveDialog({
@@ -1956,6 +1967,15 @@ ${bodyContent}
             await vscode.workspace.fs.writeFile(uri, Buffer.from(mermaid));
             vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
         }
+    }
+
+    private async copyMermaidToClipboard(): Promise<void> {
+        if (!this._currentGraph) { return; }
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
+        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
+        await vscode.env.clipboard.writeText(mermaid);
+        vscode.window.showInformationMessage('Mermaid copied to clipboard');
     }
 
     /**
@@ -2044,36 +2064,19 @@ ${bodyContent}
         dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
         dot += '    edge [fontname="Arial", fontsize=10];\n\n';
 
-        // Define node colors by type
-        const nodeColors: Record<string, string> = {
-            file: '#3b82f6',
-            table: '#10b981',
-            view: '#8b5cf6',
-            external: '#64748b'
-        };
-
         // Add nodes
         dot += '    // Nodes\n';
         for (const node of this._currentGraph.nodes) {
-            const color = nodeColors[node.type] || '#64748b';
+            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
             const label = node.label.replace(/"/g, '\\"');
             dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
         }
 
         dot += '\n    // Edges\n';
 
-        // Define edge colors by reference type
-        const edgeColors: Record<string, string> = {
-            select: '#64748b',
-            join: '#a78bfa',
-            insert: '#10b981',
-            update: '#fbbf24',
-            delete: '#f87171'
-        };
-
         // Add edges
         for (const edge of this._currentGraph.edges) {
-            const color = edgeColors[edge.referenceType] || '#64748b';
+            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
             const label = edge.referenceType || '';
             dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
         }
@@ -2137,10 +2140,16 @@ ${bodyContent}
         const width = Math.max(1200, maxX + 150);
         const height = Math.max(800, maxY + 150);
 
+        // Pre-build node lookup map for O(1) access
+        const nodeMap = new Map<string, WorkspaceNode>();
+        for (const node of graph.nodes) {
+            nodeMap.set(node.id, node);
+        }
+
         // Generate SVG (similar to renderGraph method but without interactivity)
         const edgesHtml = graph.edges.map(edge => {
-            const source = graph.nodes.find(n => n.id === edge.source);
-            const target = graph.nodes.find(n => n.id === edge.target);
+            const source = nodeMap.get(edge.source);
+            const target = nodeMap.get(edge.target);
             if (!source || !target) {return '';}
 
             const x1 = source.x + source.width / 2;
@@ -2149,13 +2158,13 @@ ${bodyContent}
             const y2 = target.y;
 
             const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
-            const color = getReferenceTypeColor(edge.referenceType);
+            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
 
             return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
         }).join('\n');
 
         const nodesHtml = graph.nodes.map(node => {
-            const color = getWorkspaceNodeColor(node.type);
+            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
 
             return `    <g transform="translate(${node.x}, ${node.y})">
         <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>

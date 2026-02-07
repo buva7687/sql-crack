@@ -179,3 +179,137 @@ FROM (
 ) AS customer_values
 GROUP BY tier
 ORDER BY tier_total_value DESC;
+
+
+
+WITH
+             -- Monthly revenue metrics
+             monthly_revenue AS (
+                 SELECT
+                     DATE_TRUNC(o.order_date, 'MONTH') AS report_month,
+                     SUM(o.total_amount) AS monthly_revenue,
+                     COUNT(DISTINCT o.customer_id) AS unique_customers,
+                     COUNT(o.order_id) AS total_orders,
+                     AVG(o.total_amount) AS avg_order_value
+                 FROM orders o
+                 WHERE o.order_date >= DATE('2024-01-01')
+                     AND o.status != 'cancelled'
+                 GROUP BY DATE_TRUNC(o.order_date, 'MONTH')
+             ),
+
+             -- Customer segment classification
+             customer_segments AS (
+                 SELECT
+                     customer_id,
+                     CASE
+                         WHEN total_lifetime_value > 10000 THEN 'Platinum'
+                         WHEN total_lifetime_value > 5000 THEN 'Gold'
+                         WHEN total_lifetime_value > 1000 THEN 'Silver'
+                         ELSE 'Bronze'
+                     END AS customer_tier,
+                     total_lifetime_value,
+                     order_count
+                 FROM customer_lifetime_summary
+                 WHERE last_order_date >= DATE('2024-01-01')
+             ),
+
+             -- Product category performance
+             category_performance AS (
+                 SELECT
+                     pc.category_id,
+                     pc.category_name,
+                     COUNT(DISTINCT oi.order_id) AS orders_with_category,
+                     SUM(oi.quantity) AS units_sold,
+                     SUM(oi.quantity * oi.unit_price) AS category_revenue,
+                     AVG(oi.unit_price) AS avg_unit_price
+                 FROM order_items oi
+                 JOIN products p ON oi.product_id = p.product_id
+                 JOIN product_categories pc ON p.category_id = pc.category_id
+                 GROUP BY pc.category_id, pc.category_name
+             )
+
+             SELECT
+                 -- Order Identifiers
+                 o.order_id,
+                 o.order_date,
+
+                 -- Customer Information
+                 c.customer_id,
+                 c.customer_name,
+                 c.email AS customer_email,
+                 c.city AS customer_city,
+                 c.country AS customer_country,
+                 cs.customer_tier,
+
+                 -- Order Details
+                 o.status AS order_status,
+                 o.total_amount AS order_total,
+                 o.shipping_amount,
+                 o.tax_amount,
+
+                 -- Product Information (aggregated per order)
+                 COUNT(DISTINCT oi.product_id) AS unique_products,
+                 SUM(oi.quantity) AS total_items,
+
+                 -- Revenue Metrics
+                 o.total_amount - (o.cost_of_goods + o.shipping_amount + o.tax_amount) AS profit_margin,
+
+                 -- Time-based Metrics
+                 DATEDIFF('day', o.order_date, o.shipment_date) AS fulfillment_days,
+                 EXTRACT('hour' FROM o.order_date) AS order_hour,
+
+                 -- Monthly Context
+                 mr.monthly_revenue,
+                 mr.avg_order_value AS monthly_avg_order_value,
+
+                 -- Customer Behavior
+                 cs.order_count AS customer_lifetime_orders,
+                 cs.total_lifetime_value AS customer_lifetime_spend,
+
+                 -- Flagging
+                 CASE
+                     WHEN o.status = 'delivered' AND o.shipment_date > o.estimated_delivery_date THEN 1
+                     ELSE 0
+                 END AS is_late_delivery,
+
+                 CASE
+                     WHEN o.total_amount > (mr.monthly_revenue / mr.total_orders) * 2 THEN 1
+                     ELSE 0
+                 END AS is_high_value_order
+
+             FROM orders o
+             JOIN customers c ON o.customer_id = c.customer_id
+             JOIN customer_segments cs ON o.customer_id = cs.customer_id
+             JOIN order_items oi ON o.order_id = oi.order_id
+             JOIN monthly_revenue mr ON DATE_TRUNC(o.order_date, 'MONTH') = mr.report_month
+             LEFT JOIN shipments s ON o.order_id = s.order_id
+
+             WHERE o.order_date >= DATE('2024-01-01')
+                 AND o.order_date < DATE('2024-02-01')
+                 AND o.status IN ('pending', 'processing', 'shipped', 'delivered')
+
+             GROUP BY
+                 o.order_id,
+                 o.order_date,
+                 c.customer_id,
+                 c.customer_name,
+                 c.email,
+                 c.city,
+                 c.country,
+                 cs.customer_tier,
+                 cs.order_count,
+                 cs.total_lifetime_value,
+                 o.status,
+                 o.total_amount,
+                 o.shipping_amount,
+                 o.tax_amount,
+                 o.cost_of_goods,
+                 o.shipment_date,
+                 o.estimated_delivery_date,
+                 mr.monthly_revenue,
+                 mr.avg_order_value
+
+             ORDER BY
+                 o.order_date DESC,
+                 o.total_amount DESC
+             LIMIT 1000;

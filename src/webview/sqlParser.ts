@@ -839,6 +839,9 @@ export function parseSqlBatch(
 
                 // Adjust line numbers by adding the offset
                 const lineOffset = stmtStartLine - 1;
+                if (result.error) {
+                    result.error = offsetErrorLineNumber(result.error, lineOffset);
+                }
                 for (const node of result.nodes) {
                     if (node.startLine) {
                         node.startLine += lineOffset;
@@ -1105,6 +1108,143 @@ function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     }
 }
 
+function getLeadingKeyword(sql: string): string | null {
+    const stripped = stripLeadingComments(sql);
+    const match = stripped.match(/^\s*([A-Za-z_]+)/);
+    return match ? match[1].toUpperCase() : null;
+}
+
+interface ParseErrorLocation {
+    line: number;
+    column?: number;
+}
+
+function getLineColumnFromOffset(sql: string, offset: number): ParseErrorLocation {
+    const safeOffset = Math.max(0, Math.min(offset, sql.length));
+    const before = sql.slice(0, safeOffset);
+    const line = before.split('\n').length;
+    const lastNewline = before.lastIndexOf('\n');
+    const column = safeOffset - lastNewline;
+    return { line, column };
+}
+
+function inferErrorOffsetFromToken(sql: string, token: string): number | null {
+    const trimmed = token.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const isWordToken = /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed);
+    if (isWordToken) {
+        const pattern = trimmed.length === 1
+            ? new RegExp(`\\b${escapeRegex(trimmed)}[A-Za-z0-9_]*\\b`, 'i')
+            : new RegExp(`\\b${escapeRegex(trimmed)}\\b`, 'i');
+        const wordMatch = pattern.exec(sql);
+        if (wordMatch && typeof wordMatch.index === 'number') {
+            return wordMatch.index;
+        }
+    }
+
+    const directIndex = sql.toUpperCase().indexOf(trimmed.toUpperCase());
+    return directIndex >= 0 ? directIndex : null;
+}
+
+function extractParseErrorLocation(
+    err: unknown,
+    originalError: string,
+    sql: string,
+    syntaxHint: string | null
+): ParseErrorLocation | null {
+    const errorObj = err as any;
+
+    const structuredLocation = errorObj?.location?.start;
+    if (structuredLocation && typeof structuredLocation.line === 'number') {
+        return {
+            line: structuredLocation.line,
+            column: typeof structuredLocation.column === 'number' ? structuredLocation.column : undefined,
+        };
+    }
+
+    const hashLocation = errorObj?.hash?.loc;
+    if (hashLocation && typeof hashLocation.first_line === 'number') {
+        return {
+            line: hashLocation.first_line,
+            column: typeof hashLocation.first_column === 'number' ? hashLocation.first_column : undefined,
+        };
+    }
+
+    if (typeof errorObj?.lineNumber === 'number') {
+        return {
+            line: errorObj.lineNumber,
+            column: typeof errorObj?.columnNumber === 'number' ? errorObj.columnNumber : undefined,
+        };
+    }
+
+    const lineInfoMatch = originalError.match(/(?:line\s+|at\s+line\s+)(\d+)/i);
+    if (lineInfoMatch) {
+        const line = parseInt(lineInfoMatch[1], 10);
+        const colInfoMatch = originalError.match(/(?:column\s+|col\s+)(\d+)/i);
+        const column = colInfoMatch ? parseInt(colInfoMatch[1], 10) : undefined;
+        return { line, column };
+    }
+
+    if (syntaxHint) {
+        const inferredOffset = inferErrorOffsetFromToken(sql, syntaxHint);
+        if (inferredOffset !== null) {
+            return getLineColumnFromOffset(sql, inferredOffset);
+        }
+    }
+
+    return null;
+}
+
+function formatErrorLocationPrefix(location: ParseErrorLocation | null): string {
+    if (!location) {
+        return '';
+    }
+    return `Line ${location.line}${location.column ? `, column ${location.column}` : ''}`;
+}
+
+function offsetErrorLineNumber(message: string, lineOffset: number): string {
+    if (lineOffset <= 0) {
+        return message;
+    }
+
+    const prefixMatch = message.match(/^Line\s+(\d+)(,\s*column\s+\d+)?\s*:\s*/i);
+    if (!prefixMatch) {
+        return message;
+    }
+
+    const relativeLine = parseInt(prefixMatch[1], 10);
+    if (!Number.isFinite(relativeLine)) {
+        return message;
+    }
+
+    const absoluteLine = relativeLine + lineOffset;
+    const columnPart = prefixMatch[2] || '';
+    const remainder = message.slice(prefixMatch[0].length);
+    return `Line ${absoluteLine}${columnPart}: ${remainder}`;
+}
+
+function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
+    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
+    // Fall back to PostgreSQL AST parsing for these statements so visualization can still render.
+    if (dialect !== 'Snowflake') {
+        return null;
+    }
+
+    const keyword = getLeadingKeyword(sql);
+    if (!keyword || !['DELETE', 'MERGE'].includes(keyword)) {
+        return null;
+    }
+
+    try {
+        return parser.astify(sql, { database: 'PostgreSQL' });
+    } catch {
+        return null;
+    }
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     // Reset all parser state atomically by creating a fresh context
     ctx = createFreshContext(dialect);
@@ -1124,7 +1264,16 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const parser = new Parser();
 
     try {
-        const ast = parser.astify(sql, { database: dialect });
+        let ast: any;
+        try {
+            ast = parser.astify(sql, { database: dialect });
+        } catch (parseError) {
+            const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, dialect);
+            if (!fallbackAst) {
+                throw parseError;
+            }
+            ast = fallbackAst;
+        }
         const statements = Array.isArray(ast) ? ast : [ast];
 
         for (const stmt of statements) {
@@ -1213,9 +1362,15 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         const syntaxHint = butFoundMatch ? butFoundMatch[1] :
                           (quotedFoundMatch ? quotedFoundMatch[1] :
                           (unexpectedMatch ? unexpectedMatch[1] : null));
+        const parseLocation = extractParseErrorLocation(err, originalError, sql, syntaxHint);
+
+        // Check for || concatenation operator failure
+        const hasPipeConcat = /\|\|/.test(sql);
 
         if (originalError.includes('found') || originalError.includes('Expected')) {
-            if (ctx.dialect === 'MySQL') {
+            if (hasPipeConcat && (syntaxHint === '|' || syntaxHint === '||' || originalError.includes('||'))) {
+                message = `|| concatenation operator failed to parse in ${ctx.dialect}. Try PostgreSQL or MySQL dialect which supports || concatenation.`;
+            } else if (ctx.dialect === 'MySQL') {
                 // MySQL-specific issues - check in order of likelihood
                 if (hasParenthesizedUnion && hasIntervalQuoted) {
                     message = `This query uses PostgreSQL syntax (INTERVAL '...' and parenthesized UNION). Try PostgreSQL dialect.`;
@@ -1242,6 +1397,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             else {
                 message = `SQL syntax not recognized by ${ctx.dialect} parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
             }
+        }
+
+        const locationPrefix = formatErrorLocationPrefix(parseLocation);
+        if (locationPrefix && !/^Line\s+\d+/i.test(message)) {
+            message = `${locationPrefix}: ${message}`;
         }
 
         return { nodes: [], edges: [], stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
@@ -1999,6 +2159,33 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
 
             return rootId;
         }
+
+        // For CREATE TABLE AS SELECT (CTAS), process the inner SELECT for optimization hints
+        if (stmt.keyword === 'table' && (stmt.select || stmt.as) && objectName) {
+            const innerSelect = stmt.select || stmt.as;
+            const selectRootId = processSelect(innerSelect, nodes, edges);
+
+            const tableNodeWidth = Math.max(160, objectName.length * 10 + 60);
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `TABLE ${objectName}`,
+                description: `Create table as select: ${objectName}`,
+                accessMode: 'write',
+                operationType: 'CREATE_TABLE_AS',
+                x: 0, y: 0, width: tableNodeWidth, height: 60
+            });
+
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
     }
 
     // Calculate width based on label length
@@ -2094,11 +2281,16 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             const containerWidth = Math.max(200, cteChildren.length > 0 ? 220 : 160);
             const containerHeight = cteChildren.length > 0 ? 80 + cteChildren.length * 35 : 60;
 
+            // Check if this CTE is recursive (node-sql-parser sets recursive flag on the CTE or parent)
+            const isRecursive = cte.recursive === true || cte.prefix?.toLowerCase() === 'recursive';
+            const cteLabel = isRecursive ? `WITH RECURSIVE ${cteName}` : `WITH ${cteName}`;
+            const cteDescription = isRecursive ? 'Recursive Common Table Expression' : 'Common Table Expression';
+
             nodes.push({
                 id: cteId,
                 type: 'cte',
-                label: `WITH ${cteName}`,
-                description: 'Common Table Expression',
+                label: cteLabel,
+                description: cteDescription,
                 children: cteChildren.length > 0 ? cteChildren : undefined,
                 childEdges: cteChildren.length > 0 ? cteChildEdges : undefined, // Keep empty array if children exist
                 expanded: false, // Start collapsed, expand on click to show subflow
@@ -2441,8 +2633,9 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
         previousId = sortId;
     }
 
-    // Process LIMIT
-    if (stmt.limit) {
+    // Process LIMIT — guard against phantom objects from node-sql-parser
+    // (PostgreSQL, Snowflake, Trino, Redshift return { seperator: "", value: [] } when no LIMIT exists)
+    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         ctx.hasNoLimit = false;
         const limitId = genId('limit');
         const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;

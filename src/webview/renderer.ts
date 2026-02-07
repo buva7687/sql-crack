@@ -33,8 +33,28 @@ import {
 } from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
-import { showKeyboardShortcutsHelp } from './ui';
+import {
+    showKeyboardShortcutsHelp,
+    createLegendBar,
+    toggleLegendBar,
+    isLegendBarVisible,
+    getLegendBarHeight,
+    createCommandBar,
+    showCommandBar,
+    hideCommandBar,
+    toggleCommandBar,
+    isCommandBarVisible,
+    registerCommandBarActions,
+    createBreadcrumbBar,
+    addBreadcrumbSegment,
+    removeBreadcrumbSegment,
+    clearBreadcrumbBar,
+    updateHintsSummaryBadge,
+} from './ui';
 import dagre from 'dagre';
+import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
+import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors } from './constants/colors';
+import type { GridStyle } from '../shared/themeTokens';
 import {
     getViewportBounds,
     getVisibleElements,
@@ -53,6 +73,11 @@ import {
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
 import { escapeRegex } from '../shared';
+import { getHintBadgeState, getTopHints, sortHintsByImpact } from './hintsHierarchy';
+import { getWarningIndicatorState } from './warningIndicator';
+import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
+import { extractSqlSnippet } from './sqlSnippet';
+import { shouldShowMinimap } from './minimapVisibility';
 
 const state: ViewState = {
     scale: 1,
@@ -101,6 +126,7 @@ let sqlPreviewPanel: HTMLDivElement | null = null;
 let tooltipElement: HTMLDivElement | null = null;
 let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
+let columnLineageBanner: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
@@ -116,6 +142,7 @@ let clusterNodeMap: Map<string, NodeCluster> = new Map();
 let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
+let hintsShowAll = false;
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
@@ -134,60 +161,19 @@ let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 
+function isReducedMotionPreferred(): boolean {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function initRenderer(container: HTMLElement): void {
-    // Create SVG element
-    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '100%');
-    svg.setAttribute('height', '100%');
-    svg.setAttribute('tabindex', '-1'); // Make SVG focusable for keyboard events
-    svg.style.background = UI_COLORS.background;
-    svg.style.cursor = 'grab';
-    svg.style.position = 'absolute';
-    svg.style.top = '0';
-    svg.style.left = '0';
-    svg.style.zIndex = '1';
-    svg.style.outline = 'none'; // Remove focus outline
-
-    // Add defs for markers (arrows) and patterns
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = `
-        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.default}" />
-        </marker>
-        <marker id="arrowhead-highlight" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.highlight}" />
-        </marker>
-        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
-        </filter>
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-            <feMerge>
-                <feMergeNode in="coloredBlur"/>
-                <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-        </filter>
-        <!-- Grid pattern for light theme -->
-        <pattern id="grid-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-            <rect width="20" height="20" fill="${UI_COLORS.gridBackground}"/>
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="${UI_COLORS.gridLine}" stroke-width="1"/>
-        </pattern>
-    `;
-    svg.appendChild(defs);
-
-    // Create background rectangle for pattern (light theme)
-    backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    backgroundRect.setAttribute('width', '100%');
-    backgroundRect.setAttribute('height', '100%');
-    backgroundRect.setAttribute('fill', UI_COLORS.background);
-    backgroundRect.style.pointerEvents = 'none';
-    svg.appendChild(backgroundRect);
-
-    // Create main group for pan/zoom
-    mainGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svg.appendChild(mainGroup);
-
-    container.appendChild(svg);
+    // Use extracted canvas setup module
+    const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+    const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
+    svg = canvas.svg;
+    mainGroup = canvas.mainGroup;
+    backgroundRect = canvas.backgroundRect;
 
     // Create details panel
     detailsPanel = document.createElement('div');
@@ -235,6 +221,42 @@ export function initRenderer(container: HTMLElement): void {
     `;
     container.appendChild(breadcrumbPanel);
 
+    // Column lineage active banner
+    columnLineageBanner = document.createElement('div');
+    columnLineageBanner.id = 'column-lineage-banner';
+    columnLineageBanner.style.cssText = `
+        position: absolute;
+        top: 62px;
+        left: 16px;
+        right: auto;
+        z-index: 140;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: min(70vw, 520px);
+        pointer-events: none;
+    `;
+    columnLineageBanner.innerHTML = `
+        <span style="pointer-events: none;">🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        <button id="column-lineage-banner-close" style="
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0 4px;
+            pointer-events: auto;
+        " aria-label="Close column lineage banner">×</button>
+    `;
+    container.appendChild(columnLineageBanner);
+    const bannerClose = columnLineageBanner.querySelector('#column-lineage-banner-close');
+    bannerClose?.addEventListener('click', () => toggleColumnFlows(false));
+
     // Create stats panel
     statsPanel = document.createElement('div');
     statsPanel.className = 'stats-panel';
@@ -278,30 +300,21 @@ export function initRenderer(container: HTMLElement): void {
         transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
     `;
     container.appendChild(hintsPanel);
+    ensureHintsPanelScrollbarStyles();
 
-    // Create legend panel (color legend)
-    legendPanel = document.createElement('div');
-    legendPanel.className = 'legend-panel';
-    legendPanel.style.cssText = `
-        position: absolute;
-        left: 16px;
-        top: 60px;
-        background: ${UI_COLORS.backgroundPanel};
-        border: 1px solid ${UI_COLORS.border};
-        border-radius: 8px;
-        padding: 12px 16px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 11px;
-        color: ${UI_COLORS.textMuted};
-        z-index: 100;
-        max-width: 200px;
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(-8px);
-        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
-    `;
-    updateLegendPanel();
-    container.appendChild(legendPanel);
+    // Create bottom legend bar (replaces old top-left legend panel)
+    legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
+
+    // Dynamically shift stats & hints panels above the legend bar when it toggles
+    document.addEventListener('legend-bar-toggle', ((e: CustomEvent) => {
+        adjustPanelBottoms(e.detail.visible ? e.detail.height : 0);
+    }) as EventListener);
+
+    // Apply initial offset if legend starts visible
+    if (isLegendBarVisible()) {
+        // Defer so the legend bar has rendered and has a measurable height
+        requestAnimationFrame(() => adjustPanelBottoms(getLegendBarHeight()));
+    }
 
     // Create SQL preview panel
     sqlPreviewPanel = document.createElement('div');
@@ -454,6 +467,44 @@ export function initRenderer(container: HTMLElement): void {
     document.head.appendChild(spinnerStyle);
     container.appendChild(loadingOverlay);
 
+    // Create command bar (Ctrl+Shift+P palette)
+    createCommandBar(container, () => state.isDarkTheme);
+    registerCommandBarActions([
+        { id: 'zoom-in', label: 'Zoom In', shortcut: '+', action: () => zoomIn() },
+        { id: 'zoom-out', label: 'Zoom Out', shortcut: '-', action: () => zoomOut() },
+        { id: 'fit-view', label: 'Fit to View', shortcut: 'R', action: () => resetView() },
+        { id: 'toggle-theme', label: 'Toggle Theme', shortcut: 'T', category: 'View', action: () => toggleTheme() },
+        { id: 'toggle-fullscreen', label: 'Toggle Fullscreen', shortcut: 'F', category: 'View', action: () => toggleFullscreen() },
+        { id: 'toggle-legend', label: 'Toggle Legend', shortcut: 'L', category: 'View', action: () => toggleLegend() },
+        { id: 'toggle-sql', label: 'Show SQL Preview', shortcut: 'S', category: 'View', action: () => toggleSqlPreview() },
+        { id: 'toggle-stats', label: 'Show Query Stats', shortcut: 'Q', category: 'View', action: () => toggleStats() },
+        { id: 'toggle-hints', label: 'Show Optimization Hints', shortcut: 'O', category: 'View', action: () => toggleHints() },
+        { id: 'toggle-columns', label: 'Toggle Column Lineage', shortcut: 'C', category: 'View', action: () => toggleColumnFlows() },
+        { id: 'layout-vertical', label: 'Layout: Vertical', shortcut: '1', category: 'Layout', action: () => switchLayout('vertical') },
+        { id: 'layout-horizontal', label: 'Layout: Horizontal', shortcut: '2', category: 'Layout', action: () => switchLayout('horizontal') },
+        { id: 'layout-compact', label: 'Layout: Compact', shortcut: '3', category: 'Layout', action: () => switchLayout('compact') },
+        { id: 'layout-force', label: 'Layout: Force', shortcut: '4', category: 'Layout', action: () => switchLayout('force') },
+        { id: 'layout-radial', label: 'Layout: Radial', shortcut: '5', category: 'Layout', action: () => switchLayout('radial') },
+        { id: 'focus-all', label: 'Focus: All Connected', shortcut: 'A', category: 'Focus', action: () => setFocusMode('all') },
+        { id: 'focus-upstream', label: 'Focus: Upstream Only', shortcut: 'U', category: 'Focus', action: () => setFocusMode('upstream') },
+        { id: 'focus-downstream', label: 'Focus: Downstream Only', shortcut: 'D', category: 'Focus', action: () => setFocusMode('downstream') },
+        { id: 'search', label: 'Search Nodes', shortcut: 'Ctrl+F', category: 'Navigation', action: () => searchBox?.focus() },
+        { id: 'help', label: 'Keyboard Shortcuts', shortcut: '?', category: 'Help', action: () => showKeyboardShortcutsHelp(getKeyboardShortcuts(), state.isDarkTheme) },
+    ]);
+
+    // Create breadcrumb bar (filter/state indicator)
+    createBreadcrumbBar(container, {
+        isDarkTheme: () => state.isDarkTheme,
+        onClearAll: () => {
+            clearFocusMode();
+            if (searchBox) {
+                searchBox.value = '';
+                clearSearch();
+            }
+            toggleColumnFlows(false);
+        },
+    });
+
     // Hide context menu on click outside
     const contextMenuClickHandler = () => {
         if (contextMenuElement) {
@@ -465,6 +516,45 @@ export function initRenderer(container: HTMLElement): void {
 
     // Store container reference
     containerElement = container;
+
+    // Accessibility: reduced motion and high contrast support
+    const reducedMotionStyle = document.createElement('style');
+    reducedMotionStyle.textContent = `
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+            .edge,
+            .column-lineage-edge {
+                animation: none !important;
+                stroke-dasharray: none !important;
+            }
+            .details-panel,
+            .stats-panel,
+            .hints-panel,
+            .legend-panel,
+            .sql-preview-panel {
+                transition: none !important;
+            }
+        }
+        @media (prefers-contrast: more) {
+            .node-rect { stroke-width: 2 !important; }
+            .node-accent { width: 6px !important; }
+            .edge,
+            .column-lineage-edge { stroke-width: 2 !important; }
+            .details-panel,
+            .stats-panel,
+            .hints-panel,
+            .legend-panel,
+            .sql-preview-panel,
+            #sql-crack-breadcrumb-bar {
+                border-width: 2px !important;
+            }
+        }
+    `;
+    document.head.appendChild(reducedMotionStyle);
 
     // Apply initial theme
     applyTheme(state.isDarkTheme);
@@ -637,11 +727,16 @@ function setupEventListeners(): void {
         updateZoomIndicator();
     });
 
-    // Click outside to deselect and reset focus
+    // Click outside to deselect, reset focus, and restore zoom
     svg.addEventListener('click', (e) => {
         if (e.target === svg) {
+            const wasZoomed = state.zoomedNodeId !== null;
             selectNode(null);
             clearFocusMode();
+            if (wasZoomed) {
+                fitView();
+                updateZoomIndicator();
+            }
         }
     });
 
@@ -650,6 +745,11 @@ function setupEventListeners(): void {
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
+            // Dismiss column lineage first if active
+            if (state.showColumnFlows) {
+                toggleColumnFlows(false);
+                return;
+            }
             selectNode(null);
             clearFocusMode();
             hideContextMenu();
@@ -669,6 +769,20 @@ function setupEventListeners(): void {
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
                                document.activeElement?.tagName === 'TEXTAREA';
 
+        // Ctrl/Cmd + Shift + P for command bar
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+            e.preventDefault();
+            toggleCommandBar();
+            return;
+        }
+
+        // Escape closes command bar first if visible
+        if (e.key === 'Escape' && isCommandBarVisible()) {
+            e.preventDefault();
+            hideCommandBar();
+            return;
+        }
+
         // Ctrl/Cmd + F for search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
@@ -678,6 +792,11 @@ function setupEventListeners(): void {
 
         // Escape to close panels, exit fullscreen, and reset view
         if (e.key === 'Escape') {
+            // Dismiss column lineage mode first if active
+            if (state.showColumnFlows) {
+                toggleColumnFlows(false);
+                return;
+            }
             if (state.isFullscreen) {
                 toggleFullscreen(false);
             }
@@ -707,6 +826,13 @@ function setupEventListeners(): void {
         // Skip single-key shortcuts if modifier keys are pressed
         // This allows native browser shortcuts (Ctrl+C, Cmd+V, etc.) to work normally
         if (e.metaKey || e.ctrlKey || e.altKey) {return;}
+
+        // Number keys 1-5 for quick layout switching
+        if (e.key === '1') { e.preventDefault(); switchLayout('vertical'); return; }
+        if (e.key === '2') { e.preventDefault(); switchLayout('horizontal'); return; }
+        if (e.key === '3') { e.preventDefault(); switchLayout('compact'); return; }
+        if (e.key === '4') { e.preventDefault(); switchLayout('force'); return; }
+        if (e.key === '5') { e.preventDefault(); switchLayout('radial'); return; }
 
         // + or = to zoom in
         if (e.key === '+' || e.key === '=') {
@@ -791,7 +917,7 @@ function setupEventListeners(): void {
         // ? to show keyboard shortcuts help
         if (e.key === '?') {
             e.preventDefault();
-            showKeyboardShortcutsHelp(getKeyboardShortcuts());
+            showKeyboardShortcutsHelp(getKeyboardShortcuts(), state.isDarkTheme);
         }
 
         // Arrow keys to navigate between connected nodes (accessibility)
@@ -826,14 +952,11 @@ export function cleanupRenderer(): void {
 function updateTransform(): void {
     if (mainGroup) {
         mainGroup.setAttribute('transform', `translate(${state.offsetX}, ${state.offsetY}) scale(${state.scale})`);
-        // Update minimap viewport when panning/zooming
-        const viewport = document.getElementById('minimap-viewport');
-        if (viewport) {
-            requestAnimationFrame(() => {
-                const event = new CustomEvent('transform-update');
-                document.dispatchEvent(event);
-            });
-        }
+        // Update minimap viewport when panning/zooming.
+        // Keep this direct so the viewport box tracks drag/zoom continuously.
+        requestAnimationFrame(() => {
+            updateMinimapViewport();
+        });
         // Trigger virtualized re-render on pan/zoom
         throttledVirtualizedRender();
     }
@@ -1324,15 +1447,30 @@ export function render(result: ParseResult): void {
 
     // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
     selectNode(null);
+    clearFocusMode();
+    state.focusModeEnabled = false;
+    state.selectedColumn = null;
+    selectedColumnLineage = null;
+    clearLineageHighlights();
+    hideColumnLineagePanel();
+    state.showColumnFlows = false;
+    setColumnLineageBannerVisible(false);
+    updateLegendPanel();
+
+    if (searchBox && searchBox.value) {
+        searchBox.value = '';
+    }
+    clearSearch();
+    clearBreadcrumbBar();
 
     currentNodes = result.nodes;
     currentEdges = result.edges;
     currentStats = result.stats;
     currentHints = result.hints;
+    hintsShowAll = false;
     currentSql = result.sql;
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
-
 
     // Reset highlight state
     state.highlightedColumnSources = [];
@@ -1514,20 +1652,15 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         renderStandardNode(node, group);
     }
 
-    // Hover effect with tooltip
+    // Hover effect with tooltip — accent-strip design uses subtle surface highlight
     const rect = group.querySelector('.node-rect') as SVGRectElement;
     if (rect) {
-        // Get the correct color based on node type
-        const getColor = () => {
-            if (node.type === 'join') {
-                const joinType = node.label || 'INNER JOIN';
-                return getJoinColor(joinType);
-            }
-            return getNodeColor(node.type);
-        };
-        
+        const isDark = state.isDarkTheme;
+        const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+        const hoverFill = isDark ? '#222222' : '#F1F5F9';
+
         group.addEventListener('mouseenter', (e) => {
-            rect.setAttribute('fill', lightenColor(getColor(), 20));
+            rect.setAttribute('fill', hoverFill);
             highlightConnectedEdges(node.id, true);
             showTooltip(node, e as MouseEvent);
         });
@@ -1537,7 +1670,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         });
 
         group.addEventListener('mouseleave', () => {
-            rect.setAttribute('fill', getColor());
+            rect.setAttribute('fill', surface.fill);
             if (state.selectedNodeId !== node.id) {
                 highlightConnectedEdges(node.id, false);
             }
@@ -1750,7 +1883,8 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
 
 function renderClusterNode(node: FlowNode, group: SVGGElement): void {
     const cluster = clusterNodeMap.get(node.id);
-    const clusterColor = cluster ? getClusterColor(cluster.type) : getNodeColor('cluster');
+    const clusterColor = cluster ? getClusterColor(cluster.type) : getNodeAccentColor('cluster', state.isDarkTheme);
+    const surface = state.isDarkTheme ? NODE_SURFACE.dark : NODE_SURFACE.light;
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('class', 'node-rect');
@@ -1758,10 +1892,11 @@ function renderClusterNode(node: FlowNode, group: SVGGElement): void {
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', UI_COLORS.backgroundSubtle);
+    rect.setAttribute('rx', '8');
+    rect.setAttribute('fill', surface.fill);
     rect.setAttribute('stroke', clusterColor);
-    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('stroke-width', '1.5');
+    rect.setAttribute('stroke-dasharray', '6,3');
     rect.setAttribute('filter', 'url(#shadow)');
     group.appendChild(rect);
 
@@ -1770,7 +1905,7 @@ function renderClusterNode(node: FlowNode, group: SVGGElement): void {
     label.setAttribute('y', String(node.y + node.height / 2));
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('dominant-baseline', 'middle');
-    label.setAttribute('fill', UI_COLORS.text);
+    label.setAttribute('fill', surface.text);
     label.setAttribute('font-size', '12');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     label.textContent = node.label;
@@ -1793,67 +1928,81 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     const isTable = node.type === 'table';
     const tableCategory = node.tableCategory || 'physical';
     const isDark = state.isDarkTheme;
-    
-    // Text colors based on theme - standard nodes always have colored backgrounds, so white text is usually fine
-    // But for light theme, we might need darker text on lighter backgrounds
-    // Since standard nodes use colored backgrounds (blue, purple, etc.), white text should work
-    // But let's be safe and use theme-aware colors for better contrast
-    const textColor = isDark ? UI_COLORS.white : UI_COLORS.white; // Keep white for colored backgrounds
-    const textColorMuted = isDark ? UI_COLORS.whiteMuted : UI_COLORS.whiteBright;
-    const textColorDim = isDark ? UI_COLORS.whiteDim : UI_COLORS.whiteMuted;
-    const strokeColor = isDark ? UI_COLORS.borderWhite : 'rgba(0, 0, 0, 0.2)';
+    const accentPosition = ((window as any).nodeAccentPosition || 'left') as string;
 
-    // Background rect
+    // New accent-strip design: neutral fill + colored accent strip
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const accentColor = getNodeAccentColor(node.type, isDark);
+    const textColor = surface.text;
+    const textColorMuted = surface.textMuted;
+    const textColorDim = isDark ? '#64748B' : '#94A3B8';
+
+    // Background rect — neutral fill
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '8');
-    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
 
-    // Apply different styles based on table category and access mode
+    // Apply different border styles based on table category and access mode
     if (isTable) {
-        // Access mode coloring (read/write differentiation)
         if (node.accessMode === 'write') {
-            // Write operations: Red border with "WRITE" emphasis
             rect.setAttribute('stroke', NODE_STROKE_COLORS.write);
-            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('stroke-width', '2');
         } else if (node.accessMode === 'read') {
-            // Read operations: Blue border
             rect.setAttribute('stroke', NODE_STROKE_COLORS.read);
-            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('stroke-width', '2');
         } else if (tableCategory === 'cte_reference') {
-            // CTE reference: double border effect with dashed inner
             rect.setAttribute('stroke', NODE_STROKE_COLORS.cte);
-            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('stroke-width', '2');
             rect.setAttribute('stroke-dasharray', '8,4');
         } else if (tableCategory === 'derived' || node.accessMode === 'derived') {
-            // Derived table: dashed border
             rect.setAttribute('stroke', NODE_STROKE_COLORS.derived);
-            rect.setAttribute('stroke-width', '2');
+            rect.setAttribute('stroke-width', '1.5');
             rect.setAttribute('stroke-dasharray', '5,3');
-        } else {
-            // Physical table: solid border for emphasis
-            rect.setAttribute('stroke', strokeColor);
-            rect.setAttribute('stroke-width', '2');
         }
     }
 
-    // Add complexity indicator (colored glow for medium/high complexity)
+    // Add complexity indicator
     if (node.complexityLevel && node.complexityLevel !== 'low') {
         const complexityColor = node.complexityLevel === 'high' ?
             GLOW_COLORS.high :
             GLOW_COLORS.medium;
-
         rect.setAttribute('stroke', complexityColor.replace('0.4', '0.8'));
         rect.setAttribute('stroke-width', '2');
         rect.setAttribute('stroke-dasharray', '4,2');
     }
 
     group.appendChild(rect);
+
+    // Accent strip — colored bar indicating node type
+    const accentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    if (accentPosition === 'bottom') {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y + node.height - 3));
+        accentStrip.setAttribute('width', String(node.width));
+        accentStrip.setAttribute('height', '3');
+        accentStrip.setAttribute('rx', '0');
+        // Clip to bottom corners only
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 0 0 6px 6px)`);
+    } else {
+        // Left accent strip (default)
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y));
+        accentStrip.setAttribute('width', '3');
+        accentStrip.setAttribute('height', String(node.height));
+        accentStrip.setAttribute('rx', '0');
+        // Clip to left corners only
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    }
+    accentStrip.setAttribute('fill', accentColor);
+    group.appendChild(accentStrip);
 
     // Add badges for access mode and category
     const badges: Array<{ text: string; color: string }> = [];
@@ -1915,41 +2064,39 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         group.appendChild(badgeLabel);
     });
 
-    // Warning badges (top-left corner)
-    if (node.warnings && node.warnings.length > 0) {
-        const warningBadgeSize = 18;
-        const warningX = node.x - 6;
-        const warningY = node.y - 6;
+    // Inline performance warning marker (top-right triangle)
+    const warningIndicator = getWarningIndicatorState(node.warnings);
+    if (warningIndicator) {
+        const triangleSize = 14;
+        const triangleLeft = node.x + node.width - triangleSize - 6;
+        const triangleTop = node.y + 6;
 
-        // Badge background circle
-        const warningCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        warningCircle.setAttribute('cx', String(warningX + warningBadgeSize / 2));
-        warningCircle.setAttribute('cy', String(warningY + warningBadgeSize / 2));
-        warningCircle.setAttribute('r', String(warningBadgeSize / 2));
-        warningCircle.setAttribute('fill', getWarningColor(node.warnings[0].severity));
-        warningCircle.setAttribute('filter', 'url(#shadow)');
-        group.appendChild(warningCircle);
+        const warningTriangle = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        warningTriangle.setAttribute('d', `M ${triangleLeft} ${triangleTop + triangleSize} L ${triangleLeft + triangleSize / 2} ${triangleTop} L ${triangleLeft + triangleSize} ${triangleTop + triangleSize} Z`);
+        warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
+        warningTriangle.setAttribute('opacity', '0.95');
+        warningTriangle.setAttribute('filter', 'url(#shadow)');
+        group.appendChild(warningTriangle);
 
-        // Warning icon
-        const warningIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        warningIcon.setAttribute('x', String(warningX + warningBadgeSize / 2));
-        warningIcon.setAttribute('y', String(warningY + warningBadgeSize / 2 + 5));
-        warningIcon.setAttribute('text-anchor', 'middle');
-        warningIcon.setAttribute('fill', 'white');
-        warningIcon.setAttribute('font-size', '12');
-        warningIcon.setAttribute('font-weight', '700');
-        warningIcon.textContent = getWarningIcon(node.warnings[0].type);
-        group.appendChild(warningIcon);
+        const exclamation = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        exclamation.setAttribute('x', String(triangleLeft + triangleSize / 2));
+        exclamation.setAttribute('y', String(triangleTop + triangleSize - 2));
+        exclamation.setAttribute('text-anchor', 'middle');
+        exclamation.setAttribute('fill', 'white');
+        exclamation.setAttribute('font-size', '9');
+        exclamation.setAttribute('font-weight', '700');
+        exclamation.textContent = '!';
+        group.appendChild(exclamation);
 
-        // If multiple warnings, show count
-        if (node.warnings.length > 1) {
+        if (warningIndicator.count > 1) {
             const countBadge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            countBadge.setAttribute('x', String(warningX + warningBadgeSize + 2));
-            countBadge.setAttribute('y', String(warningY + 10));
-            countBadge.setAttribute('fill', getWarningColor(node.warnings[0].severity));
+            countBadge.setAttribute('x', String(triangleLeft - 2));
+            countBadge.setAttribute('y', String(triangleTop + 8));
+            countBadge.setAttribute('text-anchor', 'end');
+            countBadge.setAttribute('fill', getWarningColor(warningIndicator.severity));
             countBadge.setAttribute('font-size', '9');
             countBadge.setAttribute('font-weight', '700');
-            countBadge.textContent = `+${node.warnings.length - 1}`;
+            countBadge.textContent = `+${warningIndicator.count - 1}`;
             group.appendChild(countBadge);
         }
     }
@@ -1992,23 +2139,45 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
     const joinType = node.label || 'INNER JOIN';
     const joinColor = getJoinColor(joinType);
     const isDark = state.isDarkTheme;
-    
-    // Text colors based on theme - use white for dark theme, dark for light theme
-    const textColor = isDark ? '#ffffff' : '#1e293b';
-    const textColorMuted = isDark ? 'rgba(255,255,255,0.8)' : 'rgba(30,41,59,0.8)';
-    const textColorDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(30,41,59,0.7)';
+    const accentPosition = ((window as any).nodeAccentPosition || 'left') as string;
 
-    // Background rect with join-specific color
+    // Neutral fill + accent strip design
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const textColor = surface.text;
+    const textColorMuted = surface.textMuted;
+    const textColorDim = isDark ? '#64748B' : '#94A3B8';
+
+    // Background rect — neutral fill
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '8');
-    rect.setAttribute('fill', joinColor);
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
+
+    // Accent strip for join type
+    const accentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    if (accentPosition === 'bottom') {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y + node.height - 3));
+        accentStrip.setAttribute('width', String(node.width));
+        accentStrip.setAttribute('height', '3');
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 0 0 6px 6px)`);
+    } else {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y));
+        accentStrip.setAttribute('width', '3');
+        accentStrip.setAttribute('height', String(node.height));
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    }
+    accentStrip.setAttribute('fill', joinColor);
+    group.appendChild(accentStrip);
 
     // Venn diagram visualization
     const vennContainer = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
@@ -2102,15 +2271,19 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudGroup.setAttribute('data-node-id', node.id);
         cloudGroup.style.cursor = 'move';
 
-        // Cloud container with dashed border (matching subquery style)
+        // Cloud container — theme-aware
+        const sqCloudIsDark = state.isDarkTheme;
+        const sqCloudSurface = sqCloudIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+        const sqCloudAccent = getNodeAccentColor('subquery', sqCloudIsDark);
+
         const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         cloud.setAttribute('x', String(cloudX));
         cloud.setAttribute('y', String(cloudY));
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
-        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('fill', sqCloudSurface.fill);
+        cloud.setAttribute('stroke', sqCloudAccent);
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('stroke-dasharray', '6,3');
         cloud.setAttribute('filter', 'url(#shadow)');
@@ -2121,7 +2294,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
+        cloudTitle.setAttribute('fill', sqCloudSurface.textMuted);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = node.label;
@@ -2255,7 +2428,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         const midX = (arrowStartX + arrowEndX) / 2;
         arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
         arrowPath.setAttribute('fill', 'none');
-        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke', sqCloudAccent);
         arrowPath.setAttribute('stroke-width', '2');
         arrowPath.setAttribute('stroke-dasharray', '5,3');
         arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
@@ -2291,26 +2464,40 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         });
     }
 
-    // Main subquery node (with dashed border)
+    // Main subquery node — neutral fill + accent strip + dashed border
+    const sqIsDark = state.isDarkTheme;
+    const sqSurface = sqIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const sqAccent = getNodeAccentColor('subquery', sqIsDark);
+
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(nodeWidth));
     rect.setAttribute('height', String(nodeHeight));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', UI_COLORS.backgroundDark);
-    rect.setAttribute('stroke', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', sqSurface.fill);
+    rect.setAttribute('stroke', sqAccent);
     rect.setAttribute('stroke-width', '2');
     rect.setAttribute('stroke-dasharray', '6,3');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
+    // Accent strip
+    const sqAccentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    sqAccentStrip.setAttribute('x', String(node.x));
+    sqAccentStrip.setAttribute('y', String(node.y));
+    sqAccentStrip.setAttribute('width', '3');
+    sqAccentStrip.setAttribute('height', String(nodeHeight));
+    sqAccentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    sqAccentStrip.setAttribute('fill', sqAccent);
+    group.appendChild(sqAccentStrip);
+
     // Subquery icon
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 12));
     iconText.setAttribute('y', String(node.y + 26));
-    iconText.setAttribute('fill', getNodeColor(node.type));
+    iconText.setAttribute('fill', sqAccent);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = '⊂';
     group.appendChild(iconText);
@@ -2319,7 +2506,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 30));
     label.setAttribute('y', String(node.y + 26));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', sqSurface.text);
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', 'monospace');
@@ -2330,7 +2517,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 12));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', UI_COLORS.whiteFaint);
+    descText.setAttribute('fill', sqSurface.textMuted);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -2374,15 +2561,19 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudGroup.setAttribute('data-node-id', node.id);
         cloudGroup.style.cursor = 'move';
 
-        // Cloud container background
+        // Cloud container background — theme-aware
+        const cteCloudIsDark = state.isDarkTheme;
+        const cteCloudSurface = cteCloudIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+        const cteCloudAccent = getNodeAccentColor('cte', cteCloudIsDark);
+
         const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         cloud.setAttribute('x', String(cloudX));
         cloud.setAttribute('y', String(cloudY));
         cloud.setAttribute('width', String(cloudWidth));
         cloud.setAttribute('height', String(cloudHeight));
         cloud.setAttribute('rx', '16');
-        cloud.setAttribute('fill', UI_COLORS.backgroundDark);
-        cloud.setAttribute('stroke', getNodeColor(node.type));
+        cloud.setAttribute('fill', cteCloudSurface.fill);
+        cloud.setAttribute('stroke', cteCloudAccent);
         cloud.setAttribute('stroke-width', '2');
         cloud.setAttribute('filter', 'url(#shadow)');
         cloudGroup.appendChild(cloud);
@@ -2393,7 +2584,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
         cloudTitle.setAttribute('y', String(cloudY + 20));
         cloudTitle.setAttribute('text-anchor', 'middle');
-        cloudTitle.setAttribute('fill', UI_COLORS.whiteDim);
+        cloudTitle.setAttribute('fill', cteCloudSurface.textMuted);
         cloudTitle.setAttribute('font-size', '11');
         cloudTitle.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         cloudTitle.textContent = cteName;
@@ -2527,7 +2718,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         const midX = (arrowStartX + arrowEndX) / 2;
         arrowPath.setAttribute('d', `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`);
         arrowPath.setAttribute('fill', 'none');
-        arrowPath.setAttribute('stroke', getNodeColor(node.type));
+        arrowPath.setAttribute('stroke', cteCloudAccent);
         arrowPath.setAttribute('stroke-width', '2');
         arrowPath.setAttribute('stroke-dasharray', '5,3');
         arrowPath.setAttribute('marker-end', 'url(#arrowhead)');
@@ -2563,24 +2754,40 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         });
     }
 
-    // Main CTE node (simple reference box)
+    // Main CTE node — neutral fill + accent strip
+    const isDark = state.isDarkTheme;
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const accentColor = getNodeAccentColor('cte', isDark);
+
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(nodeWidth));
     rect.setAttribute('height', String(nodeHeight));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
+
+    // Accent strip
+    const cteAccent = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    cteAccent.setAttribute('x', String(node.x));
+    cteAccent.setAttribute('y', String(node.y));
+    cteAccent.setAttribute('width', '3');
+    cteAccent.setAttribute('height', String(nodeHeight));
+    cteAccent.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    cteAccent.setAttribute('fill', accentColor);
+    group.appendChild(cteAccent);
 
     // Icon
     const icon = getNodeIcon(node.type);
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     iconText.setAttribute('x', String(node.x + 14));
     iconText.setAttribute('y', String(node.y + 26));
-    iconText.setAttribute('fill', UI_COLORS.whiteBright);
+    iconText.setAttribute('fill', accentColor);
     iconText.setAttribute('font-size', '14');
     iconText.textContent = icon;
     group.appendChild(iconText);
@@ -2589,7 +2796,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(node.x + 34));
     label.setAttribute('y', String(node.y + 26));
-    label.setAttribute('fill', 'white');
+    label.setAttribute('fill', surface.text);
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -2600,7 +2807,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     descText.setAttribute('x', String(node.x + 14));
     descText.setAttribute('y', String(node.y + 45));
-    descText.setAttribute('fill', UI_COLORS.whiteDim);
+    descText.setAttribute('fill', surface.textMuted);
     descText.setAttribute('font-size', '10');
     descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
     if (hasChildren && node.children) {
@@ -2745,7 +2952,7 @@ function renderCloudSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', UI_COLORS.whiteSubtle);
+            path.setAttribute('stroke', state.isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)');
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2754,6 +2961,9 @@ function renderCloudSubflow(
     }
 
     // Draw child nodes with full styling (like main flow nodes)
+    const cloudIsDark = state.isDarkTheme;
+    const cloudChildSurface = cloudIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+
     for (const child of children) {
         const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         childGroup.setAttribute('class', 'cloud-subflow-node');
@@ -2762,26 +2972,37 @@ function renderCloudSubflow(
 
         const childX = offsetX + child.x;
         const childY = offsetY + child.y;
-        const nodeColor = getNodeColor(child.type);
+        const childAccent = getNodeAccentColor(child.type, cloudIsDark);
+        const hoverFill = cloudIsDark ? '#222222' : '#F1F5F9';
 
-        // Node rectangle with full styling (matching main nodes)
+        // Node rectangle — neutral fill + accent strip (matching main nodes)
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String(childX));
         rect.setAttribute('y', String(childY));
         rect.setAttribute('width', String(child.width));
         rect.setAttribute('height', String(child.height));
-        rect.setAttribute('rx', '10');  // Match main nodes
-        rect.setAttribute('fill', nodeColor);
-        rect.setAttribute('stroke', UI_COLORS.borderWhite);
-        rect.setAttribute('stroke-width', '2');  // Match main nodes
+        rect.setAttribute('rx', '6');
+        rect.setAttribute('fill', cloudChildSurface.fill);
+        rect.setAttribute('stroke', cloudChildSurface.border);
+        rect.setAttribute('stroke-width', '1');
         rect.setAttribute('filter', 'url(#shadow)');
         childGroup.appendChild(rect);
+
+        // Accent strip
+        const childAccentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        childAccentStrip.setAttribute('x', String(childX));
+        childAccentStrip.setAttribute('y', String(childY));
+        childAccentStrip.setAttribute('width', '3');
+        childAccentStrip.setAttribute('height', String(child.height));
+        childAccentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+        childAccentStrip.setAttribute('fill', childAccent);
+        childGroup.appendChild(childAccentStrip);
 
         // Node icon (positioned like main nodes)
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 14));
         icon.setAttribute('y', String(childY + 26));
-        icon.setAttribute('fill', UI_COLORS.whiteBright);
+        icon.setAttribute('fill', childAccent);
         icon.setAttribute('font-size', '14');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -2790,11 +3011,11 @@ function renderCloudSubflow(
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         label.setAttribute('x', String(childX + 34));
         label.setAttribute('y', String(childY + 26));
-        label.setAttribute('fill', 'white');
+        label.setAttribute('fill', cloudChildSurface.text);
         label.setAttribute('font-size', '12');
         label.setAttribute('font-weight', '600');
         label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        label.textContent = truncate(child.label, 18);  // Increased from 14 for full-size nodes
+        label.textContent = truncate(child.label, 18);
         childGroup.appendChild(label);
 
         // Description text (like main nodes)
@@ -2802,7 +3023,7 @@ function renderCloudSubflow(
             const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             descText.setAttribute('x', String(childX + 14));
             descText.setAttribute('y', String(childY + 45));
-            descText.setAttribute('fill', UI_COLORS.whiteDim);
+            descText.setAttribute('fill', cloudChildSurface.textMuted);
             descText.setAttribute('font-size', '10');
             descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
             descText.textContent = truncate(child.description, 22);
@@ -2811,14 +3032,14 @@ function renderCloudSubflow(
 
         // Tooltip event handlers
         childGroup.addEventListener('mouseenter', (e) => {
-            rect.setAttribute('fill', lightenColor(nodeColor, 15));
+            rect.setAttribute('fill', hoverFill);
             showTooltip(child, e as MouseEvent);
         });
         childGroup.addEventListener('mousemove', (e) => {
             updateTooltipPosition(e as MouseEvent);
         });
         childGroup.addEventListener('mouseleave', () => {
-            rect.setAttribute('fill', nodeColor);
+            rect.setAttribute('fill', cloudChildSurface.fill);
             hideTooltip();
         });
 
@@ -2936,14 +3157,19 @@ function renderSubflow(
     subflowGroup.setAttribute('class', 'subflow-group');
     subflowGroup.setAttribute('clip-path', `url(#${clipId})`);
 
-    // Background for subflow area
+    // Background for subflow area — theme-aware
+    const sfIsDark = state.isDarkTheme;
+    const sfSurface = sfIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const sfEdgeColor = sfIsDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+    const sfBgColor = sfIsDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.03)';
+
     const subflowBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     subflowBg.setAttribute('x', String(offsetX));
     subflowBg.setAttribute('y', String(offsetY));
     subflowBg.setAttribute('width', String(containerWidth));
     subflowBg.setAttribute('height', String(containerHeight));
     subflowBg.setAttribute('rx', '6');
-    subflowBg.setAttribute('fill', UI_COLORS.backgroundOverlay);
+    subflowBg.setAttribute('fill', sfBgColor);
     subflowGroup.appendChild(subflowBg);
 
     // Draw child edges first (behind nodes)
@@ -2966,7 +3192,7 @@ function renderSubflow(
 
             path.setAttribute('d', d);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', UI_COLORS.borderWhite);
+            path.setAttribute('stroke', sfEdgeColor);
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-linecap', 'round');
 
@@ -2981,24 +3207,35 @@ function renderSubflow(
 
         const childX = offsetX + child.x;
         const childY = offsetY + child.y;
+        const sfChildAccent = getNodeAccentColor(child.type, sfIsDark);
 
-        // Node rectangle
+        // Node rectangle — neutral fill + accent strip
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String(childX));
         rect.setAttribute('y', String(childY));
         rect.setAttribute('width', String(child.width));
         rect.setAttribute('height', String(child.height));
         rect.setAttribute('rx', '6');
-        rect.setAttribute('fill', getNodeColor(child.type));
-        rect.setAttribute('stroke', UI_COLORS.borderWhiteLight);
+        rect.setAttribute('fill', sfSurface.fill);
+        rect.setAttribute('stroke', sfSurface.border);
         rect.setAttribute('stroke-width', '1');
         childGroup.appendChild(rect);
+
+        // Accent strip
+        const sfAccent = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        sfAccent.setAttribute('x', String(childX));
+        sfAccent.setAttribute('y', String(childY));
+        sfAccent.setAttribute('width', '3');
+        sfAccent.setAttribute('height', String(child.height));
+        sfAccent.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+        sfAccent.setAttribute('fill', sfChildAccent);
+        childGroup.appendChild(sfAccent);
 
         // Node icon
         const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         icon.setAttribute('x', String(childX + 8));
         icon.setAttribute('y', String(childY + child.height / 2 + 4));
-        icon.setAttribute('fill', UI_COLORS.whiteBright);
+        icon.setAttribute('fill', sfChildAccent);
         icon.setAttribute('font-size', '11');
         icon.textContent = getNodeIcon(child.type);
         childGroup.appendChild(icon);
@@ -3007,7 +3244,7 @@ function renderSubflow(
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         label.setAttribute('x', String(childX + 22));
         label.setAttribute('y', String(childY + child.height / 2 + 4));
-        label.setAttribute('fill', 'white');
+        label.setAttribute('fill', sfSurface.text);
         label.setAttribute('font-size', '10');
         label.setAttribute('font-weight', '500');
         label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -3025,42 +3262,59 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     const padding = 10;
     const headerHeight = 32;
     const funcHeight = 24;
+    const isDark = state.isDarkTheme;
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const accentColor = getNodeAccentColor('window', isDark);
+    const accentPosition = ((window as any).nodeAccentPosition || 'left') as string;
+    const pillBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
 
-    // Main container
+    // Main container — neutral fill
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
-    // Header
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x));
-    header.setAttribute('y', String(node.y));
-    header.setAttribute('width', String(node.width));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '10');
-    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
-    group.appendChild(header);
+    // Accent strip
+    const accentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    if (accentPosition === 'bottom') {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y + node.height - 3));
+        accentStrip.setAttribute('width', String(node.width));
+        accentStrip.setAttribute('height', '3');
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 0 0 6px 6px)`);
+    } else {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y));
+        accentStrip.setAttribute('width', '3');
+        accentStrip.setAttribute('height', String(node.height));
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    }
+    accentStrip.setAttribute('fill', accentColor);
+    group.appendChild(accentStrip);
 
-    const headerClip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    headerClip.setAttribute('x', String(node.x));
-    headerClip.setAttribute('y', String(node.y + headerHeight - 10));
-    headerClip.setAttribute('width', String(node.width));
-    headerClip.setAttribute('height', '10');
-    headerClip.setAttribute('fill', UI_COLORS.backgroundOverlay);
-    group.appendChild(headerClip);
+    // Header separator
+    const headerSep = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    headerSep.setAttribute('x1', String(node.x + 8));
+    headerSep.setAttribute('y1', String(node.y + headerHeight));
+    headerSep.setAttribute('x2', String(node.x + node.width - 8));
+    headerSep.setAttribute('y2', String(node.y + headerHeight));
+    headerSep.setAttribute('stroke', surface.border);
+    headerSep.setAttribute('stroke-width', '1');
+    group.appendChild(headerSep);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', UI_COLORS.whiteBright);
+    icon.setAttribute('fill', accentColor);
     icon.setAttribute('font-size', '12');
     icon.textContent = '▦';
     group.appendChild(icon);
@@ -3068,7 +3322,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     title.setAttribute('x', String(node.x + 28));
     title.setAttribute('y', String(node.y + 22));
-    title.setAttribute('fill', 'white');
+    title.setAttribute('fill', surface.text);
     title.setAttribute('font-size', '12');
     title.setAttribute('font-weight', '600');
     title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -3085,14 +3339,14 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
+        funcPill.setAttribute('fill', pillBg);
         group.appendChild(funcPill);
 
         // Function name
         const funcName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcName.setAttribute('x', String(node.x + padding + 6));
         funcName.setAttribute('y', String(yOffset + 15));
-        funcName.setAttribute('fill', BADGE_COLORS.functionName);
+        funcName.setAttribute('fill', accentColor);
         funcName.setAttribute('font-size', '10');
         funcName.setAttribute('font-weight', '600');
         funcName.setAttribute('font-family', 'monospace');
@@ -3153,7 +3407,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
+        moreText.setAttribute('fill', surface.textMuted);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${windowDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -3165,34 +3419,59 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
     const padding = 10;
     const headerHeight = 32;
     const funcHeight = 24;
+    const isDark = state.isDarkTheme;
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const accentColor = getNodeAccentColor('aggregate', isDark);
+    const accentPosition = ((window as any).nodeAccentPosition || 'left') as string;
+    const pillBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
 
-    // Main container
+    // Main container — neutral fill
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
-    // Header
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x));
-    header.setAttribute('y', String(node.y));
-    header.setAttribute('width', String(node.width));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '10');
-    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
-    group.appendChild(header);
+    // Accent strip
+    const accentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    if (accentPosition === 'bottom') {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y + node.height - 3));
+        accentStrip.setAttribute('width', String(node.width));
+        accentStrip.setAttribute('height', '3');
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 0 0 6px 6px)`);
+    } else {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y));
+        accentStrip.setAttribute('width', '3');
+        accentStrip.setAttribute('height', String(node.height));
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    }
+    accentStrip.setAttribute('fill', accentColor);
+    group.appendChild(accentStrip);
+
+    // Header separator
+    const headerSep = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    headerSep.setAttribute('x1', String(node.x + 8));
+    headerSep.setAttribute('y1', String(node.y + headerHeight));
+    headerSep.setAttribute('x2', String(node.x + node.width - 8));
+    headerSep.setAttribute('y2', String(node.y + headerHeight));
+    headerSep.setAttribute('stroke', surface.border);
+    headerSep.setAttribute('stroke-width', '1');
+    group.appendChild(headerSep);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', UI_COLORS.whiteBright);
+    icon.setAttribute('fill', accentColor);
     icon.setAttribute('font-size', '12');
     icon.textContent = 'Σ';
     group.appendChild(icon);
@@ -3200,7 +3479,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     title.setAttribute('x', String(node.x + 28));
     title.setAttribute('y', String(node.y + 22));
-    title.setAttribute('fill', 'white');
+    title.setAttribute('fill', surface.text);
     title.setAttribute('font-size', '12');
     title.setAttribute('font-weight', '600');
     title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -3217,14 +3496,14 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         funcPill.setAttribute('width', String(node.width - padding * 2));
         funcPill.setAttribute('height', String(funcHeight));
         funcPill.setAttribute('rx', '4');
-        funcPill.setAttribute('fill', UI_COLORS.backgroundOverlay);
+        funcPill.setAttribute('fill', pillBg);
         group.appendChild(funcPill);
 
         // Function expression
         const funcText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         funcText.setAttribute('x', String(node.x + padding + 6));
         funcText.setAttribute('y', String(yOffset + 16));
-        funcText.setAttribute('fill', BADGE_COLORS.functionName);
+        funcText.setAttribute('fill', accentColor);
         funcText.setAttribute('font-size', '10');
         funcText.setAttribute('font-weight', '600');
         funcText.setAttribute('font-family', 'monospace');
@@ -3241,7 +3520,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
+        moreText.setAttribute('fill', surface.textMuted);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${aggregateDetails.functions.length - 4} more`;
         group.appendChild(moreText);
@@ -3253,34 +3532,59 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     const padding = 10;
     const headerHeight = 32;
     const caseHeight = 40;
+    const isDark = state.isDarkTheme;
+    const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
+    const accentColor = getNodeAccentColor('case', isDark);
+    const accentPosition = ((window as any).nodeAccentPosition || 'left') as string;
+    const pillBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
 
-    // Main container
+    // Main container — neutral fill
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
     rect.setAttribute('y', String(node.y));
     rect.setAttribute('width', String(node.width));
     rect.setAttribute('height', String(node.height));
-    rect.setAttribute('rx', '10');
-    rect.setAttribute('fill', getNodeColor(node.type));
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', surface.fill);
+    rect.setAttribute('stroke', surface.border);
+    rect.setAttribute('stroke-width', '1');
     rect.setAttribute('filter', 'url(#shadow)');
     rect.setAttribute('class', 'node-rect');
     group.appendChild(rect);
 
-    // Header
-    const header = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    header.setAttribute('x', String(node.x));
-    header.setAttribute('y', String(node.y));
-    header.setAttribute('width', String(node.width));
-    header.setAttribute('height', String(headerHeight));
-    header.setAttribute('rx', '10');
-    header.setAttribute('fill', UI_COLORS.backgroundOverlay);
-    group.appendChild(header);
+    // Accent strip
+    const accentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    if (accentPosition === 'bottom') {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y + node.height - 3));
+        accentStrip.setAttribute('width', String(node.width));
+        accentStrip.setAttribute('height', '3');
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 0 0 6px 6px)`);
+    } else {
+        accentStrip.setAttribute('x', String(node.x));
+        accentStrip.setAttribute('y', String(node.y));
+        accentStrip.setAttribute('width', '3');
+        accentStrip.setAttribute('height', String(node.height));
+        accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
+    }
+    accentStrip.setAttribute('fill', accentColor);
+    group.appendChild(accentStrip);
+
+    // Header separator
+    const headerSep = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    headerSep.setAttribute('x1', String(node.x + 8));
+    headerSep.setAttribute('y1', String(node.y + headerHeight));
+    headerSep.setAttribute('x2', String(node.x + node.width - 8));
+    headerSep.setAttribute('y2', String(node.y + headerHeight));
+    headerSep.setAttribute('stroke', surface.border);
+    headerSep.setAttribute('stroke-width', '1');
+    group.appendChild(headerSep);
 
     // Icon and title
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     icon.setAttribute('x', String(node.x + 10));
     icon.setAttribute('y', String(node.y + 22));
-    icon.setAttribute('fill', UI_COLORS.whiteBright);
+    icon.setAttribute('fill', accentColor);
     icon.setAttribute('font-size', '12');
     icon.textContent = '?';
     group.appendChild(icon);
@@ -3288,7 +3592,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     title.setAttribute('x', String(node.x + 28));
     title.setAttribute('y', String(node.y + 22));
-    title.setAttribute('fill', 'white');
+    title.setAttribute('fill', surface.text);
     title.setAttribute('font-size', '12');
     title.setAttribute('font-weight', '600');
     title.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -3305,14 +3609,14 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         casePill.setAttribute('width', String(node.width - padding * 2));
         casePill.setAttribute('height', String(caseHeight));
         casePill.setAttribute('rx', '4');
-        casePill.setAttribute('fill', UI_COLORS.backgroundOverlay);
+        casePill.setAttribute('fill', pillBg);
         group.appendChild(casePill);
 
         // CASE conditions count
         const caseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         caseText.setAttribute('x', String(node.x + padding + 6));
         caseText.setAttribute('y', String(yOffset + 18));
-        caseText.setAttribute('fill', BADGE_COLORS.functionName);
+        caseText.setAttribute('fill', accentColor);
         caseText.setAttribute('font-size', '10');
         caseText.setAttribute('font-weight', '600');
         caseText.setAttribute('font-family', 'monospace');
@@ -3323,7 +3627,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
             const elseText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             elseText.setAttribute('x', String(node.x + padding + 6));
             elseText.setAttribute('y', String(yOffset + 32));
-            elseText.setAttribute('fill', UI_COLORS.whiteDim);
+            elseText.setAttribute('fill', surface.textMuted);
             elseText.setAttribute('font-size', '9');
             const truncatedElse = caseStmt.elseValue.length > 20 ? caseStmt.elseValue.substring(0, 17) + '...' : caseStmt.elseValue;
             elseText.textContent = 'ELSE: ' + truncatedElse;
@@ -3339,7 +3643,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         moreText.setAttribute('x', String(node.x + node.width / 2));
         moreText.setAttribute('y', String(node.y + node.height - 8));
         moreText.setAttribute('text-anchor', 'middle');
-        moreText.setAttribute('fill', UI_COLORS.whiteFaint);
+        moreText.setAttribute('fill', surface.textMuted);
         moreText.setAttribute('font-size', '9');
         moreText.textContent = `+${caseDetails.cases.length - 3} more`;
         group.appendChild(moreText);
@@ -3376,26 +3680,28 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
 
     if (!sourceNode || !targetNode) { return; }
 
-    // Calculate connection points (center bottom to center top)
+    // Theme-aware edge colors
+    const isDark = state.isDarkTheme;
+    const defaultStroke = isDark ? '#333333' : '#CBD5E1';
+    const hoverStroke = '#6366F1'; // indigo
+
     const x1 = sourceNode.x + sourceNode.width / 2;
     const y1 = sourceNode.y + sourceNode.height;
     const x2 = targetNode.x + targetNode.width / 2;
     const y2 = targetNode.y;
 
-    // Create curved path
     const midY = (y1 + y2) / 2;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', EDGE_COLORS.default);
-    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke', defaultStroke);
+    path.setAttribute('stroke-width', '1.5');
     path.setAttribute('marker-end', 'url(#arrowhead)');
     path.setAttribute('class', 'edge');
     path.setAttribute('data-source', edge.source);
     path.setAttribute('data-target', edge.target);
     path.setAttribute('data-edge-id', edge.id);
 
-    // Store SQL clause information if available
     if (edge.sqlClause) {
         path.setAttribute('data-sql-clause', edge.sqlClause);
     }
@@ -3406,27 +3712,26 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
         path.setAttribute('data-start-line', String(edge.startLine));
     }
 
-    // Make edge clickable with visual feedback
     path.style.cursor = 'pointer';
+    path.style.transition = 'stroke 0.15s, stroke-width 0.15s';
 
-    // Click handler to show SQL clause and highlight
     path.addEventListener('click', (e) => {
         e.stopPropagation();
         handleEdgeClick(edge);
     });
 
-    // Hover effect for edges
+    // Hover: indigo highlight, 2px
     path.addEventListener('mouseenter', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', EDGE_COLORS.defaultLight);
-            path.setAttribute('stroke-width', '3');
+            path.setAttribute('stroke', hoverStroke);
+            path.setAttribute('stroke-width', '2');
         }
     });
 
     path.addEventListener('mouseleave', () => {
         if (!path.getAttribute('data-highlighted')) {
-            path.setAttribute('stroke', EDGE_COLORS.default);
-            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke', defaultStroke);
+            path.setAttribute('stroke-width', '1.5');
         }
     });
 
@@ -3434,6 +3739,8 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
 }
 
 function handleEdgeClick(edge: FlowEdge): void {
+    const isDark = state.isDarkTheme;
+    const defaultStroke = isDark ? '#333333' : '#CBD5E1';
     // Clear previous edge highlights
     const edges = mainGroup?.querySelectorAll('.edge');
     edges?.forEach(e => {
@@ -3444,10 +3751,10 @@ function handleEdgeClick(edge: FlowEdge): void {
 
         if (isConnected) {
             e.setAttribute('stroke', EDGE_COLORS.highlight);
-            e.setAttribute('stroke-width', '3');
+            e.setAttribute('stroke-width', '2.5');
         } else {
-            e.setAttribute('stroke', EDGE_COLORS.default);
-            e.setAttribute('stroke-width', '2');
+            e.setAttribute('stroke', defaultStroke);
+            e.setAttribute('stroke-width', '1.5');
         }
     });
 
@@ -3480,27 +3787,35 @@ function handleEdgeClick(edge: FlowEdge): void {
 function showSqlClausePanel(edge: FlowEdge): void {
     // Reuse or create a panel for showing SQL clause details
     let clausePanel = document.getElementById('sql-clause-panel') as HTMLDivElement;
+    const isDark = state.isDarkTheme;
+    const panelBg = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;
+    const panelBorder = isDark ? UI_COLORS.borderMedium : 'rgba(15, 23, 42, 0.14)';
+    const panelShadow = isDark ? UI_COLORS.shadowMedium : '0 8px 24px rgba(15, 23, 42, 0.12)';
+    const mutedText = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const headingText = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const clauseBg = isDark ? UI_COLORS.backgroundSubtleDark : 'rgba(15, 23, 42, 0.04)';
+    const clauseBorder = isDark ? UI_COLORS.border : 'rgba(15, 23, 42, 0.1)';
+    const clauseText = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;
 
     if (!clausePanel) {
         clausePanel = document.createElement('div');
         clausePanel.id = 'sql-clause-panel';
-        clausePanel.style.cssText = `
-            position: fixed;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${UI_COLORS.backgroundPanelSolid};
-            border: 1px solid ${UI_COLORS.borderMedium};
-            border-radius: 12px;
-            padding: 16px 20px;
-            max-width: 600px;
-            z-index: 1000;
-            box-shadow: ${UI_COLORS.shadowMedium};
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-        `;
-
         containerElement?.appendChild(clausePanel);
     }
+    clausePanel.style.cssText = `
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${panelBg};
+        border: 1px solid ${panelBorder};
+        border-radius: 12px;
+        padding: 16px 20px;
+        max-width: 600px;
+        z-index: 1000;
+        box-shadow: ${panelShadow};
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    `;
 
     // Build content
     const clauseType = edge.clauseType || 'flow';
@@ -3514,7 +3829,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             right: 8px;
             background: transparent;
             border: none;
-            color: ${UI_COLORS.textMuted};
+            color: ${mutedText};
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
@@ -3529,16 +3844,16 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 font-weight: 700;
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
-            <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
+            <div style="color: ${headingText}; font-size: 13px; font-weight: 600;">
                 ${edge.label || 'Data Flow'}
             </div>
         </div>
         <div style="
-            background: ${UI_COLORS.backgroundSubtleDark};
-            border: 1px solid ${UI_COLORS.border};
+            background: ${clauseBg};
+            border: 1px solid ${clauseBorder};
             border-radius: 8px;
             padding: 12px;
-            color: ${UI_COLORS.textBright};
+            color: ${clauseText};
             font-size: 13px;
             line-height: 1.6;
             white-space: pre-wrap;
@@ -3547,7 +3862,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             overflow-y: auto;
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
-            <div style="color: ${UI_COLORS.textMuted}; font-size: 11px; margin-top: 8px;">
+            <div style="color: ${mutedText}; font-size: 11px; margin-top: 8px;">
                 📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
@@ -3571,6 +3886,10 @@ function escapeHtml(text: string): string {
 
 function updateBreadcrumb(nodeId: string | null): void {
     if (!breadcrumbPanel) { return; }
+    if (state.showColumnFlows) {
+        breadcrumbPanel.style.display = 'none';
+        return;
+    }
 
     if (!nodeId) {
         // Hide breadcrumb if no node selected
@@ -3635,6 +3954,14 @@ function renderBreadcrumb(): void {
     breadcrumbPanel.style.display = 'flex';
     breadcrumbPanel.style.alignItems = 'center';
     breadcrumbPanel.style.gap = '8px';
+    breadcrumbPanel.style.background = state.isDarkTheme ? UI_COLORS.backgroundPanel : UI_COLORS.backgroundPanelLight;
+    breadcrumbPanel.style.borderColor = state.isDarkTheme ? UI_COLORS.border : 'rgba(0, 0, 0, 0.1)';
+    breadcrumbPanel.style.color = state.isDarkTheme ? UI_COLORS.textSubtle : '#475569';
+
+    const crumbText = state.isDarkTheme ? '#f1f5f9' : '#0f172a';
+    const crumbMuted = state.isDarkTheme ? '#94a3b8' : '#475569';
+    const crumbHover = state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(15, 23, 42, 0.08)';
+    const separatorColor = state.isDarkTheme ? '#64748b' : '#94a3b8';
 
     state.breadcrumbPath.forEach((node, index) => {
         // Create breadcrumb item
@@ -3645,13 +3972,13 @@ function renderBreadcrumb(): void {
             border-radius: 4px;
             transition: background 0.2s;
             font-weight: ${index === state.breadcrumbPath.length - 1 ? '600' : '400'};
-            color: ${index === state.breadcrumbPath.length - 1 ? '#f1f5f9' : '#94a3b8'};
+            color: ${index === state.breadcrumbPath.length - 1 ? crumbText : crumbMuted};
         `;
         item.textContent = node.label;
 
         // Add hover effect
         item.addEventListener('mouseenter', () => {
-            item.style.background = 'rgba(148, 163, 184, 0.2)';
+            item.style.background = crumbHover;
         });
 
         item.addEventListener('mouseleave', () => {
@@ -3678,7 +4005,7 @@ function renderBreadcrumb(): void {
         // Add separator
         if (index < state.breadcrumbPath.length - 1) {
             const separator = document.createElement('span');
-            separator.style.color = '#64748b';
+            separator.style.color = separatorColor;
             separator.style.fontSize = '10px';
             separator.textContent = '›';
             breadcrumbPanel!.appendChild(separator);
@@ -3687,6 +4014,8 @@ function renderBreadcrumb(): void {
 }
 
 function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
+    const isDark = state.isDarkTheme;
+    const defaultStroke = isDark ? '#333333' : '#CBD5E1';
     const edges = mainGroup?.querySelectorAll('.edge');
     edges?.forEach(edge => {
         const source = edge.getAttribute('data-source');
@@ -3694,11 +4023,11 @@ function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
         if (source === nodeId || target === nodeId) {
             if (highlight) {
                 edge.setAttribute('stroke', EDGE_COLORS.highlight);
-                edge.setAttribute('stroke-width', '3');
+                edge.setAttribute('stroke-width', '2.5');
                 edge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
             } else {
-                edge.setAttribute('stroke', EDGE_COLORS.default);
-                edge.setAttribute('stroke-width', '2');
+                edge.setAttribute('stroke', defaultStroke);
+                edge.setAttribute('stroke-width', '1.5');
                 edge.setAttribute('marker-end', 'url(#arrowhead)');
             }
         }
@@ -3846,6 +4175,10 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
 /** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
 function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
+    if (isReducedMotionPreferred()) {
+        restoreStroke();
+        return;
+    }
     rect.style.animation = 'node-pulse 0.6s ease-out';
     if (!document.getElementById('pulse-animation-style')) {
         const style = document.createElement('style');
@@ -3918,6 +4251,7 @@ function pulseNode(nodeId: string): void {
  * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
  */
 function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
+    if (isReducedMotionPreferred()) { return; }
     const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
     if (!cloudContainer) { return; }
 
@@ -4172,6 +4506,15 @@ function updateDetailsPanel(nodeId: string | null): void {
 
     const node = currentNodes.find(n => n.id === nodeId);
     if (!node) { return; }
+    const isDark = state.isDarkTheme;
+    const sectionLabelColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const detailTextColor = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
+    const detailCardBg = isDark ? UI_COLORS.backgroundSubtle : 'rgba(15, 23, 42, 0.04)';
+    const detailDividerColor = isDark ? UI_COLORS.borderLight : 'rgba(15, 23, 42, 0.08)';
+    const sectionBorderColor = isDark ? UI_COLORS.border : 'rgba(15, 23, 42, 0.12)';
+    const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
+    const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
+    const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
 
     detailsPanel.style.transform = 'translate(0, -50%)';
 
@@ -4182,28 +4525,28 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.windowDetails && node.windowDetails.functions.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map(func => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
                                 <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
                                 <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
                             <div style="display: flex; align-items: center; gap: 4px;">
                                 <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -4216,23 +4559,23 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.aggregateDetails && node.aggregateDetails.functions.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map(func => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
-                            <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; font-family: monospace;">
+                            <div style="color: ${sectionLabelColor}; font-size: 10px; font-family: monospace;">
                                 Alias: ${escapeHtml(func.alias)}
                             </div>
                         ` : ''}
                     </div>
                 `).join('')}
                 ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
-                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${UI_COLORS.border};">
-                        <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
-                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${sectionBorderColor};">
+                        <div style="color: ${sectionLabelColor}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
+                        <div style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
                     </div>
                 ` : ''}
             </div>
@@ -4243,9 +4586,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     if (node.caseDetails && node.caseDetails.cases.length > 0) {
         detailsSection += `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">CASE Statements</div>
                 ${node.caseDetails.cases.map((caseStmt) => `
-                    <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                    <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
                         ${caseStmt.alias ? `
                             <div style="color: ${COMPLEXITY_COLORS.Moderate}; font-weight: 600; font-size: 11px; margin-bottom: 4px;">
                                 ${escapeHtml(caseStmt.alias)}
@@ -4255,18 +4598,18 @@ function updateDetailsPanel(nodeId: string | null): void {
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
                                     <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
-                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
                                     <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
-                                    <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
                                 <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
-                                <span style="color: ${UI_COLORS.textSubtle}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -4278,10 +4621,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.children && node.children.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
-                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 6px 8px;">
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Internal Structure</div>
+                <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
-                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${UI_COLORS.borderLight};">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
                             <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
                                 ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
                             </span>
@@ -4295,10 +4638,10 @@ function updateDetailsPanel(nodeId: string | null): void {
     else if (node.details && node.details.length > 0) {
         detailsSection = `
             <div style="margin-bottom: 10px;">
-                <div style="color: ${UI_COLORS.textMuted}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
-                <div style="background: ${UI_COLORS.backgroundSubtle}; border-radius: 4px; padding: 8px;">
+                <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
+                <div style="background: ${detailCardBg}; border-radius: 4px; padding: 8px;">
                     ${node.details.map(d => `
-                        <div style="color: ${UI_COLORS.textSubtle}; font-size: 11px; padding: 2px 0; font-family: monospace;">
+                        <div style="color: ${detailTextColor}; font-size: 11px; padding: 2px 0; font-family: monospace;">
                             ${escapeHtml(d)}
                         </div>
                     `).join('')}
@@ -4307,10 +4650,25 @@ function updateDetailsPanel(nodeId: string | null): void {
         `;
     }
 
+    const traceColumnsAction = shouldShowTraceColumnsAction(currentColumnFlows?.length || 0) ? `
+        <button id="trace-columns-btn" style="
+            width: 100%;
+            margin-bottom: 10px;
+            background: ${state.isDarkTheme ? 'rgba(129, 140, 248, 0.22)' : 'rgba(99, 102, 241, 0.12)'};
+            color: ${state.isDarkTheme ? '#c7d2fe' : '#4338ca'};
+            border: 1px solid ${state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.35)'};
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        ">🔍 Trace Column Lineage</button>
+    ` : '';
+
     detailsPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="margin: 0; color: ${UI_COLORS.text}; font-size: 12px;">Node Details</h3>
-            <button id="close-details" style="background: none; border: none; color: ${UI_COLORS.textMuted}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
+            <h3 style="margin: 0; color: ${headingColor}; font-size: 12px;">Node Details</h3>
+            <button id="close-details" style="background: none; border: none; color: ${closeButtonColor}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
@@ -4321,7 +4679,8 @@ function updateDetailsPanel(nodeId: string | null): void {
             </div>
         </div>
         ${detailsSection}
-        <div style="color: ${UI_COLORS.textDim}; font-size: 10px; margin-top: 12px;">
+        ${traceColumnsAction}
+        <div style="color: ${footerColor}; font-size: 10px; margin-top: 12px;">
             Type: ${node.type}<br>
             ID: ${escapeHtml(node.id)}
         </div>
@@ -4330,6 +4689,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     // Close button handler
     detailsPanel.querySelector('#close-details')?.addEventListener('click', () => {
         selectNode(null);
+    });
+    detailsPanel.querySelector('#trace-columns-btn')?.addEventListener('click', () => {
+        toggleColumnFlows(true);
     });
 }
 
@@ -4802,10 +5164,14 @@ function updateStatsPanel(): void {
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
 
+    const badgeState = getHintBadgeState(currentHints || []);
+    updateHintsSummaryBadge(badgeState);
+
     if (!currentHints || currentHints.length === 0) {
         hintsPanel.style.opacity = '0';
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
+        hintsShowAll = false;
         return;
     }
 
@@ -4813,354 +5179,95 @@ function updateHintsPanel(): void {
     hintsPanel.style.visibility = 'visible';
     hintsPanel.style.transform = 'translateY(0)';
 
-    // Theme-aware colors
     const isDark = state.isDarkTheme;
     const textColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
     const textColorMuted = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
-    const borderColor = isDark ? UI_COLORS.border : UI_COLORS.borderMedium;
-
-    // Theme-aware button/badge colors - darker versions for light theme
-    const colors = {
-        blue: isDark ? STATUS_COLORS.info : STATUS_COLORS.infoDark,
-        amber: isDark ? STATUS_COLORS.warningLight : STATUS_COLORS.warningDark,
-        green: isDark ? STATUS_COLORS.successLight : STATUS_COLORS.successDark,
-        violet: isDark ? STATUS_COLORS.violetLight : STATUS_COLORS.violetDark,
-        red: isDark ? STATUS_COLORS.error : STATUS_COLORS.errorDark,
-        slate: isDark ? UI_COLORS.textSubtle : UI_COLORS.textDim
-    };
-
-    // Use centralized HINT_COLORS for consistent styling
     const hintColors = HINT_COLORS;
-
-    // Group hints by category
-    const hintsByCategory: Record<string, OptimizationHint[]> = {
-        'performance': [],
-        'quality': [],
-        'best-practice': [],
-        'complexity': [],
-        'other': []
-    };
-
-    currentHints.forEach(hint => {
-        const category = hint.category || 'other';
-        if (hintsByCategory[category]) {
-            hintsByCategory[category].push(hint);
-        } else {
-            hintsByCategory['other'].push(hint);
-        }
-    });
-
-    // Count hints by category
-    const perfCount = hintsByCategory['performance'].length;
-    const qualityCount = hintsByCategory['quality'].length;
-    const bestPracticeCount = hintsByCategory['best-practice'].length;
-    const complexityCount = hintsByCategory['complexity'].length;
-
-    // Count by severity
-    const highCount = currentHints.filter(h => h.severity === 'high').length;
-    const mediumCount = currentHints.filter(h => h.severity === 'medium').length;
-    const lowCount = currentHints.filter(h => h.severity === 'low').length;
+    const sortedHints = sortHintsByImpact(currentHints);
+    const visibleHints = hintsShowAll ? sortedHints : getTopHints(sortedHints, 3);
+    const remainingCount = Math.max(0, sortedHints.length - visibleHints.length);
 
     hintsPanel.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-            <span style="font-weight: 600; color: ${textColor};">Optimization Hints</span>
-            <span style="
-                background: rgba(245, 158, 11, 0.2);
-                color: ${colors.amber};
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-size: 10px;
-            ">${currentHints.length}</span>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+            <span style="font-weight: 600; color: ${textColor};">⚡ Performance Hints</span>
+            <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
         </div>
-
-        <!-- Category Filters -->
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
-            ${perfCount > 0 ? `
-                <button class="hint-filter-btn" data-category="performance" style="
-                    background: rgba(59, 130, 246, 0.2);
-                    color: ${colors.blue};
-                    border: 1px solid rgba(59, 130, 246, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Performance (${perfCount})</button>
-            ` : ''}
-            ${qualityCount > 0 ? `
-                <button class="hint-filter-btn" data-category="quality" style="
-                    background: rgba(245, 158, 11, 0.2);
-                    color: ${colors.amber};
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Quality (${qualityCount})</button>
-            ` : ''}
-            ${bestPracticeCount > 0 ? `
-                <button class="hint-filter-btn" data-category="best-practice" style="
-                    background: rgba(34, 197, 94, 0.2);
-                    color: ${colors.green};
-                    border: 1px solid rgba(34, 197, 94, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Best Practice (${bestPracticeCount})</button>
-            ` : ''}
-            ${complexityCount > 0 ? `
-                <button class="hint-filter-btn" data-category="complexity" style="
-                    background: rgba(139, 92, 246, 0.2);
-                    color: ${colors.violet};
-                    border: 1px solid rgba(139, 92, 246, 0.3);
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    cursor: pointer;
-                    transition: all 0.15s;
-                ">Complexity (${complexityCount})</button>
-            ` : ''}
-        </div>
-
-        <!-- Severity Filters -->
-        ${(highCount > 0 || mediumCount > 0 || lowCount > 0) ? `
-            <div style="display: flex; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid ${borderColor};">
-                ${highCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="high" style="
-                        background: rgba(239, 68, 68, 0.2);
-                        color: ${colors.red};
-                        border: 1px solid rgba(239, 68, 68, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">High (${highCount})</button>
-                ` : ''}
-                ${mediumCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="medium" style="
-                        background: rgba(245, 158, 11, 0.2);
-                        color: ${colors.amber};
-                        border: 1px solid rgba(245, 158, 11, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">Medium (${mediumCount})</button>
-                ` : ''}
-                ${lowCount > 0 ? `
-                    <button class="hint-severity-btn" data-severity="low" style="
-                        background: rgba(148, 163, 184, 0.2);
-                        color: ${colors.slate};
-                        border: 1px solid rgba(148, 163, 184, 0.3);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        cursor: pointer;
-                        transition: all 0.15s;
-                    ">Low (${lowCount})</button>
-                ` : ''}
-            </div>
-        ` : ''}
-
-        <!-- Hints List -->
-        <div class="hints-list" style="max-height: 300px; overflow-y: auto;">
-            ${Object.entries(hintsByCategory).map(([category, hints]) => {
-                if (hints.length === 0) {return '';}
-
-                const categoryLabels: Record<string, string> = {
-                    'performance': '⚡ Performance',
-                    'quality': '🔍 Quality',
-                    'best-practice': '✨ Best Practice',
-                    'complexity': '📊 Complexity',
-                    'other': '📝 Other'
-                };
-
+        <div class="hints-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+            ${visibleHints.map(hint => {
+                const style = hintColors[hint.type] || hintColors.info;
+                const severity = hint.severity || 'low';
+                const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
                 return `
-                    <div class="hint-category" data-category="${category}" style="margin-bottom: 12px;">
-                        <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
-                            ${categoryLabels[category] || category} (${hints.length})
+                    <button class="hint-item" data-node-id="${hint.nodeId || ''}" style="
+                        text-align: left;
+                        border: 1px solid ${style.border};
+                        border-left-width: 3px;
+                        background: ${style.bg};
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        cursor: ${hint.nodeId ? 'pointer' : 'default'};
+                    ">
+                        <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
+                            <span>${style.icon}</span>
+                            <span>${escapeHtml(hint.message)}</span>
+                            <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
-                        ${hints.map(hint => {
-                            const style = hintColors[hint.type] || hintColors.info;
-                            const severityBadge = hint.severity ? `
-                                <span style="
-                                    background: ${hint.severity === 'high' ? 'rgba(239, 68, 68, 0.2)' : hint.severity === 'medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(148, 163, 184, 0.2)'};
-                                    color: ${hint.severity === 'high' ? colors.red : hint.severity === 'medium' ? colors.amber : colors.slate};
-                                    padding: 2px 6px;
-                                    border-radius: 4px;
-                                    font-size: 9px;
-                                    margin-left: 6px;
-                                    text-transform: uppercase;
-                                ">${hint.severity}</span>
-                            ` : '';
-
-                            return `
-                                <div class="hint-item" data-category="${hint.category || 'other'}" data-severity="${hint.severity || ''}" style="
-                                    background: ${style.bg};
-                                    border-left: 3px solid ${style.border};
-                                    padding: 8px 12px;
-                                    margin-bottom: 8px;
-                                    border-radius: 0 4px 4px 0;
-                                ">
-                                    <div style="color: ${textColor}; font-size: 12px; margin-bottom: 4px; display: flex; align-items: center;">
-                                        ${style.icon} ${hint.message}${severityBadge}
-                                    </div>
-                                    ${hint.suggestion ? `
-                                        <div style="color: ${textColorMuted}; font-size: 11px;">
-                                            ${hint.suggestion}
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
+                        ${hint.suggestion ? `<div style="font-size: 11px; color: ${textColorMuted}; margin-top: 4px;">${escapeHtml(hint.suggestion)}</div>` : ''}
+                    </button>
                 `;
             }).join('')}
+            ${!hintsShowAll && remainingCount > 0 ? `
+                <button id="show-all-hints" style="
+                    border: 1px dashed ${isDark ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'};
+                    background: transparent;
+                    color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 11px;
+                    cursor: pointer;
+                ">Show all ${sortedHints.length} hints...</button>
+            ` : ''}
+            ${hintsShowAll && sortedHints.length > 3 ? `
+                <button id="show-top-hints" style="
+                    border: 1px dashed ${isDark ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'};
+                    background: transparent;
+                    color: ${isDark ? '#a5b4fc' : '#6366f1'};
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 11px;
+                    cursor: pointer;
+                ">Show top 3 only</button>
+            ` : ''}
         </div>
     `;
 
-    // Add filter button event listeners
-    const filterButtons = hintsPanel.querySelectorAll('.hint-filter-btn');
-    const severityButtons = hintsPanel.querySelectorAll('.hint-severity-btn');
-    const hintItems = hintsPanel.querySelectorAll('.hint-item');
-    const categoryGroups = hintsPanel.querySelectorAll('.hint-category');
-
-    let activeCategory: string | null = null;
-    let activeSeverity: string | null = null;
-
-    // Create "Clear filters" button (initially hidden)
-    const clearFiltersBtn = document.createElement('button');
-    clearFiltersBtn.id = 'clear-filters-btn';
-    clearFiltersBtn.innerHTML = '✕ Clear filters';
-    clearFiltersBtn.style.cssText = `
-        display: none;
-        background: rgba(99, 102, 241, 0.15);
-        color: #818cf8;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-size: 10px;
-        cursor: pointer;
-        margin-left: auto;
-        transition: all 0.15s;
-    `;
-    clearFiltersBtn.addEventListener('mouseenter', () => {
-        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.25)';
-    });
-    clearFiltersBtn.addEventListener('mouseleave', () => {
-        clearFiltersBtn.style.background = 'rgba(99, 102, 241, 0.15)';
-    });
-    clearFiltersBtn.addEventListener('click', () => {
-        activeCategory = null;
-        activeSeverity = null;
-        filterButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
-        severityButtons.forEach(b => { (b as HTMLElement).style.opacity = '1'; });
-        applyFilters();
-    });
-
-    // Insert clear button after the header
-    const headerDiv = hintsPanel.querySelector('div');
-    if (headerDiv) {
-        headerDiv.style.display = 'flex';
-        headerDiv.style.alignItems = 'center';
-        headerDiv.appendChild(clearFiltersBtn);
-    }
-
-    filterButtons.forEach(btn => {
-        const btnEl = btn as HTMLElement;
-        btnEl.addEventListener('click', () => {
-            const category = btnEl.getAttribute('data-category');
-            if (activeCategory === category) {
-                activeCategory = null;
-                btnEl.style.opacity = '1';
-            } else {
-                activeCategory = category;
-                filterButtons.forEach(b => {
-                    (b as HTMLElement).style.opacity = '0.5';
-                });
-                btnEl.style.opacity = '1';
-            }
-            applyFilters();
+    hintsPanel.querySelectorAll('.hint-item').forEach((item) => {
+        const el = item as HTMLButtonElement;
+        const nodeId = el.getAttribute('data-node-id');
+        if (!nodeId) {
+            el.style.cursor = 'default';
+            return;
+        }
+        el.addEventListener('click', () => {
+            const node = currentNodes.find(n => n.id === nodeId);
+            if (!node) { return; }
+            selectNode(node.id, { skipNavigation: true });
+            zoomToNode(node);
+            pulseNode(node.id);
         });
     });
 
-    severityButtons.forEach(btn => {
-        const btnEl = btn as HTMLElement;
-        btnEl.addEventListener('click', () => {
-            const severity = btnEl.getAttribute('data-severity');
-            if (activeSeverity === severity) {
-                activeSeverity = null;
-                btnEl.style.opacity = '1';
-            } else {
-                activeSeverity = severity;
-                severityButtons.forEach(b => {
-                    (b as HTMLElement).style.opacity = '0.5';
-                });
-                btnEl.style.opacity = '1';
-            }
-            applyFilters();
-        });
+    const showAllBtn = hintsPanel.querySelector('#show-all-hints') as HTMLButtonElement | null;
+    showAllBtn?.addEventListener('click', () => {
+        hintsShowAll = true;
+        updateHintsPanel();
     });
 
-    // Create "no matching hints" message element
-    const noMatchesEl = document.createElement('div');
-    noMatchesEl.id = 'no-matches-message';
-    noMatchesEl.innerHTML = createEmptyStateHtml({
-        icon: '🔍',
-        title: 'No matching hints',
-        subtitle: 'Try adjusting your filters'
+    const showTopBtn = hintsPanel.querySelector('#show-top-hints') as HTMLButtonElement | null;
+    showTopBtn?.addEventListener('click', () => {
+        hintsShowAll = false;
+        updateHintsPanel();
     });
-    noMatchesEl.style.display = 'none';
-    const hintsList = hintsPanel.querySelector('.hints-list');
-    if (hintsList) {
-        hintsList.appendChild(noMatchesEl);
-    }
-
-    function applyFilters() {
-        // Show/hide clear filters button based on active filters
-        const hasActiveFilters = activeCategory !== null || activeSeverity !== null;
-        clearFiltersBtn.style.display = hasActiveFilters ? 'block' : 'none';
-
-        let visibleCount = 0;
-        hintItems.forEach(item => {
-            const itemEl = item as HTMLElement;
-            const itemCategory = itemEl.getAttribute('data-category') || 'other';
-            const itemSeverity = itemEl.getAttribute('data-severity') || '';
-
-            const categoryMatch = !activeCategory || itemCategory === activeCategory;
-            const severityMatch = !activeSeverity || itemSeverity === activeSeverity;
-
-            if (categoryMatch && severityMatch) {
-                itemEl.style.display = '';
-                visibleCount++;
-            } else {
-                itemEl.style.display = 'none';
-            }
-        });
-
-        // Hide/show category groups
-        categoryGroups.forEach(group => {
-            const groupEl = group as HTMLElement;
-            const visibleItems = Array.from(groupEl.querySelectorAll('.hint-item')).filter(item => {
-                const itemEl = item as HTMLElement;
-                return itemEl.style.display !== 'none';
-            });
-
-            if (visibleItems.length === 0) {
-                groupEl.style.display = 'none';
-            } else {
-                groupEl.style.display = '';
-            }
-        });
-
-        // Show/hide "no matches" message
-        noMatchesEl.style.display = (hasActiveFilters && visibleCount === 0) ? 'block' : 'none';
-    }
 }
 
 function fitView(): void {
@@ -5566,6 +5673,18 @@ function navigateToFirstResult(): void {
 function performSearch(term: string): void {
     highlightMatches(term);
     navigateToFirstResult();
+    if (term && state.searchResults.length > 0) {
+        addBreadcrumbSegment({
+            id: 'search',
+            label: `Search: "${term}"`,
+            onClear: () => {
+                if (searchBox) { searchBox.value = ''; }
+                clearSearch();
+            },
+        });
+    } else {
+        removeBreadcrumbSegment('search');
+    }
 }
 
 function navigateSearch(delta: number): void {
@@ -5607,6 +5726,7 @@ function clearSearch(): void {
 
     // Reset count display
     updateSearchCountDisplay();
+    removeBreadcrumbSegment('search');
 }
 
 export function getSearchResultCount(): { current: number; total: number } {
@@ -6233,116 +6353,14 @@ const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description:
     window: { color: NODE_COLORS.window, icon: '▦', description: 'Window function' },
 };
 
+/** @deprecated Legend content is now managed by the bottom legend bar module */
 function updateLegendPanel(): void {
-    if (!legendPanel) {return;}
-
-    legendPanel.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">Node Types</span>
-            <button id="close-legend" style="background: none; border: none; color: ${UI_COLORS.textDim}; cursor: pointer; font-size: 14px;">&times;</button>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 6px;">
-            ${Object.entries(NODE_TYPE_INFO).map(([type, info]) => `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="
-                        background: ${info.color};
-                        width: 24px;
-                        height: 18px;
-                        border-radius: 4px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 10px;
-                        color: white;
-                    ">${info.icon}</span>
-                    <div style="flex: 1;">
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 11px; font-weight: 500;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                        <div style="color: ${UI_COLORS.textDim}; font-size: 9px;">${info.description}</div>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-        <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
-            <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Table Categories</div>
-            <div style="display: flex; flex-direction: column; gap: 5px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="
-                        background: ${BADGE_COLORS.read};
-                        width: 24px;
-                        height: 16px;
-                        border-radius: 3px;
-                        border: 2px solid ${UI_COLORS.borderWhite};
-                    "></span>
-                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Physical Table</div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="
-                        background: ${BADGE_COLORS.read};
-                        width: 24px;
-                        height: 16px;
-                        border-radius: 3px;
-                        border: 3px dashed ${NODE_STROKE_COLORS.cte};
-                    "></span>
-                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">CTE Reference</div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="
-                        background: ${BADGE_COLORS.derivedAlt};
-                        width: 24px;
-                        height: 16px;
-                        border-radius: 3px;
-                        border: 2px dashed rgba(20, 184, 166, 0.8);
-                    "></span>
-                    <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Derived Table</div>
-                </div>
-            </div>
-        </div>
-        ${state.showColumnFlows ? `
-            <div style="border-top: 1px solid ${UI_COLORS.border}; margin-top: 12px; padding-top: 10px;">
-                <div style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 11px; margin-bottom: 8px;">Column Lineage</div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: ${BADGE_COLORS.orderBy}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">SRC</span>
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Source Table</div>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: ${BADGE_COLORS.read}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">ALIAS</span>
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Renamed/Alias</div>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: ${BADGE_COLORS.frame}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">AGG</span>
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Aggregated</div>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: ${BADGE_COLORS.merge}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">CALC</span>
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Calculated</div>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: ${CONDITION_COLORS.having}; color: white; font-size: 8px; font-weight: 600; padding: 2px 4px; border-radius: 3px;">JOIN</span>
-                        <div style="color: ${UI_COLORS.textBright}; font-size: 10px;">Joined</div>
-                    </div>
-                </div>
-            </div>
-        ` : ''}
-    `;
-
-    legendPanel.querySelector('#close-legend')?.addEventListener('click', () => {
-        toggleLegend(false);
-    });
+    // No-op: the bottom legend bar (legendBar.ts) manages its own content
 }
 
 export function toggleLegend(show?: boolean): void {
-    if (!legendPanel) {return;}
-    state.legendVisible = show ?? !state.legendVisible;
-    if (state.legendVisible) {
-        legendPanel.style.opacity = '1';
-        legendPanel.style.visibility = 'visible';
-        legendPanel.style.transform = 'translateY(0)';
-    } else {
-        legendPanel.style.opacity = '0';
-        legendPanel.style.visibility = 'hidden';
-        legendPanel.style.transform = 'translateY(-8px)';
-    }
+    toggleLegendBar(show);
+    state.legendVisible = isLegendBarVisible();
 }
 
 let statsVisible = true;
@@ -6367,6 +6385,18 @@ export function toggleHints(show?: boolean): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
     }
+}
+
+const PANEL_BASE_BOTTOM = 16; // default bottom offset for stats & hints panels
+
+/**
+ * Shift stats and hints panels up so they sit above the legend bar.
+ * Called whenever the legend bar toggles or on initial render.
+ */
+function adjustPanelBottoms(legendHeight: number): void {
+    const bottom = `${PANEL_BASE_BOTTOM + legendHeight}px`;
+    if (statsPanel) { statsPanel.style.bottom = bottom; }
+    if (hintsPanel) { hintsPanel.style.bottom = bottom; }
 }
 
 // Layout order for cycling
@@ -6564,8 +6594,16 @@ export function toggleFocusMode(enable?: boolean): void {
 
     if (state.focusModeEnabled && state.selectedNodeId) {
         applyFocusMode(state.selectedNodeId);
+        const modeLabel = state.focusMode === 'upstream' ? 'Upstream' : state.focusMode === 'downstream' ? 'Downstream' : 'All';
+        addBreadcrumbSegment({
+            id: 'focus-mode',
+            label: `Focus: ${modeLabel}`,
+            icon: state.focusMode === 'upstream' ? '\u2191' : state.focusMode === 'downstream' ? '\u2193' : '\u21c4',
+            onClear: () => { toggleFocusMode(false); },
+        });
     } else {
         clearFocusMode();
+        removeBreadcrumbSegment('focus-mode');
     }
 }
 
@@ -6812,16 +6850,22 @@ function updateSqlPreview(): void {
 
     const formattedSql = formatSql(currentSql);
     const highlightedSql = highlightSql(formattedSql);
+    const sqlHeaderColor = state.isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;
+    const sqlBodyColor = state.isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;
+    const sqlCopyButtonBg = state.isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.12)';
+    const sqlCopyButtonBorder = state.isDarkTheme ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.22)';
+    const sqlCopyButtonText = state.isDarkTheme ? UI_COLORS.focusText : UI_COLORS.focusTextLight;
+    const sqlCloseButtonText = state.isDarkTheme ? UI_COLORS.textDim : UI_COLORS.textLightMuted;
 
     sqlPreviewPanel.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: ${UI_COLORS.text}; font-size: 12px;">SQL Query</span>
+            <span style="font-weight: 600; color: ${sqlHeaderColor}; font-size: 12px;">SQL Query</span>
             <div style="display: flex; gap: 8px;">
                 <button id="copy-sql" style="
-                    background: rgba(99, 102, 241, 0.2);
-                    border: 1px solid rgba(99, 102, 241, 0.3);
+                    background: ${sqlCopyButtonBg};
+                    border: 1px solid ${sqlCopyButtonBorder};
                     border-radius: 4px;
-                    color: ${UI_COLORS.focusText};
+                    color: ${sqlCopyButtonText};
                     padding: 4px 10px;
                     font-size: 10px;
                     cursor: pointer;
@@ -6829,7 +6873,7 @@ function updateSqlPreview(): void {
                 <button id="close-sql-preview" style="
                     background: none;
                     border: none;
-                    color: ${UI_COLORS.textDim};
+                    color: ${sqlCloseButtonText};
                     cursor: pointer;
                     font-size: 16px;
                 ">&times;</button>
@@ -6842,6 +6886,7 @@ function updateSqlPreview(): void {
             line-height: 1.5;
             max-height: 150px;
             overflow-y: auto;
+            color: ${sqlBodyColor};
         ">${highlightedSql}</pre>
     `;
 
@@ -7032,8 +7077,8 @@ export function updateMinimap(): void {
     const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
     const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!minimapContainer || !minimapSvg || nodesForMinimap.length < 8) {
-        // Only show minimap for complex queries (8+ nodes)
+    if (!minimapContainer || !minimapSvg || !shouldShowMinimap(nodesForMinimap.length)) {
+        // Hide minimap for trivial/empty graph states.
         if (minimapContainer) {minimapContainer.style.display = 'none';}
         return;
     }
@@ -7074,7 +7119,7 @@ function updateMinimapViewport(): void {
     const minimapContainer = document.getElementById('minimap-container');
     const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
 
-    if (!viewport || !minimapContainer || !svg || nodesForMinimap.length < 8) {return;}
+    if (!viewport || !minimapContainer || !svg || !shouldShowMinimap(nodesForMinimap.length)) {return;}
 
     const bounds = calculateBounds();
     const svgRect = svg.getBoundingClientRect();
@@ -7212,7 +7257,10 @@ export function toggleFullscreen(enable?: boolean): void {
         }
         
         // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
+        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
+        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
         uiElements.forEach(el => {
             if (el) {
                 el.dataset.originalDisplay = el.style.display || '';
@@ -7273,8 +7321,11 @@ export function toggleFullscreen(enable?: boolean): void {
             });
         }
 
-        // Restore UI elements
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel];
+        // Restore UI elements (must match the hide list above)
+        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
+        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
+        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
         uiElements.forEach(el => {
             if (el && el.dataset.originalDisplay !== undefined) {
                 el.style.display = el.dataset.originalDisplay;
@@ -7362,31 +7413,35 @@ function applyTheme(dark: boolean): void {
         bg: UI_COLORS.backgroundLight,
         panelBg: UI_COLORS.backgroundPanelLight,
         panelBgSolid: UI_COLORS.backgroundPanelLightSolid,
-        border: UI_COLORS.borderMedium,
+        border: 'rgba(0, 0, 0, 0.1)',
         text: UI_COLORS.textLight,
         textMuted: '#475569',
         textDim: UI_COLORS.textLightDim
     };
 
-    // Apply to SVG background - use pattern for light theme, solid color for dark
-    if (backgroundRect) {
-        if (dark) {
-            backgroundRect.setAttribute('fill', colors.bg);
-        } else {
-            // Use grid pattern for light theme (JSON Crack style)
-            backgroundRect.setAttribute('fill', 'url(#grid-pattern)');
-        }
+    // Apply canvas theme using extracted module
+    if (svg && backgroundRect) {
+        const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+        updateCanvasTheme(svg, backgroundRect, dark, gridStyle);
     }
 
     // Apply to all panels
-    const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement];
+    const panels = [detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, tooltipElement, breadcrumbPanel];
     panels.forEach(panel => {
         if (panel) {
             panel.style.background = colors.panelBg;
             panel.style.borderColor = colors.border;
             panel.style.color = colors.text;
+            panel.style.boxShadow = dark
+                ? '0 4px 12px rgba(0, 0, 0, 0.3)'
+                : '0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04)';
         }
     });
+    updateColumnLineageBannerStyle();
+    ensureHintsPanelScrollbarStyles();
+    if (columnLineagePanel) {
+        ensureColumnLineagePanelScrollbarStyles();
+    }
 
     // Apply to minimap
     const minimap = document.getElementById('minimap-container');
@@ -7440,14 +7495,9 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
     }
 
     // Show SQL fragment if we have line numbers
-    if (node.startLine && currentSql) {
-        const sqlLines = currentSql.split('\n');
-        const startIdx = Math.max(0, node.startLine - 1);
-        const endIdx = node.endLine ? Math.min(sqlLines.length, node.endLine) : startIdx + 1;
-        const fragment = sqlLines.slice(startIdx, endIdx).join('\n').trim();
-
-        if (fragment) {
-            const displayFragment = fragment.length > 120 ? fragment.substring(0, 120) + '...' : fragment;
+    if (currentSql) {
+        const sqlSnippet = extractSqlSnippet(currentSql, node.startLine, node.endLine, 3, 180);
+        if (sqlSnippet) {
             content += `
                 <div style="
                     margin-top: 8px;
@@ -7462,13 +7512,19 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     white-space: pre-wrap;
                     word-break: break-all;
                     max-width: 300px;
-                ">${escapeHtml(displayFragment)}</div>
+                ">${escapeHtml(sqlSnippet.snippet)}</div>
             `;
 
             // Add line number reference
             content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                📍 Line ${node.startLine}${node.endLine && node.endLine !== node.startLine ? `-${node.endLine}` : ''}
+                📍 ${sqlSnippet.lineLabel}
             </div>`;
+
+            if (sqlSnippet.truncated) {
+                content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#93c5fd' : '#1d4ed8'}; margin-top: 4px;">
+                    Press S for full SQL
+                </div>`;
+            }
         }
     }
 
@@ -7543,7 +7599,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
     // Add keyboard hint
     content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#475569' : '#94a3b8'}; margin-top: 8px; border-top: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
-        Click to select • Double-click to zoom
+        Click to select • Double-click to zoom • Right-click for actions
     </div>`;
 
     tooltipElement.innerHTML = content;
@@ -7809,6 +7865,100 @@ function hideContextMenu(): void {
 let selectedColumnLineage: ColumnFlow | null = null;
 let columnLineagePanel: HTMLElement | null = null;
 
+function updateColumnLineageBannerStyle(): void {
+    if (!columnLineageBanner) { return; }
+    const background = state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)';
+    const border = state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)';
+    const textColor = state.isDarkTheme ? '#c7d2fe' : '#4338ca';
+    const buttonColor = state.isDarkTheme ? '#a5b4fc' : '#4f46e5';
+    columnLineageBanner.style.background = background;
+    columnLineageBanner.style.border = `1px solid ${border}`;
+    columnLineageBanner.style.color = textColor;
+    const closeBtn = columnLineageBanner.querySelector('#column-lineage-banner-close') as HTMLButtonElement | null;
+    if (closeBtn) {
+        closeBtn.style.color = buttonColor;
+    }
+}
+
+function setColumnLineageBannerVisible(visible: boolean): void {
+    if (!columnLineageBanner) { return; }
+    updateColumnLineageBannerStyle();
+    columnLineageBanner.style.display = visible ? 'flex' : 'none';
+}
+
+function ensureHintsPanelScrollbarStyles(): void {
+    const styleId = 'hints-panel-scroll-style';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+    const { thumb, thumbHover, track } = getScrollbarColors(state.isDarkTheme);
+    style.textContent = `
+        .hints-panel,
+        .hints-panel .hints-list {
+            scrollbar-width: thin;
+            scrollbar-color: ${thumb} ${track};
+        }
+        .hints-panel::-webkit-scrollbar,
+        .hints-panel .hints-list::-webkit-scrollbar {
+            width: 10px;
+        }
+        .hints-panel::-webkit-scrollbar-track,
+        .hints-panel .hints-list::-webkit-scrollbar-track {
+            background: ${track};
+            border-radius: 8px;
+        }
+        .hints-panel::-webkit-scrollbar-thumb,
+        .hints-panel .hints-list::-webkit-scrollbar-thumb {
+            background: ${thumb};
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        .hints-panel::-webkit-scrollbar-thumb:hover,
+        .hints-panel .hints-list::-webkit-scrollbar-thumb:hover {
+            background: ${thumbHover};
+            background-clip: padding-box;
+        }
+    `;
+}
+
+function ensureColumnLineagePanelScrollbarStyles(): void {
+    const styleId = 'column-lineage-panel-scroll-style';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+    const { thumb, thumbHover, track } = getScrollbarColors(state.isDarkTheme);
+    style.textContent = `
+        #column-lineage-panel {
+            scrollbar-width: thin;
+            scrollbar-color: ${thumb} ${track};
+        }
+        #column-lineage-panel::-webkit-scrollbar {
+            width: 10px;
+        }
+        #column-lineage-panel::-webkit-scrollbar-track {
+            background: ${track};
+            border-radius: 8px;
+        }
+        #column-lineage-panel::-webkit-scrollbar-thumb {
+            background: ${thumb};
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        #column-lineage-panel::-webkit-scrollbar-thumb:hover {
+            background: ${thumbHover};
+            background-clip: padding-box;
+        }
+    `;
+}
+
 /**
  * Toggle column lineage mode
  */
@@ -7816,10 +7966,31 @@ export function toggleColumnFlows(show?: boolean): void {
     state.showColumnFlows = show !== undefined ? show : !state.showColumnFlows;
 
     if (state.showColumnFlows) {
+        if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+            state.showColumnFlows = false;
+            setColumnLineageBannerVisible(false);
+            return;
+        }
         showColumnLineagePanel();
+        if (breadcrumbPanel) {
+            breadcrumbPanel.style.display = 'none';
+        }
+        addBreadcrumbSegment({
+            id: 'column-lineage',
+            label: 'Column Lineage',
+            icon: '\u2502',
+            onClear: () => { toggleColumnFlows(false); },
+        });
+        // Banner is redundant when the breadcrumb chip is visible
+        setColumnLineageBannerVisible(false);
     } else {
         hideColumnLineagePanel();
+        setColumnLineageBannerVisible(false);
         clearLineageHighlights();
+        removeBreadcrumbSegment('column-lineage');
+        if (state.selectedNodeId) {
+            updateBreadcrumb(state.selectedNodeId);
+        }
     }
 
     // Update legend
@@ -7832,6 +8003,7 @@ export function toggleColumnFlows(show?: boolean): void {
 function showColumnLineagePanel(): void {
     // Always remove existing panel first (fixes stale panel when switching queries)
     hideColumnLineagePanel();
+    ensureColumnLineagePanelScrollbarStyles();
 
     if (!currentColumnFlows || currentColumnFlows.length === 0) {
         // No column flows for this query type (e.g., UPDATE, DELETE, INSERT)
@@ -7846,16 +8018,18 @@ function showColumnLineagePanel(): void {
         left: 16px;
         top: 50%;
         transform: translateY(-50%);
-        background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
-        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        background: ${state.isDarkTheme ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${state.isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.1)'};
         border-radius: 8px;
         padding: 12px;
         max-height: 70vh;
         overflow-y: auto;
         z-index: 1000;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        box-shadow: ${state.isDarkTheme ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 16px rgba(0, 0, 0, 0.1)'};
         min-width: 200px;
         max-width: 260px;
+        backdrop-filter: blur(8px);
+        scrollbar-width: thin;
     `;
 
     // Header
@@ -7866,16 +8040,39 @@ function showColumnLineagePanel(): void {
         color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
         margin-bottom: 8px;
         padding-bottom: 6px;
-        border-bottom: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+        border-bottom: 1px solid ${state.isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};
         display: flex;
         justify-content: space-between;
         align-items: center;
     `;
     header.innerHTML = `
         <span>Column Lineage</span>
-        <span style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+            <span style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+            <button id="column-lineage-panel-close" type="button" style="
+                border: none;
+                background: transparent;
+                color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};
+                cursor: pointer;
+                font-size: 14px;
+                line-height: 1;
+                padding: 0 2px;
+            " aria-label="Close column lineage panel">×</button>
+        </span>
     `;
     columnLineagePanel.appendChild(header);
+    const panelCloseBtn = header.querySelector('#column-lineage-panel-close') as HTMLButtonElement | null;
+    panelCloseBtn?.addEventListener('click', () => toggleColumnFlows(false));
+
+    // Allow Escape to dismiss column lineage when the panel itself has focus
+    columnLineagePanel.setAttribute('tabindex', '-1');
+    columnLineagePanel.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleColumnFlows(false);
+        }
+    });
 
     // Column search input
     const searchContainer = document.createElement('div');
@@ -7889,9 +8086,9 @@ function showColumnLineagePanel(): void {
     searchInput.style.cssText = `
         width: 100%;
         padding: 6px 8px 6px 28px;
-        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.15)'};
+        border: 1px solid ${state.isDarkTheme ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.12)'};
         border-radius: 4px;
-        background: ${state.isDarkTheme ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.9)'};
+        background: ${state.isDarkTheme ? 'rgba(26, 26, 26, 0.8)' : 'rgba(250, 250, 250, 0.9)'};
         color: ${state.isDarkTheme ? '#f1f5f9' : '#1e293b'};
         font-size: 11px;
         outline: none;
@@ -7951,7 +8148,7 @@ function createColumnItem(flow: ColumnFlow): HTMLElement {
     const item = document.createElement('div');
     item.style.cssText = `
         padding: 8px 10px;
-        background: ${state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)'};
+        background: ${state.isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)'};
         border-radius: 6px;
         cursor: pointer;
         transition: all 0.15s ease;
@@ -8000,12 +8197,12 @@ function createColumnItem(flow: ColumnFlow): HTMLElement {
 
     // Hover effect
     item.addEventListener('mouseenter', () => {
-        item.style.background = state.isDarkTheme ? 'rgba(71, 85, 105, 0.7)' : 'rgba(226, 232, 240, 0.9)';
+        item.style.background = state.isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
     });
 
     item.addEventListener('mouseleave', () => {
         if (selectedColumnLineage?.id !== flow.id) {
-            item.style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+            item.style.background = state.isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)';
             item.style.borderColor = 'transparent';
         }
     });
@@ -8019,7 +8216,7 @@ function createColumnItem(flow: ColumnFlow): HTMLElement {
         const allItems = columnLineagePanel?.querySelectorAll('div[style*="cursor: pointer"]');
         allItems?.forEach((el) => {
             (el as HTMLElement).style.borderColor = 'transparent';
-            (el as HTMLElement).style.background = state.isDarkTheme ? 'rgba(51, 65, 85, 0.5)' : 'rgba(241, 245, 249, 0.8)';
+            (el as HTMLElement).style.background = state.isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)';
         });
 
         // Highlight selected
@@ -8104,7 +8301,7 @@ function showLineagePath(flow: ColumnFlow): void {
                     </div>
                     <div style="font-size: 10px; color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'};">
                         ${escapeHtml(step.nodeName)}
-                        ${step.expression ? `<br><code style="font-size: 9px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'};">${escapeHtml(step.expression)}</code>` : ''}
+                        ${step.expression ? `<br><code style="font-size: 9px; color: ${state.isDarkTheme ? '#a5b4fc' : '#6366f1'}; background: ${state.isDarkTheme ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)'}; padding: 1px 4px; border-radius: 3px;">${escapeHtml(step.expression)}</code>` : ''}
                     </div>
                 </div>
             </div>
@@ -8429,6 +8626,7 @@ function addCollapseButton(node: FlowNode, group: SVGGElement): void {
 
 export function getKeyboardShortcuts(): Array<{ key: string; description: string }> {
     return [
+        { key: 'Ctrl/Cmd + Shift + P', description: 'Command palette' },
         { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
         { key: '/', description: 'Focus search' },
         { key: '+/-', description: 'Zoom in/out' },
@@ -8436,6 +8634,7 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
         { key: 'H', description: 'Cycle layouts' },
+        { key: '1-5', description: 'Quick layout switch (V/H/C/F/R)' },
         { key: 'S', description: 'Toggle SQL preview' },
         { key: 'C', description: 'Toggle column lineage' },
         { key: 'L', description: 'Toggle legend' },
