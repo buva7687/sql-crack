@@ -5,8 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
----
-
 ## [0.2.1] - 2026-02-06
 
 ### Added
@@ -30,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace lineage legend + keyboard hints**: Integrated keyboard shortcut hints into lineage view legend.
 - **One-time help button pulse**: Toolbar `?` button pulses once on first run to aid discoverability.
 - **Full SQL preview tooltip cue**: Node tooltips mention the `S` shortcut for full SQL preview.
+- **Workspace legend re-open affordance**: Added a dedicated legend toggle button to the Graph zoom toolbar so users can re-open the legend without keyboard-only discovery.
+- **Lineage legend re-open affordance**: Added a dedicated legend toggle button to lineage zoom controls for the same show/hide behavior in lineage detail view.
 
 ### Changed
 
@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Column lineage panel**: Themed scrollbar; explicit close button in header.
 - **Workspace graph nodes**: Added `node-bg` class and `node-accent` strip so CSS theme variables apply correctly.
 - **Workspace graph background**: Uses dot-grid pattern matching lineage view instead of solid background.
+- **Workspace Graph legend UX**: Moved from sidebar section to a bottom frosted legend strip; removed the old sidebar legend block.
+- **Lineage legend UX**: Replaced top-right collapsible legend panel with a bottom-anchored horizontal legend strip.
+- **Legend copy cleanup**: Removed the misleading keyboard-style `× Dismiss` hint in the workspace legend strip; `L` remains the documented shortcut and `×` remains a click action.
 
 ### Fixed
 
@@ -53,6 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Snowflake DELETE parsing**: Snowflake DELETE/MERGE statements that fail native grammar now fall back to PostgreSQL AST parsing.
 - **Light-theme toolbar**: Overflow button and dropdown rows use correct light-mode colors.
 - **Breadcrumb/filter state**: Filter chips no longer leak stale state across re-renders.
+- **Collapsed sidebar canvas usage**: Graph now auto-fits after sidebar collapse/expand so newly available canvas space is used immediately.
+- **Zoom control displacement**: Removed incorrect `zoom-toolbar` top offset that was applied when the bottom legend was visible.
+
+### Tests
+
+- Added regression coverage for:
+  - workspace legend toolbar toggle behavior,
+  - lineage legend toggle wiring,
+  - auto-fit on sidebar layout changes,
+  - legend strip style expectations.
 
 ---
 
