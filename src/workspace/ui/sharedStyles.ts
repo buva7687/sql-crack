@@ -1479,6 +1479,110 @@ export function getImpactFormStyles(): string {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
         }
+        .impact-typeahead {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .impact-typeahead-input {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-size: 14px;
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            outline: none;
+            transition: all 0.2s;
+        }
+        .impact-typeahead-input:hover {
+            border-color: var(--border-color);
+            background: var(--bg-tertiary);
+        }
+        .impact-typeahead-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .impact-typeahead-results {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            max-height: 220px;
+            overflow-y: auto;
+            z-index: 20;
+            padding: 6px;
+        }
+        .impact-typeahead-item {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.15s ease;
+        }
+        .impact-typeahead-item:hover {
+            background: var(--bg-hover);
+        }
+        .impact-typeahead-name {
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .impact-typeahead-type {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            padding: 2px 7px;
+        }
+        .impact-selected-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            max-width: 100%;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .impact-selected-badge span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 260px;
+        }
+        .impact-selected-badge button {
+            border: none;
+            background: transparent;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
+        }
+        .impact-selected-badge button:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
 
         /* Modern Button-Style Change Type Selector */
         .change-type-buttons {

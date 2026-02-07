@@ -34,54 +34,47 @@ export class ImpactView {
                     <h3>Impact</h3>
                     <span class="view-inline-stats">${tableCount} tables, ${viewCount} views</span>
                 </div>
-                <div class="view-search-box">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                    </svg>
-                    <input type="text"
-                           id="impact-search-input"
-                           class="view-search-input"
-                           placeholder="Search tables, views..."
-                           autocomplete="off"
-                           value="">
-                    <button class="view-search-clear" id="impact-search-clear">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="view-filters">
-                    <div class="view-quick-filters">
-                        <span class="view-filter-label">Filter:</span>
-                        <button class="view-filter-chip active" data-filter="all">All</button>
-                        <button class="view-filter-chip" data-filter="table">Tables</button>
-                        <button class="view-filter-chip" data-filter="view">Views</button>
-                    </div>
-                    <div class="view-results-info" id="impact-results-info" style="display: none;">
-                        <span id="impact-results-count">0</span> results
-                    </div>
-                </div>
 
                 <!-- Form -->
                 <div class="view-content">
                     <div class="view-form-card">
                         <div class="view-form-fields">
                             <div class="view-form-field">
-                                <label for="impact-table-select">
+                                <label for="impact-table-input">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                                     </svg>
                                     Table/View
                                     <span class="field-hint">(${tableCount} tables, ${viewCount} views)</span>
                                 </label>
-                                <select id="impact-table-select" class="form-select">
-                                    <option value="">-- Select a table or view (${tableCount} tables, ${viewCount} views) --</option>
-                                    ${tables.map(table => `
-                                        <option value="${this.escapeHtml(table.id)}" data-name="${this.escapeHtml(table.name)}" data-type="${table.type}">
-                                            ${this.escapeHtml(table.name)} (${table.type})
-                                        </option>
-                                    `).join('')}
-                                </select>
+                                <div class="impact-typeahead">
+                                    <input type="text"
+                                           id="impact-table-input"
+                                           class="impact-typeahead-input"
+                                           placeholder="Type to search tables and views..."
+                                           autocomplete="off"
+                                           role="combobox"
+                                           aria-expanded="false"
+                                           aria-controls="impact-typeahead-results">
+                                    <input type="hidden" id="impact-table-id" value="">
+                                    <div class="impact-typeahead-results" id="impact-typeahead-results" role="listbox" style="display: none;">
+                                        ${tables.map(table => `
+                                            <button type="button"
+                                                    class="impact-typeahead-item"
+                                                    data-node-id="${this.escapeHtml(table.id)}"
+                                                    data-name="${this.escapeHtml(table.name)}"
+                                                    data-type="${table.type}"
+                                                    role="option">
+                                                <span class="impact-typeahead-name">${this.escapeHtml(table.name)}</span>
+                                                <span class="impact-typeahead-type">${table.type}</span>
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                    <div class="impact-selected-badge" id="impact-selected-badge" style="display: none;">
+                                        <span id="impact-selected-label"></span>
+                                        <button type="button" id="impact-selected-clear">Clear</button>
+                                    </div>
+                                </div>
                                 <div class="field-subtext">Available: ${tableCount} tables • ${viewCount} views</div>
                             </div>
                             <div class="view-form-field">

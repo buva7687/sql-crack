@@ -2029,17 +2029,15 @@ function getImpactFormScript(): string {
     return `
         // ========== Impact Form Setup ==========
         function setupImpactForm() {
-            const tableSelect = document.getElementById('impact-table-select');
+            const tableInput = document.getElementById('impact-table-input');
+            const tableIdInput = document.getElementById('impact-table-id');
+            const typeaheadResults = document.getElementById('impact-typeahead-results');
+            const resultItems = typeaheadResults ? Array.from(typeaheadResults.querySelectorAll('.impact-typeahead-item')) : [];
+            const selectedBadge = document.getElementById('impact-selected-badge');
+            const selectedLabel = document.getElementById('impact-selected-label');
+            const selectedClear = document.getElementById('impact-selected-clear');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
-            const searchInput = document.getElementById('impact-search-input');
-            const searchClear = document.getElementById('impact-search-clear');
-            const filterChips = document.querySelectorAll('.view-filter-chip[data-filter]');
-            const resultsInfo = document.getElementById('impact-results-info');
-            const resultsCount = document.getElementById('impact-results-count');
-
-            // Store all original options
-            const allOptions = tableSelect ? Array.from(tableSelect.options) : [];
 
             changeTypeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -2048,98 +2046,153 @@ function getImpactFormScript(): string {
                 });
             });
 
-            // Filter function for search and filter chips
-            function filterImpactOptions() {
-                if (!tableSelect) return;
+            function updateAnalyzeButtonState() {
+                if (analyzeBtn && tableIdInput) {
+                    analyzeBtn.disabled = !tableIdInput.value;
+                }
+            }
 
-                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
-                const activeFilter = document.querySelector('.view-filter-chip.active[data-filter]');
-                const filterValue = activeFilter?.getAttribute('data-filter') || 'all';
+            function closeTypeaheadResults() {
+                if (typeaheadResults) {
+                    typeaheadResults.style.display = 'none';
+                }
+                tableInput?.setAttribute('aria-expanded', 'false');
+            }
 
-                // Clear existing options except the first (placeholder)
-                while (tableSelect.options.length > 1) {
-                    tableSelect.remove(1);
+            function openTypeaheadResults() {
+                if (typeaheadResults) {
+                    typeaheadResults.style.display = 'block';
+                }
+                tableInput?.setAttribute('aria-expanded', 'true');
+            }
+
+            function clearSelectedTable(preserveInputValue = false) {
+                if (!tableIdInput) {
+                    return;
                 }
 
+                tableIdInput.value = '';
+                tableIdInput.dataset.name = '';
+                tableIdInput.dataset.type = '';
+                if (!preserveInputValue && tableInput) {
+                    tableInput.value = '';
+                }
+                if (selectedBadge) {
+                    selectedBadge.style.display = 'none';
+                }
+                if (selectedLabel) {
+                    selectedLabel.textContent = '';
+                }
+                updateAnalyzeButtonState();
+            }
+
+            function selectTypeaheadItem(item) {
+                if (!tableIdInput) {
+                    return;
+                }
+
+                const nodeId = item.getAttribute('data-node-id') || '';
+                const tableName = item.getAttribute('data-name') || '';
+                const tableType = item.getAttribute('data-type') || '';
+                if (!nodeId || !tableName) {
+                    return;
+                }
+
+                tableIdInput.value = nodeId;
+                tableIdInput.dataset.name = tableName;
+                tableIdInput.dataset.type = tableType;
+                if (tableInput) {
+                    tableInput.value = tableName;
+                }
+                if (selectedBadge) {
+                    selectedBadge.style.display = 'inline-flex';
+                }
+                if (selectedLabel) {
+                    selectedLabel.textContent = tableName + ' (' + tableType + ')';
+                }
+                closeTypeaheadResults();
+                updateAnalyzeButtonState();
+            }
+
+            function filterTypeaheadResults() {
+                if (!tableInput || !typeaheadResults) {
+                    return;
+                }
+
+                const query = tableInput.value.trim().toLowerCase();
                 let visibleCount = 0;
-                allOptions.forEach((option, index) => {
-                    if (index === 0) return; // Skip placeholder
 
-                    const tableName = option.getAttribute('data-name') || '';
-                    const tableType = option.getAttribute('data-type') || '';
-                    const nameLower = tableName.toLowerCase();
-
-                    const matchesSearch = !searchQuery || nameLower.includes(searchQuery);
-                    const matchesFilter = filterValue === 'all' || tableType === filterValue;
-
-                    if (matchesSearch && matchesFilter) {
-                        tableSelect.appendChild(option.cloneNode(true));
+                resultItems.forEach(item => {
+                    const itemName = (item.getAttribute('data-name') || '').toLowerCase();
+                    const matches = !query || itemName.includes(query);
+                    item.style.display = matches ? 'flex' : 'none';
+                    if (matches) {
                         visibleCount++;
                     }
                 });
 
-                // Update results info
-                if (resultsInfo && resultsCount) {
-                    if (searchQuery || filterValue !== 'all') {
-                        resultsInfo.style.display = 'block';
-                        resultsCount.textContent = visibleCount;
-                    } else {
-                        resultsInfo.style.display = 'none';
+                if (query && visibleCount > 0) {
+                    openTypeaheadResults();
+                } else {
+                    closeTypeaheadResults();
+                }
+            }
+
+            tableInput?.addEventListener('input', () => {
+                clearSelectedTable(true);
+                filterTypeaheadResults();
+            });
+
+            tableInput?.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeTypeaheadResults();
+                    if (tableInput) {
+                        tableInput.blur();
+                    }
+                    return;
+                }
+
+                if (event.key === 'Enter') {
+                    const firstVisible = resultItems.find(item => item.style.display !== 'none');
+                    if (firstVisible) {
+                        event.preventDefault();
+                        selectTypeaheadItem(firstVisible);
                     }
                 }
+            });
 
-                // Show/hide clear button
-                if (searchClear) {
-                    searchClear.style.display = searchQuery ? 'flex' : 'none';
+            tableInput?.addEventListener('focus', () => {
+                if (tableInput.value.trim()) {
+                    filterTypeaheadResults();
                 }
+            });
 
-                // Update analyze button state
-                if (analyzeBtn) {
-                    analyzeBtn.disabled = !tableSelect.value;
-                }
-            }
+            selectedClear?.addEventListener('click', () => {
+                clearSelectedTable();
+                closeTypeaheadResults();
+                tableInput?.focus();
+            });
 
-            // Search input handler
-            if (searchInput) {
-                let debounceTimeout;
-                searchInput.addEventListener('input', () => {
-                    clearTimeout(debounceTimeout);
-                    debounceTimeout = setTimeout(filterImpactOptions, 200);
-                });
-            }
-
-            // Clear search button
-            if (searchClear) {
-                searchClear.addEventListener('click', () => {
-                    if (searchInput) {
-                        searchInput.value = '';
-                        filterImpactOptions();
-                    }
-                });
-            }
-
-            // Filter chip handlers
-            filterChips.forEach(chip => {
-                chip.addEventListener('click', () => {
-                    filterChips.forEach(c => c.classList.remove('active'));
-                    chip.classList.add('active');
-                    filterImpactOptions();
+            resultItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    selectTypeaheadItem(item);
                 });
             });
 
-            if (tableSelect && analyzeBtn) {
-                tableSelect.addEventListener('change', () => {
-                    analyzeBtn.disabled = !tableSelect.value;
-                });
+            document.addEventListener('click', (event) => {
+                if (event.target.closest('.impact-typeahead')) {
+                    return;
+                }
+                closeTypeaheadResults();
+            });
 
+            if (analyzeBtn && tableIdInput) {
                 analyzeBtn.addEventListener('click', () => {
-                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
-                    const tableName = selectedOption.getAttribute('data-name');
-                    const tableType = selectedOption.getAttribute('data-type');
+                    const tableName = tableIdInput.dataset.name;
                     const activeButton = document.querySelector('.change-type-btn.active');
                     const changeType = activeButton?.getAttribute('data-value') || 'modify';
 
-                    if (!tableName) return;
+                    if (!tableName) {return;}
 
                     const resultsDiv = document.getElementById('impact-results');
                     if (resultsDiv) {
@@ -2156,8 +2209,7 @@ function getImpactFormScript(): string {
                 });
             }
 
-            // Initial filter
-            filterImpactOptions();
+            updateAnalyzeButtonState();
         }
     `;
 }
