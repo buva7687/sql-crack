@@ -508,19 +508,6 @@ export class WorkspacePanel {
                 }
                 break;
 
-            case 'switchToTableExplorer':
-                this._currentView = 'tableExplorer';
-                await this.buildLineageGraph();
-                // Send table list to webview
-                if (this._lineageGraph) {
-                    const html = this._tableExplorer.generateTableList(this._lineageGraph);
-                    this._panel.webview.postMessage({
-                        command: 'tableListResult',
-                        data: { html }
-                    });
-                }
-                break;
-
             case 'switchToImpactView':
                 this._currentView = 'impact';
                 await this.buildLineageGraph();
@@ -745,7 +732,7 @@ export class WorkspacePanel {
 
         if (!node) {
             this._panel.webview.postMessage({
-                command: 'tableExplorerResult',
+                command: 'tableDetailResult',
                 data: { error: `Table "${tableName}" not found in lineage graph` }
             });
             return;
@@ -759,7 +746,7 @@ export class WorkspacePanel {
         });
 
         this._panel.webview.postMessage({
-            command: 'tableExplorerResult',
+            command: 'tableDetailResult',
             data: {
                 table: {
                     id: node.id,
@@ -1191,14 +1178,6 @@ ${bodyContent}
                             <path d="M3 12h4l3 9 4-18 3 9h4"/>
                         </svg>
                         Lineage
-                    </button>
-                    <button class="view-tab" data-view="tableExplorer" 
-                        title="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model."
-                        aria-label="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model.">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
-                        </svg>
-                        Tables
                     </button>
                     <button class="view-tab" data-view="impact" 
                         title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."

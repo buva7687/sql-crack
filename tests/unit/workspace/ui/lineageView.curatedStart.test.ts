@@ -36,6 +36,10 @@ describe('LineageView curated start content', () => {
         expect(html).toContain('id="lineage-show-all-btn"');
         expect(html).toContain('Show all 3 tables');
         expect(html).toContain('id="lineage-tables-grid" style="display: none;"');
+        expect(html).toContain('id="lineage-sort"');
+        expect(html).toContain('option value="connected">Most Connected');
+        expect(html).toContain('class="lineage-table-item connection-');
+        expect(html).toContain('data-total="');
     });
 
     it('includes script support for show-all expansion and curated-item click handling', () => {
@@ -48,8 +52,11 @@ describe('LineageView curated start content', () => {
         });
 
         expect(script).toContain('const showAllBtn = document.getElementById(\'lineage-show-all-btn\');');
+        expect(script).toContain('const sortSelect = document.getElementById(\'lineage-sort\');');
         expect(script).toContain('function setLineageGridMode(expanded)');
+        expect(script).toContain('const sortValue = sortSelect?.value || \'connected\';');
         expect(script).toContain('showAllTables = true;');
+        expect(script).toContain('sortSelect?.addEventListener(\'change\', filterLineageTables);');
         expect(script).toContain('.lineage-table-item, .popular-item');
     });
 
@@ -58,5 +65,8 @@ describe('LineageView curated start content', () => {
 
         expect(css).toContain('.lineage-popular-grid');
         expect(css).toContain('.lineage-show-all-btn');
+        expect(css).toContain('.view-sort-group');
+        expect(css).toContain('.lineage-table-item.connection-high');
+        expect(css).toContain('.popular-item.connection-high');
     });
 });

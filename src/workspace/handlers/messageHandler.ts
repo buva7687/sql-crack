@@ -142,10 +142,6 @@ export class MessageHandler {
                 await this.handleSwitchToLineageView();
                 break;
 
-            case 'switchToTableExplorer':
-                await this.handleSwitchToTableExplorer();
-                break;
-
             case 'switchToImpactView':
                 await this.handleSwitchToImpactView();
                 break;
@@ -341,20 +337,6 @@ export class MessageHandler {
         }
     }
 
-    private async handleSwitchToTableExplorer(): Promise<void> {
-        this._context.setCurrentView('tableExplorer');
-        await this._context.buildLineageGraph();
-
-        const lineageGraph = this._context.getLineageGraph();
-        if (lineageGraph) {
-            const html = this._context.getTableExplorer().generateTableList(lineageGraph);
-            this._context.panel.webview.postMessage({
-                command: 'tableListResult',
-                data: { html }
-            });
-        }
-    }
-
     private async handleSwitchToImpactView(): Promise<void> {
         this._context.setCurrentView('impact');
         await this._context.buildLineageGraph();
@@ -497,7 +479,7 @@ export class MessageHandler {
 
         if (!node) {
             this._context.panel.webview.postMessage({
-                command: 'tableExplorerResult',
+                command: 'tableDetailResult',
                 data: { error: `Table "${tableName}" not found in lineage graph` }
             });
             return;
@@ -511,7 +493,7 @@ export class MessageHandler {
         });
 
         this._context.panel.webview.postMessage({
-            command: 'tableExplorerResult',
+            command: 'tableDetailResult',
             data: {
                 table: {
                     id: node.id,

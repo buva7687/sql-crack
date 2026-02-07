@@ -177,11 +177,11 @@ export class ImpactView {
                         </button>
                         <button type="button"
                                 class="cross-link-btn"
-                                data-action="cross-view-table-explorer"
+                                data-action="cross-view-detail"
                                 data-table="${this.escapeHtml(targetTableName)}"
                                 data-node-id="${this.escapeHtml(targetNodeId)}"
                                 data-node-type="table">
-                            Explore in Tables
+                            View Details
                         </button>
                     </div>
                 </div>

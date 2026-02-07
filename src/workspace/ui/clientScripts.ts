@@ -1035,7 +1035,6 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         ${getTooltipScript()}
         ${getImpactSummaryScript()}
         ${getImpactFormScript()}
-        ${getTableSearchScript()}
         ${getVisualLineageSearchScript()}
         ${getLineageGraphScript()}
         ${getColumnLineageScript()}
@@ -1049,8 +1048,6 @@ function getViewModeScript(): string {
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
         let lineageDetailView = false;
-        let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
-        let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
 
         // Navigation state stack for cross-view navigation
         const navStack = [];
@@ -1068,7 +1065,7 @@ function getViewModeScript(): string {
                     selectedNodeId
                 };
             } else {
-                // Save scroll position for non-graph views (lineage, tableExplorer, impact)
+                // Save scroll position for non-graph views (lineage, impact)
                 const scrollContainer = lineageContent || document.querySelector('.lineage-content');
                 if (scrollContainer) {
                     viewStates[currentViewMode] = {
@@ -1114,7 +1111,6 @@ function getViewModeScript(): string {
 
         const viewTitles = {
             lineage: 'Data Lineage',
-            tableExplorer: 'Table Explorer',
             impact: 'Impact Analysis'
         };
 
@@ -1131,17 +1127,6 @@ function getViewModeScript(): string {
                     '<div class="view-skeleton-card"></div>' +
                     '<div class="view-skeleton-card"></div>' +
                     '<div class="view-skeleton-card"></div>' +
-                '</div>' +
-            '</div>',
-            tableExplorer: '<div class="view-skeleton view-skeleton-tables">' +
-                '<div class="view-skeleton-header"></div>' +
-                '<div class="view-skeleton-search"></div>' +
-                '<div class="view-skeleton-list">' +
-                    '<div class="view-skeleton-list-item"></div>' +
-                    '<div class="view-skeleton-list-item"></div>' +
-                    '<div class="view-skeleton-list-item"></div>' +
-                    '<div class="view-skeleton-list-item"></div>' +
-                    '<div class="view-skeleton-list-item"></div>' +
                 '</div>' +
             '</div>',
             impact: '<div class="view-skeleton view-skeleton-impact">' +
@@ -1185,7 +1170,6 @@ function getViewModeScript(): string {
 
             const viewLabels = {
                 lineage: 'Lineage',
-                tableExplorer: 'Tables',
                 impact: 'Impact'
             };
             const segments = [{
@@ -1214,7 +1198,7 @@ function getViewModeScript(): string {
 
             if (lineageDetailView && lineageTitle && lineageTitle.textContent) {
                 const titleText = lineageTitle.textContent.trim();
-                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Table Explorer' && titleText !== 'Impact Analysis') {
+                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Impact Analysis') {
                     segments.push({
                         label: titleText,
                         action: 'detail-root',
@@ -1318,7 +1302,7 @@ function getViewModeScript(): string {
                 if (focusBtn) focusBtn.style.display = '';
                 if (graphModeSwitcher) {
                     // Use visibility (not display) so switcher always reserves space in layout.
-                    // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
+                    // This prevents main tabs (Graph|Lineage|Impact) from shifting position
                     // when switching between tabs, ensuring good UX (mouse stays over clicked tab).
                     graphModeSwitcher.style.visibility = 'visible';
                     graphModeSwitcher.style.pointerEvents = 'auto';
@@ -1361,8 +1345,6 @@ function getViewModeScript(): string {
                 if (!skipMessage) {
                     if (view === 'lineage') {
                         vscode.postMessage({ command: 'switchToLineageView' });
-                    } else if (view === 'tableExplorer') {
-                        vscode.postMessage({ command: 'switchToTableExplorer' });
                     } else if (view === 'impact') {
                         vscode.postMessage({ command: 'switchToImpactView' });
                     }
@@ -1400,8 +1382,6 @@ function getViewModeScript(): string {
 
             if (action === 'detail-root') {
                 lineageDetailView = false;
-                tableExplorerHistory = [];
-                currentExploredTable = null;
                 // Clear column trace when resetting to detail root
                 if (typeof clearColumnHighlighting === 'function') {
                     clearColumnHighlighting();
@@ -1410,9 +1390,6 @@ function getViewModeScript(): string {
                 if (currentViewMode === 'lineage') {
                     if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
                     vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'tableExplorer') {
-                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
                 } else if (currentViewMode === 'impact') {
                     if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
                     vscode.postMessage({ command: 'switchToImpactView' });
@@ -1514,8 +1491,6 @@ function getViewModeScript(): string {
                 // Re-request the view content from server
                 if (initialViewMode === 'lineage') {
                     vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (initialViewMode === 'tableExplorer') {
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
                 } else if (initialViewMode === 'impact') {
                     vscode.postMessage({ command: 'switchToImpactView' });
                 }
@@ -1524,7 +1499,7 @@ function getViewModeScript(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
-            const tabNames = { graph: 'Graph', lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
+            const tabNames = { graph: 'Graph', lineage: 'Lineage', impact: 'Impact' };
             if (lineageDetailView && currentViewMode !== 'graph') {
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
             } else {
@@ -1537,29 +1512,14 @@ function getViewModeScript(): string {
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (lineageDetailView && currentViewMode !== 'graph') {
-                // Check if we have history to go back to (for table explorer)
-                if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
-                    const prev = tableExplorerHistory.pop();
-                    if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
-                    lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                    vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
-                    updateBackButtonText();
-                } else {
-                    // No history, go back to main view
-                    lineageDetailView = false;
-                    tableExplorerHistory = [];
-                    currentExploredTable = null;
-                    updateBackButtonText();
-                    if (currentViewMode === 'lineage') {
-                        if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                        vscode.postMessage({ command: 'switchToLineageView' });
-                    } else if (currentViewMode === 'tableExplorer') {
-                        if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                        vscode.postMessage({ command: 'switchToTableExplorer' });
-                    } else if (currentViewMode === 'impact') {
-                        if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                        vscode.postMessage({ command: 'switchToImpactView' });
-                    }
+                lineageDetailView = false;
+                updateBackButtonText();
+                if (currentViewMode === 'lineage') {
+                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                    vscode.postMessage({ command: 'switchToLineageView' });
+                } else if (currentViewMode === 'impact') {
+                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
+                    vscode.postMessage({ command: 'switchToImpactView' });
                 }
             } else {
                 // Use nav stack to go back to previous view
@@ -1701,12 +1661,15 @@ function getContextMenuScript(): string {
                         });
                         break;
                     case 'exploreTable':
-                        switchToView('tableExplorer', false, nodeName, nodeType);
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
+                        lineageDetailView = true;
+                        updateBackButtonText();
                         vscode.postMessage({
                             command: 'exploreTable',
-                            tableName: nodeName
+                            tableName: nodeName,
+                            nodeId: contextMenuTarget.id || ''
                         });
                         break;
                     case 'openFile':
@@ -1764,6 +1727,7 @@ function getMessageHandlingScript(): string {
                         setupImpactSummaryDetails();
                     }
                     break;
+                case 'tableDetailResult':
                 case 'tableExplorerResult':
                     if (lineageContent) {
                         if (message.data?.error) {
@@ -1778,12 +1742,6 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'columnSelectionCleared':
                     clearColumnHighlighting();
-                    break;
-                case 'tableListResult':
-                    if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
-                        setupTableSearchAndFilter();
-                    }
                     break;
                 case 'impactFormResult':
                     if (lineageContent && message.data?.html) {
@@ -1986,10 +1944,10 @@ function getEventDelegationScript(): string {
                         return;
                     }
 
-                    if (action === 'cross-view-table-explorer') {
+                    if (action === 'cross-view-detail' || action === 'cross-view-table-explorer') {
                         if (!tableName) { return; }
 
-                        switchToView('tableExplorer', false, tableName, nodeType);
+                        switchToView('lineage', false, tableName, nodeType);
                         if (lineageTitle) {
                             lineageTitle.textContent = 'Table: ' + tableName;
                         }
@@ -2053,11 +2011,6 @@ function getEventDelegationScript(): string {
 
                 switch (action) {
                     case 'explore-table':
-                        // Push current table to history before navigating (for back button)
-                        if (currentViewMode === 'tableExplorer' && currentExploredTable) {
-                            tableExplorerHistory.push(currentExploredTable);
-                        }
-                        currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
@@ -2495,177 +2448,6 @@ function getImpactSummaryScript(): string {
     `;
 }
 
-function getTableSearchScript(): string {
-    return `
-        // ========== Table Search and Filter Setup ==========
-        function setupTableSearchAndFilter() {
-            const searchInput = document.getElementById('table-search-input');
-            const searchClear = document.getElementById('table-search-clear');
-            const typeFilter = document.getElementById('table-type-filter');
-            const sortSelect = document.getElementById('table-sort');
-            const clearFilters = document.getElementById('table-clear-filters');
-            const tableGrid = document.getElementById('table-list-grid');
-            const emptyFilter = document.getElementById('table-list-empty-filter');
-            const resultsInfo = document.getElementById('table-list-results-info');
-            const resultsCount = document.getElementById('table-results-count');
-            const emptyMessage = document.getElementById('empty-filter-message');
-
-            let debounceTimeout;
-            const totalItems = tableGrid ? tableGrid.querySelectorAll('.table-list-item').length : 0;
-
-            function filterTables() {
-                if (!tableGrid) return;
-
-                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
-                const typeValue = typeFilter?.value || 'all';
-                const sortValue = sortSelect?.value || 'connected';
-
-                const items = Array.from(tableGrid.querySelectorAll('.table-list-item'));
-                let visibleItems = [];
-
-                items.forEach(item => {
-                    const tableName = item.getAttribute('data-name') || '';
-                    const tableType = item.getAttribute('data-type') || '';
-                    const nameText = item.querySelector('.table-list-name')?.textContent?.toLowerCase() || '';
-
-                    const matchesSearch = !searchQuery || tableName.includes(searchQuery) || nameText.includes(searchQuery);
-                    const matchesType = typeValue === 'all' || tableType === typeValue;
-
-                    if (matchesSearch && matchesType) {
-                        item.style.display = '';
-                        visibleItems.push(item);
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-
-                visibleItems.sort((a, b) => {
-                    if (sortValue === 'name-asc') {
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameA.localeCompare(nameB);
-                    } else if (sortValue === 'name-desc') {
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameB.localeCompare(nameA);
-                    } else if (sortValue === 'type') {
-                        const typeA = a.getAttribute('data-type') || '';
-                        const typeB = b.getAttribute('data-type') || '';
-                        if (typeA !== typeB) return typeA.localeCompare(typeB);
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameA.localeCompare(nameB);
-                    } else {
-                        return 0;
-                    }
-                });
-
-                visibleItems.forEach(item => tableGrid.appendChild(item));
-
-                if (searchQuery && visibleItems.length > 0) {
-                    visibleItems.forEach(item => {
-                        const nameEl = item.querySelector('.table-list-name');
-                        if (nameEl) {
-                            const text = nameEl.textContent || '';
-                            let escapedQuery = '';
-                            const specialChars = ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\\\\\\\'];
-                            for (let i = 0; i < searchQuery.length; i++) {
-                                const char = searchQuery[i];
-                                if (specialChars.indexOf(char) >= 0) {
-                                    escapedQuery += '\\\\\\\\' + char;
-                                } else {
-                                    escapedQuery += char;
-                                }
-                            }
-                            const regex = new RegExp('(' + escapedQuery + ')', 'gi');
-                            nameEl.innerHTML = text.replace(regex, '<mark>$1</mark>');
-                        }
-                    });
-                } else {
-                    items.forEach(item => {
-                        const nameEl = item.querySelector('.table-list-name');
-                        if (nameEl) {
-                            nameEl.innerHTML = nameEl.textContent || '';
-                        }
-                    });
-                }
-
-                if (resultsInfo && resultsCount) {
-                    resultsInfo.style.display = 'block';
-                    resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
-                }
-
-                if (emptyFilter && emptyMessage) {
-                    if (visibleItems.length === 0) {
-                        emptyFilter.style.display = 'block';
-                        let message = 'No tables match your search criteria';
-                        if (searchQuery) {
-                            message = 'No tables matching "' + searchQuery + '"';
-                        } else if (typeValue !== 'all') {
-                            message = 'No ' + typeValue + 's found';
-                        }
-                        emptyMessage.textContent = message;
-                    } else {
-                        emptyFilter.style.display = 'none';
-                    }
-                }
-
-                if (searchClear) {
-                    searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
-                }
-                if (clearFilters) {
-                    clearFilters.style.display = searchQuery || typeValue !== 'all' ? 'inline-flex' : 'none';
-                }
-            }
-
-            function debouncedFilter() {
-                clearTimeout(debounceTimeout);
-                debounceTimeout = setTimeout(filterTables, 180);
-            }
-
-            searchInput?.addEventListener('input', debouncedFilter);
-            searchClear?.addEventListener('click', () => {
-                if (searchInput) searchInput.value = '';
-                if (typeFilter) typeFilter.value = 'all';
-                filterTables();
-                searchInput?.focus();
-            });
-            clearFilters?.addEventListener('click', () => {
-                if (searchInput) searchInput.value = '';
-                if (typeFilter) typeFilter.value = 'all';
-                if (sortSelect) sortSelect.value = 'connected';
-                filterTables();
-                searchInput?.focus();
-            });
-            typeFilter?.addEventListener('change', filterTables);
-            sortSelect?.addEventListener('change', filterTables);
-
-            searchInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    if (searchInput.value) {
-                        searchInput.value = '';
-                        filterTables();
-                    } else {
-                        searchInput.blur();
-                    }
-                    e.preventDefault();
-                }
-            });
-
-            document.addEventListener('keydown', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                if (e.key === '/' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                    e.preventDefault();
-                    searchInput?.focus();
-                    searchInput?.select();
-                }
-            });
-
-            filterTables();
-        }
-    `;
-}
-
 function getVisualLineageSearchScript(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
@@ -2675,6 +2457,7 @@ function getVisualLineageSearchScript(): string {
             const searchInput = document.getElementById('lineage-search-input');
             const searchClear = document.getElementById('lineage-search-clear');
             const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
+            const sortSelect = document.getElementById('lineage-sort');
             const tablesGrid = document.getElementById('lineage-tables-grid');
             const popularSection = document.getElementById('lineage-popular-section');
             const showAllBtn = document.getElementById('lineage-show-all-btn');
@@ -2698,8 +2481,9 @@ function getVisualLineageSearchScript(): string {
                 const searchQuery = (searchInput?.value || '').toLowerCase().trim();
                 const hasActiveFilter = lineageTypeFilter !== 'all';
                 const shouldExpand = showAllTables || !!searchQuery || hasActiveFilter;
+                const sortValue = sortSelect?.value || 'connected';
                 const items = Array.from(tablesGrid.querySelectorAll('.lineage-table-item'));
-                let visibleCount = 0;
+                const visibleItems = [];
 
                 setLineageGridMode(shouldExpand);
 
@@ -2712,7 +2496,7 @@ function getVisualLineageSearchScript(): string {
 
                     if (matchesSearch && matchesType) {
                         item.style.display = '';
-                        visibleCount++;
+                        visibleItems.push(item);
 
                         // Highlight matching text
                         const nameEl = item.querySelector('.table-item-name');
@@ -2737,6 +2521,36 @@ function getVisualLineageSearchScript(): string {
                         item.style.display = 'none';
                     }
                 });
+
+                visibleItems.sort((a, b) => {
+                    const nameA = a.getAttribute('data-name') || '';
+                    const nameB = b.getAttribute('data-name') || '';
+                    const typeA = a.getAttribute('data-type') || '';
+                    const typeB = b.getAttribute('data-type') || '';
+                    const totalA = Number(a.getAttribute('data-total') || '0');
+                    const totalB = Number(b.getAttribute('data-total') || '0');
+
+                    if (sortValue === 'name-asc') {
+                        return nameA.localeCompare(nameB);
+                    }
+                    if (sortValue === 'name-desc') {
+                        return nameB.localeCompare(nameA);
+                    }
+                    if (sortValue === 'type') {
+                        if (typeA !== typeB) {
+                            return typeA.localeCompare(typeB);
+                        }
+                        return nameA.localeCompare(nameB);
+                    }
+
+                    if (totalB !== totalA) {
+                        return totalB - totalA;
+                    }
+                    return nameA.localeCompare(nameB);
+                });
+
+                visibleItems.forEach(item => tablesGrid.appendChild(item));
+                const visibleCount = visibleItems.length;
 
                 // Show/hide empty state and results count
                 if (emptyFilter) {
@@ -2796,6 +2610,8 @@ function getVisualLineageSearchScript(): string {
                     filterLineageTables();
                 });
             });
+
+            sortSelect?.addEventListener('change', filterLineageTables);
 
             showAllBtn?.addEventListener('click', () => {
                 showAllTables = true;

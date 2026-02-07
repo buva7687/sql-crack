@@ -79,6 +79,15 @@ export class LineageView {
                         <button class="view-filter-chip" data-filter="view">Views</button>
                         <button class="view-filter-chip" data-filter="cte">CTEs</button>
                     </div>
+                    <div class="view-sort-group">
+                        <label class="view-filter-label" for="lineage-sort">Sort:</label>
+                        <select id="lineage-sort" class="view-filter-select">
+                            <option value="connected">Most Connected</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="type">Type</option>
+                        </select>
+                    </div>
                     <div class="view-results-info" id="lineage-results-info" style="display: none;">
                         <span id="lineage-results-count">0</span> results
                     </div>
@@ -205,15 +214,15 @@ export class LineageView {
                     <div class="cross-link-actions">
                         <button type="button"
                                 class="cross-link-btn icon-only"
-                                title="Explore in Tables"
-                                data-action="cross-view-table-explorer"
+                                title="View Details"
+                                data-action="cross-view-detail"
                                 data-table="${this.escapeHtml(centerName)}"
                                 data-node-id="${this.escapeHtml(centerNodeId)}"
                                 data-node-type="${centerNode?.type || 'table'}">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                             </svg>
-                            <span>Explore in Tables</span>
+                            <span>View Details</span>
                         </button>
                         <button type="button"
                                 class="cross-link-btn icon-only"
@@ -457,12 +466,13 @@ export class LineageView {
             return '<p class="no-tables">No tables, views, or CTEs found</p>';
         }
 
-        return nodeConnections.map(({ node, upstreamCount, downstreamCount }) => `
-            <button class="lineage-table-item"
+        return nodeConnections.map(({ node, upstreamCount, downstreamCount, total }) => `
+            <button class="lineage-table-item connection-${this.getConnectionStrength(total)}"
                     data-action="select-node"
                     data-node-id="${this.escapeHtml(node.id)}"
                     data-name="${this.escapeHtml(node.name.toLowerCase())}"
-                    data-type="${node.type}">
+                    data-type="${node.type}"
+                    data-total="${total}">
                 <span class="table-item-icon">${this.getNodeIcon(node.type)}</span>
                 <span class="table-item-name">${this.escapeHtml(node.name)}</span>
                 <span class="table-item-type">${node.type}</span>
@@ -503,12 +513,13 @@ export class LineageView {
             return '<p class="no-popular">No connected tables found</p>';
         }
 
-        return nodeConnections.slice(0, limit).map(({ node, upstreamCount, downstreamCount }) => `
-            <button class="popular-item"
+        return nodeConnections.slice(0, limit).map(({ node, upstreamCount, downstreamCount, total }) => `
+            <button class="popular-item connection-${this.getConnectionStrength(total)}"
                     data-action="select-node"
                     data-node-id="${this.escapeHtml(node.id)}"
                     data-node-name="${this.escapeHtml(node.name)}"
-                    data-node-type="${node.type}">
+                    data-node-type="${node.type}"
+                    data-total="${total}">
                 <span class="popular-icon">${this.getNodeIcon(node.type)}</span>
                 <span class="popular-name">${this.escapeHtml(node.name)}</span>
                 <span class="popular-type-badge">${node.type}</span>
@@ -806,6 +817,19 @@ export class LineageView {
      */
     private getNodeIcon(type: string): string {
         return getWorkspaceNodeIcon(type);
+    }
+
+    private getConnectionStrength(total: number): 'none' | 'low' | 'medium' | 'high' {
+        if (total <= 0) {
+            return 'none';
+        }
+        if (total < 3) {
+            return 'low';
+        }
+        if (total < 10) {
+            return 'medium';
+        }
+        return 'high';
     }
 
     /**

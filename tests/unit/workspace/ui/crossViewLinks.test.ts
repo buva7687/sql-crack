@@ -53,10 +53,10 @@ describe('workspace cross-view linking', () => {
 
         expect(tableHtml).toContain('data-action="cross-view-lineage"');
         expect(tableHtml).toContain('data-action="cross-view-impact"');
-        expect(lineageHtml).toContain('data-action="cross-view-table-explorer"');
+        expect(lineageHtml).toContain('data-action="cross-view-detail"');
         expect(lineageHtml).toContain('data-action="cross-view-impact"');
         expect(impactHtml).toContain('data-action="cross-view-lineage"');
-        expect(impactHtml).toContain('data-action="cross-view-table-explorer"');
+        expect(impactHtml).toContain('data-action="cross-view-detail"');
     });
 
     it('handles cross-view actions through delegated client script logic', () => {
@@ -72,7 +72,8 @@ describe('workspace cross-view linking', () => {
         expect(script).toContain("action.indexOf('cross-view-') === 0");
         expect(script).toContain('prefillImpactForm');
         expect(script).toContain("switchToView('lineage'");
-        expect(script).toContain("switchToView('tableExplorer'");
+        expect(script).toContain("action === 'cross-view-detail'");
+        expect(script).not.toContain("switchToView('tableExplorer'");
         expect(script).toContain("switchToView('impact'");
         expect(css).toContain('.cross-link-actions');
         expect(css).toContain('.cross-link-btn');

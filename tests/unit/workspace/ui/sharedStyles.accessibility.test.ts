@@ -54,8 +54,8 @@ describe('workspace sharedStyles accessibility rules', () => {
     it('includes view-specific skeleton styles for non-graph tabs', () => {
         const css = getWebviewStyles(true);
         expect(css).toContain('.view-skeleton-lineage');
-        expect(css).toContain('.view-skeleton-tables');
         expect(css).toContain('.view-skeleton-impact');
+        expect(css).not.toContain('.view-skeleton-tables');
         expect(css).toContain('@keyframes skeleton-pulse');
     });
 

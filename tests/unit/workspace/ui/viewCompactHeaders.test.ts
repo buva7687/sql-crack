@@ -1,6 +1,5 @@
 import { ImpactView } from '../../../../src/workspace/ui/impactView';
 import { LineageView } from '../../../../src/workspace/ui/lineageView';
-import { TableExplorer } from '../../../../src/workspace/ui/tableExplorer';
 import { getWebviewStyles } from '../../../../src/workspace/ui/sharedStyles';
 import { LineageGraph } from '../../../../src/workspace/lineage/types';
 
@@ -28,21 +27,15 @@ function createGraph(): LineageGraph {
 }
 
 describe('workspace compact view headers', () => {
-    it('renders compact, differentiated headers across lineage, tables, and impact views', () => {
+    it('renders compact, differentiated headers across lineage and impact views', () => {
         const graph = createGraph();
         const lineageHtml = new LineageView().generateLineageSearchView(graph);
-        const tableHtml = new TableExplorer().generateTableList(graph);
         const impactHtml = new ImpactView().generateImpactForm(graph);
 
         expect(lineageHtml).toContain('class="view-container view-lineage"');
         expect(lineageHtml).toContain('class="view-compact-header"');
         expect(lineageHtml).toContain('class="view-inline-stats"');
         expect(lineageHtml).not.toContain('view-controls-header');
-
-        expect(tableHtml).toContain('class="view-container view-tables"');
-        expect(tableHtml).toContain('class="view-compact-header"');
-        expect(tableHtml).toContain('class="view-inline-stats"');
-        expect(tableHtml).not.toContain('view-controls-header');
 
         expect(impactHtml).toContain('class="view-container view-impact"');
         expect(impactHtml).toContain('class="view-compact-header"');
@@ -56,7 +49,6 @@ describe('workspace compact view headers', () => {
         expect(css).toContain('.view-compact-header');
         expect(css).toContain('.view-inline-stats');
         expect(css).toContain('.view-container.view-lineage');
-        expect(css).toContain('.view-container.view-tables');
         expect(css).toContain('.view-container.view-impact');
     });
 });

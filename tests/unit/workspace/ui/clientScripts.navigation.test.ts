@@ -80,7 +80,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('fitToScreen();');
     });
 
-    it('uses view-specific skeleton variants for lineage, tables, and impact loading states', () => {
+    it('uses view-specific skeleton variants for lineage and impact loading states', () => {
         const script = getWebviewScript({
             nonce: 'test',
             graphData: '{"nodes":[]}',
@@ -90,8 +90,9 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain('view-skeleton-lineage');
-        expect(script).toContain('view-skeleton-tables');
         expect(script).toContain('view-skeleton-impact');
+        expect(script).not.toContain('view-skeleton-tables');
+        expect(script).not.toContain("switchToTableExplorer");
     });
 
     it('preserves selected lineage direction when opening another node from search', () => {

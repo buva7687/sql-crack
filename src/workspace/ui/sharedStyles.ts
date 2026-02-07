@@ -587,9 +587,6 @@ export function getSharedViewStyles(): string {
         .view-container.view-lineage {
             border-top-color: var(--node-view-border);
         }
-        .view-container.view-tables {
-            border-top-color: var(--node-table-border);
-        }
         .view-container.view-impact {
             border-top-color: var(--warning);
         }
@@ -622,7 +619,6 @@ export function getSharedViewStyles(): string {
             letter-spacing: 0.2px;
         }
         .view-lineage .view-compact-header h3 { color: var(--node-view); }
-        .view-tables .view-compact-header h3 { color: var(--node-table); }
         .view-impact .view-compact-header h3 { color: var(--warning); }
         .view-inline-stats {
             margin-left: auto;
@@ -800,6 +796,24 @@ export function getSharedViewStyles(): string {
             width: 14px;
             height: 14px;
         }
+        .view-filter-select {
+            min-width: 150px;
+            padding: 6px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+        }
+        .view-filter-select:hover {
+            border-color: var(--accent);
+        }
+        .view-filter-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
 
         /* Quick Filter Chips */
         .view-quick-filters {
@@ -807,6 +821,15 @@ export function getSharedViewStyles(): string {
             gap: 8px;
             flex-wrap: wrap;
             align-items: center;
+        }
+        .view-sort-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .view-sort-group .view-filter-label {
+            margin: 0;
         }
         .view-filter-chip {
             padding: 6px 12px;
@@ -827,6 +850,17 @@ export function getSharedViewStyles(): string {
             background: var(--accent);
             border-color: var(--accent);
             color: white;
+        }
+        @media (max-width: 760px) {
+            .view-sort-group {
+                margin-left: 0;
+                width: 100%;
+                justify-content: flex-start;
+            }
+            .view-filter-select {
+                min-width: 0;
+                flex: 1;
+            }
         }
 
         /* View Content Grid */
@@ -965,6 +999,23 @@ export function getSharedViewStyles(): string {
             transform: translateY(-1px);
             box-shadow: var(--shadow-sm);
         }
+        .lineage-table-item.connection-high,
+        .popular-item.connection-high {
+            border-left: 3px solid var(--accent);
+        }
+        .lineage-table-item.connection-medium,
+        .popular-item.connection-medium {
+            border-left: 3px solid var(--warning);
+        }
+        .lineage-table-item.connection-low,
+        .popular-item.connection-low {
+            border-left: 3px solid var(--success);
+        }
+        .lineage-table-item.connection-none,
+        .popular-item.connection-none {
+            border-left: 3px solid var(--border-subtle);
+            opacity: 0.9;
+        }
         .table-item-icon {
             font-size: 18px;
             flex-shrink: 0;
@@ -1019,7 +1070,6 @@ export function getSharedViewStyles(): string {
         .view-results-info {
             font-size: 12px;
             color: var(--text-muted);
-            margin-left: auto;
         }
 
         /* View Empty State */
@@ -2088,7 +2138,6 @@ export function getImpactFormStyles(): string {
         .view-skeleton-header,
         .view-skeleton-search,
         .view-skeleton-card,
-        .view-skeleton-list-item,
         .view-skeleton-field,
         .view-skeleton-button {
             background: var(--bg-secondary);
@@ -2102,9 +2151,6 @@ export function getImpactFormStyles(): string {
         }
         .view-skeleton-lineage .view-skeleton-header {
             width: 44%;
-        }
-        .view-skeleton-tables .view-skeleton-header {
-            width: 36%;
         }
         .view-skeleton-impact .view-skeleton-header {
             width: 30%;
@@ -2120,14 +2166,6 @@ export function getImpactFormStyles(): string {
         }
         .view-skeleton-card {
             height: 76px;
-        }
-        .view-skeleton-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .view-skeleton-list-item {
-            height: 56px;
         }
         .view-skeleton-form {
             display: flex;
