@@ -5,6 +5,8 @@ import { FocusMode, LayoutType } from '../types';
 import { createExportDropdown } from './exportDropdown';
 import { createLayoutPicker } from './layoutPicker';
 import { ICONS } from '../../shared/icons';
+import { getComponentUiColors } from '../constants';
+import { repositionBreadcrumbBar } from './breadcrumbBar';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -277,6 +279,9 @@ export function createToolbar(
     // Set up ResizeObserver for overflow menu
     const resizeObserver = setupOverflowObserver(actions, toolbarWrapper, callbacks.isDarkTheme);
     applyOverflowMenuTheme(callbacks.isDarkTheme());
+
+    // Apply initial theme to toolbar elements (covers light-theme startup)
+    updateToolbarTheme(callbacks.isDarkTheme(), toolbar, actions, searchContainer);
 
     // Set initial dialect value
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
@@ -1625,6 +1630,25 @@ export function updateToolbarTheme(
         btn.style.color = textColor;
     });
 
+    // Update floating dropdown menus
+    const theme = getComponentUiColors(dark);
+    document.querySelectorAll('.sql-crack-floating-toolbar-menu').forEach(menu => {
+        const el = menu as HTMLElement;
+        el.style.background = theme.surfaceElevated;
+        el.style.borderColor = theme.border;
+        el.style.boxShadow = theme.shadow;
+        // Update menu item text colors
+        el.querySelectorAll<HTMLElement>('div').forEach(child => {
+            const c = child.style.color;
+            if (c && c !== theme.textDim && c !== theme.accent) {
+                // Update non-accent, non-header text to match theme
+                if (c === '#e2e8f0' || c === 'rgb(226, 232, 240)' || c === '#1e293b' || c === 'rgb(30, 41, 59)') {
+                    child.style.color = theme.textBright;
+                }
+            }
+        });
+    });
+
     applyOverflowMenuTheme(dark);
 }
 
@@ -1729,6 +1753,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         </span>
     `;
     badge.title = tooltipText;
+    requestAnimationFrame(() => repositionBreadcrumbBar());
 }
 
 /**
@@ -1738,5 +1763,6 @@ export function clearErrorBadge(): void {
     const badge = document.getElementById('sql-crack-error-badge');
     if (badge) {
         badge.remove();
+        repositionBreadcrumbBar();
     }
 }

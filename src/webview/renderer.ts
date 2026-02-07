@@ -7257,7 +7257,10 @@ export function toggleFullscreen(enable?: boolean): void {
         }
         
         // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner];
+        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
+        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
+        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
         uiElements.forEach(el => {
             if (el) {
                 el.dataset.originalDisplay = el.style.display || '';

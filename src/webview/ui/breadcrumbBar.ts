@@ -115,6 +115,20 @@ export function isBreadcrumbBarVisible(): boolean {
     return barElement !== null && barElement.style.display !== 'none';
 }
 
+export function repositionBreadcrumbBar(): void {
+    repositionBar();
+}
+
+function repositionBar(): void {
+    if (!barElement) { return; }
+    const errorBadge = document.getElementById('sql-crack-error-badge');
+    if (errorBadge && errorBadge.offsetHeight > 0) {
+        barElement.style.top = `${56 + errorBadge.offsetHeight + 4}px`;
+    } else {
+        barElement.style.top = '56px';
+    }
+}
+
 function renderSegments(): void {
     if (!barElement || !callbacks) { return; }
 
@@ -124,6 +138,7 @@ function renderSegments(): void {
     }
 
     barElement.style.display = 'flex';
+    repositionBar();
     barElement.innerHTML = '';
 
     const isDark = callbacks.isDarkTheme();
