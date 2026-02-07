@@ -73,6 +73,7 @@ describe('workspace cross-view linking', () => {
         expect(script).toContain('prefillImpactForm');
         expect(script).toContain("switchToView('lineage'");
         expect(script).toContain("action === 'cross-view-detail'");
+        expect(script).not.toContain('cross-view-table-explorer');
         expect(script).not.toContain("switchToView('tableExplorer'");
         expect(script).toContain("switchToView('impact'");
         expect(css).toContain('.cross-link-actions');

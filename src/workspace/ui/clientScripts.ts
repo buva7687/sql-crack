@@ -1728,7 +1728,6 @@ function getMessageHandlingScript(): string {
                     }
                     break;
                 case 'tableDetailResult':
-                case 'tableExplorerResult':
                     if (lineageContent) {
                         if (message.data?.error) {
                             lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + message.data.error + '</div>';
@@ -1944,7 +1943,7 @@ function getEventDelegationScript(): string {
                         return;
                     }
 
-                    if (action === 'cross-view-detail' || action === 'cross-view-table-explorer') {
+                    if (action === 'cross-view-detail') {
                         if (!tableName) { return; }
 
                         switchToView('lineage', false, tableName, nodeType);

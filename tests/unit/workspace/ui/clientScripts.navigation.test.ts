@@ -93,6 +93,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('view-skeleton-impact');
         expect(script).not.toContain('view-skeleton-tables');
         expect(script).not.toContain("switchToTableExplorer");
+        expect(script).not.toContain('tableExplorerResult');
     });
 
     it('preserves selected lineage direction when opening another node from search', () => {
