@@ -201,6 +201,7 @@ export function getBaseStyles(): string {
         .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
         .icon-btn.active { background: var(--accent); color: white; }
         .icon-btn svg { width: 16px; height: 16px; }
+        .icon-btn.btn-disabled { opacity: 0.35; cursor: default; }
 
         /* ========== Search Box ========== */
         .search-box {
@@ -229,6 +230,7 @@ export function getBaseStyles(): string {
         }
         .search-clear:hover { color: var(--error-light); background: rgba(239, 68, 68, 0.1); }
         .search-clear.visible { display: flex; }
+        .search-count { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 
         /* ========== View Mode Tabs ========== */
         .view-tabs {
@@ -1668,6 +1670,17 @@ export function getImpactFormStyles(): string {
             border: 1px solid var(--border-subtle);
             border-radius: 999px;
             padding: 2px 7px;
+        }
+        .typeahead-loading {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; font-size: 12px; color: var(--text-muted);
+        }
+        .loading-spinner-small {
+            width: 14px; height: 14px;
+            border: 2px solid var(--border-subtle);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
         }
         .impact-selected-badge {
             display: inline-flex;

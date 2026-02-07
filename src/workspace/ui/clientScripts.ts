@@ -63,6 +63,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphLegendBar = document.getElementById('workspace-legend-bar');
         const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
         const graphLegendToggleBtn = document.getElementById('btn-legend-toggle');
+        const searchCount = document.getElementById('graph-search-count');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========
@@ -412,6 +413,16 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             if (selectionCrossLinks) {
                 selectionCrossLinks.style.display = 'none';
             }
+            updateGraphActionButtons();
+        }
+
+        function updateGraphActionButtons() {
+            const hasSelection = !!selectedNodeId;
+            [focusBtn, traceUpBtn, traceDownBtn].forEach(btn => {
+                if (!btn) return;
+                btn.classList.toggle('btn-disabled', !hasSelection);
+                btn.setAttribute('aria-disabled', hasSelection ? 'false' : 'true');
+            });
         }
 
         function updateSelectionPanel(node) {
@@ -481,6 +492,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             }
 
             if (focusModeEnabled) applyFocusMode();
+            updateGraphActionButtons();
         }
 
         function markWelcomeSeen() {
@@ -724,6 +736,12 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
             updateGraphEmptyState();
             applySearchHighlight();
+            if (searchCount) {
+                const total = graphData?.nodes?.length || 0;
+                const matched = getSearchMatchCount(query, typeFilter === 'all' ? undefined : [typeFilter]);
+                searchCount.textContent = matched + ' / ' + total;
+                searchCount.style.display = '';
+            }
         }
 
         function clearSearch() {
@@ -733,6 +751,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             vscode.postMessage({ command: 'clearSearch' });
             updateGraphEmptyState();
             applySearchHighlight();
+            if (searchCount) { searchCount.textContent = ''; searchCount.style.display = 'none'; }
         }
 
         let searchTimeout;
@@ -865,18 +884,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         });
         traceUpBtn?.addEventListener('click', () => {
             if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream dependencies.';
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream sources.';
                 return;
             }
             setTraceMode('upstream');
         });
         traceDownBtn?.addEventListener('click', () => {
             if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream dependents.';
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream consumers.';
                 return;
             }
             setTraceMode('downstream');
         });
+        updateGraphActionButtons();
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
@@ -958,13 +978,18 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                         const impactBadge = document.getElementById('impact-selected-badge');
                         const impactLabel = document.getElementById('impact-selected-label');
                         const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+                        const loader = document.getElementById('impact-typeahead-loading');
 
                         if (!impactInput || !impactTableId) {
                             if (attempt < 8) {
+                                if (loader && attempt === 0) loader.style.display = 'flex';
                                 setTimeout(() => prefillImpactFromSelection(attempt + 1), 80);
+                            } else {
+                                if (loader) loader.style.display = 'none';
                             }
                             return;
                         }
+                        if (loader) loader.style.display = 'none';
 
                         impactInput.value = nodeLabel;
                         impactTableId.value = nodeId;
@@ -1983,13 +2008,18 @@ function getEventDelegationScript(): string {
                             const impactBadge = document.getElementById('impact-selected-badge');
                             const impactLabel = document.getElementById('impact-selected-label');
                             const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+                            const loader = document.getElementById('impact-typeahead-loading');
 
                             if (!impactInput || !impactTableId) {
                                 if (attempt < 8) {
+                                    if (loader && attempt === 0) loader.style.display = 'flex';
                                     setTimeout(() => prefillImpactForm(attempt + 1), 80);
+                                } else {
+                                    if (loader) loader.style.display = 'none';
                                 }
                                 return;
                             }
+                            if (loader) loader.style.display = 'none';
 
                             impactInput.value = tableName;
                             impactTableId.value = inferredNodeId;

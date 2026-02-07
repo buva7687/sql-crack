@@ -70,6 +70,10 @@ export class ImpactView {
                                             </button>
                                         `).join('')}
                                     </div>
+                                    <div class="typeahead-loading" id="impact-typeahead-loading" style="display: none;">
+                                        <div class="loading-spinner-small"></div>
+                                        <span>Loading...</span>
+                                    </div>
                                     <div class="impact-selected-badge" id="impact-selected-badge" style="display: none;">
                                         <span id="impact-selected-label"></span>
                                         <button type="button" id="impact-selected-clear">Clear</button>

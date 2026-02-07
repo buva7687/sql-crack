@@ -1232,6 +1232,7 @@ ${bodyContent}
                             <path d="M18 6L6 18M6 6l12 12"/>
                         </svg>
                     </button>
+                    <span class="search-count" id="graph-search-count"></span>
                 </div>
                 <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1267,12 +1268,12 @@ ${bodyContent}
                         <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream dependencies">
+                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 19V5M5 12l7-7 7 7"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream dependents">
+                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 5v14M5 12l7 7 7-7"/>
                     </svg>

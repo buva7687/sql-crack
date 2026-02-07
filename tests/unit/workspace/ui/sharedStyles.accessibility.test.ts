@@ -87,6 +87,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.lineage-edge-transform { stroke: var(--warning); }');
     });
 
+    it('includes search-count, typeahead-loading, and btn-disabled styles', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.search-count');
+        expect(css).toContain('.typeahead-loading');
+        expect(css).toContain('.loading-spinner-small');
+        expect(css).toContain('.icon-btn.btn-disabled');
+    });
+
     it('includes graph sidebar selection cross-link styles', () => {
         const css = getWebviewStyles(true);
         expect(css).toContain('.selection-cross-links');

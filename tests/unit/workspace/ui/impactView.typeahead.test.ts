@@ -31,6 +31,15 @@ describe('ImpactView typeahead selection', () => {
         expect(html).not.toContain('impact-results-info');
     });
 
+    it('renders a typeahead loading indicator element', () => {
+        const html = new ImpactView().generateImpactForm(createGraph());
+
+        expect(html).toContain('id="impact-typeahead-loading"');
+        expect(html).toContain('class="typeahead-loading"');
+        expect(html).toContain('class="loading-spinner-small"');
+        expect(html).toContain('Loading...');
+    });
+
     it('wires typeahead behavior in client script and defines corresponding styles', () => {
         const script = getWebviewScript({
             nonce: 'test',

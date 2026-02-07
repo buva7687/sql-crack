@@ -130,6 +130,35 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("button.setAttribute('data-file-path', filePath || '');");
     });
 
+    it('captures graph-search-count element and updates it in performSearch/clearSearch', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const searchCount = document.getElementById('graph-search-count');");
+        expect(script).toContain("searchCount.textContent = matched + ' / ' + total;");
+        expect(script).toContain("searchCount.style.display = 'none';");
+    });
+
+    it('toggles btn-disabled class on focus/trace buttons via updateGraphActionButtons', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function updateGraphActionButtons()');
+        expect(script).toContain("btn.classList.toggle('btn-disabled', !hasSelection);");
+        expect(script).toContain("btn.setAttribute('aria-disabled'");
+        expect(script).toContain('updateGraphActionButtons();');
+    });
+
     it('synchronizes lineage overlay offsets with clamped legend height values', () => {
         const script = getWebviewScript({
             nonce: 'test',
