@@ -379,10 +379,10 @@ export class LineageGraphRenderer {
                 </marker>
                 <!-- Column lineage arrowheads -->
                 <marker id="column-arrowhead-upstream" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                    <polygon points="0 0, 8 3, 0 6" fill="#22c55e" />
+                    <polygon points="0 0, 8 3, 0 6" />
                 </marker>
                 <marker id="column-arrowhead-downstream" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                    <polygon points="0 0, 8 3, 0 6" fill="#3b82f6" />
+                    <polygon points="0 0, 8 3, 0 6" />
                 </marker>
             </defs>
         `;

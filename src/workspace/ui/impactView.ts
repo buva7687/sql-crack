@@ -114,12 +114,13 @@ export class ImpactView {
                                 </div>
                             </div>
                             <div class="view-form-actions">
-                                <button id="impact-analyze-btn" class="btn-primary" disabled>
+                                <button id="impact-analyze-btn" class="btn-primary" disabled aria-describedby="impact-analyze-hint">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
                                     </svg>
                                     <span>Analyze Impact</span>
                                 </button>
+                                <p id="impact-analyze-hint" class="form-hint">Select a table or view above to analyze impact</p>
                             </div>
                         </div>
                     </div>
@@ -446,8 +447,8 @@ export class ImpactView {
             <div class="export-options">
                 <h3>Export Report</h3>
                 <div class="export-buttons">
-                    <button onclick="exportImpactReport('markdown')">Markdown</button>
-                    <button onclick="exportImpactReport('json')">JSON</button>
+                    <button type="button" data-action="export-impact-report" data-format="markdown">Markdown</button>
+                    <button type="button" data-action="export-impact-report" data-format="json">JSON</button>
                 </div>
             </div>
         `;

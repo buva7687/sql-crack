@@ -1237,6 +1237,10 @@ function getViewModeScript(): string {
                 clearColumnHighlighting();
             }
 
+            // Reset lineage detail mode on explicit tab transitions so the back button
+            // always reflects the current tab's true navigation target.
+            lineageDetailView = false;
+
             // Save state of current view before switching
             saveCurrentViewState();
 
@@ -1351,6 +1355,7 @@ function getViewModeScript(): string {
                 }
             }
             updateSidebarSectionsForView();
+            updateBackButtonText();
             updateWorkspaceBreadcrumb();
         }
 
@@ -1499,32 +1504,25 @@ function getViewModeScript(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
-            const tabNames = { graph: 'Graph', lineage: 'Lineage', impact: 'Impact' };
-            if (lineageDetailView && currentViewMode !== 'graph') {
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
+            if (lineageDetailView && currentViewMode === 'lineage') {
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Lineage';
             } else {
-                const prevView = navStack.length > 0 ? navStack[navStack.length - 1] : 'graph';
-                const fromLabel = prevView === 'graph' && navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph') + fromLabel;
+                const fromLabel = navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph' + fromLabel;
             }
         }
 
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (lineageDetailView && currentViewMode !== 'graph') {
+            if (lineageDetailView && currentViewMode === 'lineage') {
                 lineageDetailView = false;
                 updateBackButtonText();
-                if (currentViewMode === 'lineage') {
-                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'impact') {
-                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                    vscode.postMessage({ command: 'switchToImpactView' });
-                }
+                if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                vscode.postMessage({ command: 'switchToLineageView' });
             } else {
-                // Use nav stack to go back to previous view
-                const previousView = navStack.length > 0 ? navStack.pop() : 'graph';
-                switchToView(previousView, true); // skipMessage=true since we're navigating back
+                // Non-detail back always returns to Graph to match button label and user expectation.
+                navStack.length = 0;
+                switchToView('graph', true); // skipMessage=true since this is local navigation
             }
             updateWorkspaceBreadcrumb();
         });
@@ -1844,7 +1842,7 @@ function getMessageHandlingScript(): string {
                 bgRect.setAttribute('y', bbox.y - padding);
                 bgRect.setAttribute('width', width);
                 bgRect.setAttribute('height', height);
-                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#111111' : '#fafafa');
+                bgRect.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim());
                 svgClone.insertBefore(bgRect, svgClone.firstChild);
 
                 // Serialize SVG
@@ -1926,6 +1924,16 @@ function getEventDelegationScript(): string {
                 const tableName = target.getAttribute('data-table');
                 const nodeId = target.getAttribute('data-node-id');
                 const nodeType = target.getAttribute('data-node-type') || target.getAttribute('data-type') || 'table';
+
+                if (action === 'export-impact-report') {
+                    const requested = target.getAttribute('data-format') || 'markdown';
+                    const format = requested === 'json' ? 'impact-json' : 'impact-markdown';
+                    vscode.postMessage({
+                        command: 'export',
+                        format: format
+                    });
+                    return;
+                }
 
                 if (action && action.indexOf('cross-view-') === 0) {
                     const inferredNodeId = nodeId || (tableName ? ('table:' + tableName.toLowerCase()) : '');
@@ -2204,9 +2212,14 @@ function getImpactFormScript(): string {
                 });
             });
 
+            const analyzeHint = document.getElementById('impact-analyze-hint');
             function updateAnalyzeButtonState() {
                 if (analyzeBtn && tableIdInput) {
-                    analyzeBtn.disabled = !tableIdInput.value;
+                    const hasValue = !!tableIdInput.value;
+                    analyzeBtn.disabled = !hasValue;
+                    if (analyzeHint) {
+                        analyzeHint.classList.toggle('hidden', hasValue);
+                    }
                 }
             }
 
@@ -2661,6 +2674,7 @@ function getLineageGraphScript(): string {
         let pendingLineageGraphMessage = null;
         let refreshLineageMinimapViewport = null;
         let lineageShortcutHandler = null;
+        let lineageOverlayResizeHandler = null;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
 
         function processLineageGraphResult(message) {
@@ -2997,6 +3011,22 @@ function getLineageGraphScript(): string {
             maybeRenderColumnTraceHint();
         }
 
+        function syncLineageOverlayOffsets() {
+            const container = document.getElementById('lineage-graph-container');
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!container) return;
+
+            if (!legendPanel || legendPanel.classList.contains('is-hidden')) {
+                container.style.setProperty('--lineage-legend-height', '0px');
+                return;
+            }
+
+            const measuredHeight = Math.ceil(legendPanel.getBoundingClientRect().height) || legendPanel.offsetHeight || 0;
+            // Clamp to avoid pathological layout values pushing overlays too far upward.
+            const legendHeight = Math.min(Math.max(measuredHeight, 0), 96);
+            container.style.setProperty('--lineage-legend-height', legendHeight + 'px');
+        }
+
         function setLineageLegendVisible(visible) {
             const legendPanel = document.getElementById('lineage-legend');
             if (!legendPanel) return;
@@ -3011,6 +3041,7 @@ function getLineageGraphScript(): string {
             if (container) {
                 container.classList.toggle('lineage-legend-visible', visible);
             }
+            syncLineageOverlayOffsets();
         }
 
         function toggleLineageLegendBar(show) {
@@ -3040,6 +3071,7 @@ function getLineageGraphScript(): string {
             }
 
             setLineageLegendVisible(showLegend);
+            requestAnimationFrame(syncLineageOverlayOffsets);
 
             const dismissBtn = document.getElementById('legend-dismiss');
             dismissBtn?.addEventListener('click', (event) => {
@@ -3053,6 +3085,12 @@ function getLineageGraphScript(): string {
                 event.stopPropagation();
                 toggleLineageLegendBar();
             });
+
+            if (lineageOverlayResizeHandler) {
+                window.removeEventListener('resize', lineageOverlayResizeHandler);
+            }
+            lineageOverlayResizeHandler = () => syncLineageOverlayOffsets();
+            window.addEventListener('resize', lineageOverlayResizeHandler);
         }
 
         function getLineageTypeIcon(type) {
@@ -3746,7 +3784,6 @@ function getColumnLineageScript(): string {
             path.setAttribute('class', 'column-lineage-edge column-edge-' + type);
             path.setAttribute('d', pathD);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', type === 'upstream' ? '#22c55e' : '#3b82f6');
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-opacity', '0.7');
             path.setAttribute('marker-end', 'url(#column-arrowhead-' + type + ')');

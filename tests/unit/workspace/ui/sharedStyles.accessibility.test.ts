@@ -45,7 +45,9 @@ describe('workspace sharedStyles accessibility rules', () => {
     it('includes bottom legend strip styles for workspace graph and lineage views', () => {
         const css = getWebviewStyles(false);
         expect(css).toContain('.lineage-legend.is-hidden');
-        expect(css).toContain('.lineage-graph-container.lineage-legend-visible .lineage-minimap');
+        expect(css).toContain('--lineage-legend-height: 0px;');
+        expect(css).toContain('bottom: calc(18px + clamp(0px, var(--lineage-legend-height), 96px));');
+        expect(css).toContain('bottom: calc(22px + clamp(0px, var(--lineage-legend-height), 96px));');
         expect(css).toContain('.workspace-legend-bar');
         expect(css).toContain('.graph-area.graph-legend-visible .keyboard-hints');
         expect(css).not.toContain('.workspace-legend-bar,\n        .legend-inline');
@@ -59,6 +61,26 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('@keyframes skeleton-pulse');
     });
 
+    it('defines column-edge upstream/downstream CSS variables for both themes', () => {
+        const darkVars = getCssVariables(true);
+        const lightVars = getCssVariables(false);
+
+        expect(darkVars).toContain('--column-edge-upstream: #22c55e');
+        expect(darkVars).toContain('--column-edge-downstream: #3b82f6');
+        expect(lightVars).toContain('--column-edge-upstream: #16a34a');
+        expect(lightVars).toContain('--column-edge-downstream: #2563eb');
+    });
+
+    it('uses CSS variables for column edge strokes and arrowhead fills', () => {
+        const css = getWebviewStyles(true);
+
+        expect(css).toContain('.column-edge-upstream');
+        expect(css).toContain('stroke: var(--column-edge-upstream)');
+        expect(css).toContain('stroke: var(--column-edge-downstream)');
+        expect(css).toContain('#column-arrowhead-upstream polygon { fill: var(--column-edge-upstream); }');
+        expect(css).toContain('#column-arrowhead-downstream polygon { fill: var(--column-edge-downstream); }');
+    });
+
     it('avoids stale danger token usage and uses theme variables for transform edges', () => {
         const css = getWebviewStyles(true);
         expect(css).not.toContain('var(--danger)');
@@ -70,5 +92,25 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.selection-cross-links');
         expect(css).toContain('.selection-divider');
         expect(css).toContain('.selection-actions-label');
+    });
+
+    it('renders theme-aware borders for workspace view tabs', () => {
+        const css = getBaseStyles();
+        expect(css).toContain('.view-tabs');
+        expect(css).toContain('border: 1px solid var(--border-color);');
+        expect(css).toContain('.view-tab {');
+        expect(css).toContain('border: 1px solid var(--border-subtle);');
+        expect(css).toContain('.view-tab.active');
+        expect(css).toContain('border-color: var(--accent);');
+    });
+
+    it('keeps lineage minimap and zoom controls above legend overlay', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.lineage-zoom-controls');
+        expect(css).toContain('.lineage-minimap');
+        expect(css).toContain('.lineage-legend');
+        expect(css).toContain('z-index: 130;');
+        expect(css).toContain('.lineage-legend {\n            position: absolute;');
+        expect(css).toContain('z-index: 100;');
     });
 });

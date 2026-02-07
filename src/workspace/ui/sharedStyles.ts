@@ -50,6 +50,8 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-update: #fcd34d;
                 --edge-delete: #fca5a5;
                 --edge-subquery: #a78bfa;
+                --column-edge-upstream: #22c55e;
+                --column-edge-downstream: #3b82f6;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -109,6 +111,8 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-update: #fbbf24;
                 --edge-delete: #f87171;
                 --edge-subquery: #8b5cf6;
+                --column-edge-upstream: #16a34a;
+                --column-edge-downstream: #2563eb;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -230,16 +234,17 @@ export function getBaseStyles(): string {
         .view-tabs {
             display: flex; align-items: center; gap: 2px;
             background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
         }
         .view-tab {
-            padding: 6px 12px; border: none; background: transparent;
+            padding: 6px 12px; border: 1px solid var(--border-subtle); background: var(--bg-secondary);
             color: var(--text-muted); font-size: 12px; font-weight: 500;
             border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
             white-space: nowrap;
         }
-        .view-tab:hover { color: var(--text-secondary); background: var(--bg-tertiary); }
+        .view-tab:hover { color: var(--text-secondary); background: var(--bg-tertiary); border-color: var(--border-color); }
         .view-tab.active {
-            background: var(--accent); color: white;
+            background: var(--accent); color: white; border-color: var(--accent);
         }
         .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
 
@@ -299,6 +304,14 @@ export function getBaseStyles(): string {
         }
         .help-tooltip-item:last-child { margin-bottom: 0; }
         .help-tooltip-item strong { color: var(--text-primary); }
+        .help-tooltip-hint {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border-subtle);
+            font-style: italic;
+        }
 
         /* ========== Loading States ========== */
         .loading-container {
@@ -1176,6 +1189,12 @@ export function getSharedViewStyles(): string {
             padding-top: 20px;
             border-top: 1px solid var(--border-subtle);
         }
+        .form-hint {
+            margin: 6px 0 0;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+        .form-hint.hidden { display: none; }
     `;
 }
 
@@ -2832,6 +2851,7 @@ export function getLineageGraphStyles(): string {
             flex: 1;
             min-height: 0;
             overflow: hidden;
+            --lineage-legend-height: 0px;
             background-color: var(--canvas-bg);
             background-image:
                 radial-gradient(circle, var(--grid-color) 1px, transparent 1px),
@@ -2853,7 +2873,7 @@ export function getLineageGraphStyles(): string {
         /* Zoom Controls */
         .lineage-zoom-controls {
             position: absolute;
-            bottom: 16px;
+            bottom: calc(18px + clamp(0px, var(--lineage-legend-height), 96px));
             left: 16px;
             display: flex;
             align-items: center;
@@ -2863,7 +2883,7 @@ export function getLineageGraphStyles(): string {
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
             box-shadow: var(--shadow-md);
-            z-index: 10;
+            z-index: 130;
         }
         .lineage-zoom-controls .zoom-btn {
             display: flex;
@@ -3084,10 +3104,10 @@ export function getLineageNodeStyles(): string {
             fill: var(--text-primary);
         }
         .lineage-node .column-row.in-path .column-state {
-            fill: #22c55e;  /* Green for upstream */
+            fill: var(--column-edge-upstream);
         }
         .lineage-node.downstream .column-row.in-path .column-state {
-            fill: #3b82f6;  /* Blue for downstream */
+            fill: var(--column-edge-downstream);
         }
         .lineage-node .column-row.dimmed {
             opacity: 0.3;
@@ -3100,7 +3120,7 @@ export function getLineageNodeStyles(): string {
         /* Column Lineage Info Panel */
         .column-lineage-info {
             position: absolute;
-            bottom: 20px;
+            bottom: calc(22px + clamp(0px, var(--lineage-legend-height), 96px));
             left: 50%;
             transform: translateX(-50%);
             background: var(--bg-secondary);
@@ -3108,7 +3128,7 @@ export function getLineageNodeStyles(): string {
             border-radius: var(--radius-lg);
             padding: 12px 16px;
             box-shadow: var(--shadow-lg);
-            z-index: 100;
+            z-index: 130;
             min-width: 280px;
             display: none;
         }
@@ -3152,10 +3172,10 @@ export function getLineageNodeStyles(): string {
             color: var(--text-secondary);
         }
         .column-lineage-info .info-stats .stat.upstream {
-            color: #22c55e;
+            color: var(--column-edge-upstream);
         }
         .column-lineage-info .info-stats .stat.downstream {
-            color: #3b82f6;
+            color: var(--column-edge-downstream);
         }
         .column-lineage-info .info-hint {
             font-size: 11px;
@@ -3262,13 +3282,15 @@ export function getLineageNodeStyles(): string {
             transition: stroke-opacity 0.2s;
         }
         .column-edge-upstream {
-            stroke: #22c55e;
+            stroke: var(--column-edge-upstream);
             stroke-dasharray: 4, 2;
         }
         .column-edge-downstream {
-            stroke: #3b82f6;
+            stroke: var(--column-edge-downstream);
             stroke-dasharray: 4, 2;
         }
+        #column-arrowhead-upstream polygon { fill: var(--column-edge-upstream); }
+        #column-arrowhead-downstream polygon { fill: var(--column-edge-downstream); }
 
         /* Tooltip */
         .lineage-tooltip {
@@ -3475,16 +3497,6 @@ export function getLineageNodeStyles(): string {
             color: var(--text-primary);
             background: var(--bg-tertiary);
         }
-        .lineage-graph-container.lineage-legend-visible .lineage-zoom-controls {
-            bottom: 68px;
-        }
-        .lineage-graph-container.lineage-legend-visible .lineage-minimap {
-            bottom: 68px;
-        }
-        .lineage-graph-container.lineage-legend-visible .column-lineage-info {
-            bottom: 74px;
-        }
-
         /* Keyboard Shortcuts Hint */
         .keyboard-hints {
             position: absolute;
@@ -3537,14 +3549,14 @@ export function getLineageNodeStyles(): string {
         /* Mini-map */
         .lineage-minimap {
             position: absolute;
-            bottom: 12px;
+            bottom: calc(18px + clamp(0px, var(--lineage-legend-height), 96px));
             right: 12px;
             width: 180px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
-            z-index: 100;
+            z-index: 130;
             overflow: hidden;
         }
         .lineage-minimap .minimap-header {

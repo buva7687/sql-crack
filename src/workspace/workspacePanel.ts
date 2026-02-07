@@ -1211,6 +1211,7 @@ ${bodyContent}
                 <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
                 <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
                 <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
+                <div class="help-tooltip-hint">Tip: To trace data flow from a specific table, use the Lineage tab.</div>
             </div>
 
             <div class="header-right">
@@ -1905,6 +1906,16 @@ ${bodyContent}
      * Handle export functionality
      */
     private async handleExport(format: string): Promise<void> {
+        if (format === 'impact-markdown') {
+            await this.exportImpactReport('markdown');
+            return;
+        }
+
+        if (format === 'impact-json') {
+            await this.exportImpactReport('json');
+            return;
+        }
+
         if (this._isRebuilding) {
             vscode.window.showWarningMessage('Graph is being rebuilt. Please try exporting again in a moment.');
             return;
@@ -1931,6 +1942,163 @@ ${bodyContent}
         } else if (format === 'dot') {
             await this.exportAsDot();
         }
+    }
+
+    /**
+     * Export the latest impact report in Markdown or JSON format.
+     */
+    private async exportImpactReport(format: 'markdown' | 'json'): Promise<void> {
+        if (!this._currentImpactReport) {
+            vscode.window.showErrorMessage('No impact report available. Run an impact analysis first.');
+            return;
+        }
+
+        const report = this._currentImpactReport;
+        const safeTarget = report.target.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            || 'impact';
+        const extension = format === 'markdown' ? 'md' : 'json';
+        const defaultFilename = `impact-report-${safeTarget}.${extension}`;
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(defaultFilename),
+            filters: format === 'markdown'
+                ? { 'Markdown': ['md'] }
+                : { 'JSON': ['json'] }
+        });
+
+        if (!uri) {
+            return;
+        }
+
+        const payload = this.buildImpactReportExportData(report);
+        const content = format === 'markdown'
+            ? this.generateImpactReportMarkdown(payload)
+            : JSON.stringify(payload, null, 2);
+
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
+        vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+    }
+
+    /**
+     * Build a stable export payload for impact report serialization.
+     */
+    private buildImpactReportExportData(report: ImpactReport): Record<string, unknown> {
+        const serializeItems = (items: typeof report.directImpacts) => items.map(item => ({
+            node: {
+                id: item.node.id,
+                name: item.node.name,
+                type: item.node.type,
+                filePath: item.node.filePath,
+                lineNumber: item.node.lineNumber
+            },
+            impactType: item.impactType,
+            reason: item.reason,
+            filePath: item.filePath,
+            lineNumber: item.lineNumber,
+            severity: item.severity
+        }));
+
+        return {
+            version: '1.0',
+            exportedAt: new Date().toISOString(),
+            report: {
+                changeType: report.changeType,
+                target: report.target,
+                severity: report.severity,
+                summary: report.summary,
+                directImpacts: serializeItems(report.directImpacts),
+                transitiveImpacts: serializeItems(report.transitiveImpacts),
+                suggestions: report.suggestions
+            }
+        };
+    }
+
+    /**
+     * Render Markdown output for an impact report export payload.
+     */
+    private generateImpactReportMarkdown(payload: Record<string, any>): string {
+        const report = payload.report as ImpactReport & {
+            directImpacts: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>;
+            transitiveImpacts: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>;
+        };
+        const lines: string[] = [];
+
+        lines.push('# Impact Analysis Report');
+        lines.push('');
+        lines.push(`- Exported: ${payload.exportedAt}`);
+        lines.push(`- Severity: ${report.severity.toUpperCase()}`);
+        lines.push(`- Change Type: ${report.changeType.toUpperCase()}`);
+        lines.push(`- Target: ${report.target.type} \`${report.target.name}\``);
+        lines.push('');
+        lines.push('## Summary');
+        lines.push('');
+        lines.push(`- Total Affected: ${report.summary.totalAffected}`);
+        lines.push(`- Tables Affected: ${report.summary.tablesAffected}`);
+        lines.push(`- Views Affected: ${report.summary.viewsAffected}`);
+        lines.push(`- Queries Affected: ${report.summary.queriesAffected}`);
+        lines.push(`- Files Affected: ${report.summary.filesAffected}`);
+        lines.push('');
+
+        const appendImpactSection = (
+            title: string,
+            items: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>
+        ) => {
+            lines.push(`## ${title}`);
+            lines.push('');
+            if (items.length === 0) {
+                lines.push('- None');
+                lines.push('');
+                return;
+            }
+
+            for (const item of items) {
+                const location = item.lineNumber > 0
+                    ? `${item.filePath}:${item.lineNumber}`
+                    : item.filePath;
+                lines.push(`- \`${item.node.name}\` (${item.node.type})`);
+                lines.push(`  - Severity: ${item.severity}`);
+                lines.push(`  - Reason: ${item.reason}`);
+                lines.push(`  - Location: ${location}`);
+            }
+            lines.push('');
+        };
+
+        appendImpactSection('Direct Impacts', report.directImpacts);
+        appendImpactSection('Transitive Impacts', report.transitiveImpacts);
+
+        lines.push('## Suggestions');
+        lines.push('');
+        if (report.suggestions.length === 0) {
+            lines.push('- None');
+        } else {
+            for (const suggestion of report.suggestions) {
+                lines.push(`- ${suggestion}`);
+            }
+        }
+        lines.push('');
+
+        return lines.join('\n');
     }
 
     /**

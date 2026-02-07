@@ -26,9 +26,13 @@ describe('workspace clientScripts navigation context', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(script).toContain("Back to ' + (tabNames[prevView] || 'Graph') + fromLabel");
+        expect(script).toContain("Back to Graph' + fromLabel");
         expect(script).toContain("navigationOriginLabel = '';");
         expect(script).toContain("navigationOriginType = '';");
+        expect(script).toContain('lineageDetailView = false;');
+        expect(script).toContain('updateBackButtonText();');
+        expect(script).toContain("if (lineageDetailView && currentViewMode === 'lineage')");
+        expect(script).toContain("switchToView('graph', true);");
     });
 
     it('renders actionable workspace breadcrumb segments for context-preserving navigation', () => {
@@ -124,5 +128,20 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'open-file':");
         expect(script).toContain("button.setAttribute('data-node-id', nodeId);");
         expect(script).toContain("button.setAttribute('data-file-path', filePath || '');");
+    });
+
+    it('synchronizes lineage overlay offsets with clamped legend height values', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function syncLineageOverlayOffsets()');
+        expect(script).toContain('Math.min(Math.max(measuredHeight, 0), 96)');
+        expect(script).toContain("container.style.setProperty('--lineage-legend-height', legendHeight + 'px');");
+        expect(script).toContain('window.addEventListener(\'resize\', lineageOverlayResizeHandler);');
     });
 });
