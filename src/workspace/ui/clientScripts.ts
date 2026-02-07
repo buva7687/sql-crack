@@ -2470,16 +2470,32 @@ function getVisualLineageSearchScript(): string {
             const searchClear = document.getElementById('lineage-search-clear');
             const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
             const tablesGrid = document.getElementById('lineage-tables-grid');
+            const popularSection = document.getElementById('lineage-popular-section');
+            const showAllBtn = document.getElementById('lineage-show-all-btn');
             const emptyFilter = document.getElementById('lineage-empty-filter');
             const resultsInfo = document.getElementById('lineage-results-info');
             const resultsCount = document.getElementById('lineage-results-count');
+            let showAllTables = false;
+
+            function setLineageGridMode(expanded) {
+                if (tablesGrid) {
+                    tablesGrid.style.display = expanded ? 'grid' : 'none';
+                }
+                if (popularSection) {
+                    popularSection.style.display = expanded ? 'none' : 'block';
+                }
+            }
 
             function filterLineageTables() {
                 if (!tablesGrid) return;
 
                 const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const hasActiveFilter = lineageTypeFilter !== 'all';
+                const shouldExpand = showAllTables || !!searchQuery || hasActiveFilter;
                 const items = Array.from(tablesGrid.querySelectorAll('.lineage-table-item'));
                 let visibleCount = 0;
+
+                setLineageGridMode(shouldExpand);
 
                 items.forEach(item => {
                     const name = item.getAttribute('data-name') || '';
@@ -2518,7 +2534,7 @@ function getVisualLineageSearchScript(): string {
 
                 // Show/hide empty state and results count
                 if (emptyFilter) {
-                    emptyFilter.style.display = visibleCount === 0 ? 'block' : 'none';
+                    emptyFilter.style.display = shouldExpand && visibleCount === 0 ? 'block' : 'none';
                 }
                 if (resultsInfo && resultsCount) {
                     if (searchQuery || lineageTypeFilter !== 'all') {
@@ -2533,6 +2549,9 @@ function getVisualLineageSearchScript(): string {
             searchInput?.addEventListener('input', () => {
                 const query = searchInput.value.trim();
                 if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+                if (!query) {
+                    showAllTables = false;
+                }
                 filterLineageTables();
             });
 
@@ -2540,6 +2559,7 @@ function getVisualLineageSearchScript(): string {
                 if (e.key === 'Escape') {
                     searchInput.value = '';
                     if (searchClear) searchClear.style.display = 'none';
+                    showAllTables = false;
                     filterLineageTables();
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
@@ -2554,6 +2574,7 @@ function getVisualLineageSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
+                showAllTables = false;
                 filterLineageTables();
                 searchInput?.focus();
             });
@@ -2563,12 +2584,20 @@ function getVisualLineageSearchScript(): string {
                     filterChips.forEach(c => c.classList.remove('active'));
                     chip.classList.add('active');
                     lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
+                    if (lineageTypeFilter === 'all' && !(searchInput?.value || '').trim()) {
+                        showAllTables = false;
+                    }
                     filterLineageTables();
                 });
             });
 
-            // Setup click handlers for table items
-            tablesGrid?.querySelectorAll('.lineage-table-item').forEach(item => {
+            showAllBtn?.addEventListener('click', () => {
+                showAllTables = true;
+                filterLineageTables();
+            });
+
+            // Setup click handlers for table items (both curated and full grids)
+            document.querySelectorAll('.lineage-table-item, .popular-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
                     const nodeId = item.getAttribute('data-node-id');

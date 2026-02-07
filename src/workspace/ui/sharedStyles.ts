@@ -929,6 +929,45 @@ export function getSharedViewStyles(): string {
         .lineage-tables-section {
             margin-top: 8px;
         }
+        .lineage-popular-section {
+            margin-bottom: 10px;
+        }
+        .lineage-popular-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .lineage-popular-header h4 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .lineage-popular-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 10px;
+        }
+        .lineage-show-all-btn {
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 10px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .lineage-show-all-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--bg-hover);
+        }
         .lineage-tables-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

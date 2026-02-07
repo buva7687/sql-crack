@@ -42,6 +42,7 @@ export class LineageView {
 
         // Stats
         const stats = this.collectStats(graph);
+        const totalNodeCount = searchableNodes.length;
 
         if (searchableNodes.length === 0) {
             return this.generateEmptyState();
@@ -85,9 +86,19 @@ export class LineageView {
 
                 <!-- Content -->
                 <div class="view-content">
-                    <!-- All Tables Grid -->
                     <div class="lineage-tables-section">
-                        <div class="lineage-tables-grid" id="lineage-tables-grid">
+                        <div class="lineage-popular-section" id="lineage-popular-section">
+                            <div class="lineage-popular-header">
+                                <h4>Most Connected</h4>
+                                <button class="lineage-show-all-btn" id="lineage-show-all-btn" type="button">
+                                    Show all ${totalNodeCount} tables
+                                </button>
+                            </div>
+                            <div class="lineage-popular-grid" id="lineage-popular-grid">
+                                ${this.generatePopularNodes(graph, 6)}
+                            </div>
+                        </div>
+                        <div class="lineage-tables-grid" id="lineage-tables-grid" style="display: none;">
                             ${this.generateAllNodes(graph)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
