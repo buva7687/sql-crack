@@ -216,26 +216,13 @@ export class ImpactView {
      * Generate severity indicator badge
      */
     generateSeverityBadge(severity: string): string {
-        const colors: Record<string, string> = {
-            'critical': '#dc2626',
-            'high': '#f59e0b',
-            'medium': '#10b981',
-            'low': '#6b7280'
-        };
-
-        const icons: Record<string, string> = {
-            'critical': '🔴',
-            'high': '🟠',
-            'medium': '🟡',
-            'low': '🟢'
-        };
-
-        const color = colors[severity] || colors.low;
-        const icon = icons[severity] || '';
+        const normalizedSeverity = ['critical', 'high', 'medium', 'low'].includes(severity)
+            ? severity
+            : 'low';
 
         return `
-            <div class="severity-badge" style="background-color: ${color}">
-                ${icon} ${severity.toUpperCase()} IMPACT
+            <div class="severity-badge severity-${normalizedSeverity}">
+                ${normalizedSeverity.toUpperCase()} IMPACT
             </div>
         `;
     }

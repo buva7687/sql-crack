@@ -1507,6 +1507,30 @@ export function getImpactFormStyles(): string {
             gap: 12px;
             margin-bottom: 16px;
         }
+        .severity-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            color: #fff;
+            text-transform: uppercase;
+        }
+        .severity-badge.severity-critical {
+            background: var(--error);
+        }
+        .severity-badge.severity-high {
+            background: var(--warning);
+        }
+        .severity-badge.severity-medium {
+            background: var(--success);
+        }
+        .severity-badge.severity-low {
+            background: var(--text-dim);
+        }
         .report-target {
             margin-bottom: 16px;
             padding: 12px 14px;
