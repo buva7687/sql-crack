@@ -497,8 +497,10 @@ export class LineageView {
                 // External endpoints are still visible in full-node exploration views.
                 const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
                 const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
-                const upstreamCount = upstream.nodes.length;
-                const downstreamCount = downstream.nodes.length;
+                // Count only tables, views, CTEs (exclude column nodes to match graph display)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+                const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
+                const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
                 if (total > 0) {
                     nodeConnections.push({ node, upstreamCount, downstreamCount, total });
