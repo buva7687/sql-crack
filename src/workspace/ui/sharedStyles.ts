@@ -2109,6 +2109,80 @@ export function getImpactFormStyles(): string {
         .skeleton-line:last-child {
             width: 60%; margin-bottom: 0;
         }
+        .view-skeleton {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px;
+        }
+        .view-skeleton-header,
+        .view-skeleton-search,
+        .view-skeleton-card,
+        .view-skeleton-list-item,
+        .view-skeleton-field,
+        .view-skeleton-button {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            animation: skeleton-pulse 1.4s ease-in-out infinite;
+        }
+        .view-skeleton-header {
+            height: 36px;
+            width: 52%;
+        }
+        .view-skeleton-lineage .view-skeleton-header {
+            width: 44%;
+        }
+        .view-skeleton-tables .view-skeleton-header {
+            width: 36%;
+        }
+        .view-skeleton-impact .view-skeleton-header {
+            width: 30%;
+        }
+        .view-skeleton-search {
+            height: 42px;
+            width: 100%;
+        }
+        .view-skeleton-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .view-skeleton-card {
+            height: 76px;
+        }
+        .view-skeleton-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .view-skeleton-list-item {
+            height: 56px;
+        }
+        .view-skeleton-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 10px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            background: var(--bg-primary);
+        }
+        .view-skeleton-field {
+            height: 44px;
+        }
+        .view-skeleton-actions {
+            display: flex;
+            gap: 10px;
+            padding-top: 4px;
+        }
+        .view-skeleton-button {
+            height: 36px;
+            flex: 1;
+        }
+        .view-skeleton-button.secondary {
+            flex: 0.55;
+        }
         @keyframes skeleton-pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }

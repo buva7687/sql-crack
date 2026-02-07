@@ -1023,9 +1023,40 @@ function getViewModeScript(): string {
         };
 
         const viewEmptyStates = {
-            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
+            lineage: '<div class="view-skeleton view-skeleton-lineage">' +
+                '<div class="view-skeleton-header"></div>' +
+                '<div class="view-skeleton-search"></div>' +
+                '<div class="view-skeleton-grid">' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                '</div>' +
+            '</div>',
+            tableExplorer: '<div class="view-skeleton view-skeleton-tables">' +
+                '<div class="view-skeleton-header"></div>' +
+                '<div class="view-skeleton-search"></div>' +
+                '<div class="view-skeleton-list">' +
+                    '<div class="view-skeleton-list-item"></div>' +
+                    '<div class="view-skeleton-list-item"></div>' +
+                    '<div class="view-skeleton-list-item"></div>' +
+                    '<div class="view-skeleton-list-item"></div>' +
+                    '<div class="view-skeleton-list-item"></div>' +
+                '</div>' +
+            '</div>',
+            impact: '<div class="view-skeleton view-skeleton-impact">' +
+                '<div class="view-skeleton-header"></div>' +
+                '<div class="view-skeleton-form">' +
+                    '<div class="view-skeleton-field"></div>' +
+                    '<div class="view-skeleton-field"></div>' +
+                    '<div class="view-skeleton-actions">' +
+                        '<div class="view-skeleton-button"></div>' +
+                        '<div class="view-skeleton-button secondary"></div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>'
         };
 
         function updateSidebarSectionsForView() {

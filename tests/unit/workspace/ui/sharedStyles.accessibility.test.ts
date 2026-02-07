@@ -50,4 +50,12 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.graph-area.graph-legend-visible .keyboard-hints');
         expect(css).not.toContain('.workspace-legend-bar,\n        .legend-inline');
     });
+
+    it('includes view-specific skeleton styles for non-graph tabs', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.view-skeleton-lineage');
+        expect(css).toContain('.view-skeleton-tables');
+        expect(css).toContain('.view-skeleton-impact');
+        expect(css).toContain('@keyframes skeleton-pulse');
+    });
 });
