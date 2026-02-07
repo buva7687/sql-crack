@@ -202,6 +202,32 @@ export class LineageView {
                             ${renderableGraph.stats.downstreamCount} downstream
                         </span>
                     </div>
+                    <div class="cross-link-actions">
+                        <button type="button"
+                                class="cross-link-btn icon-only"
+                                title="Explore in Tables"
+                                data-action="cross-view-table-explorer"
+                                data-table="${this.escapeHtml(centerName)}"
+                                data-node-id="${this.escapeHtml(centerNodeId)}"
+                                data-node-type="${centerNode?.type || 'table'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                            </svg>
+                            <span>Explore in Tables</span>
+                        </button>
+                        <button type="button"
+                                class="cross-link-btn icon-only"
+                                title="Analyze Impact"
+                                data-action="cross-view-impact"
+                                data-table="${this.escapeHtml(centerName)}"
+                                data-node-id="${this.escapeHtml(centerNodeId)}"
+                                data-node-type="${centerNode?.type || 'table'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                            </svg>
+                            <span>Analyze Impact</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Direction Toggle -->

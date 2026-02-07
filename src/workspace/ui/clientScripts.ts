@@ -1839,6 +1839,83 @@ function getEventDelegationScript(): string {
                 const action = target.getAttribute('data-action');
                 const tableName = target.getAttribute('data-table');
                 const nodeId = target.getAttribute('data-node-id');
+                const nodeType = target.getAttribute('data-node-type') || target.getAttribute('data-type') || 'table';
+
+                if (action && action.indexOf('cross-view-') === 0) {
+                    const inferredNodeId = nodeId || (tableName ? ('table:' + tableName.toLowerCase()) : '');
+
+                    if (action === 'cross-view-lineage') {
+                        if (!inferredNodeId) { return; }
+
+                        switchToView('lineage', false, tableName || '', nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Data Lineage';
+                        }
+                        setTimeout(() => {
+                            selectLineageNode(inferredNodeId);
+                        }, 120);
+                        return;
+                    }
+
+                    if (action === 'cross-view-table-explorer') {
+                        if (!tableName) { return; }
+
+                        switchToView('tableExplorer', false, tableName, nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Table: ' + tableName;
+                        }
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
+                        }
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        setTimeout(() => {
+                            vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: inferredNodeId || nodeId });
+                        }, 120);
+                        return;
+                    }
+
+                    if (action === 'cross-view-impact') {
+                        if (!tableName) { return; }
+
+                        switchToView('impact', false, tableName, nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Impact Analysis';
+                        }
+
+                        const prefillImpactForm = (attempt = 0) => {
+                            const impactInput = document.getElementById('impact-table-input');
+                            const impactTableId = document.getElementById('impact-table-id');
+                            const impactBadge = document.getElementById('impact-selected-badge');
+                            const impactLabel = document.getElementById('impact-selected-label');
+                            const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+
+                            if (!impactInput || !impactTableId) {
+                                if (attempt < 8) {
+                                    setTimeout(() => prefillImpactForm(attempt + 1), 80);
+                                }
+                                return;
+                            }
+
+                            impactInput.value = tableName;
+                            impactTableId.value = inferredNodeId;
+                            impactTableId.dataset.name = tableName;
+                            impactTableId.dataset.type = nodeType || 'table';
+                            if (impactBadge) {
+                                impactBadge.style.display = 'inline-flex';
+                            }
+                            if (impactLabel) {
+                                impactLabel.textContent = tableName + ' (' + (nodeType || 'table') + ')';
+                            }
+                            if (impactAnalyzeBtn) {
+                                impactAnalyzeBtn.disabled = false;
+                            }
+                        };
+
+                        setTimeout(() => prefillImpactForm(), 120);
+                        return;
+                    }
+                }
 
                 if (!tableName) return;
 

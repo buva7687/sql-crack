@@ -231,6 +231,24 @@ export class TableExplorer {
                 <div class="explorer-header">
                     <h2>${this.escapeHtml(table.name)}</h2>
                     <span class="node-type">${table.type}</span>
+                    <div class="cross-link-actions">
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-lineage"
+                                data-table="${this.escapeHtml(table.name)}"
+                                data-node-id="${this.escapeHtml(table.id)}"
+                                data-node-type="${table.type}">
+                            View Lineage
+                        </button>
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-impact"
+                                data-table="${this.escapeHtml(table.name)}"
+                                data-node-id="${this.escapeHtml(table.id)}"
+                                data-node-type="${table.type}">
+                            Analyze Impact
+                        </button>
+                    </div>
                 </div>
         `;
 

@@ -150,6 +150,11 @@ export class ImpactView {
      * Generate impact analysis report HTML
      */
     generateImpactReport(report: ImpactReport): string {
+        const targetTableName = report.target.type === 'column'
+            ? (report.target.tableName || report.target.name)
+            : report.target.name;
+        const targetNodeId = `table:${targetTableName.toLowerCase()}`;
+
         let html = `
             <div class="impact-report">
                 <div class="report-header">
@@ -161,6 +166,24 @@ export class ImpactView {
                     <h3>Target</h3>
                     <p><strong>${report.changeType.toUpperCase()}:</strong>
                     ${report.target.type} "${this.escapeHtml(report.target.name)}"</p>
+                    <div class="cross-link-actions">
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-lineage"
+                                data-table="${this.escapeHtml(targetTableName)}"
+                                data-node-id="${this.escapeHtml(targetNodeId)}"
+                                data-node-type="table">
+                            View Lineage Graph
+                        </button>
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-table-explorer"
+                                data-table="${this.escapeHtml(targetTableName)}"
+                                data-node-id="${this.escapeHtml(targetNodeId)}"
+                                data-node-type="table">
+                            Explore in Tables
+                        </button>
+                    </div>
                 </div>
 
                 ${this.generateSummary(report)}

@@ -1079,6 +1079,46 @@ export function getSharedViewStyles(): string {
             font-size: 12px;
             color: var(--text-dim);
         }
+        .cross-link-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .cross-link-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .cross-link-btn svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+        .cross-link-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--bg-hover);
+        }
+        .cross-link-btn.icon-only {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border-radius: var(--radius-sm);
+        }
+        .cross-link-btn.icon-only span {
+            display: none;
+        }
 
         /* Form Card for Impact View */
         .view-form-card {
@@ -1745,6 +1785,9 @@ export function getImpactFormStyles(): string {
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
         }
+        .report-target .cross-link-actions {
+            margin-top: 10px;
+        }
         .impact-summary {
             margin-bottom: 20px;
         }
@@ -2113,8 +2156,12 @@ export function getLineageVisualStyles(): string {
         .table-explorer { padding: 16px; }
         .explorer-header {
             display: flex; align-items: center; gap: 12px;
+            flex-wrap: wrap;
             margin-bottom: 20px; padding-bottom: 12px;
             border-bottom: 1px solid var(--border-subtle);
+        }
+        .explorer-header .cross-link-actions {
+            margin-left: auto;
         }
         .explorer-header h2 {
             font-size: 20px; font-weight: 600; color: var(--text-primary); margin: 0;
@@ -2625,10 +2672,15 @@ export function getLineageGraphStyles(): string {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
             padding: 12px 16px;
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
             flex-shrink: 0;
+        }
+        .graph-header .cross-link-actions {
+            margin-left: auto;
         }
         .graph-title {
             display: flex;
