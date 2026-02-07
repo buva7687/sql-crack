@@ -483,6 +483,8 @@ export class LineageView {
 
         graph.nodes.forEach((node) => {
             if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+                // Curated "Most Connected" should prioritize internal lineage density.
+                // External endpoints are still visible in full-node exploration views.
                 const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
                 const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
                 const upstreamCount = upstream.nodes.length;

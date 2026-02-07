@@ -1022,6 +1022,8 @@ function getViewModeScript(): string {
             impact: 'Impact Analysis'
         };
 
+        // Inline skeleton templates keep first-paint placeholders close to the tab switch logic.
+        // If these variants grow much further, move them into dedicated render helpers.
         const viewEmptyStates = {
             lineage: '<div class="view-skeleton view-skeleton-lineage">' +
                 '<div class="view-skeleton-header"></div>' +
