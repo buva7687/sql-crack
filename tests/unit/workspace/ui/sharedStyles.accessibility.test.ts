@@ -64,4 +64,11 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).not.toContain('var(--danger)');
         expect(css).toContain('.lineage-edge-transform { stroke: var(--warning); }');
     });
+
+    it('includes graph sidebar selection cross-link styles', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.selection-cross-links');
+        expect(css).toContain('.selection-divider');
+        expect(css).toContain('.selection-actions-label');
+    });
 });

@@ -55,6 +55,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const selectionFile = document.getElementById('selection-file');
         const selectionUpstream = document.getElementById('selection-upstream');
         const selectionDownstream = document.getElementById('selection-downstream');
+        const selectionCrossLinks = document.getElementById('selection-cross-links');
         const graphEmptyOverlay = document.getElementById('graph-empty-overlay');
         const graphEmptyTitle = document.getElementById('graph-empty-title');
         const graphEmptyDesc = document.getElementById('graph-empty-desc');
@@ -408,6 +409,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 selectionEmpty.textContent = selectionEmptyText;
                 selectionEmpty.style.display = '';
             }
+            if (selectionCrossLinks) {
+                selectionCrossLinks.style.display = 'none';
+            }
         }
 
         function updateSelectionPanel(node) {
@@ -427,7 +431,15 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
             const { upstream, downstream } = getNeighbors(nodeId);
             const connectionCount = upstream.size + downstream.size;
-            const typeLabel = type === 'file' ? 'File' : type === 'table' ? 'Table' : type === 'view' ? 'View' : 'External';
+            const typeLabel = type === 'file'
+                ? 'File'
+                : type === 'table'
+                    ? 'Table'
+                    : type === 'view'
+                        ? 'View'
+                        : type === 'cte'
+                            ? 'CTE'
+                            : 'External';
 
             if (selectionTitle) selectionTitle.textContent = label;
             if (selectionMeta) {
@@ -450,6 +462,23 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
             if (selectionUpstream) selectionUpstream.textContent = upstreamList.length ? upstreamList.join(', ') : 'None';
             if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
+
+            if (selectionCrossLinks) {
+                const showCrossLinks = type === 'table' || type === 'view' || type === 'cte';
+                selectionCrossLinks.style.display = showCrossLinks ? '' : 'none';
+
+                selectionCrossLinks.querySelectorAll('[data-graph-action]').forEach(button => {
+                    button.setAttribute('data-node-id', nodeId);
+                    button.setAttribute('data-node-label', label);
+                    button.setAttribute('data-node-type', type);
+                    button.setAttribute('data-file-path', filePath || '');
+                });
+
+                const openFileAction = selectionCrossLinks.querySelector('[data-graph-action="open-file"]');
+                if (openFileAction) {
+                    openFileAction.style.display = filePath ? '' : 'none';
+                }
+            }
 
             if (focusModeEnabled) applyFocusMode();
         }
@@ -894,6 +923,73 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 case 'clear-selection':
                     clearSelection();
                     break;
+                case 'view-lineage': {
+                    const nodeId = actionEl.getAttribute('data-node-id') || selectedNodeId;
+                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
+                    const nodeType = actionEl.getAttribute('data-node-type') || '';
+                    if (!nodeId) {
+                        break;
+                    }
+                    switchToView('lineage', false, nodeLabel, nodeType);
+                    if (lineageTitle) {
+                        lineageTitle.textContent = 'Data Lineage';
+                    }
+                    setTimeout(() => {
+                        if (typeof selectLineageNode === 'function') {
+                            selectLineageNode(nodeId);
+                        }
+                    }, 120);
+                    break;
+                }
+                case 'analyze-impact': {
+                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
+                    const nodeType = actionEl.getAttribute('data-node-type') || 'table';
+                    const nodeId = actionEl.getAttribute('data-node-id') || '';
+                    if (!nodeLabel) {
+                        break;
+                    }
+                    switchToView('impact', false, nodeLabel, nodeType);
+                    if (lineageTitle) {
+                        lineageTitle.textContent = 'Impact Analysis';
+                    }
+                    const prefillImpactFromSelection = (attempt = 0) => {
+                        const impactInput = document.getElementById('impact-table-input');
+                        const impactTableId = document.getElementById('impact-table-id');
+                        const impactBadge = document.getElementById('impact-selected-badge');
+                        const impactLabel = document.getElementById('impact-selected-label');
+                        const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+
+                        if (!impactInput || !impactTableId) {
+                            if (attempt < 8) {
+                                setTimeout(() => prefillImpactFromSelection(attempt + 1), 80);
+                            }
+                            return;
+                        }
+
+                        impactInput.value = nodeLabel;
+                        impactTableId.value = nodeId;
+                        impactTableId.dataset.name = nodeLabel;
+                        impactTableId.dataset.type = nodeType || 'table';
+                        if (impactBadge) {
+                            impactBadge.style.display = 'inline-flex';
+                        }
+                        if (impactLabel) {
+                            impactLabel.textContent = nodeLabel + ' (' + (nodeType || 'table') + ')';
+                        }
+                        if (impactAnalyzeBtn) {
+                            impactAnalyzeBtn.disabled = false;
+                        }
+                    };
+                    setTimeout(() => prefillImpactFromSelection(), 120);
+                    break;
+                }
+                case 'open-file': {
+                    const filePath = actionEl.getAttribute('data-file-path') || '';
+                    if (filePath) {
+                        openFile(filePath);
+                    }
+                    break;
+                }
                 case 'dismiss-welcome':
                     markWelcomeSeen();
                     updateGraphEmptyState();

@@ -1463,6 +1463,15 @@ ${bodyContent}
                             <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
                             <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
                         </div>
+                        <div class="selection-cross-links" id="selection-cross-links" style="display: none;">
+                            <div class="selection-divider"></div>
+                            <div class="selection-actions-label">Actions</div>
+                            <div class="selection-actions">
+                                <button class="action-chip action-chip-small" data-graph-action="view-lineage">View Lineage</button>
+                                <button class="action-chip action-chip-small" data-graph-action="analyze-impact">Analyze Impact</button>
+                                <button class="action-chip action-chip-small" data-graph-action="open-file">Open File</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

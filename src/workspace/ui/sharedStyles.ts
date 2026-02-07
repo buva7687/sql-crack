@@ -3977,6 +3977,23 @@ export function getGraphStyles(): string {
             gap: 8px;
             flex-wrap: wrap;
         }
+        .selection-cross-links {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .selection-divider {
+            border-top: 1px solid var(--border-subtle);
+            margin-top: 2px;
+            padding-top: 8px;
+        }
+        .selection-actions-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
 
         /* ========== Legend Items ========== */
         .legend-grid { padding: 8px 16px; }

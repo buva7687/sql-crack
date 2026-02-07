@@ -106,4 +106,21 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*lineageCurrentDirection/);
         expect(script).not.toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*'both'/);
     });
+
+    it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const selectionCrossLinks = document.getElementById('selection-cross-links');");
+        expect(script).toContain("case 'view-lineage':");
+        expect(script).toContain("case 'analyze-impact':");
+        expect(script).toContain("case 'open-file':");
+        expect(script).toContain("button.setAttribute('data-node-id', nodeId);");
+        expect(script).toContain("button.setAttribute('data-file-path', filePath || '');");
+    });
 });
