@@ -7321,8 +7321,11 @@ export function toggleFullscreen(enable?: boolean): void {
             });
         }
 
-        // Restore UI elements
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner];
+        // Restore UI elements (must match the hide list above)
+        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
+        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
+        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
+        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
         uiElements.forEach(el => {
             if (el && el.dataset.originalDisplay !== undefined) {
                 el.style.display = el.dataset.originalDisplay;
