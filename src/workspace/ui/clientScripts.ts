@@ -2535,7 +2535,7 @@ function getVisualLineageSearchScript(): string {
                 command: 'getLineageGraph',
                 nodeId: nodeId,
                 depth: 5,
-                direction: 'both'
+                direction: lineageCurrentDirection
             });
         }
     `;

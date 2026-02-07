@@ -79,4 +79,17 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('scheduleGraphAutoFit();');
         expect(script).toContain('fitToScreen();');
     });
+
+    it('preserves selected lineage direction when opening another node from search', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*lineageCurrentDirection/);
+        expect(script).not.toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*'both'/);
+    });
 });
