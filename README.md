@@ -48,7 +48,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 ### Workspace Analysis
 
-Analyze cross-file dependencies across your entire SQL project with four powerful views:
+Analyze cross-file dependencies across your entire SQL project with three main views:
 
 #### Graph View
 Dependency graph showing file and table relationships with color-coded edges for SELECT, JOIN, INSERT, UPDATE, and DELETE operations. Includes a selection panel with upstream/downstream context, focus mode, and an index freshness badge, plus guided empty-state prompts when the graph is empty or search yields no matches.
@@ -61,9 +61,7 @@ Explore data lineage across tables, views, and CTEs with:
 - **Column Type Colors** — Primary (Gold), Numeric (Blue), Text (Green), DateTime (Purple), JSON (Teal)
 - **Focus Modes** — View upstream only (`U`), downstream only (`D`), or all connections (`A`)
 - **Trace Controls** — Trace Up/Down buttons to highlight full upstream/downstream lineage
-
-#### Table Explorer
-Browse all tables and views with schema details, column information, and cross-references.
+- **Table Browser** — Search and browse all tables, views, and CTEs with schema details and cross-references
 
 #### Impact Analysis
 Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped transitive impacts, and source → target column paths.
@@ -157,6 +155,8 @@ Install the generated `.vsix` file via **Extensions → ••• → Install fr
 Analyze cross-file dependencies:
 - Right-click folder → **"SQL Crack: Analyze Workspace Dependencies"**
 - Command Palette → **"SQL Crack: Analyze Workspace Dependencies"**
+
+> **Tip:** Re-open the panel anytime by running the same command from the Command Palette.
 
 ---
 
@@ -348,7 +348,7 @@ src/
 - ✅ **Phase 1** — Core visualization (execution flow, CTE expansion, fullscreen)
 - ✅ **Phase 2** — Developer productivity (quality warnings, column lineage, cloud panels)
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
-- ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 4 view modes)
+- ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 
 **Planned**:
