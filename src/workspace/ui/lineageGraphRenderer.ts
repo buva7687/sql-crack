@@ -95,6 +95,7 @@ export class LineageGraphRenderer {
     private readonly NODE_WIDTH = 200;
     private readonly NODE_HEIGHT_COLLAPSED = 78;
     private readonly NODE_HEIGHT_PER_COLUMN = 24;
+    private readonly MAX_VISIBLE_COLUMNS = 20;
     private readonly NODE_SEP = 60;
     private readonly RANK_SEP = 120;
     private readonly EDGE_SEP = 20;
@@ -207,6 +208,8 @@ export class LineageGraphRenderer {
 
         const isExpanded = expandedNodes.has(node.id);
         const columns = this.getNodeColumns(node);
+        const visibleColumnCount = Math.min(columns.length, this.MAX_VISIBLE_COLUMNS);
+        const hasHiddenColumns = columns.length > this.MAX_VISIBLE_COLUMNS;
 
         nodeMap.set(node.id, {
             id: node.id,
@@ -216,7 +219,9 @@ export class LineageGraphRenderer {
             y: 0,
             width: this.NODE_WIDTH,
             height: isExpanded && columns.length > 0
-                ? this.NODE_HEIGHT_COLLAPSED + columns.length * this.NODE_HEIGHT_PER_COLUMN
+                ? this.NODE_HEIGHT_COLLAPSED +
+                  visibleColumnCount * this.NODE_HEIGHT_PER_COLUMN +
+                  (hasHiddenColumns ? 20 : 0)
                 : this.NODE_HEIGHT_COLLAPSED,
             columns: isExpanded ? columns : undefined,
             expanded: isExpanded,
@@ -485,7 +490,8 @@ export class LineageGraphRenderer {
             svg += `<line x1="0" y1="50" x2="${node.width}" y2="50" class="node-divider"/>`;
             let columnY = 68;
             let columnIndex = 0;
-            for (const column of node.columns) {
+            const visibleColumns = node.columns.slice(0, this.MAX_VISIBLE_COLUMNS);
+            for (const column of visibleColumns) {
                 // Note: dimmed class is applied dynamically via JS when a column is selected
                 // Don't apply dimmed by default - only selected and in-path states come from server
                 const columnClasses = [
@@ -515,12 +521,20 @@ export class LineageGraphRenderer {
                 columnIndex++;
             }
 
+            const hiddenColumnCount = node.columns.length - visibleColumns.length;
+            if (hiddenColumnCount > 0) {
+                const hiddenLabel = `Showing first ${this.MAX_VISIBLE_COLUMNS} of ${node.columns.length} columns`;
+                svg += `
+                    <text x="${node.width / 2}" y="${columnY + 2}" text-anchor="middle" class="column-limit-note">${this.escapeHtml(hiddenLabel)}</text>
+                `;
+            }
+
             // Close button for expanded nodes (top-right corner)
             svg += `
                 <g class="column-close-btn" data-action="collapse">
-                    <circle cx="${node.width - 16}" cy="16" r="10" fill="rgba(239,68,68,0.6)"/>
+                    <circle cx="${node.width - 16}" cy="16" r="10" class="column-close-btn-circle"/>
                     <path d="M ${node.width - 21} 11 L ${node.width - 11} 21 M ${node.width - 11} 11 L ${node.width - 21} 21"
-                          stroke="white" stroke-width="2" stroke-linecap="round"/>
+                          class="column-close-btn-icon" fill="none" stroke-width="2" stroke-linecap="round"/>
                 </g>
             `;
         }

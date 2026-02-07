@@ -450,8 +450,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         }
     }
 
-    // Detect circular dependencies (simplified: check for bidirectional file dependencies)
-    const circularDependencies: string[] = [];
+    // Detect circular dependencies across full file dependency graph.
     const fileDeps = new Map<string, Set<string>>();
 
     for (const [filePath, analysis] of index.files.entries()) {
@@ -467,20 +466,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         fileDeps.set(filePath, deps);
     }
 
-    // Check for bidirectional dependencies (A depends on B and B depends on A)
-    const checkedPairs = new Set<string>();
-    for (const [fileA, depsA] of fileDeps.entries()) {
-        for (const fileB of depsA) {
-            const pairKey = [fileA, fileB].sort().join('|');
-            if (checkedPairs.has(pairKey)) {continue;}
-            checkedPairs.add(pairKey);
-
-            const depsB = fileDeps.get(fileB);
-            if (depsB?.has(fileA)) {
-                circularDependencies.push(`${path.basename(fileA)} <-> ${path.basename(fileB)}`);
-            }
-        }
-    }
+    const circularDependencies = findFileCycleGroups(fileDeps);
 
     return {
         totalFiles: index.fileCount,
@@ -491,6 +477,67 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         missingDefinitions,
         circularDependencies
     };
+}
+
+/**
+ * Find circular file dependency groups using Tarjan's strongly connected components algorithm.
+ * Any SCC with more than one file (or a self-loop) represents a cycle.
+ */
+function findFileCycleGroups(fileDeps: Map<string, Set<string>>): string[] {
+    let indexCounter = 0;
+    const indices = new Map<string, number>();
+    const lowLinks = new Map<string, number>();
+    const stack: string[] = [];
+    const onStack = new Set<string>();
+    const cycleGroups: string[] = [];
+
+    const visit = (nodeId: string): void => {
+        indices.set(nodeId, indexCounter);
+        lowLinks.set(nodeId, indexCounter);
+        indexCounter++;
+        stack.push(nodeId);
+        onStack.add(nodeId);
+
+        for (const targetId of fileDeps.get(nodeId) || []) {
+            if (!indices.has(targetId)) {
+                visit(targetId);
+                lowLinks.set(nodeId, Math.min(lowLinks.get(nodeId)!, lowLinks.get(targetId)!));
+            } else if (onStack.has(targetId)) {
+                lowLinks.set(nodeId, Math.min(lowLinks.get(nodeId)!, indices.get(targetId)!));
+            }
+        }
+
+        if (lowLinks.get(nodeId) !== indices.get(nodeId)) {
+            return;
+        }
+
+        const component: string[] = [];
+        while (stack.length > 0) {
+            const top = stack.pop()!;
+            onStack.delete(top);
+            component.push(top);
+            if (top === nodeId) {
+                break;
+            }
+        }
+
+        const isSelfLoop = component.length === 1 && (fileDeps.get(component[0])?.has(component[0]) || false);
+        if (component.length > 1 || isSelfLoop) {
+            const labels = component
+                .map(filePath => path.basename(filePath))
+                .sort((a, b) => a.localeCompare(b));
+            cycleGroups.push(`${labels.join(' -> ')} -> ${labels[0]}`);
+        }
+    };
+
+    for (const nodeId of fileDeps.keys()) {
+        if (!indices.has(nodeId)) {
+            visit(nodeId);
+        }
+    }
+
+    cycleGroups.sort((a, b) => a.localeCompare(b));
+    return cycleGroups;
 }
 
 /**
@@ -514,9 +561,6 @@ function getPrimaryReferenceType(types: TableReference['referenceType'][]): Tabl
  */
 function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
     if (nodes.length === 0) {return;}
-
-    // Calculate canvas dimensions
-    const canvasWidth = 3200;
 
     /**
      * Dynamic spacing based on node count to better utilize available screen space.
@@ -670,8 +714,19 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
     }
 
     // ========== Position Nodes ==========
-    // Calculate max nodes per row
+    // Calculate dynamic canvas width from the widest level to avoid huge empty space
+    // in tiny graphs while still allowing large workspaces to spread out.
     const avgNodeWidth = nodes.reduce((sum, n) => sum + n.width, 0) / nodes.length;
+    const maxNodesInLevel = Math.max(
+        1,
+        ...sortedLevels.map(level => levelGroups.get(level)?.length || 0)
+    );
+    const estimatedCanvasWidth = Math.ceil(
+        maxNodesInLevel * avgNodeWidth +
+        Math.max(0, maxNodesInLevel - 1) * horizontalGap +
+        padding * 2
+    );
+    const canvasWidth = Math.min(5600, Math.max(960, estimatedCanvasWidth));
     const maxNodesPerRow = Math.max(4, Math.floor((canvasWidth - padding * 2) / (avgNodeWidth + horizontalGap)));
 
     let currentY = padding;

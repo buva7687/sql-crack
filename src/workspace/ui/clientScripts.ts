@@ -2234,6 +2234,8 @@ function getImpactFormScript(): string {
             const selectedClear = document.getElementById('impact-selected-clear');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+            let impactTypeaheadDebounceTimer = null;
+            const impactTypeaheadDebounceMs = 180;
 
             changeTypeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -2339,9 +2341,24 @@ function getImpactFormScript(): string {
                 }
             }
 
+            function scheduleTypeaheadFilter(immediate = false) {
+                if (impactTypeaheadDebounceTimer) {
+                    clearTimeout(impactTypeaheadDebounceTimer);
+                    impactTypeaheadDebounceTimer = null;
+                }
+                if (immediate) {
+                    filterTypeaheadResults();
+                    return;
+                }
+                impactTypeaheadDebounceTimer = setTimeout(() => {
+                    impactTypeaheadDebounceTimer = null;
+                    filterTypeaheadResults();
+                }, impactTypeaheadDebounceMs);
+            }
+
             tableInput?.addEventListener('input', () => {
                 clearSelectedTable(true);
-                filterTypeaheadResults();
+                scheduleTypeaheadFilter();
             });
 
             tableInput?.addEventListener('keydown', (event) => {
@@ -2364,7 +2381,7 @@ function getImpactFormScript(): string {
 
             tableInput?.addEventListener('focus', () => {
                 if (tableInput.value.trim()) {
-                    filterTypeaheadResults();
+                    scheduleTypeaheadFilter(true);
                 }
             });
 
@@ -2507,6 +2524,8 @@ function getVisualLineageSearchScript(): string {
             const resultsInfo = document.getElementById('lineage-results-info');
             const resultsCount = document.getElementById('lineage-results-count');
             let showAllTables = false;
+            let lineageFilterDebounceTimer = null;
+            const lineageFilterDebounceMs = 180;
 
             function setLineageGridMode(expanded) {
                 if (tablesGrid) {
@@ -2608,13 +2627,28 @@ function getVisualLineageSearchScript(): string {
                 }
             }
 
+            function scheduleLineageFilter(immediate = false) {
+                if (lineageFilterDebounceTimer) {
+                    clearTimeout(lineageFilterDebounceTimer);
+                    lineageFilterDebounceTimer = null;
+                }
+                if (immediate) {
+                    filterLineageTables();
+                    return;
+                }
+                lineageFilterDebounceTimer = setTimeout(() => {
+                    lineageFilterDebounceTimer = null;
+                    filterLineageTables();
+                }, lineageFilterDebounceMs);
+            }
+
             searchInput?.addEventListener('input', () => {
                 const query = searchInput.value.trim();
                 if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
                 if (!query) {
                     showAllTables = false;
                 }
-                filterLineageTables();
+                scheduleLineageFilter();
             });
 
             searchInput?.addEventListener('keydown', (e) => {
@@ -2622,7 +2656,7 @@ function getVisualLineageSearchScript(): string {
                     searchInput.value = '';
                     if (searchClear) searchClear.style.display = 'none';
                     showAllTables = false;
-                    filterLineageTables();
+                    scheduleLineageFilter(true);
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
                     // Select the first visible item
@@ -2637,7 +2671,7 @@ function getVisualLineageSearchScript(): string {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
                 showAllTables = false;
-                filterLineageTables();
+                scheduleLineageFilter(true);
                 searchInput?.focus();
             });
 
@@ -2649,15 +2683,15 @@ function getVisualLineageSearchScript(): string {
                     if (lineageTypeFilter === 'all' && !(searchInput?.value || '').trim()) {
                         showAllTables = false;
                     }
-                    filterLineageTables();
+                    scheduleLineageFilter(true);
                 });
             });
 
-            sortSelect?.addEventListener('change', filterLineageTables);
+            sortSelect?.addEventListener('change', () => scheduleLineageFilter(true));
 
             showAllBtn?.addEventListener('click', () => {
                 showAllTables = true;
-                filterLineageTables();
+                scheduleLineageFilter(true);
             });
 
             // Setup click handlers for table items (both curated and full grids)

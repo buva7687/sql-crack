@@ -10,6 +10,11 @@ import { ICONS, getWorkspaceNodeIcon } from '../../shared';
  * Generates HTML for table-centric exploration
  */
 export class TableExplorer {
+    private readonly connectionCountCache = new WeakMap<LineageGraph, Map<string, {
+        upstreamCount: number;
+        downstreamCount: number;
+    }>>();
+
     /**
      * Generate a list of all tables in the workspace with search and filtering
      */
@@ -44,14 +49,35 @@ export class TableExplorer {
 
         // Count connections for each table
         const flowAnalyzer = new FlowAnalyzer(graph);
+        let graphConnectionCache = this.connectionCountCache.get(graph);
+        if (!graphConnectionCache) {
+            graphConnectionCache = new Map();
+            this.connectionCountCache.set(graph, graphConnectionCache);
+        }
+        const isDisplayableNode = (node: LineageNode) =>
+            node.type === 'table' || node.type === 'view' || node.type === 'cte';
+
         const tablesWithCounts = tables.map(table => {
+            const cached = graphConnectionCache!.get(table.id);
+            if (cached) {
+                return {
+                    table,
+                    ...cached,
+                    totalConnections: cached.upstreamCount + cached.downstreamCount
+                };
+            }
+
             const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 10, excludeExternal: true });
             const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 10, excludeExternal: true });
+            const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
+            const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
+
+            graphConnectionCache!.set(table.id, { upstreamCount, downstreamCount });
             return {
                 table,
-                upstreamCount: upstream.nodes.length,
-                downstreamCount: downstream.nodes.length,
-                totalConnections: upstream.nodes.length + downstream.nodes.length
+                upstreamCount,
+                downstreamCount,
+                totalConnections: upstreamCount + downstreamCount
             };
         });
 

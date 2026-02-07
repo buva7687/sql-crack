@@ -557,20 +557,26 @@ export class MessageHandler {
         filePath?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
+        const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) {return;}
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
-        // For file nodes, get all tables defined in the file and aggregate their upstream
-        let nodeIds: string[] = [];
+        // For file nodes, aggregate upstream for all displayable nodes defined in the file.
+        const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            // This would need indexManager access - simplified for now
-            // In full implementation, pass indexManager through context
+            const normalizedPath = filePath.toLowerCase();
+            for (const [id, node] of lineageGraph.nodes) {
+                const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
+                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                    nodeIds.add(id);
+                }
+            }
         } else if (nodeId) {
-            nodeIds = [nodeId];
+            nodeIds.add(nodeId);
         }
 
-        if (nodeIds.length === 0) {
+        if (nodeIds.size === 0) {
             this._context.panel.webview.postMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
@@ -609,19 +615,26 @@ export class MessageHandler {
         filePath?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
+        const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) {return;}
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
-        // For file nodes, get all tables defined in the file and aggregate their downstream
-        let nodeIds: string[] = [];
+        // For file nodes, aggregate downstream for all displayable nodes defined in the file.
+        const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            // This would need indexManager access - simplified for now
+            const normalizedPath = filePath.toLowerCase();
+            for (const [id, node] of lineageGraph.nodes) {
+                const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
+                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                    nodeIds.add(id);
+                }
+            }
         } else if (nodeId) {
-            nodeIds = [nodeId];
+            nodeIds.add(nodeId);
         }
 
-        if (nodeIds.length === 0) {
+        if (nodeIds.size === 0) {
             this._context.panel.webview.postMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }

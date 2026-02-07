@@ -67,8 +67,12 @@ describe('workspace sharedStyles accessibility rules', () => {
 
         expect(darkVars).toContain('--column-edge-upstream: #22c55e');
         expect(darkVars).toContain('--column-edge-downstream: #3b82f6');
+        expect(darkVars).toContain('--lineage-coltype-numeric: #60a5fa');
+        expect(darkVars).toContain('--lineage-minimap-viewport-fill: rgba(99, 102, 241, 0.15)');
         expect(lightVars).toContain('--column-edge-upstream: #16a34a');
         expect(lightVars).toContain('--column-edge-downstream: #2563eb');
+        expect(lightVars).toContain('--lineage-coltype-numeric: #3b82f6');
+        expect(lightVars).toContain('--lineage-minimap-viewport-fill: rgba(79, 70, 229, 0.15)');
     });
 
     it('uses CSS variables for column edge strokes and arrowhead fills', () => {
@@ -120,5 +124,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('z-index: 130;');
         expect(css).toContain('.lineage-legend {\n            position: absolute;');
         expect(css).toContain('z-index: 100;');
+    });
+
+    it('uses theme variables for lineage type colors and minimap viewport fill', () => {
+        const css = getWebviewStyles(true);
+
+        expect(css).toContain('.lineage-node .column-dot.type-numeric {\n            fill: var(--lineage-coltype-numeric);');
+        expect(css).toContain('.lineage-legend .legend-numeric { background: var(--lineage-coltype-numeric); }');
+        expect(css).toContain('.lineage-minimap .minimap-viewport {\n            fill: var(--lineage-minimap-viewport-fill);');
+        expect(css).not.toContain('.lineage-legend .legend-numeric { background: #60a5fa; }');
     });
 });

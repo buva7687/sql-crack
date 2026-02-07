@@ -60,6 +60,7 @@ export class WorkspacePanel {
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
+    private readonly _extensionVersion: string;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
@@ -143,6 +144,7 @@ export class WorkspacePanel {
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
         this._indexManager = new IndexManager(context, dialect);
 
         // Detect theme from settings or VS Code theme
@@ -193,6 +195,24 @@ export class WorkspacePanel {
             null,
             this._disposables
         );
+    }
+
+    /**
+     * Resolve extension version for export metadata.
+     */
+    private static resolveExtensionVersion(): string {
+        const extension = vscode.extensions?.getExtension('buvan.sql-crack');
+        const manifestVersion = (extension?.packageJSON as { version?: string } | undefined)?.version;
+        if (manifestVersion && manifestVersion.trim().length > 0) {
+            return manifestVersion;
+        }
+
+        const envVersion = process.env.npm_package_version;
+        if (envVersion && envVersion.trim().length > 0) {
+            return envVersion;
+        }
+
+        return '1.0';
     }
 
     /**
@@ -1763,7 +1783,7 @@ ${bodyContent}
                           stroke-width="2"
                           marker-end="url(#arrowhead-${edge.referenceType})"
                           opacity="0.7"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="${this._isDarkTheme ? '#94a3b8' : '#64748b'}" font-size="10">${edge.count}</text>` : ''}
+                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="var(--text-muted)" font-size="10">${edge.count}</text>` : ''}
                 </g>
             `;
         }).join('');
@@ -1857,7 +1877,7 @@ ${bodyContent}
                 if (ref.columns && ref.columns.length > 0) {
                     const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
                     const moreCount = ref.columns.length - 8;
-                    content += `<br><span style="font-size:9px;color:${this._isDarkTheme ? '#94a3b8' : '#64748b'};">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                    content += `<br><span style="font-size:9px;color:var(--text-muted);">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
                 }
 
                 content += '</li>';
@@ -1871,7 +1891,7 @@ ${bodyContent}
         }
 
         if (node.type === 'external') {
-            content += `<div class="tooltip-content" style="color:${this._isDarkTheme ? '#fbbf24' : '#f59e0b'};">Not defined in workspace</div>`;
+            content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
         }
 
         content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
@@ -2003,7 +2023,7 @@ ${bodyContent}
         }));
 
         return {
-            version: '1.0',
+            version: this._extensionVersion,
             exportedAt: new Date().toISOString(),
             report: {
                 changeType: report.changeType,
@@ -2164,7 +2184,7 @@ ${bodyContent}
         if (!this._currentGraph) { return; }
 
         const exportData = {
-            version: '1.0',
+            version: this._extensionVersion,
             exportedAt: new Date().toISOString(),
             graph: {
                 nodes: this._currentGraph.nodes.map(node => ({

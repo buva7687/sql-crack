@@ -52,6 +52,20 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-subquery: #a78bfa;
                 --column-edge-upstream: #22c55e;
                 --column-edge-downstream: #3b82f6;
+                --lineage-coltype-numeric: #60a5fa;
+                --lineage-coltype-text: #4ade80;
+                --lineage-coltype-datetime: #c084fc;
+                --lineage-coltype-boolean: #fb923c;
+                --lineage-coltype-binary: #f87171;
+                --lineage-coltype-json: #2dd4bf;
+                --lineage-row-odd-bg: rgba(148, 163, 184, 0.08);
+                --lineage-row-even-bg: rgba(248, 250, 252, 0.03);
+                --lineage-row-hover-bg: rgba(99, 102, 241, 0.16);
+                --lineage-row-focus-bg: rgba(99, 102, 241, 0.24);
+                --lineage-minimap-viewport-fill: rgba(99, 102, 241, 0.15);
+                --lineage-close-btn-bg: rgba(239, 68, 68, 0.6);
+                --lineage-close-btn-bg-hover: rgba(239, 68, 68, 0.9);
+                --lineage-close-btn-icon: #ffffff;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -113,6 +127,20 @@ export function getCssVariables(dark: boolean = true): string {
                 --edge-subquery: #8b5cf6;
                 --column-edge-upstream: #16a34a;
                 --column-edge-downstream: #2563eb;
+                --lineage-coltype-numeric: #3b82f6;
+                --lineage-coltype-text: #16a34a;
+                --lineage-coltype-datetime: #9333ea;
+                --lineage-coltype-boolean: #ea580c;
+                --lineage-coltype-binary: #dc2626;
+                --lineage-coltype-json: #0d9488;
+                --lineage-row-odd-bg: rgba(100, 116, 139, 0.08);
+                --lineage-row-even-bg: rgba(148, 163, 184, 0.05);
+                --lineage-row-hover-bg: rgba(79, 70, 229, 0.12);
+                --lineage-row-focus-bg: rgba(79, 70, 229, 0.2);
+                --lineage-minimap-viewport-fill: rgba(79, 70, 229, 0.15);
+                --lineage-close-btn-bg: rgba(220, 38, 38, 0.55);
+                --lineage-close-btn-bg-hover: rgba(220, 38, 38, 0.78);
+                --lineage-close-btn-icon: #ffffff;
                 --shadow-node: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
                 --radius-sm: 4px;
                 --radius-md: 6px;
@@ -3018,22 +3046,22 @@ export function getLineageNodeStyles(): string {
         }
         /* Column type color coding */
         .lineage-node .column-dot.type-numeric {
-            fill: #60a5fa;  /* Blue for numbers */
+            fill: var(--lineage-coltype-numeric);
         }
         .lineage-node .column-dot.type-text {
-            fill: #4ade80;  /* Green for text */
+            fill: var(--lineage-coltype-text);
         }
         .lineage-node .column-dot.type-datetime {
-            fill: #c084fc;  /* Purple for dates */
+            fill: var(--lineage-coltype-datetime);
         }
         .lineage-node .column-dot.type-boolean {
-            fill: #fb923c;  /* Orange for boolean */
+            fill: var(--lineage-coltype-boolean);
         }
         .lineage-node .column-dot.type-binary {
-            fill: #f87171;  /* Red for binary */
+            fill: var(--lineage-coltype-binary);
         }
         .lineage-node .column-dot.type-json {
-            fill: #2dd4bf;  /* Teal for JSON */
+            fill: var(--lineage-coltype-json);
         }
         .lineage-node .column-dot.type-other {
             fill: var(--text-dim);  /* Gray for unknown */
@@ -3063,15 +3091,24 @@ export function getLineageNodeStyles(): string {
         .lineage-node .column-close-btn:hover {
             opacity: 1;
         }
-        .lineage-node .column-close-btn circle {
+        .lineage-node .column-close-btn .column-close-btn-circle {
+            fill: var(--lineage-close-btn-bg);
             transition: fill 0.15s;
         }
-        .lineage-node .column-close-btn:hover circle {
-            fill: rgba(239, 68, 68, 0.9);
+        .lineage-node .column-close-btn .column-close-btn-icon {
+            stroke: var(--lineage-close-btn-icon);
+        }
+        .lineage-node .column-close-btn:hover .column-close-btn-circle {
+            fill: var(--lineage-close-btn-bg-hover);
         }
         .lineage-node .count-badge {
             font-size: 10px;
             fill: var(--text-muted);
+        }
+        .lineage-node .column-limit-note {
+            font-size: 10px;
+            fill: var(--text-muted);
+            pointer-events: none;
         }
 
         /* Column Row States */
@@ -3084,19 +3121,19 @@ export function getLineageNodeStyles(): string {
             transition: fill 0.15s;
         }
         .lineage-node .column-row .column-row-bg.odd {
-            fill: rgba(148, 163, 184, 0.08);
+            fill: var(--lineage-row-odd-bg);
         }
         .lineage-node .column-row .column-row-bg.even {
-            fill: rgba(248, 250, 252, 0.03);
+            fill: var(--lineage-row-even-bg);
         }
         .lineage-node .column-row:hover {
             opacity: 1;
         }
         .lineage-node .column-row:hover .column-row-bg {
-            fill: rgba(99, 102, 241, 0.16);
+            fill: var(--lineage-row-hover-bg);
         }
         .lineage-node .column-row:focus-visible .column-row-bg {
-            fill: rgba(99, 102, 241, 0.24);
+            fill: var(--lineage-row-focus-bg);
             stroke: color-mix(in srgb, var(--accent) 55%, white);
             stroke-width: 1.5;
         }
@@ -3460,10 +3497,10 @@ export function getLineageNodeStyles(): string {
             flex-shrink: 0;
         }
         .lineage-legend .legend-primary { background: var(--warning-light); }
-        .lineage-legend .legend-numeric { background: #60a5fa; }
-        .lineage-legend .legend-text { background: #4ade80; }
-        .lineage-legend .legend-datetime { background: #c084fc; }
-        .lineage-legend .legend-json { background: #2dd4bf; }
+        .lineage-legend .legend-numeric { background: var(--lineage-coltype-numeric); }
+        .lineage-legend .legend-text { background: var(--lineage-coltype-text); }
+        .lineage-legend .legend-datetime { background: var(--lineage-coltype-datetime); }
+        .lineage-legend .legend-json { background: var(--lineage-coltype-json); }
         .lineage-legend .legend-keyboard-hints .hint-item {
             display: inline-flex;
             align-items: center;
@@ -3603,7 +3640,7 @@ export function getLineageNodeStyles(): string {
         .lineage-minimap .minimap-node-cte { fill: var(--accent); opacity: 0.8; }
         .lineage-minimap .minimap-node-external { fill: var(--node-external); opacity: 0.8; }
         .lineage-minimap .minimap-viewport {
-            fill: rgba(99, 102, 241, 0.15);
+            fill: var(--lineage-minimap-viewport-fill);
             stroke: var(--accent);
             stroke-width: 2;
             cursor: move;

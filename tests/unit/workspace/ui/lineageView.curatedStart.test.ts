@@ -118,7 +118,7 @@ describe('LineageView curated start content', () => {
         expect(script).toContain('function setLineageGridMode(expanded)');
         expect(script).toContain('const sortValue = sortSelect?.value || \'connected\';');
         expect(script).toContain('showAllTables = true;');
-        expect(script).toContain('sortSelect?.addEventListener(\'change\', filterLineageTables);');
+        expect(script).toContain('sortSelect?.addEventListener(\'change\', () => scheduleLineageFilter(true));');
         expect(script).toContain('.lineage-table-item, .popular-item');
     });
 
