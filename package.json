@@ -28,7 +28,10 @@
       {
         "command": "sql-crack.visualize",
         "title": "SQL Crack: Visualize SQL Query",
-        "icon": "$(graph)"
+        "icon": {
+          "light": "assets/sql-flow-sc-light.svg",
+          "dark": "assets/sql-flow-sc-dark.svg"
+        }
       },
       {
         "command": "sql-crack.analyzeWorkspace",
