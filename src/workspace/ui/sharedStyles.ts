@@ -573,11 +573,74 @@ export function getSharedViewStyles(): string {
             width: 100%;
             max-width: 1000px;
             margin: 0 auto;
-            padding: 24px;
+            padding: 20px 24px 24px;
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow-y: auto;
+            gap: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-top-width: 3px;
+            border-radius: var(--radius-lg);
+        }
+        .view-container.view-lineage {
+            border-top-color: var(--node-view-border);
+        }
+        .view-container.view-tables {
+            border-top-color: var(--node-table-border);
+        }
+        .view-container.view-impact {
+            border-top-color: var(--warning);
+        }
+        .view-compact-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 40px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .view-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            color: var(--text-secondary);
+        }
+        .view-icon svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+        }
+        .view-compact-header h3 {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: 0.2px;
+        }
+        .view-lineage .view-compact-header h3 { color: var(--node-view); }
+        .view-tables .view-compact-header h3 { color: var(--node-table); }
+        .view-impact .view-compact-header h3 { color: var(--warning); }
+        .view-inline-stats {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        @media (max-width: 760px) {
+            .view-compact-header {
+                flex-wrap: wrap;
+                align-items: flex-start;
+                gap: 6px 10px;
+            }
+            .view-inline-stats {
+                width: 100%;
+                margin-left: 0;
+                white-space: normal;
+            }
         }
 
         /* View Header - consistent across all tabs */
@@ -738,6 +801,7 @@ export function getSharedViewStyles(): string {
             gap: 16px;
             flex-wrap: wrap;
             align-items: center;
+            margin-bottom: 12px;
         }
         .view-filter-clear {
             margin-left: auto;

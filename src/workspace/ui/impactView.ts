@@ -28,64 +28,37 @@ export class ImpactView {
         tables.sort((a, b) => a.name.localeCompare(b.name));
 
         return `
-            <div class="view-container">
-                <!-- View Header -->
-                <div class="view-header">
-                    <div class="view-header-icon">${ICONS.warning}</div>
-                    <div class="view-header-content">
-                        <h3 class="view-title">Impact Analysis</h3>
-                        <p class="view-subtitle">Analyze the impact of changes to tables or views in your workspace</p>
-                    </div>
+            <div class="view-container view-impact">
+                <div class="view-compact-header">
+                    <span class="view-icon">${ICONS.warning}</span>
+                    <h3>Impact</h3>
+                    <span class="view-inline-stats">${tableCount} tables, ${viewCount} views</span>
                 </div>
-
-                <!-- Stats -->
-                <div class="view-stats">
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${tables.length}</span>
-                        <span class="view-stat-label">Total</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${tableCount}</span>
-                        <span class="view-stat-label">Tables</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${viewCount}</span>
-                        <span class="view-stat-label">Views</span>
-                    </div>
-                </div>
-
-                <!-- Search Controls -->
-                <div class="view-controls">
-                    <div class="view-controls-header">
-                        <h4>Search & Filter</h4>
-                        <p class="view-controls-hint">Search for tables or views to analyze</p>
-                    </div>
-                    <div class="view-search-box">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                <div class="view-search-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    <input type="text"
+                           id="impact-search-input"
+                           class="view-search-input"
+                           placeholder="Search tables, views..."
+                           autocomplete="off"
+                           value="">
+                    <button class="view-search-clear" id="impact-search-clear">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                            <path d="M18 6L6 18M6 6l12 12"/>
                         </svg>
-                        <input type="text"
-                               id="impact-search-input"
-                               class="view-search-input"
-                               placeholder="Search tables, views..."
-                               autocomplete="off"
-                               value="">
-                        <button class="view-search-clear" id="impact-search-clear">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <path d="M18 6L6 18M6 6l12 12"/>
-                            </svg>
-                        </button>
+                    </button>
+                </div>
+                <div class="view-filters">
+                    <div class="view-quick-filters">
+                        <span class="view-filter-label">Filter:</span>
+                        <button class="view-filter-chip active" data-filter="all">All</button>
+                        <button class="view-filter-chip" data-filter="table">Tables</button>
+                        <button class="view-filter-chip" data-filter="view">Views</button>
                     </div>
-                    <div class="view-filters">
-                        <div class="view-quick-filters">
-                            <span class="view-filter-label">Filter:</span>
-                            <button class="view-filter-chip active" data-filter="all">All</button>
-                            <button class="view-filter-chip" data-filter="table">Tables</button>
-                            <button class="view-filter-chip" data-filter="view">Views</button>
-                        </div>
-                        <div class="view-results-info" id="impact-results-info" style="display: none;">
-                            <span id="impact-results-count">0</span> results
-                        </div>
+                    <div class="view-results-info" id="impact-results-info" style="display: none;">
+                        <span id="impact-results-count">0</span> results
                     </div>
                 </div>
 
