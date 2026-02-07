@@ -32,15 +32,20 @@ describe('LineageView legend keyboard hints', () => {
         };
     }
 
-    it('renders keyboard hints inside the legend panel instead of a detached floating block', () => {
+    it('renders keyboard hints inside a bottom legend strip with a dismiss control', () => {
         const view = new LineageView();
         const html = view.generateLineageGraphView(createGraph(), 'table:orders', {
             depth: 3,
             direction: 'both',
         });
 
+        expect(html).toContain('id="lineage-legend-content"');
+        expect(html).toContain('id="legend-dismiss"');
+        expect(html).toContain('id="lineage-legend-toggle"');
         expect(html).toContain('legend-keyboard-hints');
         expect(html).toContain('id="lineage-keyboard-hints"');
+        expect(html).toContain('<kbd>L</kbd>');
         expect(html).not.toContain('id="keyboard-hints"');
+        expect(html).not.toContain('id="legend-toggle"');
     });
 });

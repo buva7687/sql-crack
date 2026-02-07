@@ -46,4 +46,37 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("action === 'detail-root'");
         expect(script).toContain("action === 'clear-column-trace'");
     });
+
+    it('supports bottom workspace legend visibility via L shortcut and dismiss button', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('graphLegendStorageKey');
+        expect(script).toContain('toggleGraphLegend');
+        expect(script).toContain('workspace-legend-dismiss');
+        expect(script).toContain('btn-legend-toggle');
+        expect(script).toContain('graphLegendToggleBtn?.addEventListener(\'click\'');
+        expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
+    });
+
+    it('auto-fits graph after sidebar layout changes', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function scheduleGraphAutoFit()');
+        expect(script).toContain("document.getElementById('btn-sidebar')?.addEventListener('click'");
+        expect(script).toContain("document.getElementById('btn-sidebar-close')?.addEventListener('click'");
+        expect(script).toContain('scheduleGraphAutoFit();');
+        expect(script).toContain('fitToScreen();');
+    });
 });

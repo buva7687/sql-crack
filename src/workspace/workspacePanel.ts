@@ -1344,7 +1344,7 @@ ${bodyContent}
         <div class="main-layout">
             <!-- Graph Area -->
             <div class="graph-area-container">
-                <div class="graph-area">
+                <div class="graph-area" id="graph-area">
                     ${graphHtml}
                 </div>
             </div>
@@ -1467,38 +1467,6 @@ ${bodyContent}
                 </div>
             </div>
 
-            <!-- Legend Section (Graph tab only) -->
-            <div class="sidebar-section" data-sidebar-section="legend">
-                <div class="section-header expanded" data-section="legend">
-                    <span class="section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
-                        </svg>
-                        Legend
-                    </span>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-content">
-                    <div class="legend-grid">
-                        <div class="legend-group">
-                            <div class="legend-group-title">Nodes</div>
-                            <div class="legend-item"><div class="legend-node file"></div><span>SQL Files</span></div>
-                            <div class="legend-item"><div class="legend-node table"></div><span>Tables</span></div>
-                            <div class="legend-item"><div class="legend-node view"></div><span>Views</span></div>
-                            <div class="legend-item" title="Referenced in queries but not defined in this workspace"><div class="legend-node external"></div><span>External (not defined here)</span></div>
-                        </div>
-                        <div class="legend-group">
-                            <div class="legend-group-title">Edges</div>
-                            <div class="legend-item"><div class="legend-edge select"></div><span>SELECT</span></div>
-                            <div class="legend-item"><div class="legend-edge join"></div><span>JOIN</span></div>
-                            <div class="legend-item"><div class="legend-edge insert"></div><span>INSERT</span></div>
-                            <div class="legend-item"><div class="legend-edge update"></div><span>UPDATE</span></div>
-                            <div class="legend-item"><div class="legend-edge delete"></div><span>DELETE</span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Export Section (Graph tab only) -->
             <div class="sidebar-section" data-sidebar-section="export">
                 <div class="section-header" data-section="export">
@@ -1598,6 +1566,14 @@ ${bodyContent}
             <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
+            <div class="zoom-divider"></div>
+            <button class="zoom-btn" id="btn-legend-toggle" title="Toggle legend (L)" aria-label="Toggle workspace legend" aria-pressed="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="4" y="5" width="16" height="14" rx="2"/>
+                    <line x1="8" y1="10" x2="16" y2="10"/>
+                    <line x1="8" y1="14" x2="12" y2="14"/>
+                </svg>
+            </button>
         </div>
 
         <!-- Keyboard Shortcuts Hint -->
@@ -1609,6 +1585,31 @@ ${bodyContent}
             <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
+        </div>
+
+        <!-- Bottom Legend Bar -->
+        <div class="workspace-legend-bar" id="workspace-legend-bar" role="complementary" aria-label="Workspace graph legend" aria-hidden="false">
+            <div class="legend-scroll">
+                <div class="legend-inline-group">
+                    <span class="legend-inline-item"><span class="legend-inline-node file"></span><span>SQL Files</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node table"></span><span>Tables</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node view"></span><span>Views</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-node external"></span><span>External</span></span>
+                </div>
+                <span class="legend-divider"></span>
+                <div class="legend-inline-group">
+                    <span class="legend-inline-item"><span class="legend-inline-edge select"></span><span>SELECT</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge join"></span><span>JOIN</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge insert"></span><span>INSERT</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge update"></span><span>UPDATE</span></span>
+                    <span class="legend-inline-item"><span class="legend-inline-edge delete"></span><span>DELETE</span></span>
+                </div>
+                <span class="legend-divider"></span>
+                <div class="legend-inline-group">
+                    <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
+                </div>
+            </div>
+            <button class="legend-dismiss" id="workspace-legend-dismiss" title="Dismiss legend (L)" aria-label="Dismiss workspace legend">×</button>
         </div>`;
     }
 

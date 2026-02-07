@@ -32,4 +32,21 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain("event.key === 'Enter' || event.key === ' '");
         expect(script).toContain('Press Enter to trace lineage');
     });
+
+    it('supports lineage bottom legend visibility controls with L shortcut and dismiss button', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('lineageLegendStorageKey');
+        expect(script).toContain('toggleLineageLegendBar');
+        expect(script).toContain('initializeLineageLegendBar');
+        expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
+        expect(script).toContain("const dismissBtn = document.getElementById('legend-dismiss');");
+        expect(script).toContain("const legendToggleBtn = document.getElementById('lineage-legend-toggle');");
+    });
 });

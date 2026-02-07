@@ -1,4 +1,4 @@
-import { getBaseStyles, getCssVariables, getIssuesStyles } from '../../../../src/workspace/ui/sharedStyles';
+import { getBaseStyles, getCssVariables, getIssuesStyles, getWebviewStyles } from '../../../../src/workspace/ui/sharedStyles';
 
 describe('workspace sharedStyles accessibility rules', () => {
     it('contains reduced-motion overrides for lineage flow animations and panel transitions', () => {
@@ -40,5 +40,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('--scrollbar-thumb');
         expect(css).toContain('scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);');
         expect(css).toContain('*::-webkit-scrollbar-thumb:hover');
+    });
+
+    it('includes bottom legend strip styles for workspace graph and lineage views', () => {
+        const css = getWebviewStyles(false);
+        expect(css).toContain('.lineage-legend.is-hidden');
+        expect(css).toContain('.lineage-graph-container.lineage-legend-visible .lineage-minimap');
+        expect(css).toContain('.workspace-legend-bar');
+        expect(css).toContain('.graph-area.graph-legend-visible .keyboard-hints');
+        expect(css).not.toContain('.workspace-legend-bar,\n        .legend-inline');
     });
 });

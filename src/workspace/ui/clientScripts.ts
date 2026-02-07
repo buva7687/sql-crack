@@ -28,6 +28,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             && typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const motionDurationMs = prefersReducedMotion ? 0 : 200;
+        let graphLayoutFitTimer = null;
 
         // ========== Pan and Zoom State ==========
         let scale = 1;
@@ -58,6 +59,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphEmptyTitle = document.getElementById('graph-empty-title');
         const graphEmptyDesc = document.getElementById('graph-empty-desc');
         const graphEmptyActions = document.getElementById('graph-empty-actions');
+        const graphLegendBar = document.getElementById('workspace-legend-bar');
+        const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
+        const graphLegendToggleBtn = document.getElementById('btn-legend-toggle');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========
@@ -67,6 +71,31 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let activeEmptyState = null;
         const traceUpBtn = document.getElementById('btn-trace-up');
         const traceDownBtn = document.getElementById('btn-trace-down');
+        const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
+
+        function setGraphLegendVisible(visible) {
+            if (!graphLegendBar) return;
+            graphLegendBar.classList.toggle('is-hidden', !visible);
+            graphLegendBar.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            if (graphLegendToggleBtn) {
+                graphLegendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+            }
+            const graphAreaEl = document.getElementById('graph-area') || document.querySelector('.graph-area');
+            if (graphAreaEl) {
+                graphAreaEl.classList.toggle('graph-legend-visible', visible);
+            }
+        }
+
+        function toggleGraphLegend(show) {
+            if (!graphLegendBar) return;
+            const nextVisible = typeof show === 'boolean' ? show : graphLegendBar.classList.contains('is-hidden');
+            setGraphLegendVisible(nextVisible);
+            try {
+                localStorage.setItem(graphLegendStorageKey, nextVisible ? '1' : '0');
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+        }
 
         // ========== Zoom Functions ==========
         function updateTransform() {
@@ -198,6 +227,26 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             offsetY = containerCenterY - bboxCenterY * scale;
 
             updateTransform();
+        }
+
+        function scheduleGraphAutoFit() {
+            // Only auto-fit when Graph tab is active and the main graph is present.
+            const graphTab = document.querySelector('.view-tab[data-view="graph"]');
+            const isGraphTabActive = graphTab?.classList.contains('active');
+            if (!isGraphTabActive || !svg || !mainGroup) {
+                return;
+            }
+
+            if (graphLayoutFitTimer) {
+                clearTimeout(graphLayoutFitTimer);
+            }
+
+            const delay = prefersReducedMotion ? 0 : (motionDurationMs + 40);
+            graphLayoutFitTimer = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    fitToScreen();
+                });
+            }, delay);
         }
 
         // ========== Selection & Focus Helpers ==========
@@ -503,6 +552,29 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
         updateFocusButton();
 
+        if (graphLegendBar) {
+            let showGraphLegend = true;
+            try {
+                const storedLegend = localStorage.getItem(graphLegendStorageKey);
+                if (storedLegend !== null) {
+                    showGraphLegend = storedLegend === '1';
+                }
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+            setGraphLegendVisible(showGraphLegend);
+            graphLegendDismiss?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleGraphLegend(false);
+            });
+            graphLegendToggleBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleGraphLegend();
+            });
+        }
+
         // ========== Pan/Zoom Setup ==========
         if (svg && mainGroup) {
             updateTransform();
@@ -700,14 +772,23 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 resetView();
                 return;
             }
+
+            // L: Toggle bottom legend bar
+            if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                toggleGraphLegend();
+                return;
+            }
         });
 
         // ========== Sidebar Toggle ==========
         document.getElementById('btn-sidebar')?.addEventListener('click', () => {
             sidebar?.classList.toggle('collapsed');
+            scheduleGraphAutoFit();
         });
         document.getElementById('btn-sidebar-close')?.addEventListener('click', () => {
             sidebar?.classList.add('collapsed');
+            scheduleGraphAutoFit();
         });
 
         // ========== Section Toggles ==========
@@ -2477,6 +2558,8 @@ function getLineageGraphScript(): string {
         let lineageSetupInProgress = false;
         let pendingLineageGraphMessage = null;
         let refreshLineageMinimapViewport = null;
+        let lineageShortcutHandler = null;
+        const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
 
         function processLineageGraphResult(message) {
             if (lineageContent && message.data?.html) {
@@ -2812,6 +2895,64 @@ function getLineageGraphScript(): string {
             maybeRenderColumnTraceHint();
         }
 
+        function setLineageLegendVisible(visible) {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+            legendPanel.classList.toggle('is-hidden', !visible);
+            legendPanel.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
+            if (legendToggleBtn) {
+                legendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+            }
+
+            const container = document.getElementById('lineage-graph-container');
+            if (container) {
+                container.classList.toggle('lineage-legend-visible', visible);
+            }
+        }
+
+        function toggleLineageLegendBar(show) {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+            const nextVisible = typeof show === 'boolean' ? show : legendPanel.classList.contains('is-hidden');
+            setLineageLegendVisible(nextVisible);
+            try {
+                localStorage.setItem(lineageLegendStorageKey, nextVisible ? '1' : '0');
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+        }
+
+        function initializeLineageLegendBar() {
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!legendPanel) return;
+
+            let showLegend = true;
+            try {
+                const stored = localStorage.getItem(lineageLegendStorageKey);
+                if (stored !== null) {
+                    showLegend = stored === '1';
+                }
+            } catch (error) {
+                // localStorage may be unavailable in restricted webview contexts
+            }
+
+            setLineageLegendVisible(showLegend);
+
+            const dismissBtn = document.getElementById('legend-dismiss');
+            dismissBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleLineageLegendBar(false);
+            });
+            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
+            legendToggleBtn?.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleLineageLegendBar();
+            });
+        }
+
         function getLineageTypeIcon(type) {
             const icons = {
                 table: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M2 6h12M2 9h12M6 6v7M10 6v7" stroke="currentColor" stroke-width="1"/></svg>',
@@ -3131,14 +3272,20 @@ function getLineageGraphScript(): string {
             });
         }
 
-        // Keyboard handler for 'C' key to toggle all columns
-        document.addEventListener('keydown', (e) => {
+        // Keyboard handler for lineage shortcuts (C/L + column navigation focus)
+        if (lineageShortcutHandler) {
+            document.removeEventListener('keydown', lineageShortcutHandler);
+        }
+        lineageShortcutHandler = (e) => {
             // Only respond if lineage graph is visible
             const lineageContainer = document.getElementById('lineage-graph-container');
             if (!lineageContainer || lineageContainer.offsetParent === null) return;
 
-            // Ignore if typing in an input
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            // Ignore if typing in an input/select/textarea
+            const target = e.target;
+            const targetTag = target && target.tagName ? target.tagName : '';
+            const isTyping = targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT' || (target && target.isContentEditable);
+            if (isTyping) return;
 
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                 const activeEl = document.activeElement;
@@ -3156,18 +3303,17 @@ function getLineageGraphScript(): string {
             if (e.key === 'c' || e.key === 'C') {
                 e.preventDefault();
                 toggleAllColumns();
+                return;
             }
-        });
 
-        // ========== Legend Panel Toggle ==========
-        const legendToggle = document.getElementById('legend-toggle');
-        const legendPanel = document.getElementById('lineage-legend');
-        if (legendToggle && legendPanel) {
-            legendToggle.addEventListener('click', () => {
-                const collapsed = legendPanel.classList.toggle('collapsed');
-                legendToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            });
-        }
+            if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                toggleLineageLegendBar();
+            }
+        };
+        document.addEventListener('keydown', lineageShortcutHandler);
+
+        initializeLineageLegendBar();
 
         // ========== Mini-map Functionality ==========
         function setupMinimap() {

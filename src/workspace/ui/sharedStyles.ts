@@ -2977,111 +2977,93 @@ export function getLineageNodeStyles(): string {
             margin: 4px 0;
         }
 
-        /* Legend Panel */
+        /* Bottom Legend Bar */
         .lineage-legend {
             position: absolute;
-            top: 12px;
-            right: 12px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            box-shadow: var(--shadow-md);
+            left: 0;
+            right: 0;
+            bottom: 0;
             z-index: 100;
-            min-width: 120px;
-            overflow: hidden;
-        }
-        .lineage-legend .legend-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            background: var(--bg-tertiary);
-            border-bottom: 1px solid var(--border-subtle);
+            gap: 10px;
+            min-height: 36px;
+            padding: 8px 42px 8px 12px;
+            border-top: 1px solid var(--border-subtle);
+            background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.12);
+            transition: transform 0.2s ease, opacity 0.2s ease;
         }
-        .lineage-legend .legend-title {
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        .lineage-legend.is-hidden {
+            transform: translateY(100%);
+            opacity: 0;
+            pointer-events: none;
         }
-        .lineage-legend .legend-toggle {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 2px;
+        .lineage-legend .legend-strip {
             display: flex;
             align-items: center;
-            justify-content: center;
-            transition: transform 0.2s, color 0.15s;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb) transparent;
         }
-        .lineage-legend .legend-toggle:hover {
-            color: var(--text-primary);
-        }
-        .lineage-legend.collapsed .legend-toggle {
-            transform: rotate(180deg);
-        }
-        .lineage-legend .legend-content {
-            padding: 8px 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .lineage-legend.collapsed .legend-content {
-            display: none;
-        }
-        .lineage-legend .legend-item {
-            display: flex;
+        .lineage-legend .legend-inline-group {
+            display: inline-flex;
             align-items: center;
             gap: 8px;
+            flex-shrink: 0;
+        }
+        .lineage-legend .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             font-size: 11px;
             color: var(--text-secondary);
         }
         .lineage-legend .legend-color {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             border-radius: 3px;
+            flex-shrink: 0;
         }
         .lineage-legend .legend-table { background: var(--node-table); }
         .lineage-legend .legend-view { background: var(--node-view); }
         .lineage-legend .legend-cte { background: var(--accent); }
         .lineage-legend .legend-external { background: var(--node-external); }
-        .lineage-legend .legend-icon {
-            font-size: 12px;
-        }
         .lineage-legend .legend-label {
-            flex: 1;
+            color: var(--text-secondary);
         }
         .lineage-legend .legend-section-title {
-            font-size: 9px;
+            font-size: 10px;
             font-weight: 600;
-            color: var(--text-dim);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            letter-spacing: 0.4px;
+            color: var(--text-dim);
+            margin-right: 2px;
         }
         .lineage-legend .legend-divider {
-            height: 1px;
+            width: 1px;
+            height: 18px;
             background: var(--border-subtle);
-            margin: 8px 0;
+            flex-shrink: 0;
         }
         .lineage-legend .legend-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
+            flex-shrink: 0;
         }
         .lineage-legend .legend-primary { background: var(--warning-light); }
         .lineage-legend .legend-numeric { background: #60a5fa; }
         .lineage-legend .legend-text { background: #4ade80; }
         .lineage-legend .legend-datetime { background: #c084fc; }
         .lineage-legend .legend-json { background: #2dd4bf; }
-        .lineage-legend .legend-keyboard-hints {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 6px;
-        }
         .lineage-legend .legend-keyboard-hints .hint-item {
             display: inline-flex;
             align-items: center;
@@ -3093,20 +3075,49 @@ export function getLineageNodeStyles(): string {
             width: 1px;
             height: 12px;
             background: var(--border-subtle);
+            flex-shrink: 0;
         }
         .lineage-legend .legend-keyboard-hints kbd {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 20px;
-            height: 20px;
-            padding: 0 5px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
             border-radius: var(--radius-sm);
             background: var(--bg-tertiary);
             color: var(--text-secondary);
             font-size: 9px;
             font-weight: 600;
             font-family: inherit;
+        }
+        .lineage-legend .legend-dismiss {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 16px;
+            line-height: 1;
+            width: 24px;
+            height: 24px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+        }
+        .lineage-legend .legend-dismiss:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        .lineage-graph-container.lineage-legend-visible .lineage-zoom-controls {
+            bottom: 68px;
+        }
+        .lineage-graph-container.lineage-legend-visible .lineage-minimap {
+            bottom: 68px;
+        }
+        .lineage-graph-container.lineage-legend-visible .column-lineage-info {
+            bottom: 74px;
         }
 
         /* Keyboard Shortcuts Hint */
@@ -3388,13 +3399,45 @@ export function getGraphStyles(): string {
         .index-status-stale .status-dot { background: var(--warning); }
         .index-status-old .status-dot { background: var(--danger); }
         .index-status-missing .status-dot { background: var(--text-dim); }
-        .legend-inline {
-            display: flex; align-items: center; gap: 16px; padding: 6px 16px;
-            background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
-            font-size: 11px; color: var(--text-muted); flex-wrap: wrap;
+        .workspace-legend-bar {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 36px;
+            padding: 8px 40px 8px 12px;
+            background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+            border-top: 1px solid var(--border-subtle);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.12);
+            font-size: 11px;
+            color: var(--text-muted);
+            transition: transform 0.2s ease, opacity 0.2s ease;
         }
-        .legend-inline-group { display: flex; align-items: center; gap: 8px; }
-        .legend-inline-item { display: flex; align-items: center; gap: 6px; }
+        .workspace-legend-bar.is-hidden {
+            transform: translateY(100%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .workspace-legend-bar .legend-scroll {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar-thumb) transparent;
+        }
+        .legend-inline-group { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .legend-inline-item { display: inline-flex; align-items: center; gap: 6px; }
         .legend-inline-node {
             width: 12px; height: 12px; border-radius: 3px;
             border: 1px solid transparent; flex-shrink: 0;
@@ -3409,6 +3452,55 @@ export function getGraphStyles(): string {
         .legend-inline-edge.insert { background: var(--edge-insert); }
         .legend-inline-edge.update { background: var(--edge-update); }
         .legend-inline-edge.delete { background: var(--edge-delete); }
+        .workspace-legend-bar .legend-divider {
+            width: 1px;
+            height: 16px;
+            background: var(--border-subtle);
+            flex-shrink: 0;
+        }
+        .workspace-legend-bar .legend-dismiss {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            width: 24px;
+            height: 24px;
+            border-radius: var(--radius-sm);
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .workspace-legend-bar .legend-dismiss:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        .workspace-legend-bar .hint-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+        .workspace-legend-bar kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 9px;
+            font-weight: 600;
+            font-family: inherit;
+        }
+        .graph-area.graph-legend-visible .keyboard-hints {
+            bottom: 70px;
+        }
 
         /* ========== Issue Banner ========== */
         .issue-banner {
