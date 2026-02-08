@@ -186,4 +186,20 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("container.style.setProperty('--lineage-legend-height', legendHeight + 'px');");
         expect(script).toContain('window.addEventListener(\'resize\', lineageOverlayResizeHandler);');
     });
+
+    it('applies configured lineage depth and listens for runtime depth updates', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+            lineageDefaultDepth: 12,
+        });
+
+        expect(script).toContain('let lineageDepth = 12;');
+        expect(script).toContain('case \'workspaceLineageDepthUpdated\':');
+        expect(script).toContain('lineageDepth = normalizeLineageDepth(message.depth, lineageDepth);');
+        expect(script).toContain('command: \'getLineageGraph\'');
+    });
 });

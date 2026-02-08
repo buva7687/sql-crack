@@ -60,6 +60,7 @@ export interface MessageHandlerContext {
     getTableExplorer: () => TableExplorer;
     getLineageView: () => LineageView;
     getImpactView: () => ImpactView;
+    getDefaultLineageDepth: () => number;
 
     // Theme state
     getIsDarkTheme: () => boolean;
@@ -86,6 +87,36 @@ export class MessageHandler {
 
     constructor(context: MessageHandlerContext) {
         this._context = context;
+    }
+
+    private resolveRequestedDepth(depth: unknown): number {
+        const fallbackDepth = this._context.getDefaultLineageDepth();
+        const numeric = Number(depth);
+        if (!Number.isFinite(numeric)) {
+            return fallbackDepth;
+        }
+        if (numeric === -1) {
+            return -1;
+        }
+        const normalized = Math.floor(numeric);
+        if (normalized < 1) {
+            return fallbackDepth;
+        }
+        return Math.min(20, normalized);
+    }
+
+    private resolveColumnLineageTableName(tableName?: string, tableId?: string): string | undefined {
+        if (tableName && tableName.trim().length > 0) {
+            return tableName;
+        }
+        if (!tableId || tableId.trim().length === 0) {
+            return undefined;
+        }
+        const separatorIndex = tableId.indexOf(':');
+        if (separatorIndex >= 0 && separatorIndex < tableId.length - 1) {
+            return tableId.slice(separatorIndex + 1);
+        }
+        return tableId;
     }
 
     /**
@@ -147,7 +178,11 @@ export class MessageHandler {
                 break;
 
             case 'getLineage':
-                await this.handleGetLineage(message.nodeId, message.direction, message.depth);
+                await this.handleGetLineage(
+                    message.nodeId,
+                    message.direction,
+                    this.resolveRequestedDepth(message.depth)
+                );
                 break;
 
             case 'analyzeImpact':
@@ -164,7 +199,12 @@ export class MessageHandler {
                 break;
 
             case 'getColumnLineage':
-                await this.handleGetColumnLineage(message.tableName, message.columnName);
+                {
+                    const tableName = this.resolveColumnLineageTableName(message.tableName, message.tableId);
+                    if (tableName && message.columnName) {
+                        await this.handleGetColumnLineage(tableName, message.columnName);
+                    }
+                }
                 break;
 
             case 'selectLineageNode':
@@ -172,11 +212,21 @@ export class MessageHandler {
                 break;
 
             case 'getUpstream':
-                await this.handleGetUpstream(message.nodeId, message.depth, message.nodeType, message.filePath);
+                await this.handleGetUpstream(
+                    message.nodeId,
+                    this.resolveRequestedDepth(message.depth),
+                    message.nodeType,
+                    message.filePath
+                );
                 break;
 
             case 'getDownstream':
-                await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
+                await this.handleGetDownstream(
+                    message.nodeId,
+                    this.resolveRequestedDepth(message.depth),
+                    message.nodeType,
+                    message.filePath
+                );
                 break;
 
             // ========== Visual Lineage Graph Commands ==========
@@ -187,7 +237,7 @@ export class MessageHandler {
             case 'getLineageGraph':
                 await this.handleGetLineageGraph(
                     message.nodeId,
-                    message.depth || 5,
+                    this.resolveRequestedDepth(message.depth),
                     message.direction || 'both',
                     message.expandedNodes
                 );
@@ -771,7 +821,7 @@ export class MessageHandler {
         direction: 'both' | 'upstream' | 'downstream'
     ): Promise<void> {
         // Re-generate graph with new direction
-        await this.handleGetLineageGraph(nodeId, 5, direction);
+        await this.handleGetLineageGraph(nodeId, this._context.getDefaultLineageDepth(), direction);
     }
 
     private handleCollapseNodeColumns(nodeId: string): void {

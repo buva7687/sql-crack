@@ -54,4 +54,26 @@ describe('TableExplorer connection count caching', () => {
         expect(firstHtml).toContain('downstream" title="1 table');
         expect(firstHtml).not.toContain('upstream" title="2 table');
     });
+
+    it('uses configured traversal depth for lineage counts', () => {
+        const upstreamSpy = jest.spyOn(FlowAnalyzer.prototype, 'getUpstream').mockReturnValue({
+            nodes: [],
+            edges: [],
+            paths: [],
+            depth: 1,
+        });
+        const downstreamSpy = jest.spyOn(FlowAnalyzer.prototype, 'getDownstream').mockReturnValue({
+            nodes: [],
+            edges: [],
+            paths: [],
+            depth: 1,
+        });
+
+        const explorer = new TableExplorer();
+        explorer.setTraversalDepth(4);
+        explorer.generateTableList(createGraph());
+
+        expect(upstreamSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ maxDepth: 4 }));
+        expect(downstreamSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ maxDepth: 4 }));
+    });
 });

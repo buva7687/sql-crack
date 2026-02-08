@@ -184,6 +184,13 @@
           "maximum": 500,
           "description": "Maximum number of SQL files to auto-index on workspace analysis (larger workspaces require manual confirmation)"
         },
+        "sqlCrack.workspaceLineageDepth": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Default lineage traversal depth for Lineage and Table Explorer views"
+        },
         "sqlCrack.workspaceGraphDefaultMode": {
           "type": "string",
           "default": "tables",

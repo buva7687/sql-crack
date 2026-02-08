@@ -42,6 +42,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
         getTableExplorer: jest.fn(),
         getLineageView: jest.fn(),
         getImpactView: jest.fn(),
+        getDefaultLineageDepth: jest.fn(() => 5),
         getIsDarkTheme: jest.fn(() => true),
         setIsDarkTheme: jest.fn(),
         getIsRebuilding: jest.fn(() => false),
@@ -169,4 +170,3 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
         expect(sentNodes).toHaveLength(2);
     });
 });
-

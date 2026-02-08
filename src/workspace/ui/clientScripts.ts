@@ -10,13 +10,24 @@ export interface WebviewScriptParams {
     searchFilterQuery: string;
     initialView?: string;
     currentGraphMode?: 'files' | 'tables' | 'hybrid';
+    lineageDefaultDepth?: number;
 }
 
 /**
  * Generate the complete client script for main webview
  */
 export function getWebviewScript(params: WebviewScriptParams): string {
-    const { nonce, graphData, searchFilterQuery, initialView = 'graph', currentGraphMode = 'tables' } = params;
+    const {
+        nonce,
+        graphData,
+        searchFilterQuery,
+        initialView = 'graph',
+        currentGraphMode = 'tables',
+        lineageDefaultDepth = 5
+    } = params;
+    const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
+        ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
+        : 5;
 
     return `
     <script nonce="${nonce}">
@@ -24,6 +35,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
         let currentGraphMode = '${currentGraphMode}';
+        let lineageDepth = ${normalizedLineageDepth};
+        function normalizeLineageDepth(value, fallbackDepth = 5) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return fallbackDepth;
+            }
+            const normalized = Math.floor(numeric);
+            if (normalized < 1) {
+                return fallbackDepth;
+            }
+            return Math.min(20, normalized);
+        }
+        lineageDepth = normalizeLineageDepth(lineageDepth, 5);
         const prefersReducedMotion = typeof window !== 'undefined'
             && typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1641,14 +1665,14 @@ function getContextMenuScript(): string {
                                 command: 'getUpstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
-                                depth: 5
+                                depth: lineageDepth
                             });
                         } else {
                             const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getUpstream',
                                 nodeId: nodeType + ':' + nodeName.toLowerCase(),
-                                depth: 5
+                                depth: lineageDepth
                             });
                         }
                         break;
@@ -1661,14 +1685,14 @@ function getContextMenuScript(): string {
                                 command: 'getDownstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
-                                depth: 5
+                                depth: lineageDepth
                             });
                         } else {
                             const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getDownstream',
                                 nodeId: nodeType + ':' + nodeName.toLowerCase(),
-                                depth: 5
+                                depth: lineageDepth
                             });
                         }
                         break;
@@ -1820,6 +1844,18 @@ function getMessageHandlingScript(): string {
                                 ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
                                 : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
                         }
+                    }
+                    break;
+                case 'workspaceLineageDepthUpdated':
+                    lineageDepth = normalizeLineageDepth(message.depth, lineageDepth);
+                    if (currentViewMode === 'lineage' && lineageDetailView && lineageCurrentNodeId) {
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: lineageCurrentNodeId,
+                            depth: lineageDepth,
+                            direction: lineageCurrentDirection,
+                            expandedNodes: Array.from(lineageExpandedNodes || new Set())
+                        });
                     }
                     break;
                 case 'exportPng':
@@ -2056,12 +2092,12 @@ function getEventDelegationScript(): string {
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                     case 'show-downstream':
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                 }
             });
@@ -2713,7 +2749,7 @@ function getVisualLineageSearchScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: nodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection
             });
         }
@@ -3058,7 +3094,7 @@ function getLineageGraphScript(): string {
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5,
+                            depth: lineageDepth,
                             expandedNodes: Array.from(lineageExpandedNodes)
                         });
                     }
@@ -3344,12 +3380,12 @@ function getLineageGraphScript(): string {
                 },
                 'focus-upstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: 5 });
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: lineageDepth });
                     }
                 },
                 'focus-downstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: 5 });
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: lineageDepth });
                     }
                 },
                 'expand-columns': () => {
@@ -3393,7 +3429,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes)
             });
@@ -3411,7 +3447,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes || new Set())
             });
@@ -3456,7 +3492,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes)
             });
@@ -3471,7 +3507,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: []
             });
@@ -3990,7 +4026,7 @@ function getDirectionButtonsScript(): string {
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5,
+                            depth: lineageDepth,
                             expandedNodes: lineageExpandedNodes ? Array.from(lineageExpandedNodes) : []
                         });
                     }

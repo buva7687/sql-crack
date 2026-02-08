@@ -14,6 +14,19 @@ export class TableExplorer {
         upstreamCount: number;
         downstreamCount: number;
     }>>();
+    private traversalDepth = 10;
+
+    setTraversalDepth(depth: number): void {
+        const numeric = Number(depth);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        const normalized = Math.floor(numeric);
+        if (normalized < 1) {
+            return;
+        }
+        this.traversalDepth = normalized;
+    }
 
     /**
      * Generate a list of all tables in the workspace with search and filtering
@@ -67,8 +80,8 @@ export class TableExplorer {
                 };
             }
 
-            const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 10, excludeExternal: true });
-            const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 10, excludeExternal: true });
+            const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: this.traversalDepth, excludeExternal: true });
+            const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: this.traversalDepth, excludeExternal: true });
             const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
             const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
 
@@ -285,14 +298,14 @@ export class TableExplorer {
 
         // Add upstream panel - get all nodes including external in single call
         const flowAnalyzer = new FlowAnalyzer(graph);
-        const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: 10, excludeExternal: false });
+        const upstream = flowAnalyzer.getUpstream(table.id, { maxDepth: this.traversalDepth, excludeExternal: false });
 
         if (upstream.nodes.length > 0) {
             html += this.generateFlowPanel('upstream', upstream, table.id, graph);
         }
 
         // Add downstream panel - get all nodes including external in single call
-        const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: 10, excludeExternal: false });
+        const downstream = flowAnalyzer.getDownstream(table.id, { maxDepth: this.traversalDepth, excludeExternal: false });
 
         if (downstream.nodes.length > 0) {
             html += this.generateFlowPanel('downstream', downstream, table.id, graph);
