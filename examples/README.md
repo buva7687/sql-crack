@@ -26,6 +26,7 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **Subqueries** | `basic-subqueries.sql` | Double-click subquery nodes to expand |
 | **CASE expressions** | `basic-case-expressions.sql` | Check node details panel for branch logic |
 | **Set operations** | `basic-set-operations.sql` | See UNION/INTERSECT/EXCEPT connecting nodes |
+| **Table-valued functions** | `tvf-bigquery.sql`, `tvf-snowflake.sql`, `tvf-transactsql.sql` | Verify UNNEST/FLATTEN/OPENJSON appear as table-function nodes |
 | **Performance hints** | `quality-performance-hints.sql` | Check hints panel (bottom-left) for anti-patterns |
 | **Quality warnings** | `quality-code-warnings.sql` | Look for ⚠ warning badges on nodes |
 | **Write operations** | `dml-write-operations.sql` | See INSERT/UPDATE/DELETE/MERGE badges |
@@ -64,6 +65,13 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | `basic-window-functions.sql` | ROW_NUMBER, RANK, LAG, LEAD, running totals |
 | `basic-case-expressions.sql` | Simple CASE, searched CASE, nested conditions |
 | `basic-set-operations.sql` | UNION, UNION ALL, INTERSECT, EXCEPT |
+
+### Table-Valued Functions
+| File | What it demonstrates |
+|------|---------------------|
+| `tvf-bigquery.sql` | BigQuery UNNEST() as source and join input |
+| `tvf-snowflake.sql` | Snowflake LATERAL FLATTEN and TABLE(FLATTEN(...)) |
+| `tvf-transactsql.sql` | SQL Server OPENJSON() source and CROSS APPLY usage |
 
 ### Column Lineage
 | File | What it demonstrates |
