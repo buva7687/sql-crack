@@ -2973,6 +2973,13 @@ function formatExpressionFromAst(expr: any): string {
         return `${expr.operator || ''}${formatExpressionFromAst(expr.expr)}`;
     }
 
+    // CAST expression
+    if (expr.type === 'cast') {
+        const innerExpr = formatExpressionFromAst(expr.expr);
+        const dataType = expr.target?.dataType || expr.target || 'type';
+        return `CAST(${innerExpr} AS ${dataType})`;
+    }
+
     // Number or string literal
     if (expr.type === 'number' || expr.type === 'single_quote_string' || expr.type === 'string') {
         return String(expr.value ?? '');
@@ -3076,9 +3083,23 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
         }
         
         const expression = col.expr ? formatExpressionFromAst(col.expr) : name;
-        const sourceColName = getStringValue(col.expr?.column);
-        const sourceTableName = getStringValue(col.expr?.table) ||
-            (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined);
+        
+        // Extract source column and table
+        // For CAST expressions, the source column is inside col.expr.expr
+        let sourceColName: string | undefined;
+        let sourceTableName: string | undefined;
+        
+        if (col.expr?.type === 'cast') {
+            // CAST expression: extract source from the inner expression
+            sourceColName = getStringValue(col.expr.expr?.column) || undefined;
+            sourceTableName = getStringValue(col.expr.expr?.table) ||
+                (col.expr.expr?.table ? getStringValue(col.expr.expr.table.table) || getStringValue(col.expr.expr.table.name) : undefined) || undefined;
+        } else {
+            // Regular expression: extract source from the expression itself
+            sourceColName = getStringValue(col.expr?.column) || undefined;
+            sourceTableName = getStringValue(col.expr?.table) ||
+                (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined) || undefined;
+        }
 
         return {
             name: name,
