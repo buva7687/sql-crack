@@ -98,4 +98,10 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
    - Confusing "added to data" with "implemented in parser"
    - Writing status reports before running `npm test`
    - Removing failing tests instead of either fixing them OR clearly marking them as pending
+   - **Regex false positives:** Be careful with dialect detection regex patterns
+     - Example: `:\w+` matches Snowflake path operator BUT ALSO PostgreSQL `::` cast and MySQL `:param` bind parameters
+     - Use negative lookbehind/lookahead or more specific patterns: `/(?<!:):\w+(?!:)/` instead of `/:\w+/`
+   - **Cross-dialect syntax:** Some keywords exist in multiple dialects
+     - Example: `UNNEST` is valid in BigQuery, PostgreSQL, AND Trino - not just BigQuery
+     - Always check if syntax is dialect-specific before showing warnings
    - Claiming "complete" when only the foundation is done

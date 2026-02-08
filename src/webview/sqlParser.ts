@@ -1333,6 +1333,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Generate optimization hints
         generateHints(statements[0]);
 
+        // Detect dialect-specific syntax patterns
+        detectDialectSpecificSyntax(sql, dialect);
+
         // Detect advanced issues (unused CTEs, dead columns, etc.)
         detectAdvancedIssues(nodes, edges, sql);
 
@@ -1450,6 +1453,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         if (locationPrefix && !/^Line\s+\d+/i.test(message)) {
             message = `${locationPrefix}: ${message}`;
         }
+
+        // Even when parsing fails, try to detect dialect-specific syntax
+        // to provide helpful hints to users
+        detectDialectSpecificSyntax(sql, dialect);
 
         return { nodes: [], edges: [], stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
     }
@@ -4000,6 +4007,96 @@ function buildColumnLineagePath(
     }
 
     return path;
+}
+
+/**
+ * Detect dialect-specific syntax patterns and add appropriate hints
+ * This helps users identify when they're using syntax that's specific to a certain dialect
+ */
+function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): void {
+    const upperSql = sql.toUpperCase();
+    
+    // Snowflake-specific syntax patterns
+    const hasSnowflakePathOperator = /(?<!:):\w+(?!:)/.test(sql); // e.g., payload:items (excludes :: casts and :params)
+    const hasSnowflakeNamedArgs = /\w+\s*=>\s*/.test(sql); // e.g., input => value
+    const hasFlatten = /\bFLATTEN\s*\(/i.test(sql);
+    
+    if ((hasSnowflakePathOperator || hasSnowflakeNamedArgs || hasFlatten) && currentDialect !== 'Snowflake') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'Snowflake-specific syntax detected',
+            suggestion: currentDialect === 'MySQL' || currentDialect === 'PostgreSQL'
+                ? `This query uses Snowflake syntax (e.g., : path operator or => named arguments). Try Snowflake dialect for full support.`
+                : `This query uses Snowflake-specific syntax. Consider switching to Snowflake dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // BigQuery-specific syntax patterns
+    const hasBigQueryStruct = /\bSTRUCT\s*\(/i.test(sql);
+    const hasBigQueryUnnest = /\bUNNEST\s*\(/i.test(sql);
+    const hasBigQueryArrayType = /\bARRAY<.*>/i.test(sql);
+    
+    const unnestOnlyDialects: SqlDialect[] = ['BigQuery', 'PostgreSQL', 'Trino', 'Athena'];
+    if ((hasBigQueryStruct || hasBigQueryArrayType || (hasBigQueryUnnest && !unnestOnlyDialects.includes(currentDialect)))
+        && currentDialect !== 'BigQuery') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'BigQuery-specific syntax detected',
+            suggestion: `This query uses BigQuery syntax (e.g., STRUCT, UNNEST, or ARRAY<>). Try BigQuery dialect for full support.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // PostgreSQL-specific syntax patterns
+    const hasPostgresInterval = /INTERVAL\s+'[^']+'/i.test(sql);
+    const hasPostgresDollarQuotes = /\$\$/.test(sql);
+    const hasPostgresArrayAccess = /\w+\[\d+\]/.test(sql); // e.g., arr[1]
+    const hasPostgresJsonOperators = /->>|#>|\?&|\?\|/.test(sql);
+    
+    if ((hasPostgresInterval || hasPostgresDollarQuotes || hasPostgresArrayAccess || hasPostgresJsonOperators) 
+        && currentDialect !== 'PostgreSQL' && currentDialect !== 'Snowflake') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'PostgreSQL-specific syntax detected',
+            suggestion: `This query uses PostgreSQL syntax (e.g., INTERVAL '...', $$ quotes, or JSON operators). Try PostgreSQL dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // MySQL-specific syntax patterns
+    const hasMysqlBackticks = /`[\w-]+`/.test(sql); // Backtick identifiers
+    const hasMysqlGroupByRollup = /GROUP BY.*WITH ROLLUP/i.test(sql);
+    const hasMysqlDual = /FROM\s+DUAL/i.test(sql);
+    
+    if ((hasMysqlBackticks || hasMysqlGroupByRollup || hasMysqlDual) 
+        && currentDialect !== 'MySQL' && currentDialect !== 'MariaDB') {
+        ctx.hints.push({
+            type: 'info',
+            message: 'MySQL-specific syntax detected',
+            suggestion: `This query uses MySQL syntax (e.g., backtick identifiers or WITH ROLLUP). Try MySQL dialect.`,
+            category: 'best-practice',
+            severity: 'low'
+        });
+    }
+    
+    // T-SQL (SQL Server) specific syntax
+    const hasTSqlApply = /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql);
+    const hasTSqlTop = /TOP\s*\(/i.test(sql);
+    const hasTSqlPivot = /\bPIVOT\s*\(/i.test(sql);
+    
+    if ((hasTSqlApply || hasTSqlTop || hasTSqlPivot) && currentDialect !== 'TransactSQL') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'SQL Server (T-SQL) syntax detected',
+            suggestion: `This query uses SQL Server syntax (e.g., CROSS APPLY, TOP, or PIVOT). Try TransactSQL dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
 }
 
 /**
