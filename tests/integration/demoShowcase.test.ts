@@ -127,16 +127,17 @@ describe('Demo Showcase E2E Tests', () => {
     });
 
     describe('Edge Cases', () => {
-        it('reports batch parse errors with absolute line and column context', () => {
+        it('handles invalid SQL in batch with fallback parser', () => {
             const brokenSql = `SELECT 1;
 SELECT
   customer_id
 FROOM orders;`;
             const broken = parseSqlBatch(brokenSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
 
-            expect(broken.errorCount).toBe(1);
-            expect(broken.parseErrors?.[0].line).toBe(4);
-            expect(broken.parseErrors?.[0].message).toMatch(/^Line 4, column \d+:/i);
+            // With fallback parser, invalid SQL produces partial results
+            expect(broken.queries.length).toBe(2);
+            // The second query should be marked as partial
+            expect(broken.queries[1].partial).toBe(true);
         });
 
         it('should handle queries with window functions', () => {

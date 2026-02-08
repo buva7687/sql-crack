@@ -76,6 +76,7 @@ export interface ParseResult {
     columnFlows?: ColumnFlow[];
     tableUsage: Map<string, number>;
     error?: string;
+    partial?: boolean; // True when using regex fallback parser
 }
 
 export interface ParseError {

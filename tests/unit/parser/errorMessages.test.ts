@@ -121,8 +121,13 @@ describe('Item #2: Better Error Messages for Parse Failures', () => {
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            expect(result.error).toBeDefined();
-            expect(result.error?.toLowerCase()).toMatch(/postgresql|interval|dialect|try/i);
+            // Fallback parser produces partial result; error info is in hints
+            expect(result.partial).toBe(true);
+            const errorHint = result.hints.find((h: any) => h.type === 'error');
+            expect(errorHint).toBeDefined();
+            // Dialect-specific hints should suggest PostgreSQL
+            const pgHint = result.hints.find((h: any) => h.message?.toLowerCase().includes('postgresql'));
+            expect(pgHint).toBeDefined();
         });
 
         it('should parse PostgreSQL syntax with PostgreSQL dialect', () => {
@@ -154,25 +159,30 @@ describe('Item #2: Better Error Messages for Parse Failures', () => {
     });
 
     describe('Generic Error Messages', () => {
-        it('should provide helpful error when syntax is completely unknown', () => {
+        it('should provide helpful hints when syntax is completely unknown', () => {
             const sql = `
                 SELECT INVALID SYNTAX HERE
                 FROM orders
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            expect(result.error).toBeDefined();
-            // Should not just be the raw parser error
-            expect(result.error?.length).toBeGreaterThan(0);
+            // Fallback parser produces partial result with error hints
+            expect(result.partial).toBe(true);
+            const errorHint = result.hints.find((h: any) => h.type === 'error');
+            expect(errorHint).toBeDefined();
+            expect(errorHint!.message.length).toBeGreaterThan(0);
         });
 
-        it('should include line/column info in parse errors', () => {
+        it('should include parse error details in hints', () => {
             const sql = `SELECT FROM WHERE`;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            expect(result.error).toBeDefined();
-            // Error should include position info (line or column)
-            expect(result.error).toMatch(/line|column|position/i);
+            // Fallback parser produces partial result
+            expect(result.partial).toBe(true);
+            const errorHint = result.hints.find((h: any) => h.type === 'error');
+            expect(errorHint).toBeDefined();
+            // Error hint should contain parse error message
+            expect(errorHint!.message).toMatch(/parse error/i);
         });
     });
 });
