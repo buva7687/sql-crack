@@ -13,6 +13,14 @@ export type HintCategory = 'performance' | 'quality' | 'best-practice' | 'comple
 
 export type HintSeverity = 'low' | 'medium' | 'high';
 
+export type FunctionCategory = 'scalar' | 'aggregate' | 'window' | 'tvf' | 'unknown';
+
+export interface FunctionUsage {
+    name: string;
+    category: FunctionCategory;
+    count?: number;
+}
+
 export interface ComplexityBreakdown {
     joins: number;
     subqueries: number;
@@ -40,6 +48,8 @@ export interface QueryStats {
     // Performance metrics
     performanceScore?: number;
     performanceIssues?: number;
+    // Function usage
+    functionsUsed?: FunctionUsage[];
 }
 
 export interface OptimizationHint {

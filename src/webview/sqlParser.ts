@@ -158,6 +158,7 @@ interface ParserContext {
     statementType: string;
     tableUsageMap: Map<string, number>;
     dialect: SqlDialect;
+    functionsUsed: Set<string>; // Track unique function names used
 }
 
 /**
@@ -191,7 +192,8 @@ function createFreshContext(dialect: SqlDialect): ParserContext {
         hasNoLimit: true,
         statementType: '',
         tableUsageMap: new Map(),
-        dialect
+        dialect,
+        functionsUsed: new Set<string>() // Track function names
     };
 }
 
@@ -199,6 +201,13 @@ function createFreshContext(dialect: SqlDialect): ParserContext {
 function trackTableUsage(tableName: string): void {
     const normalizedName = tableName.toLowerCase();
     ctx.tableUsageMap.set(normalizedName, (ctx.tableUsageMap.get(normalizedName) || 0) + 1);
+}
+
+// Track function usage
+function trackFunctionUsage(functionName: unknown, category: 'aggregate' | 'window' | 'tvf' | 'scalar'): void {
+    if (typeof functionName !== 'string' || !functionName) return;
+    const normalizedName = functionName.toUpperCase();
+    ctx.functionsUsed.add(`${normalizedName}:${category}`);
 }
 
 function calculateComplexity(): void {
@@ -1522,6 +1531,16 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Update stats.tables to reflect the actual number of unique tables (including from CTEs and subqueries)
         ctx.stats.tables = ctx.tableUsageMap.size;
+
+        // Convert functionsUsed Set to sorted FunctionUsage array
+        if (ctx.functionsUsed.size > 0) {
+            ctx.stats.functionsUsed = Array.from(ctx.functionsUsed)
+                .map(entry => {
+                    const [name, category] = entry.split(':');
+                    return { name, category: category as import('./types/parser').FunctionCategory };
+                })
+                .sort((a, b) => a.name.localeCompare(b.name));
+        }
 
         return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage, columnFlows, tableUsage: ctx.tableUsageMap };
     } catch (err) {
@@ -2958,6 +2977,7 @@ function processFromItem(
     // Table-valued function (UNNEST, OPENJSON, FLATTEN, JSON_TABLE, etc.)
     const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
     if (tableValuedFunctionName) {
+        trackFunctionUsage(tableValuedFunctionName, 'tvf');
         ctx.stats.tables++;
         const tableId = genId('table');
         const label = getFromItemDisplayName(fromItem);
@@ -3074,6 +3094,7 @@ function formatExpressionFromAst(expr: any): string {
     // Aggregate function
     if (expr.type === 'aggr_func') {
         const funcName = expr.name || 'AGG';
+        trackFunctionUsage(funcName, 'aggregate');
         const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
         let argsStr = '';
 
@@ -3092,6 +3113,7 @@ function formatExpressionFromAst(expr: any): string {
     // Function call
     if (expr.type === 'function') {
         const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        trackFunctionUsage(funcName, expr.over ? 'window' : 'scalar');
         const args = expr.args?.value || expr.args || [];
         const argsStr = Array.isArray(args)
             ? args.map((arg: any) => formatExpressionFromAst(arg)).join(', ')
@@ -3373,6 +3395,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
 
             // Ensure funcName is a clean string
             const cleanName = typeof funcName === 'string' ? funcName : 'WINDOW';
+            trackFunctionUsage(cleanName, 'window');
 
             details.push({
                 name: cleanName.toUpperCase(),

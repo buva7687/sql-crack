@@ -4867,6 +4867,50 @@ function updateStatsPanel(): void {
                 ` : ''}
             </div>
         ` : ''}
+        ${currentStats.functionsUsed && currentStats.functionsUsed.length > 0 ? (() => {
+            const funcs = currentStats.functionsUsed!;
+            const categoryOrder = ['aggregate', 'window', 'tvf', 'scalar', 'unknown'] as const;
+            const categoryLabels: Record<string, string> = { aggregate: 'Aggregate', window: 'Window', tvf: 'Table-Valued', scalar: 'Scalar', unknown: 'Other' };
+            const categoryColors: Record<string, string> = {
+                aggregate: isDark ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
+                window: isDark ? 'rgba(139, 92, 246, 0.2)' : 'rgba(139, 92, 246, 0.15)',
+                tvf: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+                scalar: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)',
+                unknown: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)'
+            };
+            const categoryTextColors: Record<string, string> = {
+                aggregate: '#f59e0b', window: isDark ? '#a78bfa' : '#7c3aed',
+                tvf: isDark ? '#34d399' : '#059669', scalar: textColorMuted, unknown: textColorMuted
+            };
+            const grouped = new Map<string, string[]>();
+            for (const f of funcs) {
+                const cat = f.category || 'unknown';
+                if (!grouped.has(cat)) grouped.set(cat, []);
+                grouped.get(cat)!.push(f.name);
+            }
+            return `
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600; margin-bottom: 6px;">Functions Used (${funcs.length}):</div>
+                ${categoryOrder.filter(c => grouped.has(c)).map(cat => `
+                    <div style="margin-bottom: 4px;">
+                        <div style="font-size: 9px; color: ${textColorDim}; margin-bottom: 2px;">${categoryLabels[cat]}</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 3px;">
+                            ${grouped.get(cat)!.map(name => `
+                                <span style="
+                                    background: ${categoryColors[cat]};
+                                    color: ${categoryTextColors[cat]};
+                                    padding: 1px 6px;
+                                    border-radius: 3px;
+                                    font-size: 9px;
+                                    font-family: monospace;
+                                    font-weight: 500;
+                                ">${escapeHtml(name)}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>`;
+        })() : ''}
         ${tableListHtml}
     `;
 
