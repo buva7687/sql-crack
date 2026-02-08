@@ -117,6 +117,80 @@ describe('SQL Parser', () => {
       const statements = splitSqlStatements(sql);
       expect(statements).toHaveLength(2);
     });
+
+    it('ignores parentheses inside -- line comments', () => {
+      const sql = `-- list: 1) first 2) second
+SELECT * FROM users;
+-- another (comment)
+SELECT * FROM orders;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain('SELECT * FROM users');
+      expect(statements[1]).toContain('SELECT * FROM orders');
+    });
+
+    it('ignores parentheses inside // line comments', () => {
+      const sql = `// Snowflake comment (with parens)
+SELECT 1;
+// another)
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('ignores parentheses inside # line comments', () => {
+      const sql = `# MySQL comment (with parens)
+SELECT 1;
+# another)
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('ignores parentheses inside /* block comments */', () => {
+      const sql = `/* comment with ) unmatched paren */
+SELECT 1;
+/* another ( unmatched */
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('ignores semicolons inside -- line comments', () => {
+      const sql = `SELECT 1 -- comment with ; semicolon
+FROM t;
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('ignores semicolons inside /* block comments */', () => {
+      const sql = `SELECT 1 /* comment; with; semis */ FROM t;
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(2);
+    });
+
+    it('splits SQL file with comment headers containing numbered lists', () => {
+      const sql = `-- ============================================================
+-- Table-Valued Functions (TVF) - Snowflake
+-- ============================================================
+-- Use this file to validate:
+--   1) FLATTEN appears as a table-function source node
+--   2) FLATTEN alias handling
+--   3) TABLE(FLATTEN(...)) wrapper detection
+-- ============================================================
+
+SELECT * FROM t1;
+
+-- Q2
+SELECT * FROM t2;
+
+-- Q3
+SELECT * FROM t3;`;
+      const statements = splitSqlStatements(sql);
+      expect(statements).toHaveLength(3);
+    });
   });
   describe('Basic SELECT', () => {
     it('parses simple SELECT with single table', () => {

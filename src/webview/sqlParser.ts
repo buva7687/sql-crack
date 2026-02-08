@@ -487,11 +487,57 @@ export function splitSqlStatements(sql: string): string[] {
     let current = '';
     let inString = false;
     let stringChar = '';
+    let inLineComment = false;
+    let inBlockComment = false;
     let depth = 0;
 
     for (let i = 0; i < sql.length; i++) {
         const char = sql[i];
+        const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
         const prevChar = i > 0 ? sql[i - 1] : '';
+
+        // End of line comment on newline
+        if (inLineComment) {
+            current += char;
+            if (char === '\n') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        // Inside block comment — look for closing */
+        if (inBlockComment) {
+            current += char;
+            if (char === '*' && nextChar === '/') {
+                current += '/';
+                i++;
+                inBlockComment = false;
+            }
+            continue;
+        }
+
+        // Detect start of block comment /* (not inside a string)
+        if (!inString && char === '/' && nextChar === '*') {
+            inBlockComment = true;
+            current += '/*';
+            i++;
+            continue;
+        }
+
+        // Detect start of line comments: --, //, # (not inside a string)
+        if (!inString) {
+            if ((char === '-' && nextChar === '-') || (char === '/' && nextChar === '/')) {
+                inLineComment = true;
+                current += char + nextChar;
+                i++;
+                continue;
+            }
+            if (char === '#') {
+                inLineComment = true;
+                current += char;
+                continue;
+            }
+        }
 
         // Handle string literals
         if ((char === "'" || char === '"') && prevChar !== '\\') {
@@ -2392,6 +2438,42 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 source: cteId,
                 target: tableIds[0]
             });
+        }
+    }
+
+    // Connect comma-separated FROM items (implicit cross joins) that aren't
+    // already wired by the explicit JOIN logic above. tableIds[0] is the base;
+    // any additional non-join item needs an edge into the flow.
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (let i = 1; i < stmt.from.length; i++) {
+            const fromItem = stmt.from[i];
+            if (!fromItem.join) {
+                const extraTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
+                if (extraTableId && lastOutputId) {
+                    // Create an implicit CROSS JOIN node
+                    ctx.stats.joins++;
+                    const crossJoinId = genId('join');
+                    nodes.push({
+                        id: crossJoinId,
+                        type: 'join',
+                        label: 'CROSS JOIN',
+                        description: `Implicit join with ${getFromItemDisplayName(fromItem)}`,
+                        details: [getFromItemDisplayName(fromItem)],
+                        x: 0, y: 0, width: 140, height: 60
+                    });
+                    edges.push({
+                        id: genId('e'),
+                        source: lastOutputId,
+                        target: crossJoinId
+                    });
+                    edges.push({
+                        id: genId('e'),
+                        source: extraTableId,
+                        target: crossJoinId
+                    });
+                    lastOutputId = crossJoinId;
+                }
+            }
         }
     }
 
