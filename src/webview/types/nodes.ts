@@ -97,7 +97,7 @@ export interface FlowEdge {
     target: string;
     label?: string;
     sqlClause?: string;
-    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow';
+    clauseType?: 'join' | 'where' | 'having' | 'on' | 'filter' | 'flow' | 'merge_source' | 'merge_target';
     startLine?: number;
     endLine?: number;
 }

@@ -1562,6 +1562,83 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     else if (upperSql.startsWith('MERGE')) {
         statementType = 'MERGE';
         
+        // Enhanced MERGE statement visualization
+        // Extract WHEN MATCHED/NOT MATCHED clauses
+        const whenClauses = [];
+        
+        // Extract WHEN MATCHED clauses with their action (keyword after THEN)
+        const whenMatchedPattern = /WHEN\s+MATCHED\s+(?:AND\s+[^:]+\s+)?THEN\s+(\w+)/gi;
+        let match;
+        while ((match = whenMatchedPattern.exec(sql)) !== null) {
+            whenClauses.push({
+                type: 'MATCHED',
+                action: match[1] || 'UPDATE',
+            });
+        }
+        
+        // Extract WHEN NOT MATCHED clauses with their action
+        const whenNotMatchedPattern = /WHEN\s+NOT\s+MATCHED\s+(?:BY\s+\w+\s+)?THEN\s+(\w+)/gi;
+        while ((match = whenNotMatchedPattern.exec(sql)) !== null) {
+            whenClauses.push({
+                type: 'NOT MATCHED',
+                action: match[1] || 'INSERT',
+            });
+        }
+
+        // Find MERGE target and source tables
+        const mergeTargetMatch = sql.match(/MERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/i);
+        const mergeSourceMatch = sql.match(/USING\s+([`"']?[\w.]+[`"']?)/i);
+        
+        if (mergeTargetMatch && mergeSourceMatch) {
+            const targetTable = mergeTargetMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeTargetMatch[1];
+            const sourceTable = mergeSourceMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeSourceMatch[1];
+            
+            // Create a dedicated MERGE node
+            const mergeNodeId = genId('merge');
+            nodes.push({
+                id: mergeNodeId,
+                type: 'result',
+                label: 'MERGE',
+                description: 'MERGE operation',
+                details: [
+                    `Target: ${targetTable}`,
+                    `Source: ${sourceTable}`,
+                    `Branches: ${whenClauses.length} WHEN clause${whenClauses.length > 1 ? 's' : ''}`,
+                    ...whenClauses.map(w => `  WHEN ${w.type}: ${w.action}`)
+                ],
+                x: 100,
+                y: nodes.length * 100,
+                width: 180,
+                height: 80 + whenClauses.length * 15,
+                accessMode: 'write',
+                operationType: 'MERGE',
+            });
+
+            // Add edges from source and target to MERGE node
+            const sourceNode = nodes.find(n => n.label === sourceTable);
+            const targetNode = nodes.find(n => n.label === targetTable);
+            
+            if (sourceNode) {
+                edges.push({
+                    id: genId('edge'),
+                    source: sourceNode.id,
+                    target: mergeNodeId,
+                    sqlClause: 'USING',
+                    clauseType: 'merge_source',
+                });
+            }
+            
+            if (targetNode) {
+                edges.push({
+                    id: genId('edge'),
+                    source: mergeNodeId,
+                    target: targetNode.id,
+                    sqlClause: 'INTO',
+                    clauseType: 'merge_target',
+                });
+            }
+        }
+        
         // Add MERGE-specific hints
         if (dialect === 'PostgreSQL') {
             hints.push({
@@ -1660,7 +1737,13 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const parser = new Parser();
 
     try {
+        // Timeout protection: default 5 seconds
+        const PARSE_TIMEOUT_MS = 5000;
         let ast: any;
+        let timeoutError = false;
+
+        // Wrap astify in a timeout check
+        const parseStartTime = Date.now();
         try {
             ast = parser.astify(sql, { database: dialect });
         } catch (parseError) {
@@ -1669,6 +1752,19 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                 throw parseError;
             }
             ast = fallbackAst;
+        }
+        
+        const parseDuration = Date.now() - parseStartTime;
+        
+        // Warn if parsing took too long (even if it didn't timeout)
+        if (parseDuration > PARSE_TIMEOUT_MS * 0.7) {
+            ctx.hints.push({
+                type: 'warning',
+                message: `Query parsing took ${Math.round(parseDuration / 1000)}s - near timeout limit`,
+                suggestion: 'Consider simplifying this query or breaking it into smaller parts for better performance.',
+                category: 'performance',
+                severity: 'medium',
+            });
         }
         const statements = Array.isArray(ast) ? ast : [ast];
 
