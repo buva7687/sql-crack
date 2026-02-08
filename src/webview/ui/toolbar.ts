@@ -141,16 +141,18 @@ function applyOverflowMenuTheme(dark: boolean): void {
     }
 }
 
-// Button style constants
-const btnStyle = `
+// Button style helper — uses theme-aware text color
+function getBtnStyle(dark: boolean): string {
+    return `
     background: transparent;
     border: none;
-    color: #f1f5f9;
+    color: ${dark ? '#f1f5f9' : '#1e293b'};
     padding: 8px 12px;
     cursor: pointer;
     font-size: 14px;
     transition: background 0.2s;
-`;
+    `;
+}
 
 /**
  * Cleanup function type for removing event listeners
@@ -218,20 +220,20 @@ export function createToolbar(
     `;
 
     // Title and dialect selector
+    const isDark = callbacks.isDarkTheme();
     const title = document.createElement('div');
     title.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 8px 12px;
-        color: #f1f5f9;
+        color: ${isDark ? '#f1f5f9' : '#1e293b'};
         font-size: 13px;
         font-weight: 600;
         display: flex;
         align-items: center;
         gap: 8px;
     `;
-    const isDark = callbacks.isDarkTheme();
     const selectBg = isDark ? '#1e293b' : '#f1f5f9';
     const selectColor = isDark ? '#f1f5f9' : '#1e293b';
 
@@ -325,11 +327,12 @@ export function createToolbar(
 }
 
 function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
+    const dark = callbacks.isDarkTheme();
     const searchContainer = document.createElement('div');
     searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 4px 12px;
         display: flex;
@@ -349,7 +352,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     searchInput.style.cssText = `
         background: transparent;
         border: none;
-        color: #f1f5f9;
+        color: ${dark ? '#f1f5f9' : '#1e293b'};
         font-size: 12px;
         width: 140px;
         outline: none;
@@ -445,7 +448,7 @@ function createActionButtons(
     overflowBtn.setAttribute('aria-label', 'More actions');
     overflowBtn.setAttribute('role', 'button');
     overflowBtn.style.cssText = `
-        ${btnStyle}
+        ${getBtnStyle(callbacks.isDarkTheme())}
         background: transparent;
         border: 1px solid transparent;
         border-radius: 8px;
@@ -986,10 +989,10 @@ function createFeatureGroup(
     return featureGroup;
 }
 
-function createButton(label: string, onClick: () => void, ariaLabel?: string): HTMLButtonElement {
+function createButton(label: string, onClick: () => void, ariaLabel?: string, isDark = true): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.innerHTML = label;
-    btn.style.cssText = btnStyle;
+    btn.style.cssText = getBtnStyle(isDark);
     btn.addEventListener('click', onClick);
     btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
     btn.addEventListener('mouseleave', () => {
@@ -1020,7 +1023,7 @@ function createFocusModeSelector(
     btn.id = 'focus-mode-btn';
     btn.innerHTML = '⇄';
     btn.title = 'Focus Mode Direction (U/D/A)';
-    btn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    btn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = document.createElement('div');
     dropdown.id = 'focus-mode-dropdown';
@@ -1064,7 +1067,7 @@ function createFocusModeSelector(
             display: flex;
             align-items: center;
             gap: 8px;
-            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            color: ${isActive ? '#818cf8' : (callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b')};
             background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
             transition: background 0.15s;
         `;
@@ -1089,7 +1092,7 @@ function createFocusModeSelector(
             callbacks.onFocusModeChange(mode.id);
             dropdown.style.display = 'none';
             btn.innerHTML = mode.icon;
-            updateFocusModeDropdown(dropdown, mode.id);
+            updateFocusModeDropdown(dropdown, mode.id, callbacks.isDarkTheme());
         });
 
         item.addEventListener('mouseenter', () => {
@@ -1148,11 +1151,11 @@ function createFocusModeSelector(
     return container;
 }
 
-function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode): void {
+function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode, isDark = true): void {
     dropdown.querySelectorAll('[data-mode]').forEach(item => {
         const mode = item.getAttribute('data-mode') as FocusMode;
         const isActive = mode === activeMode;
-        (item as HTMLElement).style.color = isActive ? '#818cf8' : '#e2e8f0';
+        (item as HTMLElement).style.color = isActive ? '#818cf8' : (isDark ? '#e2e8f0' : '#1e293b');
         (item as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
 
         // Update checkmark
@@ -1179,7 +1182,7 @@ function createViewLocationButton(
     viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
-    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    viewLocBtn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createViewLocationDropdown(callbacks, currentLocation);
     document.body.appendChild(dropdown);
@@ -1265,7 +1268,7 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
             display: flex;
             align-items: center;
             gap: 8px;
-            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            color: ${isActive ? '#818cf8' : (callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b')};
             background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
             transition: background 0.15s;
         `;
@@ -1308,7 +1311,7 @@ function createPinnedTabsButton(
     pinsBtn.dataset.overflowKeepVisible = 'true';
     pinsBtn.innerHTML = '📋';
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
-    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    pinsBtn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins);
     document.body.appendChild(dropdown);
@@ -1393,7 +1396,7 @@ function createPinnedTabsDropdown(
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #e2e8f0;
+            color: ${callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b'};
             transition: background 0.15s;
         `;
 

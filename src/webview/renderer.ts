@@ -1811,7 +1811,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.addEventListener('blur', () => {
         const rect = group.querySelector('.node-rect') as SVGRectElement;
         if (rect && state.selectedNodeId !== node.id) {
-            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
+            rect.setAttribute('stroke', state.isDarkTheme ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.15)');
             rect.setAttribute('stroke-width', '1');
         }
     });

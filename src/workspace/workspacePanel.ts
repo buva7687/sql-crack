@@ -425,7 +425,10 @@ export class WorkspacePanel {
     private async rebuildAndRenderGraph(): Promise<void> {
         const index = this._indexManager.getIndex();
         if (!index) {
-            this._panel.webview.html = this.getErrorHtml('No index available. Try refreshing.');
+            this._panel.webview.html = this.getErrorHtml(
+                'No workspace index available.',
+                'SQL files need to be scanned before the dependency graph can be built. Click "Refresh" or open SQL files in your workspace to start indexing.'
+            );
             return;
         }
 
@@ -451,7 +454,10 @@ export class WorkspacePanel {
      */
     private renderCurrentView(): void {
         if (!this._currentGraph) {
-            this._panel.webview.html = this.getErrorHtml('No graph data available.');
+            this._panel.webview.html = this.getErrorHtml(
+                'No graph data available.',
+                'The dependency graph could not be built from the current index. Try refreshing or check that your workspace contains SQL files.'
+            );
             return;
         }
 
@@ -1488,7 +1494,7 @@ ${bodyContent}
         if (!index) {
             return {
                 text: 'Index not ready',
-                title: 'No index available yet. Click to refresh.',
+                title: 'No index available yet. Open SQL files and click Refresh to scan your workspace.',
                 level: 'missing'
             };
         }
@@ -2446,9 +2452,13 @@ ${nodesHtml}
     /**
      * Get error HTML
      */
-    private getErrorHtml(message: string): string {
+    private getErrorHtml(message: string, detail?: string): string {
         const nonce = getNonce();
         const styles = getStateStyles(this._isDarkTheme);
+        const indexStatus = this.getIndexStatus();
+        const statusLine = indexStatus.level === 'missing'
+            ? 'Index: not yet built'
+            : indexStatus.title;
         return `<!DOCTYPE html>
 <html>
 <head>
@@ -2465,8 +2475,10 @@ ${nodesHtml}
         </div>
         <div class="title error">Something went wrong</div>
         <div class="message">${message}</div>
+        ${detail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${detail}</div>` : ''}
+        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${statusLine}</div>
         <button class="btn secondary" onclick="vscode.postMessage({command:'refresh'})">
-            Try Again
+            Refresh Index
         </button>
     </div>
     <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>

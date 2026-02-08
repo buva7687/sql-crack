@@ -82,6 +82,60 @@ export interface MessageHandlerContext {
 /**
  * Message handler class for workspace panel webview messages
  */
+/**
+ * Simple edit distance (Levenshtein) between two strings.
+ * Used for fuzzy table name suggestions when a lookup fails.
+ */
+function editDistance(a: string, b: string): number {
+    const la = a.length, lb = b.length;
+    if (la === 0) { return lb; }
+    if (lb === 0) { return la; }
+    const dp: number[] = Array.from({ length: lb + 1 }, (_, i) => i);
+    for (let i = 1; i <= la; i++) {
+        let prev = dp[0];
+        dp[0] = i;
+        for (let j = 1; j <= lb; j++) {
+            const tmp = dp[j];
+            dp[j] = a[i - 1] === b[j - 1]
+                ? prev
+                : 1 + Math.min(prev, dp[j], dp[j - 1]);
+            prev = tmp;
+        }
+    }
+    return dp[lb];
+}
+
+/**
+ * Find table names similar to `query` from the lineage graph.
+ * Returns up to `limit` suggestions sorted by edit distance.
+ */
+export function findSimilarTableNames(
+    graph: LineageGraph,
+    query: string,
+    limit = 3
+): string[] {
+    const queryLower = query.toLowerCase();
+    const candidates: Array<{ name: string; distance: number }> = [];
+
+    for (const [, node] of graph.nodes) {
+        if (node.type === 'column') { continue; }
+        const nameLower = node.name.toLowerCase();
+        // Substring match — always include
+        if (nameLower.includes(queryLower) || queryLower.includes(nameLower)) {
+            candidates.push({ name: node.name, distance: 0 });
+            continue;
+        }
+        const dist = editDistance(queryLower, nameLower);
+        // Only suggest if within ~40% of the query length
+        if (dist <= Math.max(3, Math.ceil(queryLower.length * 0.4))) {
+            candidates.push({ name: node.name, distance: dist });
+        }
+    }
+
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.slice(0, limit).map(c => c.name);
+}
+
 export class MessageHandler {
     private _context: MessageHandlerContext;
 
@@ -528,9 +582,16 @@ export class MessageHandler {
         }
 
         if (!node) {
+            const suggestions = findSimilarTableNames(lineageGraph, tableName);
+            let errorMsg = `Table "${tableName}" not found in the lineage graph.`;
+            if (suggestions.length > 0) {
+                errorMsg += ` Did you mean: ${suggestions.map(s => `"${s}"`).join(', ')}?`;
+            } else {
+                errorMsg += ' Make sure the table exists in your SQL files and the workspace index is up to date.';
+            }
             this._context.panel.webview.postMessage({
                 command: 'tableDetailResult',
-                data: { error: `Table "${tableName}" not found in lineage graph` }
+                data: { error: errorMsg }
             });
             return;
         }
@@ -778,7 +839,7 @@ export class MessageHandler {
         if (!lineageGraph) {
             this._context.panel.webview.postMessage({
                 command: 'lineageGraphResult',
-                data: { error: 'No lineage graph available' }
+                data: { error: 'No lineage graph available. Open SQL files in your workspace and click Refresh to build the dependency index.' }
             });
             return;
         }
