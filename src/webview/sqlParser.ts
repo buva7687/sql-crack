@@ -490,6 +490,43 @@ export function splitSqlStatements(sql: string): string[] {
     let inLineComment = false;
     let inBlockComment = false;
     let depth = 0;
+    
+    // Track procedural blocks
+    let beginEndDepth = 0;  // Depth of nested BEGIN...END blocks
+    let caseDepth = 0;      // Depth of CASE...END expressions (to avoid false END matches)
+    let inDollarQuotes = false;
+    let dollarQuoteTag = '';  // Dollar quote tag name (empty for $$, 'function' for $function$)
+    let customDelimiter = null as string | null;  // MySQL DELIMITER command
+
+    // Helper to check if we're at a word boundary and match a keyword
+    const matchKeyword = (idx: number, keyword: string): boolean => {
+        if (idx + keyword.length > sql.length) return false;
+        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) return false;
+        // Check word boundary before
+        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) return false;
+        // Check word boundary after
+        const afterIdx = idx + keyword.length;
+        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) return false;
+        return true;
+    };
+
+    // Helper to check if BEGIN starts a procedural block (not BEGIN TRANSACTION, BEGIN TRY, etc.)
+    const isProceduralBegin = (idx: number): boolean => {
+        // Check what follows BEGIN — skip non-block BEGINs
+        const after = sql.substring(idx + 5, idx + 25).trim().toUpperCase();
+        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) return false;
+
+        // Look backwards to see what precedes BEGIN (up to 200 chars for long signatures)
+        const before = sql.substring(Math.max(0, idx - 200), idx).toUpperCase();
+
+        // Procedural BEGIN is preceded by: AS, THEN, ELSE, LOOP, IS
+        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) return true;
+
+        // Or preceded by CREATE FUNCTION/PROCEDURE/TRIGGER with arbitrary signature (no semicolons between)
+        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) return true;
+
+        return false;
+    };
 
     for (let i = 0; i < sql.length; i++) {
         const char = sql[i];
@@ -516,16 +553,16 @@ export function splitSqlStatements(sql: string): string[] {
             continue;
         }
 
-        // Detect start of block comment /* (not inside a string)
-        if (!inString && char === '/' && nextChar === '*') {
-            inBlockComment = true;
-            current += '/*';
-            i++;
-            continue;
-        }
+        // Detect start of block comment /* (not inside string or dollar quotes)
+        if (!inString && !inDollarQuotes) {
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                current += '/*';
+                i++;
+                continue;
+            }
 
-        // Detect start of line comments: --, //, # (not inside a string)
-        if (!inString) {
+            // Detect start of line comments: --, //, # (not inside string or dollar quotes)
             if ((char === '-' && nextChar === '-') || (char === '/' && nextChar === '/')) {
                 inLineComment = true;
                 current += char + nextChar;
@@ -539,24 +576,113 @@ export function splitSqlStatements(sql: string): string[] {
             }
         }
 
-        // Handle string literals
-        if ((char === "'" || char === '"') && prevChar !== '\\') {
-            if (!inString) {
-                inString = true;
-                stringChar = char;
-            } else if (char === stringChar) {
-                inString = false;
+        // Handle PostgreSQL dollar quotes: $$ or $tag$
+        // Must detect both opening and closing
+        if (!inString && char === '$') {
+            // Try to match dollar quote tag: $<optional_tag_name>$
+            let j = i + 1;
+            let tag = '';
+            // Collect tag name (alphanumeric/underscore only)
+            while (j < sql.length && /[a-zA-Z0-9_]/.test(sql[j])) {
+                tag += sql[j];
+                j++;
+            }
+            // Must end with $
+            if (j < sql.length && sql[j] === '$') {
+                const fullTag = '$' + tag + '$';
+                if (inDollarQuotes && tag === dollarQuoteTag) {
+                    // Closing the current dollar quote block
+                    inDollarQuotes = false;
+                    dollarQuoteTag = '';
+                    current += fullTag;
+                    i = j;
+                    continue;
+                } else if (!inDollarQuotes) {
+                    // Opening a new dollar quote block
+                    inDollarQuotes = true;
+                    dollarQuoteTag = tag;
+                    current += fullTag;
+                    i = j;
+                    continue;
+                }
             }
         }
 
-        // Handle parentheses depth
-        if (!inString) {
-            if (char === '(') { depth++; }
-            if (char === ')') { depth--; }
+        // Handle MySQL DELIMITER command
+        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+            // Check for DELIMITER command at start of line (after whitespace/comments)
+            const lineStart = current.trim(); // Current line content so far
+            if (lineStart === '' && char.toUpperCase() === 'D') {
+                const remaining = sql.substring(i, i + 20).toUpperCase();
+                if (remaining.startsWith('DELIMITER ')) {
+                    // Extract the delimiter
+                    const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);
+                    if (delimiterMatch) {
+                        customDelimiter = delimiterMatch[1] === ';' ? null : delimiterMatch[1];
+                        // Skip the DELIMITER line (don't add to current statement)
+                        while (i < sql.length && sql[i] !== '\n') {
+                            i++;
+                        }
+                        current = ''; // Reset current statement
+                        continue;
+                    }
+                }
+            }
         }
 
-        // Split on semicolon at depth 0
-        if (char === ';' && !inString && depth === 0) {
+        // Handle string literals (only when not in dollar quotes)
+        if (!inDollarQuotes) {
+            if ((char === "'" || char === '"') && prevChar !== '\\') {
+                if (!inString) {
+                    inString = true;
+                    stringChar = char;
+                } else if (char === stringChar) {
+                    inString = false;
+                }
+            }
+        }
+
+        // Handle parentheses depth and procedural block tracking
+        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+            if (char === '(') { depth++; }
+            if (char === ')') { depth--; }
+
+            // Track CASE...END to avoid false END matches
+            if (matchKeyword(i, 'CASE')) {
+                caseDepth++;
+            }
+
+            // Handle BEGIN...END blocks
+            if (matchKeyword(i, 'BEGIN')) {
+                if (isProceduralBegin(i)) {
+                    beginEndDepth++;
+                }
+            }
+
+            // END keyword — only decrement beginEndDepth for procedural END
+            if (matchKeyword(i, 'END')) {
+                // Check what follows END: skip END TRY, END CATCH, END IF, END LOOP, END WHILE
+                const afterEnd = sql.substring(i + 3, i + 15).trim().toUpperCase();
+                if (/^(TRY|CATCH|IF|LOOP|WHILE)\b/.test(afterEnd)) {
+                    // Block-qualifier END — don't decrement
+                } else if (caseDepth > 0) {
+                    // This END closes a CASE expression, not a BEGIN block
+                    caseDepth--;
+                } else if (beginEndDepth > 0) {
+                    beginEndDepth--;
+                }
+            }
+        }
+
+        // Determine the current delimiter
+        const delimiter = customDelimiter || ';';
+        
+        // Split on delimiter at depth 0 and not inside BEGIN...END
+        const isDelimiter = delimiter === ';' 
+            ? (char === ';' && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0)
+            : (sql.substring(i).startsWith(delimiter) && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0);
+        
+        if (isDelimiter) {
             const trimmed = current.trim();
             if (trimmed) {
                 const withoutComments = stripLeadingComments(trimmed).trim();
@@ -565,6 +691,11 @@ export function splitSqlStatements(sql: string): string[] {
                 }
             }
             current = '';
+            
+            // Skip past the custom delimiter
+            if (delimiter !== ';') {
+                i += delimiter.length - 1;
+            }
         } else {
             current += char;
         }
@@ -4096,6 +4227,31 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
             category: 'best-practice',
             severity: 'medium'
         });
+    }
+    
+    // MERGE statement detection (not fully supported by node-sql-parser in most dialects)
+    const hasMerge = /\bMERGE\s+INTO\b/i.test(sql);
+    if (hasMerge) {
+        // Check if we're in a dialect that should support MERGE
+        const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery'];
+        if (!dialectsWithMerge.includes(currentDialect)) {
+            ctx.hints.push({
+                type: 'warning',
+                message: 'MERGE statement detected',
+                suggestion: `MERGE statements are supported in TransactSQL, Oracle, Snowflake, and BigQuery dialects. Current dialect (${currentDialect}) may have limited support. Consider using dialect-specific alternatives: PostgreSQL (INSERT ... ON CONFLICT), MySQL (INSERT ... ON DUPLICATE KEY UPDATE), or SQLite (INSERT OR REPLACE/IGNORE).`,
+                category: 'best-practice',
+                severity: 'medium'
+            });
+        } else {
+            // Even in supported dialects, MERGE may have parsing issues
+            ctx.hints.push({
+                type: 'info',
+                message: 'MERGE statement',
+                suggestion: `MERGE statements are complex and may not render fully in all cases. If parsing fails, try simplifying the query or using dialect-specific alternatives (ON CONFLICT, ON DUPLICATE KEY, etc.).`,
+                category: 'best-practice',
+                severity: 'low'
+            });
+        }
     }
 }
 
