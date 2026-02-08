@@ -159,6 +159,19 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('updateGraphActionButtons();');
     });
 
+    it('re-initializes lineage legend bar after each graph result to prevent overlap', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        // processLineageGraphResult must call initializeLineageLegendBar after DOM injection
+        expect(script).toMatch(/setupMinimap\(\);\s*\n\s*initializeLineageLegendBar\(\);/);
+    });
+
     it('synchronizes lineage overlay offsets with clamped legend height values', () => {
         const script = getWebviewScript({
             nonce: 'test',

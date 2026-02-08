@@ -89,66 +89,57 @@ export class ReferenceExtractor {
     ): TableReference[] {
         const references: TableReference[] = [];
 
+        // Pre-collect CTE names via regex BEFORE attempting AST parse.
+        // This ensures the catch block (regex fallback) has CTE names available
+        // even when the AST parser fails on complex multi-statement files.
+        const sqlNoComments = this.stripSqlComments(sql);
+        const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
+        const globalCteNames = new Set<string>();
+
+        const ctePattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
+        let match;
+        while ((match = ctePattern.exec(sqlNoComments)) !== null) {
+            const cteName = match[1];
+            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
+                globalCteNames.add(cteName.toLowerCase());
+            }
+        }
+
+        const multiCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
+        while ((match = multiCtePattern.exec(sqlNoComments)) !== null) {
+            const cteName = match[1];
+            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
+                globalCteNames.add(cteName.toLowerCase());
+            }
+        }
+
+        const subqueryAliasPattern = /\)\s+AS\s+(\w+)(?=\s|$|,|\n|WHERE|JOIN|ON)/gi;
+        while ((match = subqueryAliasPattern.exec(sqlNoComments)) !== null) {
+            const aliasName = match[1];
+            if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
+                const beforeMatch = sqlNoComments.substring(Math.max(0, match.index - 500), match.index);
+                const fromContext = /\bFROM\s+\(/i.test(beforeMatch) ||
+                                  /\bUPDATE\s+[\w\s]+\s+FROM\s+\(/i.test(beforeMatch) ||
+                                  /FROM\s*\([\s\S]*?\)\s*AS\s*$/i.test(beforeMatch.slice(-200));
+                if (fromContext) {
+                    globalCteNames.add(aliasName.toLowerCase());
+                }
+            }
+        }
+
+        this.extractUpdateFromAliases(sqlNoComments, globalCteNames, reservedWords);
+        this.globalCteNames = globalCteNames;
+
         try {
             const dbDialect = this.mapDialect(dialect);
             const ast = this.parser.astify(sql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
-            // First pass: collect all CTE names from WITH clauses across all statements
-            const globalCteNames = new Set<string>();
+            // Also collect CTE names from AST (may find names regex missed)
             for (const stmt of statements) {
                 if (!stmt) {continue;}
                 this.collectCTENames(stmt, globalCteNames);
             }
-
-            // Strip comments for cleaner regex-based pattern matching
-            const sqlNoComments = this.stripSqlComments(sql);
-            const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
-
-            // Also collect CTE names using regex as backup (handles cases AST parser might miss)
-            // This pattern now works correctly since comments are stripped
-            const ctePattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
-            let match;
-            while ((match = ctePattern.exec(sqlNoComments)) !== null) {
-                const cteName = match[1];
-                if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                    globalCteNames.add(cteName.toLowerCase());
-                }
-            }
-
-            // Also check for comma-separated CTEs: WITH name1 AS (...), name2 AS (...)
-            const multiCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
-            while ((match = multiCtePattern.exec(sqlNoComments)) !== null) {
-                const cteName = match[1];
-                if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                    globalCteNames.add(cteName.toLowerCase());
-                }
-            }
-
-            // Also collect subquery aliases from SQL using regex (as backup)
-            // This catches subqueries like: FROM (SELECT ...) AS alias
-            const subqueryAliasPattern = /\)\s+AS\s+(\w+)(?=\s|$|,|\n|WHERE|JOIN|ON)/gi;
-            while ((match = subqueryAliasPattern.exec(sqlNoComments)) !== null) {
-                const aliasName = match[1];
-                if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
-                    // Check if it's in a FROM clause context - look further back
-                    const beforeMatch = sqlNoComments.substring(Math.max(0, match.index - 500), match.index);
-                    // More flexible pattern for UPDATE...FROM
-                    const fromContext = /\bFROM\s+\(/i.test(beforeMatch) ||
-                                      /\bUPDATE\s+[\w\s]+\s+FROM\s+\(/i.test(beforeMatch) ||
-                                      /FROM\s*\([\s\S]*?\)\s*AS\s*$/i.test(beforeMatch.slice(-200));
-                    if (fromContext) {
-                        globalCteNames.add(aliasName.toLowerCase());
-                    }
-                }
-            }
-
-            // Also extract subquery aliases from UPDATE...FROM patterns using balanced parenthesis matching
-            // This is more efficient than regex with large ranges that can cause backtracking
-            this.extractUpdateFromAliases(sqlNoComments, globalCteNames, reservedWords);
-
-            // Store globally for defensive checks
-            this.globalCteNames = globalCteNames;
 
             // Second pass: extract references with CTE names available
             for (let stmtIndex = 0; stmtIndex < statements.length; stmtIndex++) {
@@ -162,9 +153,8 @@ export class ReferenceExtractor {
                 this.extractFromStatement(stmt, filePath, sql, references, aliasMap, 0, stmtIndex);
             }
         } catch (error) {
-            // Fallback to regex extraction
+            // Fallback to regex extraction — CTE names are already in this.globalCteNames
             const regexRefs = this.extractWithRegex(sql, filePath);
-            // Filter out CTE names and subquery aliases from regex fallback
             for (const ref of regexRefs) {
                 const tableNameLower = ref.tableName.toLowerCase();
                 if (!this.globalCteNames.has(tableNameLower)) {

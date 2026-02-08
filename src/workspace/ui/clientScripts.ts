@@ -2759,6 +2759,7 @@ function getLineageGraphScript(): string {
                 setupLineageGraphInteractions();
                 setupDirectionButtons();
                 setupMinimap();
+                initializeLineageLegendBar();
                 setTimeout(() => {
                     lineageSetupInProgress = false;
                     // Process any queued message that arrived during setup

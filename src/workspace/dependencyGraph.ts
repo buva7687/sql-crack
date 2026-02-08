@@ -408,6 +408,22 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         }
     }
 
+    // Collect CTE names from structured query analyses (when available) as a
+    // defensive check. CTEs are query-scoped aliases and should never be flagged
+    // as missing table definitions.
+    const knownCteNames = new Set<string>();
+    for (const analysis of index.files.values()) {
+        if (!analysis.queries) {continue;}
+        for (const query of analysis.queries) {
+            if (query.ctes) {
+                for (const cte of query.ctes) {
+                    const cteName = normalizeIdentifier(cte.name);
+                    if (cteName) {knownCteNames.add(cteName);}
+                }
+            }
+        }
+    }
+
     // Count tables and views
     for (const [key, defs] of index.definitionMap.entries()) {
         for (const def of defs) {
@@ -431,10 +447,13 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const [key, refs] of index.referenceMap.entries()) {
         totalReferences += refs.length;
 
+        // Skip CTE names — they are query-scoped aliases, not external tables.
+        const refName = normalizeIdentifier(refs[0]?.tableName);
+        if (refName && knownCteNames.has(refName)) {continue;}
+
         const hasSchema = refs.some(ref => !!ref.schema);
         if (hasSchema) {
             if (!index.definitionMap.has(key)) {
-                const refName = normalizeIdentifier(refs[0]?.tableName);
                 const defs = refName ? (definitionsByName.get(refName) || []) : [];
                 const hasUnqualified = defs.some(def => !def.schema);
                 if (!hasUnqualified) {
@@ -444,7 +463,6 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
             continue;
         }
 
-        const refName = normalizeIdentifier(refs[0]?.tableName);
         if (refName && !definitionsByName.has(refName)) {
             missingDefinitions.push(key);
         }
