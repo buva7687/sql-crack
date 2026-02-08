@@ -52,7 +52,7 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
 
 ## Commands
 - `npx tsc --noEmit` — Type check
-- `npx jest --silent` — Run all tests (currently 663 tests, 39 suites)
+- `npx jest --silent` — Run all tests (currently 756 tests, 53 suites)
 - `npx jest path/to/test` — Run specific test
 - `vsce package` — Build VSIX
 
@@ -61,3 +61,41 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
 - Always run `tsc --noEmit` and `jest` before committing
 - When fixing UI/UX issues, grep for related hardcoded values across the entire codebase before marking done
 - SVG elements use `fill`/`stroke` attributes; CSS can override these with higher specificity
+
+## Lessons Learned
+
+### Type System & Validation Workflow
+1. **Always validate before claiming complete:**
+   - Run `npx tsc --noEmit` → Must pass with 0 errors
+   - Run `npx jest --silent` → All tests must pass
+   - Never assume code works without running these commands
+   - Never delete test files without running them first
+
+2. **Type system constraints:**
+   - Use `SqlDialect` union type from `src/webview/types/parser.ts` - NOT string literals
+     - ✅ Correct: `'PostgreSQL' as SqlDialect`
+     - ❌ Wrong: `'postgresql'`
+   - `tableCategory` only supports: `'physical' | 'derived' | 'cte_reference' | 'table_function'`
+     - Adding new categories requires updating `src/webview/types/nodes.ts`
+   - `ColumnLineage` interface has specific fields - check `src/webview/types/lineage.ts` before using
+
+3. **Registry vs Parser layer separation:**
+   - **Registry layer** (data): Adding functions to `functions.json` and `functionRegistry.ts`
+     - This is just data - it doesn't make the parser use it
+   - **Parser layer** (logic): Updating `sqlParser.ts` to detect and handle those functions
+     - This is implementation - requires AST traversal, node creation, graph updates
+   - **Lesson:** Registry complete ≠ Implementation complete
+     - Example: Table-valued functions (TVFs) can be in registry but not parsed
+
+4. **Test-first workflow:**
+   - Create ONE test → Run it → Fix errors → Verify it passes
+   - Don't write 30+ tests without running any of them
+   - Don't claim "tests passing" for tests that were deleted
+   - If tests rely on unimplemented features, mark them as TODO or skip them
+
+5. **Common pitfalls to avoid:**
+   - Assuming TypeScript types without checking the actual definitions
+   - Confusing "added to data" with "implemented in parser"
+   - Writing status reports before running `npm test`
+   - Removing failing tests instead of either fixing them OR clearly marking them as pending
+   - Claiming "complete" when only the foundation is done

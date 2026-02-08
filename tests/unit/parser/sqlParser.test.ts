@@ -246,6 +246,53 @@ describe('SQL Parser', () => {
     });
   });
 
+  describe('Table-Valued Functions', () => {
+    it('marks BigQuery UNNEST sources as table_function nodes', () => {
+      const result = parseSql('SELECT num FROM UNNEST([1, 2, 3]) AS num', 'BigQuery');
+
+      expect(result.error).toBeUndefined();
+      const tableFunctionNode = result.nodes.find(
+        n => n.type === 'table' && n.tableCategory === 'table_function'
+      );
+      expect(tableFunctionNode).toBeDefined();
+      expect(tableFunctionNode?.label).toBe('num');
+      expect(tableFunctionNode?.details).toContain('Function: UNNEST');
+    });
+
+    it('marks Snowflake LATERAL FLATTEN sources as table_function nodes', () => {
+      const result = parseSql(
+        'SELECT f.value FROM my_table, LATERAL FLATTEN(input => my_array) f',
+        'Snowflake'
+      );
+
+      expect(result.error).toBeUndefined();
+      const tableFunctionNode = result.nodes.find(
+        n => n.type === 'table' && n.tableCategory === 'table_function'
+      );
+      expect(tableFunctionNode).toBeDefined();
+      expect(tableFunctionNode?.label).toBe('f');
+      expect(tableFunctionNode?.details).toContain('Function: FLATTEN');
+    });
+
+    it('marks joined OPENJSON sources as joined table_function nodes', () => {
+      const result = parseSql(
+        'SELECT * FROM orders CROSS APPLY OPENJSON(tags) j',
+        'TransactSQL'
+      );
+
+      expect(result.error).toBeUndefined();
+      const tableFunctionNode = result.nodes.find(
+        n => n.type === 'table' && n.tableCategory === 'table_function'
+      );
+      expect(tableFunctionNode).toBeDefined();
+      expect(tableFunctionNode?.label).toBe('j');
+      expect(tableFunctionNode?.description).toContain('Joined table function');
+
+      const joinNode = result.nodes.find(n => n.type === 'join');
+      expect(joinNode).toBeDefined();
+    });
+  });
+
   describe('CTEs (Common Table Expressions)', () => {
     it('parses simple CTE', () => {
       const sql = `

@@ -2,6 +2,7 @@ import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 import { getAggregateFunctions, getWindowFunctions } from '../dialects';
+import { getTableValuedFunctionName } from './parser/extractors/tables';
 import { escapeRegex } from '../shared';
 
 // Import types from centralized type definitions
@@ -2308,33 +2309,10 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            // Create table node for non-join tables
-            if (!fromItem.join) {
-                const tableId = processFromItem(fromItem, nodes, edges, cteNames);
-                if (tableId) {
-                    tableIds.push(tableId);
-                    const tableName = getTableName(fromItem);
-                    joinTableMap.set(tableName, tableId);
-                }
-            } else {
-                // Create table node for join tables too
-                ctx.stats.tables++;
-                const tableName = getTableName(fromItem);
-                trackTableUsage(tableName);
-                const tableId = genId('table');
-                // Determine table category
-                const isCteRef = cteNames.has(tableName.toLowerCase());
-                nodes.push({
-                    id: tableId,
-                    type: 'table',
-                    label: tableName,
-                    description: isCteRef ? 'CTE reference' : 'Joined table',
-                    details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
-                    tableCategory: isCteRef ? 'cte_reference' : 'physical',
-                    x: 0, y: 0, width: 140, height: 60
-                });
+            const tableId = processFromItem(fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
+            if (tableId) {
                 tableIds.push(tableId);
-                joinTableMap.set(tableName, tableId);
+                joinTableMap.set(getFromItemLookupKey(fromItem), tableId);
             }
         }
     }
@@ -2351,8 +2329,8 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 ctx.stats.joins++;
                 const joinId = genId('join');
                 const joinType = fromItem.join || 'JOIN';
-                const joinTable = getTableName(fromItem);
-                const rightTableId = joinTableMap.get(joinTable);
+                const joinTable = getFromItemDisplayName(fromItem);
+                const rightTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
 
                 // Extract join condition details
                 const joinDetails: string[] = [];
@@ -2717,7 +2695,13 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     return resultId;
 }
 
-function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
+function processFromItem(
+    fromItem: any,
+    nodes: FlowNode[],
+    _edges: FlowEdge[],
+    cteNames: Set<string> = new Set(),
+    asJoin: boolean = false
+): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
         ctx.stats.subqueries++;
@@ -2751,9 +2735,36 @@ function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], c
         return subqueryId;
     }
 
+    // Table-valued function (UNNEST, OPENJSON, FLATTEN, JSON_TABLE, etc.)
+    const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
+    if (tableValuedFunctionName) {
+        ctx.stats.tables++;
+        const tableId = genId('table');
+        const label = getFromItemDisplayName(fromItem);
+        const details: string[] = [`Function: ${tableValuedFunctionName}`];
+        const rawAlias = typeof fromItem.as === 'string' ? fromItem.as.trim() : '';
+        if (rawAlias && rawAlias !== label) {
+            details.push(`Alias: ${rawAlias}`);
+        }
+
+        nodes.push({
+            id: tableId,
+            type: 'table',
+            label,
+            description: asJoin
+                ? `Joined table function (${tableValuedFunctionName})`
+                : `Table function source (${tableValuedFunctionName})`,
+            details,
+            tableCategory: 'table_function',
+            x: 0, y: 0, width: 140, height: 60
+        });
+        trackTableUsage(label);
+        return tableId;
+    }
+
     // Regular table
     const tableName = getTableName(fromItem);
-    if (!tableName || fromItem.join) { return null; } // Skip join tables, handled separately
+    if (!tableName) { return null; }
 
     ctx.stats.tables++;
     trackTableUsage(tableName);
@@ -2764,7 +2775,9 @@ function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], c
         id: tableId,
         type: 'table',
         label: tableName,
-        description: isCteRef ? 'CTE reference' : 'Source table',
+        description: isCteRef
+            ? (asJoin ? 'Joined CTE reference' : 'CTE reference')
+            : (asJoin ? 'Joined table' : 'Source table'),
         details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
         tableCategory: isCteRef ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
@@ -2788,6 +2801,42 @@ function getTableName(item: any): string {
     
     // Fallback to name, then alias, then default
     return item.name || item.as || 'table';
+}
+
+function getNormalizedFromAlias(item: any): string | null {
+    const rawAlias = typeof item?.as === 'string' ? item.as.trim() : '';
+    if (!rawAlias) {
+        return null;
+    }
+    const parenIndex = rawAlias.indexOf('(');
+    if (parenIndex > 0) {
+        return rawAlias.slice(0, parenIndex).trim();
+    }
+    return rawAlias;
+}
+
+function getFromItemDisplayName(item: any): string {
+    const alias = getNormalizedFromAlias(item);
+    if (alias) {
+        return alias;
+    }
+    const tableName = getTableName(item);
+    if (tableName && tableName !== 'table') {
+        return tableName;
+    }
+    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
+}
+
+function getFromItemLookupKey(item: any): string {
+    const alias = getNormalizedFromAlias(item);
+    if (alias) {
+        return alias;
+    }
+    const tableName = getTableName(item);
+    if (tableName && tableName !== 'table') {
+        return tableName;
+    }
+    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
 }
 
 /**
@@ -3490,6 +3539,11 @@ function extractTablesFromStatement(stmt: any): string[] {
 
     const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
     for (const item of fromItems) {
+        const tableValuedFunctionName = getTableValuedFunctionName(item, ctx.dialect);
+        if (tableValuedFunctionName) {
+            tables.push(tableValuedFunctionName);
+            continue;
+        }
         const name = getTableName(item);
         if (name && name !== 'table') {
             tables.push(name);

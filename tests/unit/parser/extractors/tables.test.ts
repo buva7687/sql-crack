@@ -6,7 +6,8 @@
 
 import {
     getTableName,
-    extractTablesFromStatement
+    extractTablesFromStatement,
+    getTableValuedFunctionName
 } from '../../../../src/webview/parser/extractors/tables';
 
 describe('Table Extractors', () => {
@@ -135,6 +136,63 @@ describe('Table Extractors', () => {
             };
 
             expect(extractTablesFromStatement(stmt)).toEqual(['public.users', 'sales.orders']);
+        });
+
+        it('extracts table-valued function names from FROM items', () => {
+            const stmt = {
+                from: [
+                    {
+                        type: 'expr',
+                        expr: {
+                            type: 'function',
+                            name: { name: [{ type: 'default', value: 'OPENJSON' }] },
+                            args: { type: 'expr_list', value: [] }
+                        },
+                        as: 'j'
+                    },
+                    { table: 'orders' }
+                ]
+            };
+
+            expect(extractTablesFromStatement(stmt, 'TransactSQL')).toEqual(['OPENJSON', 'orders']);
+        });
+
+        it('extracts wrapped TABLE(FLATTEN(...)) as FLATTEN', () => {
+            const stmt = {
+                from: [
+                    {
+                        type: 'expr',
+                        expr: {
+                            type: 'function',
+                            name: { name: [{ type: 'default', value: 'TABLE' }] },
+                            args: {
+                                type: 'expr_list',
+                                value: [
+                                    {
+                                        type: 'flatten',
+                                        name: { name: [{ type: 'default', value: 'FLATTEN' }] },
+                                        args: { type: 'flattern' }
+                                    }
+                                ]
+                            }
+                        },
+                        as: 'f'
+                    }
+                ]
+            };
+
+            expect(extractTablesFromStatement(stmt, 'Snowflake')).toEqual(['FLATTEN']);
+        });
+    });
+
+    describe('getTableValuedFunctionName', () => {
+        it('detects UNNEST shorthand nodes', () => {
+            const fromItem = {
+                type: 'unnest',
+                as: 'u'
+            };
+
+            expect(getTableValuedFunctionName(fromItem, 'BigQuery')).toBe('UNNEST');
         });
     });
 });

@@ -54,7 +54,7 @@ export interface FlowNode {
     // Join type for differentiated styling
     joinType?: string;
     // Table category for visual distinction
-    tableCategory?: 'physical' | 'derived' | 'cte_reference';
+    tableCategory?: 'physical' | 'derived' | 'cte_reference' | 'table_function';
     // Access mode for read/write differentiation
     accessMode?: 'read' | 'write' | 'derived';
     // Operation type for write operations
