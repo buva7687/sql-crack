@@ -34,6 +34,6 @@ module.exports = {
   verbose: true,
   // Handle ESM modules
   transformIgnorePatterns: [
-    'node_modules/(?!(node-sql-parser)/)'
+    'node_modules/(?!(node-sql-parser|d3-force|d3-dispatch|d3-quadtree|d3-timer)/)'
   ]
 };

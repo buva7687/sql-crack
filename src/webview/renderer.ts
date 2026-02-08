@@ -7240,6 +7240,10 @@ function calculateQueryDepth(): number {
 // Hides all UI elements (toolbars, panels) and makes SVG fill the viewport.
 // Uses individual style properties instead of cssText to preserve fonts and sizes.
 
+import { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS } from './constants/fullscreen';
+// Re-export so callers that import from renderer still get them
+export { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS };
+
 export function toggleFullscreen(enable?: boolean): void {
     state.isFullscreen = enable ?? !state.isFullscreen;
 
@@ -7252,16 +7256,16 @@ export function toggleFullscreen(enable?: boolean): void {
         return;
     }
 
-    // Find all UI elements to hide/show using IDs and classes
-    const toolbar = document.getElementById('sql-crack-toolbar') as HTMLElement;
-    const actions = document.getElementById('sql-crack-actions') as HTMLElement;
-    const batchTabs = document.getElementById('batch-tabs') as HTMLElement;
-    const breadcrumb = document.querySelector('.breadcrumb-panel') as HTMLElement;
-    const detailsPanel = document.querySelector('.details-panel') as HTMLElement;
-    const statsPanel = document.querySelector('.stats-panel') as HTMLElement;
-    const hintsPanel = document.querySelector('.hints-panel') as HTMLElement;
-    const legendPanel = document.querySelector('.legend-panel') as HTMLElement;
-    const sqlPreviewPanel = document.querySelector('.sql-preview-panel') as HTMLElement;
+    // Single source of truth: all UI elements that should be hidden in fullscreen
+    // Resolved from FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS, columnLineageBanner,
+    // plus any elements with data-fullscreen-hide attribute
+    const uiElements = [
+        ...FULLSCREEN_HIDE_IDS.map(id => document.getElementById(id) as HTMLElement),
+        ...FULLSCREEN_HIDE_SELECTORS.map(sel => document.querySelector(sel) as HTMLElement),
+        columnLineageBanner as HTMLElement,
+        // Also find any elements with data-fullscreen-hide attribute
+        ...Array.from(document.querySelectorAll('[data-fullscreen-hide]'))
+    ];
 
     if (state.isFullscreen) {
         // Save original styles and visibility (only save what we'll change)
@@ -7300,15 +7304,11 @@ export function toggleFullscreen(enable?: boolean): void {
             html.dataset.originalHeight = html.style.height || '';
         }
         
-        // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
-        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
-        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
-        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
+        // Hide UI elements using the consolidated list
         uiElements.forEach(el => {
             if (el) {
-                el.dataset.originalDisplay = el.style.display || '';
-                el.style.display = 'none';
+                (el as HTMLElement).dataset.originalDisplay = (el as HTMLElement).style.display || '';
+                (el as HTMLElement).style.display = 'none';
             }
         });
 
@@ -7365,15 +7365,11 @@ export function toggleFullscreen(enable?: boolean): void {
             });
         }
 
-        // Restore UI elements (must match the hide list above)
-        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
-        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
-        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
+        // Restore UI elements using the consolidated list
         uiElements.forEach(el => {
-            if (el && el.dataset.originalDisplay !== undefined) {
-                el.style.display = el.dataset.originalDisplay;
-                delete el.dataset.originalDisplay;
+            if (el && (el as HTMLElement).dataset.originalDisplay !== undefined) {
+                (el as HTMLElement).style.display = (el as HTMLElement).dataset.originalDisplay || '';
+                delete (el as HTMLElement).dataset.originalDisplay;
             }
         });
 

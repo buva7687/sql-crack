@@ -39,7 +39,24 @@
         "VARIANCE", "VAR_POP", "VAR_SAMP"
       ],
       "window": [],
-      "tableValued": ["UNNEST", "GENERATE_SERIES", "GENERATE_SUBSCRIPTS", "REGEXP_SPLIT_TO_TABLE", "JSON_TO_RECORD", "JSONB_TO_RECORD", "JSON_POPULATE_RECORD", "JSON_ARRAY_ELEMENTS", "JSONB_ARRAY_ELEMENTS", "JSON_EACH", "JSONB_EACH", "XMLTABLE"]
+      "tableValued": [
+        "UNNEST", 
+        "GENERATE_SERIES", 
+        "GENERATE_SUBSCRIPTS", 
+        "REGEXP_SPLIT_TO_TABLE",
+        "JSON_TO_RECORD", 
+        "JSONB_TO_RECORD", 
+        "JSON_TO_RECORDSET",
+        "JSONB_TO_RECORDSET",
+        "JSON_POPULATE_RECORD",
+        "JSON_POPULATE_RECORDSET",
+        "JSONB_POPULATE_RECORDSET",
+        "JSON_ARRAY_ELEMENTS", 
+        "JSONB_ARRAY_ELEMENTS",
+        "JSON_EACH", 
+        "JSONB_EACH",
+        "XMLTABLE"
+      ]
     },
     "transactsql": {
       "aggregates": [
@@ -75,7 +92,14 @@
         "CONDITIONAL_CHANGE_EVENT", "CONDITIONAL_TRUE_EVENT",
         "RATIO_TO_REPORT", "WIDTH_BUCKET"
       ],
-      "tableValued": ["FLATTEN", "SPLIT_TO_TABLE", "GENERATOR", "RESULT_SCAN", "VALIDATE"]
+      "tableValued": [
+        "FLATTEN", 
+        "SPLIT_TO_TABLE", 
+        "STRTOK_SPLIT_TO_TABLE",
+        "GENERATOR", 
+        "RESULT_SCAN", 
+        "VALIDATE"
+      ]
     },
     "bigquery": {
       "aggregates": [
@@ -91,7 +115,21 @@
       "window": [
         "RATIO_TO_REPORT"
       ],
-      "tableValued": ["UNNEST", "GENERATE_ARRAY", "GENERATE_DATE_ARRAY", "GENERATE_TIMESTAMP_ARRAY", "EXTERNAL_QUERY", "GAP_FILL", "RANGE_SESSIONIZE", "APPENDS", "CHANGES", "ML.PREDICT", "ML.EVALUATE"]
+      "tableValued": [
+        "UNNEST", 
+        "GENERATE_ARRAY", 
+        "GENERATE_DATE_ARRAY", 
+        "GENERATE_TIMESTAMP_ARRAY",
+        "JSON_EXTRACT_ARRAY", 
+        "JSON_EXTRACT_STRING_ARRAY",
+        "EXTERNAL_QUERY", 
+        "GAP_FILL", 
+        "RANGE_SESSIONIZE", 
+        "APPENDS", 
+        "CHANGES", 
+        "ML.PREDICT", 
+        "ML.EVALUATE"
+      ]
     },
     "redshift": {
       "aggregates": [

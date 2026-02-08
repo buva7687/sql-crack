@@ -37,6 +37,20 @@ export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
 };
 
 /**
+ * Parser timeout in milliseconds. If AST parsing exceeds this duration,
+ * the result is discarded and the regex fallback parser is used instead.
+ * Exported so tests can reference the threshold value.
+ */
+export let PARSE_TIMEOUT_MS = 5000;
+
+/**
+ * Override the parse timeout (for testing). Restores to default when called with no argument.
+ */
+export function setParseTimeout(ms?: number): void {
+    PARSE_TIMEOUT_MS = ms ?? 5000;
+}
+
+/**
  * Validates SQL input against size and query count limits.
  * Call this before parsing to prevent performance issues with large inputs.
  *
@@ -1737,12 +1751,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const parser = new Parser();
 
     try {
-        // Timeout protection: default 5 seconds
-        const PARSE_TIMEOUT_MS = 5000;
         let ast: any;
-        let timeoutError = false;
 
-        // Wrap astify in a timeout check
+        // Timeout protection: measure parse duration and warn/fallback if too slow
         const parseStartTime = Date.now();
         try {
             ast = parser.astify(sql, { database: dialect });
@@ -1753,14 +1764,29 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             }
             ast = fallbackAst;
         }
-        
-        const parseDuration = Date.now() - parseStartTime;
-        
-        // Warn if parsing took too long (even if it didn't timeout)
-        if (parseDuration > PARSE_TIMEOUT_MS * 0.7) {
+
+        const parseDurationMs = Date.now() - parseStartTime;
+
+        // If parsing exceeded the timeout, fall back to regex parser for a lighter result
+        if (parseDurationMs > PARSE_TIMEOUT_MS) {
+            const timeoutHint = {
+                type: 'warning' as const,
+                message: `Query parsing took ${(parseDurationMs / 1000).toFixed(1)}s — exceeded ${(PARSE_TIMEOUT_MS / 1000).toFixed(0)}s timeout`,
+                suggestion: 'Consider simplifying this query or breaking it into smaller parts. The regex fallback parser was used instead.',
+                category: 'performance' as const,
+                severity: 'high' as const,
+            };
+            // Return regex fallback with the timeout hint merged in
+            const fallbackResult = regexFallbackParse(sql, dialect);
+            fallbackResult.hints.unshift(timeoutHint);
+            return fallbackResult;
+        }
+
+        // Warn if parsing approached the timeout (>70% of limit)
+        if (parseDurationMs > PARSE_TIMEOUT_MS * 0.7) {
             ctx.hints.push({
                 type: 'warning',
-                message: `Query parsing took ${Math.round(parseDuration / 1000)}s - near timeout limit`,
+                message: `Query parsing took ${(parseDurationMs / 1000).toFixed(1)}s — approaching ${(PARSE_TIMEOUT_MS / 1000).toFixed(0)}s timeout limit`,
                 suggestion: 'Consider simplifying this query or breaking it into smaller parts for better performance.',
                 category: 'performance',
                 severity: 'medium',
