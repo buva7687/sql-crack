@@ -52,7 +52,7 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
 
 ## Commands
 - `npx tsc --noEmit` — Type check
-- `npx jest --silent` — Run all tests (currently 756 tests, 53 suites)
+- `npx jest --silent` — Run all tests
 - `npx jest path/to/test` — Run specific test
 - `vsce package` — Build VSIX
 
