@@ -3,12 +3,18 @@ import { VisualizationPanel } from './visualizationPanel';
 import { WorkspacePanel } from './workspace';
 import { setCustomFunctions } from './dialects';
 import { logger } from './logger';
+import { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } from './webview/sqlParser';
+import {
+    createDiagnosticsFromBatch,
+    SqlCrackCodeActionProvider,
+} from './diagnostics';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Cache of additional file extensions
 let additionalExtensions: string[] = [];
@@ -94,6 +100,44 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Get configuration
     const getConfig = () => vscode.workspace.getConfiguration('sqlCrack');
+
+    const diagnosticsCollection = vscode.languages.createDiagnosticCollection('sql-crack');
+    context.subscriptions.push(diagnosticsCollection);
+
+    const updateDiagnosticsForDocument = (document: vscode.TextDocument): void => {
+        if (!isSqlLikeDocument(document)) {
+            diagnosticsCollection.delete(document.uri);
+            return;
+        }
+
+        const sql = document.getText();
+        if (!sql.trim()) {
+            diagnosticsCollection.delete(document.uri);
+            return;
+        }
+
+        try {
+            const config = getConfig();
+            const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+            const maxFileSizeKB = config.get<number>('maxFileSizeKB', 100);
+            const maxStatements = config.get<number>('maxStatements', 50);
+            const combineDdlStatements = config.get<boolean>('combineDdlStatements', true);
+            const batch = parseSqlBatch(
+                sql,
+                defaultDialect as any,
+                {
+                    maxSqlSizeBytes: (maxFileSizeKB || 100) * 1024,
+                    maxQueryCount: maxStatements || DEFAULT_VALIDATION_LIMITS.maxQueryCount,
+                },
+                {
+                    combineDdlStatements,
+                }
+            );
+            diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
+        } catch {
+            diagnosticsCollection.delete(document.uri);
+        }
+    };
 
     // Track active SQL document and update context for menu visibility
     let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -193,8 +237,20 @@ export function activate(context: vscode.ExtensionContext) {
         );
     });
 
+    const diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
+        [
+            { language: 'sql', scheme: 'file' },
+            { language: 'sql', scheme: 'untitled' },
+        ],
+        new SqlCrackCodeActionProvider(),
+        {
+            providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds,
+        }
+    );
+
     context.subscriptions.push(activeEditorListener);
     context.subscriptions.push(workspaceCommand);
+    context.subscriptions.push(diagnosticCodeActionProvider);
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -295,14 +351,38 @@ export function activate(context: vscode.ExtensionContext) {
         return statements;
     }
 
+    const documentOpenListener = vscode.workspace.onDidOpenTextDocument((document) => {
+        updateDiagnosticsForDocument(document);
+    });
+
+    const documentSaveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+        updateDiagnosticsForDocument(document);
+    });
+
+    const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
+        diagnosticsCollection.delete(document.uri);
+    });
+
     // Listen for document changes with debounced auto-refresh
     let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
+        const config = getConfig();
+        const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
+        const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
+
+        if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh) {
+            if (diagnosticsRefreshTimer) {
+                clearTimeout(diagnosticsRefreshTimer);
+            }
+            diagnosticsRefreshTimer = setTimeout(() => {
+                updateDiagnosticsForDocument(e.document);
+                diagnosticsRefreshTimer = null;
+            }, autoRefreshDelay);
+        }
+
         const isSourceDoc = VisualizationPanel.sourceDocumentUri &&
             e.document.uri.toString() === VisualizationPanel.sourceDocumentUri.toString();
         if ((isSqlLikeDocument(e.document) || isSourceDoc) && VisualizationPanel.currentPanel) {
-            const config = getConfig();
             const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
-            const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
 
             // Always mark as stale immediately for visual feedback
             VisualizationPanel.markAsStale();
@@ -345,9 +425,17 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Prime diagnostics for currently open SQL-like documents
+    vscode.workspace.textDocuments.forEach((document) => {
+        updateDiagnosticsForDocument(document);
+    });
+
     context.subscriptions.push(visualizeCommand);
     context.subscriptions.push(refreshCommand);
     context.subscriptions.push(cursorChangeListener);
+    context.subscriptions.push(documentOpenListener);
+    context.subscriptions.push(documentSaveListener);
+    context.subscriptions.push(documentCloseListener);
     context.subscriptions.push(docChangeListener);
     context.subscriptions.push(configChangeListener);
 }
@@ -357,5 +445,9 @@ export function deactivate() {
     if (autoRefreshTimer) {
         clearTimeout(autoRefreshTimer);
         autoRefreshTimer = null;
+    }
+    if (diagnosticsRefreshTimer) {
+        clearTimeout(diagnosticsRefreshTimer);
+        diagnosticsRefreshTimer = null;
     }
 }

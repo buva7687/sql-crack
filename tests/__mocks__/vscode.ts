@@ -207,6 +207,7 @@ export const workspace = {
 
     // Workspace folders
     workspaceFolders: undefined as { uri: Uri; name: string; index: number }[] | undefined,
+    textDocuments: [] as any[],
 
     // Events
     onDidChangeConfiguration: jest.fn(() => ({ dispose: jest.fn() })),
@@ -357,6 +358,40 @@ export enum ExtensionMode {
     Test = 3
 }
 
+export enum DiagnosticSeverity {
+    Error = 0,
+    Warning = 1,
+    Information = 2,
+    Hint = 3,
+}
+
+export class Diagnostic {
+    public source?: string;
+    public code?: string | number;
+
+    constructor(
+        public readonly range: Range,
+        public readonly message: string,
+        public readonly severity: DiagnosticSeverity
+    ) {}
+}
+
+export class CodeActionKind {
+    constructor(public readonly value: string) {}
+    static readonly QuickFix = new CodeActionKind('quickfix');
+}
+
+export class CodeAction {
+    public command?: unknown;
+    public diagnostics?: Diagnostic[];
+    public isPreferred?: boolean;
+
+    constructor(
+        public readonly title: string,
+        public readonly kind: CodeActionKind = CodeActionKind.QuickFix
+    ) {}
+}
+
 // ============================================================================
 // Window - UI operations (minimal mock)
 // ============================================================================
@@ -390,6 +425,17 @@ export const commands = {
     registerCommand: jest.fn(() => ({ dispose: jest.fn() })),
     executeCommand: jest.fn().mockResolvedValue(undefined),
     getCommands: jest.fn().mockResolvedValue([])
+};
+
+export const languages = {
+    createDiagnosticCollection: jest.fn((name: string) => ({
+        name,
+        set: jest.fn(),
+        delete: jest.fn(),
+        clear: jest.fn(),
+        dispose: jest.fn(),
+    })),
+    registerCodeActionsProvider: jest.fn(() => ({ dispose: jest.fn() })),
 };
 
 // ============================================================================
