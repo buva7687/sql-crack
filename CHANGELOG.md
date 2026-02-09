@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Undo/redo layout history**: Added bounded history for layout-affecting actions (drag, zoom, reset, layout, focus mode) with toolbar controls and keyboard shortcuts (`Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z`).
+- **Query comparison mode**: Added side-by-side baseline/current compare overlay with added/removed/changed node highlighting and stats delta summary.
+- **Inline VS Code diagnostics**: SQL Crack parser hints now surface as editor diagnostics, with a Quick Fix action (**Show in SQL Flow**) to open the visualization directly.
+
+### Changed
+
+- **Toolbar controls**: Added compare toggle and undo/redo controls with active/disabled state synchronization.
+- **Diagnostics lifecycle**: Diagnostics are refreshed on open/save/auto-refresh, and cleared for closed documents or empty/non-SQL content.
+- **Documentation sync**: Updated root and examples README content to reflect roadmap-delivered features/settings (compare mode, undo/redo, diagnostics, parser reliability, and current workspace view model).
+
+### Fixed
+
+- **Edge dash pattern rendering**: Moved dash pattern handling into edge rendering flow so edge styles are restored correctly after hover and no orphaned scope code remains.
+- **Transformation badge contrast**: Replaced hardcoded white fills with contrast-aware text coloring for improved light-theme legibility.
+- **Viewport fit stability**: Clamped fit-view dimensions/scale to prevent upside-down node rendering on small viewports.
+- **Resizable panel behavior**: Preserved preferred panel width so hints/details resizing behaves predictably across window resizes.
+- **Parser resilience**: Added safe string handling to prevent `.toLowerCase()` crashes when AST values are non-string objects.
+- **Hints panel interaction**: Hint rows now allow copy/select text (switched from button semantics to text-friendly container rendering).
+
+### Tests
+
+- Added unit/regression coverage for undo manager behavior, compare mode wiring/diff logic, diagnostics mapping, and extension diagnostics wiring.
+
 ## [0.2.1] - 2026-02-06
 
 ### Added

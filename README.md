@@ -38,6 +38,8 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
+| **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
+| **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
 **Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • CTE (Purple) • Result (Green)
@@ -82,6 +84,17 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **Quality Warnings** | Unused CTEs, dead columns, duplicate subqueries, repeated table scans |
 | **Performance Hints** | Filter pushdown, join order, index suggestions, non-sargable expressions |
 | **Performance Score** | 0-100 score based on detected anti-patterns |
+| **Inline Diagnostics** | SQL Crack hints surface as VS Code diagnostics with a quick fix to open SQL Flow |
+
+### Parser Reliability
+
+| Capability | Description |
+|------------|-------------|
+| **Partial Parse Fallback** | If AST parsing fails, SQL Crack falls back to regex extraction to still render best-effort tables/joins |
+| **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
+| **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
+| **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
+| **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
 
 **Performance Icons**: Filter Pushdown (⬆) • Non-Sargable (🚫) • Join Order (⇄) • Index Suggestion (📇) • Repeated Scan (🔄) • Complex (🧮)
 
@@ -179,6 +192,8 @@ Analyze cross-file dependencies:
 | `E` | Expand/collapse all CTEs |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
+| `Cmd/Ctrl + Z` | Undo latest layout change |
+| `Cmd/Ctrl + Shift + Z` | Redo layout change |
 | `[` / `]` | Previous/next query |
 | `?` | Show all shortcuts |
 
@@ -225,14 +240,20 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab` |
 | `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
+| `sqlCrack.flowDirection` | `top-down` | Flow direction: `top-down`, `bottom-up` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
+| `sqlCrack.gridStyle` | `dots` | Canvas background style: `dots`, `lines`, `none` |
+| `sqlCrack.nodeAccentPosition` | `left` | Node accent strip position: `left`, `bottom` |
+| `sqlCrack.showMinimap` | `auto` | Minimap visibility: `auto`, `always`, `never` |
+| `sqlCrack.colorblindMode` | `off` | Color accessibility mode: `off`, `deuteranopia`, `protanopia`, `tritanopia` |
 
 ### Workspace Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Max files to auto-index (10-500) |
+| `sqlCrack.workspaceLineageDepth` | `5` | Default lineage traversal depth (1-20) |
 | `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, `hybrid` |
 
 ### Custom File Extensions
@@ -257,6 +278,10 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
+| `sqlCrack.advanced.maxFileSizeKB` | `100` | Max SQL file size before truncation handling (10-10000) |
+| `sqlCrack.advanced.maxStatements` | `50` | Max statements parsed per file (1-500) |
+| `sqlCrack.advanced.parseTimeoutSeconds` | `5` | Parser timeout in seconds (1-60) |
+| `sqlCrack.advanced.debugLogging` | `false` | Enable verbose SQL Crack output-channel logs |
 | `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |
 | `sqlCrack.advanced.clearCacheOnStartup` | `false` | Clear cache when VS Code starts |
 
@@ -352,9 +377,9 @@ src/
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 
 **Planned**:
+- Export preview dialog with PDF support
 - Diff-aware visualization for PR reviews
 - dbt integration (`ref()`, `source()` macros)
-- Query comparison (column diff between two queries)
 - Performance regression detection
 
 ---

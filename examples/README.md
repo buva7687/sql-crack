@@ -9,7 +9,7 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 1. Open `demo-showcase.sql`
 2. Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to visualize
 3. Press `?` to see all keyboard shortcuts
-4. Try pressing `C` for column lineage, `E` to expand CTEs, `H` to change layout
+4. Try pressing `C` for column lineage, `E` to expand CTEs, `H` to change layout, and `Cmd/Ctrl+Z` to undo layout actions
 
 ---
 
@@ -47,6 +47,8 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | `H` | Cycle layout (vertical/horizontal/compact/force/radial) |
 | `T` | Toggle dark/light theme |
 | `F` | Fullscreen mode |
+| `Cmd/Ctrl+Z` | Undo latest layout change |
+| `Cmd/Ctrl+Shift+Z` | Redo layout change |
 | `[` / `]` | Previous/next query |
 | `Cmd/Ctrl+F` | Search nodes |
 | `?` | Show all shortcuts |
@@ -135,6 +137,10 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 
 8. **Keyboard navigation**: Use `Tab` to focus nodes, `Arrow keys` to navigate, `Enter` to select. Great for accessibility or when mouse isn't available.
 
+9. **Compare query revisions**: Pin a query snapshot, switch to a modified query, then use the compare (`⇆`) toolbar button to see side-by-side added/removed/changed node differences.
+
+10. **Use diagnostics in editor**: Save a SQL file with anti-patterns (for example from `quality-performance-hints.sql`) and check Problems panel entries from **SQL Crack**. Use the quick fix **Show in SQL Flow** to jump straight into the graph.
+
 ---
 
 ## Workspace Analysis
@@ -143,10 +149,9 @@ To explore cross-file dependencies:
 
 1. Right-click the `examples` folder
 2. Select **"SQL Crack: Analyze Workspace Dependencies"**
-3. Use the four view tabs:
+3. Use the three view tabs:
    - **Graph** — File and table dependency visualization
    - **Lineage** — Data flow with upstream/downstream tracking
-   - **Tables** — Browse all tables/views with column details
    - **Impact** — Analyze what breaks if you change something
 
 This shows how tables in `schema-*.sql` files are referenced by queries in other files.
