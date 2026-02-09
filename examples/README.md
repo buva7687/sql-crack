@@ -43,7 +43,7 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
-| `H` | Cycle layout (vertical/horizontal/compact/force) |
+| `H` | Cycle layout (vertical/horizontal/compact/force/radial) |
 | `T` | Toggle dark/light theme |
 | `F` | Fullscreen mode |
 | `[` / `]` | Previous/next query |
@@ -117,12 +117,13 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
    - **Horizontal** — Best for wide joins (left-to-right flow)
    - **Compact** — Reduces whitespace for dense graphs
    - **Force** — Physics-based layout for complex relationships
+   - **Radial** — Highlights center-out lineage for hub-and-spoke style queries
 
 5. **Performance review**: Open `quality-performance-hints.sql` and check the hints panel. Each query demonstrates a different anti-pattern.
 
 6. **Drag clouds**: After pressing `E` to expand all CTEs, you can drag the cloud panels to reposition them. Arrows follow automatically.
 
-7. **Export for documentation**: Use the export buttons (PNG, SVG, Mermaid) to save diagrams for wikis, PRs, or presentations.
+7. **Export for documentation**: Use the export dropdown (PNG, SVG, Mermaid, Copy Mermaid) to save diagrams for wikis, PRs, or presentations.
 
 8. **Keyboard navigation**: Use `Tab` to focus nodes, `Arrow keys` to navigate, `Enter` to select. Great for accessibility or when mouse isn't available.
 

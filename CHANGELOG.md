@@ -50,12 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phantom LIMIT node**: PostgreSQL, Snowflake, Trino, and Redshift no longer show a spurious LIMIT node when no LIMIT clause exists. The "No LIMIT clause" optimization hint now correctly appears for these dialects.
 - **Click-outside zoom reset**: Clicking empty canvas now restores the full view when zoomed into a node (previously required Escape).
 - **Auto-refresh for non-`.sql` files**: `.hql`, `.ddl`, `.pgsql`, untitled files, and other non-`.sql` documents now trigger auto-refresh when the visualization panel is open.
+- **Parse error positioning**: Parser diagnostics now preserve absolute line/column coordinates so editor and badge navigation land on the correct source location.
+- **Fullscreen UI recovery**: Exiting fullscreen now consistently restores toolbar wrapper, breadcrumb bar, and parse error badge placement.
+- **Toolbar popover overlays**: Toolbar menus render as floating overlays, preventing clipping and misplaced controls in constrained layouts.
+- **Minimap sync stability**: Minimap visibility and viewport sync are now stable during query/view transitions.
 - **Stats & hints panel overlap**: Panels dynamically shift above the legend bar when it is visible instead of being hidden behind it.
 - **Column lineage banner overlap**: Banner no longer stretches full-width or captures clicks across query tabs; uses `pointer-events: none` with only the close button interactive.
 - **Column lineage Escape dismiss**: Escape now closes column lineage mode from any focus context (SVG, document, or the lineage panel itself).
 - **Snowflake DELETE parsing**: Snowflake DELETE/MERGE statements that fail native grammar now fall back to PostgreSQL AST parsing.
 - **Light-theme toolbar**: Overflow button and dropdown rows use correct light-mode colors.
 - **Breadcrumb/filter state**: Filter chips no longer leak stale state across re-renders.
+- **Theme-toggle jitter**: Switching themes no longer triggers tab jump/flicker artifacts in the webview.
 - **Collapsed sidebar canvas usage**: Graph now auto-fits after sidebar collapse/expand so newly available canvas space is used immediately.
 - **Zoom control displacement**: Removed incorrect `zoom-toolbar` top offset that was applied when the bottom legend was visible.
 
