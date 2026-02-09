@@ -50,6 +50,12 @@ export function setParseTimeout(ms?: number): void {
     PARSE_TIMEOUT_MS = ms ?? 5000;
 }
 
+export interface DialectDetectionResult {
+    dialect: SqlDialect | null;
+    scores: Partial<Record<SqlDialect, number>>;
+    confidence: 'high' | 'low' | 'none';
+}
+
 /**
  * Validates SQL input against size and query count limits.
  * Call this before parsing to prevent performance issues with large inputs.
@@ -4521,12 +4527,14 @@ function buildColumnLineagePath(
  * This helps users identify when they're using syntax that's specific to a certain dialect
  */
 function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): void {
-    const upperSql = sql.toUpperCase();
+    const strippedSql = stripSqlComments(sql);
+    const upperSql = strippedSql.toUpperCase();
+    const syntax = detectDialectSyntaxPatterns(strippedSql);
     
     // Snowflake-specific syntax patterns
-    const hasSnowflakePathOperator = /(?<!:):\w+(?!:)/.test(sql); // e.g., payload:items (excludes :: casts and :params)
-    const hasSnowflakeNamedArgs = /\w+\s*=>\s*/.test(sql); // e.g., input => value
-    const hasFlatten = /\bFLATTEN\s*\(/i.test(sql);
+    const hasSnowflakePathOperator = syntax.hasSnowflakePathOperator; // e.g., payload:items (excludes :: casts and :params)
+    const hasSnowflakeNamedArgs = syntax.hasSnowflakeNamedArgs; // e.g., input => value
+    const hasFlatten = syntax.hasFlatten;
     
     if ((hasSnowflakePathOperator || hasSnowflakeNamedArgs || hasFlatten) && currentDialect !== 'Snowflake') {
         ctx.hints.push({
@@ -4541,9 +4549,9 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
     
     // BigQuery-specific syntax patterns
-    const hasBigQueryStruct = /\bSTRUCT\s*\(/i.test(sql);
-    const hasBigQueryUnnest = /\bUNNEST\s*\(/i.test(sql);
-    const hasBigQueryArrayType = /\bARRAY<.*>/i.test(sql);
+    const hasBigQueryStruct = syntax.hasBigQueryStruct;
+    const hasBigQueryUnnest = syntax.hasBigQueryUnnest;
+    const hasBigQueryArrayType = syntax.hasBigQueryArrayType;
     
     const unnestOnlyDialects: SqlDialect[] = ['BigQuery', 'PostgreSQL', 'Trino', 'Athena'];
     if ((hasBigQueryStruct || hasBigQueryArrayType || (hasBigQueryUnnest && !unnestOnlyDialects.includes(currentDialect)))
@@ -4558,10 +4566,10 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
     
     // PostgreSQL-specific syntax patterns
-    const hasPostgresInterval = /INTERVAL\s+'[^']+'/i.test(sql);
-    const hasPostgresDollarQuotes = /\$\$/.test(sql);
-    const hasPostgresArrayAccess = /\w+\[\d+\]/.test(sql); // e.g., arr[1]
-    const hasPostgresJsonOperators = /->>|#>|\?&|\?\|/.test(sql);
+    const hasPostgresInterval = syntax.hasPostgresInterval;
+    const hasPostgresDollarQuotes = syntax.hasPostgresDollarQuotes;
+    const hasPostgresArrayAccess = syntax.hasPostgresArrayAccess; // e.g., arr[1]
+    const hasPostgresJsonOperators = syntax.hasPostgresJsonOperators;
     
     if ((hasPostgresInterval || hasPostgresDollarQuotes || hasPostgresArrayAccess || hasPostgresJsonOperators) 
         && currentDialect !== 'PostgreSQL' && currentDialect !== 'Snowflake') {
@@ -4575,9 +4583,9 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
     
     // MySQL-specific syntax patterns
-    const hasMysqlBackticks = /`[\w-]+`/.test(sql); // Backtick identifiers
-    const hasMysqlGroupByRollup = /GROUP BY.*WITH ROLLUP/i.test(sql);
-    const hasMysqlDual = /FROM\s+DUAL/i.test(sql);
+    const hasMysqlBackticks = syntax.hasMysqlBackticks; // Backtick identifiers
+    const hasMysqlGroupByRollup = syntax.hasMysqlGroupByRollup;
+    const hasMysqlDual = syntax.hasMysqlDual;
     
     if ((hasMysqlBackticks || hasMysqlGroupByRollup || hasMysqlDual) 
         && currentDialect !== 'MySQL' && currentDialect !== 'MariaDB') {
@@ -4591,9 +4599,9 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
     
     // T-SQL (SQL Server) specific syntax
-    const hasTSqlApply = /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql);
-    const hasTSqlTop = /TOP\s*\(/i.test(sql);
-    const hasTSqlPivot = /\bPIVOT\s*\(/i.test(sql);
+    const hasTSqlApply = syntax.hasTSqlApply;
+    const hasTSqlTop = syntax.hasTSqlTop;
+    const hasTSqlPivot = syntax.hasTSqlPivot;
     
     if ((hasTSqlApply || hasTSqlTop || hasTSqlPivot) && currentDialect !== 'TransactSQL') {
         ctx.hints.push({
@@ -4606,7 +4614,7 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
     
     // MERGE statement detection (not fully supported by node-sql-parser in most dialects)
-    const hasMerge = /\bMERGE\s+INTO\b/i.test(sql);
+    const hasMerge = /\bMERGE\s+INTO\b/i.test(strippedSql);
     if (hasMerge) {
         // Check if we're in a dialect that should support MERGE
         const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery'];
@@ -4629,6 +4637,128 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
             });
         }
     }
+}
+
+function stripSqlComments(sql: string): string {
+    return sql
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/--[^\n\r]*/g, ' ');
+}
+
+function detectDialectSyntaxPatterns(sql: string): {
+    hasSnowflakePathOperator: boolean;
+    hasSnowflakeNamedArgs: boolean;
+    hasFlatten: boolean;
+    hasBigQueryStruct: boolean;
+    hasBigQueryUnnest: boolean;
+    hasBigQueryArrayType: boolean;
+    hasPostgresInterval: boolean;
+    hasPostgresDollarQuotes: boolean;
+    hasPostgresArrayAccess: boolean;
+    hasPostgresJsonOperators: boolean;
+    hasMysqlBackticks: boolean;
+    hasMysqlGroupByRollup: boolean;
+    hasMysqlDual: boolean;
+    hasTSqlApply: boolean;
+    hasTSqlTop: boolean;
+    hasTSqlPivot: boolean;
+} {
+    return {
+        hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
+        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
+        hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
+        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
+        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
+        hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
+        hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
+        hasPostgresDollarQuotes: /\$\$/.test(sql),
+        hasPostgresArrayAccess: /\w+\[\d+\]/.test(sql),
+        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(sql),
+        hasMysqlBackticks: /`[\w-]+`/.test(sql),
+        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(sql),
+        hasMysqlDual: /FROM\s+DUAL/i.test(sql),
+        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql),
+        hasTSqlTop: /TOP\s*\(/i.test(sql),
+        hasTSqlPivot: /\bPIVOT\s*\(/i.test(sql),
+    };
+}
+
+export function detectDialect(sql: string): DialectDetectionResult {
+    const strippedSql = stripSqlComments(sql);
+    if (!strippedSql.trim()) {
+        return {
+            dialect: null,
+            scores: {},
+            confidence: 'none'
+        };
+    }
+
+    const syntax = detectDialectSyntaxPatterns(strippedSql);
+    const scores: Partial<Record<SqlDialect, number>> = {};
+    const addScore = (dialect: SqlDialect, points = 1): void => {
+        scores[dialect] = (scores[dialect] || 0) + points;
+    };
+
+    // Snowflake
+    if (syntax.hasSnowflakePathOperator) { addScore('Snowflake'); }
+    if (syntax.hasSnowflakeNamedArgs) { addScore('Snowflake'); }
+    if (syntax.hasFlatten) { addScore('Snowflake'); }
+
+    // BigQuery (UNNEST alone is not enough to disambiguate)
+    if (syntax.hasBigQueryStruct) { addScore('BigQuery'); }
+    if (syntax.hasBigQueryArrayType) { addScore('BigQuery'); }
+    if (syntax.hasBigQueryUnnest && (syntax.hasBigQueryStruct || syntax.hasBigQueryArrayType)) {
+        addScore('BigQuery');
+    }
+
+    // PostgreSQL
+    if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+
+    // MySQL
+    if (syntax.hasMysqlBackticks) { addScore('MySQL'); }
+    if (syntax.hasMysqlGroupByRollup) { addScore('MySQL'); }
+    if (syntax.hasMysqlDual) { addScore('MySQL'); }
+
+    // SQL Server (T-SQL)
+    if (syntax.hasTSqlApply) { addScore('TransactSQL'); }
+    if (syntax.hasTSqlTop) { addScore('TransactSQL'); }
+    if (syntax.hasTSqlPivot) { addScore('TransactSQL'); }
+
+    const candidateDialects: SqlDialect[] = ['Snowflake', 'BigQuery', 'PostgreSQL', 'MySQL', 'TransactSQL'];
+    const matchedDialects = candidateDialects
+        .map(dialect => ({ dialect, score: scores[dialect] || 0 }))
+        .filter(entry => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    if (matchedDialects.length === 0) {
+        return {
+            dialect: null,
+            scores,
+            confidence: 'none'
+        };
+    }
+
+    const topMatch = matchedDialects[0];
+    const allOtherScoresZero = candidateDialects
+        .filter(dialect => dialect !== topMatch.dialect)
+        .every(dialect => (scores[dialect] || 0) === 0);
+    const isHighConfidence = matchedDialects.length === 1 || (topMatch.score >= 2 && allOtherScoresZero);
+
+    if (!isHighConfidence) {
+        return {
+            dialect: null,
+            scores,
+            confidence: 'low'
+        };
+    }
+
+    return {
+        dialect: topMatch.dialect,
+        scores,
+        confidence: 'high'
+    };
 }
 
 /**

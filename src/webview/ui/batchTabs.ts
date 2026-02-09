@@ -11,6 +11,7 @@ export interface BatchTabsCallbacks {
 let currentBatchResult: BatchParseResult | null = null;
 let currentQueryIdx: number = 0;
 let currentCallbacks: BatchTabsCallbacks | null = null;
+let errorSummaryCleanup: (() => void) | null = null;
 
 export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCallbacks): void {
     const tabsContainer = document.createElement('div');
@@ -62,6 +63,11 @@ export function updateBatchTabs(
     currentQueryIndex: number,
     callbacks: BatchTabsCallbacks
 ): void {
+    if (errorSummaryCleanup) {
+        errorSummaryCleanup();
+        errorSummaryCleanup = null;
+    }
+
     // Store for theme change re-renders
     currentBatchResult = batchResult;
     currentQueryIdx = currentQueryIndex;
@@ -84,7 +90,15 @@ export function updateBatchTabs(
     const textColorDim = isDark ? '#475569' : '#94a3b8';
     const activeColor = isDark ? '#a5b4fc' : '#4f46e5';
     const errorColor = isDark ? '#f87171' : '#dc2626';
+    const successColor = isDark ? '#4ade80' : '#16a34a';
+    const warningColor = isDark ? '#fbbf24' : '#d97706';
     const counterColor = isDark ? '#64748b' : '#94a3b8';
+    const errorBgTint = isDark ? 'rgba(248, 113, 113, 0.14)' : 'rgba(220, 38, 38, 0.10)';
+    const errorBgTintHover = isDark ? 'rgba(248, 113, 113, 0.22)' : 'rgba(220, 38, 38, 0.16)';
+    const warningBgTint = isDark ? 'rgba(251, 191, 36, 0.14)' : 'rgba(217, 119, 6, 0.10)';
+    const warningBgTintHover = isDark ? 'rgba(251, 191, 36, 0.22)' : 'rgba(217, 119, 6, 0.16)';
+    const successBgTint = isDark ? 'rgba(74, 222, 128, 0.10)' : 'rgba(22, 163, 74, 0.08)';
+    const successBgTintHover = isDark ? 'rgba(74, 222, 128, 0.16)' : 'rgba(22, 163, 74, 0.12)';
 
     tabsContainer.style.display = 'flex';
     tabsContainer.innerHTML = '';
@@ -134,14 +148,25 @@ export function updateBatchTabs(
         const query = batchResult.queries[i];
         const isActive = i === currentQueryIndex;
         const hasError = !!query.error;
+        const isPartial = !!query.partial && !hasError;
 
-        tab.innerHTML = extractQueryLabel(query.sql, i);
-        tab.title = `Q${i + 1}: ${truncateSql(query.sql, 200)}`;
+        const stateIcon = hasError ? '⚠' : isPartial ? '⚡' : '✓';
+        const stateIconColor = hasError ? errorColor : isPartial ? warningColor : successColor;
+        const stateBaseColor = hasError ? errorColor : isPartial ? warningColor : textColorMuted;
+        const idleBg = hasError ? errorBgTint : isPartial ? warningBgTint : successBgTint;
+        const hoverBg = hasError ? errorBgTintHover : isPartial ? warningBgTintHover : successBgTintHover;
+
+        tab.innerHTML = `<span style="color: ${isActive ? activeColor : stateIconColor};">${stateIcon}</span> ${extractQueryLabel(query.sql, i)}`;
+        tab.title = hasError
+            ? `Q${i + 1}: ${query.error}`
+            : isPartial
+                ? `Q${i + 1}: Partial parse (regex fallback) — ${truncateSql(query.sql, 200)}`
+                : `Q${i + 1}: ${truncateSql(query.sql, 200)}`;
         tab.style.cssText = `
-            background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-            border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : 'transparent'};
+            background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : idleBg};
+            border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : isPartial ? warningColor : 'transparent'};
             border-radius: 4px;
-            color: ${hasError ? errorColor : isActive ? activeColor : textColorMuted};
+            color: ${isActive ? activeColor : stateBaseColor};
             cursor: pointer;
             padding: 4px 10px;
             font-size: 11px;
@@ -155,13 +180,13 @@ export function updateBatchTabs(
 
         tab.addEventListener('mouseenter', () => {
             if (!isActive) {
-                tab.style.background = 'rgba(148, 163, 184, 0.1)';
+                tab.style.background = hoverBg;
             }
         });
 
         tab.addEventListener('mouseleave', () => {
             if (!isActive) {
-                tab.style.background = 'transparent';
+                tab.style.background = idleBg;
             }
         });
 
@@ -206,29 +231,120 @@ export function updateBatchTabs(
     counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
     tabsContainer.appendChild(counter);
 
-    // Error summary indicator (if there are errors)
-    if (batchResult.errorCount && batchResult.errorCount > 0) {
+    // Parse status summary indicator (errors + partial parse count)
+    const errorCount = batchResult.errorCount || 0;
+    const partialCount = batchResult.queries.filter(q => q.partial && !q.error).length;
+    const successCount = Math.max(0, queryCount - errorCount - partialCount);
+    if (errorCount > 0 || partialCount > 0) {
         const errorSummary = document.createElement('span');
-        const successCount = batchResult.successCount || 0;
         errorSummary.style.cssText = `
-            color: ${errorColor};
+            position: relative;
+            color: ${errorCount > 0 ? errorColor : warningColor};
             font-size: 10px;
             margin-left: 8px;
             padding: 2px 6px;
-            background: ${isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.1)'};
+            background: ${errorCount > 0
+                ? (isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.1)')
+                : (isDark ? 'rgba(251, 191, 36, 0.15)' : 'rgba(217, 119, 6, 0.1)')};
             border-radius: 4px;
             display: flex;
             align-items: center;
             gap: 4px;
         `;
+        const statusIcon = errorCount > 0 ? '⚠' : '⚡';
+        const failedPart = errorCount > 0
+            ? `<button type="button" id="batch-tabs-failed-trigger" style="
+                border: none;
+                background: transparent;
+                color: ${errorColor};
+                font-size: 10px;
+                cursor: pointer;
+                font-weight: 600;
+                padding: 0;
+                text-decoration: underline;
+                text-underline-offset: 1px;
+            ">${errorCount} failed</button>`
+            : `0 failed`;
         errorSummary.innerHTML = `
-            <span style="font-size: 10px;">⚠</span>
-            <span>${successCount} ok, ${batchResult.errorCount} failed</span>
+            <span style="font-size: 10px;">${statusIcon}</span>
+            <span>
+                ${successCount} ok, ${failedPart}, ${partialCount} partial
+            </span>
         `;
-        errorSummary.title = batchResult.parseErrors
-            ?.map(e => `Q${e.queryIndex + 1}: ${e.message}`)
-            .join('\n') || 'Some queries failed to parse';
+        errorSummary.title = `${successCount} ok, ${errorCount} failed, ${partialCount} partial`;
         tabsContainer.appendChild(errorSummary);
+
+        if (errorCount > 0) {
+            const trigger = errorSummary.querySelector('#batch-tabs-failed-trigger') as HTMLButtonElement | null;
+            if (trigger) {
+                const errorList = document.createElement('div');
+                errorList.style.cssText = `
+                    display: none;
+                    position: absolute;
+                    top: calc(100% + 6px);
+                    right: 0;
+                    min-width: 280px;
+                    max-width: 420px;
+                    max-height: 220px;
+                    overflow-y: auto;
+                    background: ${isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
+                    border: 1px solid ${isDark ? 'rgba(248, 113, 113, 0.35)' : 'rgba(220, 38, 38, 0.35)'};
+                    border-radius: 6px;
+                    box-shadow: ${isDark ? '0 8px 20px rgba(0, 0, 0, 0.4)' : '0 8px 20px rgba(15, 23, 42, 0.2)'};
+                    z-index: 140;
+                `;
+
+                const parseErrors = batchResult.parseErrors || [];
+                parseErrors.forEach(parseError => {
+                    const item = document.createElement('button');
+                    const shortMessage = truncateSql(parseError.message, 120);
+                    item.type = 'button';
+                    item.style.cssText = `
+                        display: block;
+                        width: 100%;
+                        text-align: left;
+                        border: none;
+                        background: transparent;
+                        color: ${isDark ? '#fecaca' : '#991b1b'};
+                        font-size: 11px;
+                        padding: 8px 10px;
+                        cursor: pointer;
+                    `;
+                    item.textContent = `Q${parseError.queryIndex + 1}: ${shortMessage}`;
+                    item.title = parseError.message;
+                    item.addEventListener('mouseenter', () => {
+                        item.style.background = isDark ? 'rgba(248, 113, 113, 0.12)' : 'rgba(220, 38, 38, 0.10)';
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        item.style.background = 'transparent';
+                    });
+                    item.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        errorList.style.display = 'none';
+                        callbacks.onQuerySelect(parseError.queryIndex);
+                    });
+                    errorList.appendChild(item);
+                });
+
+                errorSummary.appendChild(errorList);
+
+                trigger.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    errorList.style.display = errorList.style.display === 'none' ? 'block' : 'none';
+                });
+
+                const onDocumentClick = (event: Event) => {
+                    const target = event.target as Node | null;
+                    if (!target || !errorSummary.contains(target)) {
+                        errorList.style.display = 'none';
+                    }
+                };
+                document.addEventListener('click', onDocumentClick);
+                errorSummaryCleanup = () => {
+                    document.removeEventListener('click', onDocumentClick);
+                };
+            }
+        }
     }
 }
 

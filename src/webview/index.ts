@@ -4,7 +4,7 @@ import process from 'process/browser';
 
 import { parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
-import { setParseTimeout } from './sqlParser';
+import { detectDialect, setParseTimeout } from './sqlParser';
 import { BatchParseResult, LayoutType, SqlDialect } from './types';
 import {
     initRenderer,
@@ -48,6 +48,7 @@ import {
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,
+    updateAutoDetectIndicator,
     setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
@@ -95,6 +96,7 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+let userExplicitlySetDialect = false;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -132,6 +134,8 @@ function setupVSCodeMessageListener(): void {
 function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
     window.initialSqlCode = sql;
     currentDialect = options.dialect as SqlDialect;
+    userExplicitlySetDialect = false;
+    updateAutoDetectIndicator(null);
 
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
     if (dialectSelect) {
@@ -292,7 +296,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onNextSearchResult: nextSearchResult,
         onPrevSearchResult: prevSearchResult,
         onDialectChange: (dialect: SqlDialect) => {
+            userExplicitlySetDialect = true;
             currentDialect = dialect;
+            updateAutoDetectIndicator(null);
             const sql = window.initialSqlCode || '';
             if (sql) {
                 void visualize(sql);
@@ -360,6 +366,19 @@ async function visualize(sql: string): Promise<void> {
 
     // Clear view states when loading new SQL
     queryViewStates.clear();
+
+    if (!userExplicitlySetDialect) {
+        const detection = detectDialect(sql);
+        const detectedDialect = detection.confidence === 'high' ? detection.dialect : null;
+        updateAutoDetectIndicator(detectedDialect);
+        if (detectedDialect && detectedDialect !== currentDialect) {
+            currentDialect = detectedDialect;
+            const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+            if (dialectSelect) {
+                dialectSelect.value = currentDialect;
+            }
+        }
+    }
 
     try {
         const t0 = performance.now();

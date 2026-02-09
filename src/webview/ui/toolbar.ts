@@ -280,6 +280,13 @@ export function createToolbar(
             <option value="MariaDB">MariaDB</option>
             <option value="SQLite">SQLite</option>
         </select>
+        <span id="dialect-auto-indicator" style="
+            display: none;
+            color: ${isDark ? '#818cf8' : '#4f46e5'};
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        "></span>
     `;
     toolbar.appendChild(title);
 
@@ -1633,6 +1640,10 @@ export function updateToolbarTheme(
         dialectSelect.style.background = dark ? '#1e293b' : '#f1f5f9';
         dialectSelect.style.color = textColor;
     }
+    const autoDetectIndicator = document.getElementById('dialect-auto-indicator') as HTMLSpanElement | null;
+    if (autoDetectIndicator) {
+        autoDetectIndicator.style.color = dark ? '#818cf8' : '#4f46e5';
+    }
 
     // Update search input colors
     const searchInput = searchContainer.querySelector('input');
@@ -1674,6 +1685,20 @@ export function updateToolbarTheme(
     });
 
     applyOverflowMenuTheme(dark);
+}
+
+export function updateAutoDetectIndicator(dialect: string | null): void {
+    const indicator = document.getElementById('dialect-auto-indicator') as HTMLSpanElement | null;
+    if (!indicator) { return; }
+
+    if (!dialect) {
+        indicator.textContent = '';
+        indicator.style.display = 'none';
+        return;
+    }
+
+    indicator.textContent = `auto: ${dialect}`;
+    indicator.style.display = 'inline-flex';
 }
 
 export function updateHintsSummaryBadge(

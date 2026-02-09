@@ -78,7 +78,7 @@
 - Ambiguous SQL (plain `SELECT ... FROM ... JOIN`) → keeps default dialect
 - User manually selects dialect → auto-detect disabled for session
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (Phase 2)
 
 ---
 
@@ -115,7 +115,7 @@
 - Cancel closes modal without exporting
 - Transparent background option removes grid from PNG
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (Phase 2)
 
 ---
 
@@ -532,7 +532,7 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | # | Item | Priority | Phase | Status |
 |---|------|----------|-------|--------|
 | 1 | Smart query tab labels | P1 | 1 | ✅ Complete |
-| 2 | Dialect auto-detection | P1 | 2 | Not started |
+| 2 | Dialect auto-detection | P1 | 2 | ✅ Complete |
 | 3 | Export preview + PDF | P1 | 3 | Not started |
 | 4 | Resizable panels | P1 | 2 | Not started |
 | 5 | Configurable limits | P1 | 1 | ✅ Complete |
@@ -540,7 +540,7 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | 7 | Minimap toggle setting | P2 | 1 | ✅ Complete |
 | 8 | Colorblind-safe palette | P2 | 3 | Not started |
 | 9 | Clickable error badge | P2 | 1 | ✅ Complete |
-| 10 | Better batch tab error UX | P2 | 2 | Not started |
+| 10 | Better batch tab error UX | P2 | 2 | ✅ Complete |
 | 11 | Fullscreen exit button | P2 | 2 | ✅ Complete |
 | 12 | Expandable search box | P3 | 2 | ✅ Complete |
 | 13 | Undo/redo for layout | P3 | 4 | Not started |
