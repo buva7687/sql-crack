@@ -105,3 +105,21 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
      - Example: `UNNEST` is valid in BigQuery, PostgreSQL, AND Trino - not just BigQuery
      - Always check if syntax is dialect-specific before showing warnings
    - Claiming "complete" when only the foundation is done
+
+6. **SQL comment stripping:**
+   - Any function that regex-matches against raw SQL **must** strip comments first
+   - `-- line comments` and `/* block comments */` contain SQL keywords that cause false matches
+   - Example: `-- JOIN Patterns` matched `/\bJOIN\s+(\w+)/gi` and extracted "Patterns" as a table name
+   - Use: `sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '')` before regex extraction
+   - Affected: `regexFallbackParse()`, `extractQueryLabel()` — any new regex-on-SQL function needs this too
+
+7. **Renderer state leaks on early returns:**
+   - `render()` in `renderer.ts` has early-return paths for error/empty results (lines ~1493, ~1509)
+   - These paths must clear **all** mutable state (column lineage, column flows, etc.)
+   - Otherwise pressing feature keys (like "C" for column lineage) shows stale data from the previous query
+   - When adding new state to the renderer, audit all early-return paths in `render()`
+
+8. **Webview settings wiring pattern:**
+   - New settings flow: `package.json` → `visualizationPanel.ts` (read config + inject into HTML) → `Window` interface in `index.ts` → consumed at init
+   - Always add the `window.*` property to the `Window` interface declaration in `index.ts`
+   - For refresh-time settings, also thread through the `refresh()` message options
