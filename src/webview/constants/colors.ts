@@ -2,6 +2,7 @@
 // Centralized color definitions to ensure consistency across the application
 
 import { NodeType, Severity } from '../types';
+import type { ColorblindMode } from '../../shared/theme';
 
 // ============================================================
 // UI Colors - General interface elements
@@ -86,6 +87,17 @@ export const EDGE_COLORS = {
     focus: '#6366f1',         // Indigo for focus mode highlights
     hover: '#6366f1',         // Indigo for edge hover
 } as const;
+
+export const EDGE_DASH_PATTERNS: Record<string, string | null> = {
+    flow: null,
+    join: '8,3',
+    where: '3,3',
+    having: '10,4,2,4',
+    on: '6,2',
+    filter: '2,2',
+    merge_source: '9,2,2,2',
+    merge_target: '12,3',
+};
 
 // ============================================================
 // Badge Colors - Access mode and operation badges
@@ -266,10 +278,79 @@ export const NODE_COLORS: Record<NodeType, string> = {
     cluster: '#64748b',    // slate (cluster nodes)
 };
 
+export const COLORBLIND_NODE_COLORS: Record<Exclude<ColorblindMode, 'off'>, Record<NodeType, string>> = {
+    deuteranopia: {
+        table: '#0072B2',
+        filter: '#56B4E9',
+        join: '#CC79A7',
+        aggregate: '#E69F00',
+        sort: '#009E73',
+        limit: '#2F6BFF',
+        select: '#3F4A8A',
+        result: '#009E73',
+        cte: '#CC79A7',
+        union: '#D55E00',
+        subquery: '#0072B2',
+        window: '#8E6CFF',
+        case: '#F0E442',
+        cluster: '#7F7F7F',
+    },
+    protanopia: {
+        table: '#0072B2',
+        filter: '#56B4E9',
+        join: '#CC79A7',
+        aggregate: '#E69F00',
+        sort: '#009E73',
+        limit: '#2F6BFF',
+        select: '#3F4A8A',
+        result: '#009E73',
+        cte: '#CC79A7',
+        union: '#D55E00',
+        subquery: '#0072B2',
+        window: '#8E6CFF',
+        case: '#F0E442',
+        cluster: '#7F7F7F',
+    },
+    tritanopia: {
+        table: '#2F6BFF',
+        filter: '#5F7ADB',
+        join: '#C23B75',
+        aggregate: '#C67A00',
+        sort: '#00A86B',
+        limit: '#0077CC',
+        select: '#4E4BA8',
+        result: '#00A86B',
+        cte: '#C23B75',
+        union: '#A24D00',
+        subquery: '#2F6BFF',
+        window: '#8A4FFF',
+        case: '#E2D24F',
+        cluster: '#6B7280',
+    },
+};
+
 export const WARNING_COLORS: Record<Severity, string> = {
     low: '#f59e0b',     // Amber
     medium: '#f97316',  // Orange
     high: '#ef4444',    // Red
+};
+
+export const COLORBLIND_WARNING_COLORS: Record<Exclude<ColorblindMode, 'off'>, Record<Severity, string>> = {
+    deuteranopia: {
+        low: '#2F6BFF',
+        medium: '#E69F00',
+        high: '#CC79A7',
+    },
+    protanopia: {
+        low: '#2F6BFF',
+        medium: '#E69F00',
+        high: '#CC79A7',
+    },
+    tritanopia: {
+        low: '#0077CC',
+        medium: '#C67A00',
+        high: '#C23B75',
+    },
 };
 
 export const HINT_COLORS = {
@@ -322,12 +403,42 @@ export const NODE_SURFACE = {
     },
 } as const;
 
-export function getNodeColor(type: NodeType): string {
+let activeColorblindMode: ColorblindMode = 'off';
+
+export function setColorblindMode(mode: ColorblindMode): void {
+    activeColorblindMode = mode;
+}
+
+export function getColorblindMode(): ColorblindMode {
+    return activeColorblindMode;
+}
+
+export function getNodeColor(type: NodeType, mode: ColorblindMode = activeColorblindMode): string {
+    if (mode !== 'off') {
+        return COLORBLIND_NODE_COLORS[mode][type] || COLORBLIND_NODE_COLORS[mode].select;
+    }
     return NODE_COLORS[type] || '#6366f1';
 }
 
-export function getWarningColor(severity: Severity): string {
+export function getWarningColor(severity: Severity, mode: ColorblindMode = activeColorblindMode): string {
+    if (mode !== 'off') {
+        return COLORBLIND_WARNING_COLORS[mode][severity] || COLORBLIND_WARNING_COLORS[mode].low;
+    }
     return WARNING_COLORS[severity] || WARNING_COLORS.low;
+}
+
+export function getSeverityIcon(severity: Severity): string {
+    if (severity === 'high') { return '✕'; }
+    if (severity === 'medium') { return '▲'; }
+    return 'i';
+}
+
+export function getEdgeDashPattern(clauseType?: string, mode: ColorblindMode = activeColorblindMode): string | null {
+    if (mode === 'off') {
+        return null;
+    }
+    const normalized = (clauseType || 'flow').toLowerCase();
+    return EDGE_DASH_PATTERNS[normalized] ?? EDGE_DASH_PATTERNS.flow;
 }
 
 export function getScrollbarColors(isDarkTheme: boolean): { thumb: string; thumbHover: string; track: string } {

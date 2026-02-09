@@ -261,6 +261,23 @@
           ],
           "description": "Controls when the minimap overview is displayed"
         },
+        "sqlCrack.colorblindMode": {
+          "type": "string",
+          "default": "off",
+          "enum": [
+            "off",
+            "deuteranopia",
+            "protanopia",
+            "tritanopia"
+          ],
+          "enumDescriptions": [
+            "Use the default palette",
+            "Optimize graph colors for deuteranopia (green-red deficiency)",
+            "Optimize graph colors for protanopia (red weakness)",
+            "Optimize graph colors for tritanopia (blue-yellow deficiency)"
+          ],
+          "description": "Color accessibility mode for SQL flow and warning visuals. Adds shape/dash cues alongside color."
+        },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
           "default": "auto",

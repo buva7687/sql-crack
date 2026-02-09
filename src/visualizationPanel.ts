@@ -455,6 +455,7 @@ export class VisualizationPanel {
         const gridStyle = config.get<string>('gridStyle') || 'dots';
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
         const showMinimap = config.get<string>('showMinimap') || 'auto';
+        const colorblindMode = config.get<string>('colorblindMode') || 'off';
         const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
         const maxStatements = config.get<number>('advanced.maxStatements', 50);
         const parseTimeoutSeconds = config.get<number>('advanced.parseTimeoutSeconds', 5);
@@ -503,6 +504,7 @@ export class VisualizationPanel {
         window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
         window.nodeAccentPosition = ${this._escapeForInlineScript(nodeAccentPosition)};
         window.showMinimap = ${this._escapeForInlineScript(showMinimap)};
+        window.colorblindMode = ${this._escapeForInlineScript(colorblindMode)};
         window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
         window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
         window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};

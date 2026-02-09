@@ -280,7 +280,7 @@
 - Severity levels have icon indicators alongside color
 - Setting toggle switches palette without full re-render
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (Phase 3)
 
 ---
 
@@ -538,7 +538,7 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | 5 | Configurable limits | P1 | 1 | ✅ Complete |
 | 6 | Keyboard node navigation improvements | P2 | 3 | ✅ Complete |
 | 7 | Minimap toggle setting | P2 | 1 | ✅ Complete |
-| 8 | Colorblind-safe palette | P2 | 3 | Not started |
+| 8 | Colorblind-safe palette | P2 | 3 | ✅ Complete |
 | 9 | Clickable error badge | P2 | 1 | ✅ Complete |
 | 10 | Better batch tab error UX | P2 | 2 | ✅ Complete |
 | 11 | Fullscreen exit button | P2 | 2 | ✅ Complete |

@@ -6,6 +6,8 @@
 // Reference Type Colors - Used in dependency graphs
 // ============================================================
 
+export type ColorblindMode = 'off' | 'deuteranopia' | 'protanopia' | 'tritanopia';
+
 /**
  * Colors for different SQL reference types in dependency graphs
  * These indicate the relationship type between database objects
@@ -42,6 +44,34 @@ export const WORKSPACE_NODE_COLORS_DARK: Record<string, string> = {
     view: '#a78bfa',     // Violet-400
     external: '#94a3b8', // Slate-400
     default: '#94a3b8',  // Slate-400
+} as const;
+
+/**
+ * Colorblind-safe workspace palettes keyed by mode.
+ * Uses high-contrast variants inspired by Wong/IBM safe palettes.
+ */
+export const COLORBLIND_WORKSPACE_NODE_COLORS: Record<Exclude<ColorblindMode, 'off'>, Record<string, string>> = {
+    deuteranopia: {
+        file: '#0072B2',
+        table: '#009E73',
+        view: '#CC79A7',
+        external: '#7F7F7F',
+        default: '#7F7F7F',
+    },
+    protanopia: {
+        file: '#0072B2',
+        table: '#009E73',
+        view: '#CC79A7',
+        external: '#7F7F7F',
+        default: '#7F7F7F',
+    },
+    tritanopia: {
+        file: '#2F6BFF',
+        table: '#00A86B',
+        view: '#C23B75',
+        external: '#6B7280',
+        default: '#6B7280',
+    },
 } as const;
 
 // ============================================================

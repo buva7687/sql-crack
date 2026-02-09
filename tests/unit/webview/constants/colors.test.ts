@@ -14,9 +14,14 @@ import {
     getNodeColor,
     getWarningColor,
     getScrollbarColors,
+    setColorblindMode,
 } from '../../../../src/webview/constants/colors';
 
 describe('Constants Colors', () => {
+    beforeEach(() => {
+        setColorblindMode('off');
+    });
+
     describe('UI_COLORS', () => {
         it('has background colors defined', () => {
             expect(UI_COLORS.background).toBeDefined();

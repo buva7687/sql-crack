@@ -2,7 +2,7 @@
 // Extracted from renderer.ts for modularity
 
 import { FlowEdge, FlowNode, LayoutType } from '../types';
-import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS } from '../constants/colors';
+import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
 import { EDGE_THEME } from '../../shared/themeTokens';
 
 // ============================================================
@@ -152,6 +152,11 @@ export function renderEdge(edge: FlowEdge, parent: SVGGElement, options: RenderE
             path.setAttribute('stroke', defaultStroke);
             path.setAttribute('stroke-width', String(defaultWidth));
             path.setAttribute('marker-end', 'url(#arrowhead)');
+            if (dashPattern) {
+                path.setAttribute('stroke-dasharray', dashPattern);
+            } else {
+                path.removeAttribute('stroke-dasharray');
+            }
         }
     });
 
@@ -335,3 +340,7 @@ export function clearLineageBadges(mainGroup: SVGGElement | null): void {
     const badges = mainGroup?.querySelectorAll('.lineage-badge');
     badges?.forEach(badge => badge.remove());
 }
+    const dashPattern = getEdgeDashPattern(edge.clauseType);
+    if (dashPattern) {
+        path.setAttribute('stroke-dasharray', dashPattern);
+    }

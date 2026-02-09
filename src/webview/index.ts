@@ -39,8 +39,10 @@ import {
     isDarkTheme,
     getKeyboardShortcuts,
     highlightNodeAtLine,
-    copyMermaidToClipboard
+    copyMermaidToClipboard,
+    setColorblindMode as setRendererColorblindMode,
 } from './renderer';
+import type { ColorblindMode } from '../shared/theme';
 
 import {
     createToolbar,
@@ -78,6 +80,7 @@ declare global {
         gridStyle?: string;
         nodeAccentPosition?: string;
         showMinimap?: string;
+        colorblindMode?: ColorblindMode;
         maxFileSizeKB?: number;
         maxStatements?: number;
         parseTimeoutSeconds?: number;
@@ -187,6 +190,7 @@ function init(): void {
 
     // Initialize SVG renderer
     initRenderer(container);
+    setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
     // Apply minimap mode from settings
     const minimapMode = (window.showMinimap as MinimapMode) || 'auto';

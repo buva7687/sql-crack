@@ -19,7 +19,6 @@ import {
     getNodeColor,
     getTransformationColor,
     NODE_COLORS,
-    WARNING_COLORS,
     UI_COLORS,
     EDGE_COLORS,
     BADGE_COLORS,
@@ -30,6 +29,11 @@ import {
     CLOSE_BUTTON_COLORS,
     COMPLEXITY_COLORS,
     HINT_COLORS,
+    getColorblindMode,
+    setColorblindMode as setGlobalColorblindMode,
+    getEdgeDashPattern,
+    getSeverityIcon,
+    getWarningColor as getSeverityColor,
 } from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
@@ -55,6 +59,7 @@ import { attachResizablePanel } from './ui/resizablePanel';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
+import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
 import {
     getViewportBounds,
@@ -218,6 +223,8 @@ function announceFocusedNode(node: FlowNode): void {
 
 export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
+    const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
+    setGlobalColorblindMode(configuredColorblindMode);
     const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
@@ -1694,6 +1701,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('class', 'node');
     group.setAttribute('data-id', node.id);
     group.setAttribute('data-label', node.label.toLowerCase());
+    group.setAttribute('data-node-type', node.type);
+    if (node.accessMode) {
+        group.setAttribute('data-access-mode', node.accessMode);
+    }
     group.style.cursor = 'pointer';
 
     // Accessibility: make nodes focusable and provide context for screen readers
@@ -2134,6 +2145,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
     }
     accentStrip.setAttribute('fill', accentColor);
+    accentStrip.setAttribute('class', 'node-accent');
     group.appendChild(accentStrip);
 
     // Add badges for access mode and category
@@ -2204,6 +2216,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         const triangleTop = node.y + 6;
 
         const warningTriangle = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        warningTriangle.setAttribute('class', 'node-warning-triangle');
         warningTriangle.setAttribute('d', `M ${triangleLeft} ${triangleTop + triangleSize} L ${triangleLeft + triangleSize / 2} ${triangleTop} L ${triangleLeft + triangleSize} ${triangleTop + triangleSize} Z`);
         warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
         warningTriangle.setAttribute('opacity', '0.95');
@@ -2211,13 +2224,14 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         group.appendChild(warningTriangle);
 
         const exclamation = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        exclamation.setAttribute('class', 'node-warning-icon');
         exclamation.setAttribute('x', String(triangleLeft + triangleSize / 2));
         exclamation.setAttribute('y', String(triangleTop + triangleSize - 2));
         exclamation.setAttribute('text-anchor', 'middle');
         exclamation.setAttribute('fill', 'white');
         exclamation.setAttribute('font-size', '9');
         exclamation.setAttribute('font-weight', '700');
-        exclamation.textContent = '!';
+        exclamation.textContent = getSeverityIcon(warningIndicator.severity);
         group.appendChild(exclamation);
 
         if (warningIndicator.count > 1) {
@@ -2234,8 +2248,9 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     }
 
     // Icon based on type
-    const icon = getNodeIcon(node.type);
+    const icon = getNodeVisualIcon(node);
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('class', 'node-main-icon');
     iconText.setAttribute('x', String(node.x + 12));
     iconText.setAttribute('y', String(node.y + 24));
     iconText.setAttribute('fill', textColorMuted);
@@ -4774,7 +4789,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                     ${node.children.map(child => `
                         <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
                             <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
-                                ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
+                                ${getNodeVisualIcon(child)} ${escapeHtml(child.label)}
                             </span>
                         </div>
                     `).join('')}
@@ -4820,7 +4835,7 @@ function updateDetailsPanel(nodeId: string | null): void {
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
-                ${getNodeIcon(node.type)} ${escapeHtml(node.label)}
+                ${getNodeVisualIcon(node)} ${escapeHtml(node.label)}
             </div>
             <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
                 ${escapeHtml(node.description || '')}
@@ -6525,6 +6540,13 @@ function getNodeIcon(type: FlowNode['type']): string {
     return icons[type] || '○';
 }
 
+function getNodeVisualIcon(node: FlowNode): string {
+    if (getColorblindMode() !== 'off' && node.accessMode === 'write') {
+        return '✎';
+    }
+    return getNodeIcon(node.type);
+}
+
 function getWarningIcon(warningType: string): string {
     const icons: Record<string, string> = {
         'unused': '⚠',
@@ -6542,8 +6564,7 @@ function getWarningIcon(warningType: string): string {
 }
 
 function getWarningColor(severity: string): string {
-    const colors: Record<string, string> = WARNING_COLORS;
-    return colors[severity] || colors.low;
+    return getSeverityColor((severity as any) || 'low', getColorblindMode());
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -7718,6 +7739,56 @@ export function isFullscreen(): boolean {
     return state.isFullscreen;
 }
 
+function applyColorblindModeToRenderedGraph(): void {
+    if (!mainGroup) { return; }
+
+    const allNodeGroups = mainGroup.querySelectorAll('.node');
+    allNodeGroups.forEach(group => {
+        const nodeId = group.getAttribute('data-id');
+        if (!nodeId) { return; }
+        const node = currentNodes.find(candidate => candidate.id === nodeId);
+        if (!node) { return; }
+
+        const accent = group.querySelector('.node-accent') as SVGRectElement | null;
+        if (accent) {
+            accent.setAttribute('fill', getNodeColor(node.type));
+        }
+
+        const nodeIcon = group.querySelector('.node-main-icon') as SVGTextElement | null;
+        if (nodeIcon) {
+            nodeIcon.textContent = getNodeVisualIcon(node);
+        }
+
+        const warningIndicator = getWarningIndicatorState(node.warnings);
+        const warningTriangle = group.querySelector('.node-warning-triangle') as SVGPathElement | null;
+        if (warningTriangle && warningIndicator) {
+            warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
+        }
+
+        const warningIcon = group.querySelector('.node-warning-icon') as SVGTextElement | null;
+        if (warningIcon && warningIndicator) {
+            warningIcon.textContent = getSeverityIcon(warningIndicator.severity);
+        }
+    });
+
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edge => {
+        const clauseType = edge.getAttribute('data-clause-type') || undefined;
+        const dashPattern = getEdgeDashPattern(clauseType || undefined);
+        if (dashPattern) {
+            edge.setAttribute('stroke-dasharray', dashPattern);
+        } else {
+            edge.removeAttribute('stroke-dasharray');
+        }
+    });
+}
+
+export function setColorblindMode(mode: ColorblindMode): void {
+    setGlobalColorblindMode(mode);
+    (window as any).colorblindMode = mode;
+    applyColorblindModeToRenderedGraph();
+}
+
 // ============================================================
 // FEATURE: Theme Toggle (Dark/Light)
 // ============================================================
@@ -7818,7 +7889,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                 font-size: 10px;
                 font-weight: 600;
                 color: white;
-            ">${getNodeIcon(node.type)} ${node.type.toUpperCase()}</span>
+            ">${getNodeVisualIcon(node)} ${node.type.toUpperCase()}</span>
         </div>
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${escapeHtml(node.label)}</div>
     `;
