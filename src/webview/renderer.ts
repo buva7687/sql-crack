@@ -544,7 +544,8 @@ export function initRenderer(container: HTMLElement): void {
     minimapContainer.style.cssText = `
         position: absolute;
         right: 16px;
-        bottom: 16px;
+        top: 50%;
+        transform: translateY(-50%);
         width: 150px;
         height: 100px;
         background: ${UI_COLORS.backgroundPanel};
@@ -5549,7 +5550,7 @@ function updateHintsPanel(): void {
                 const severity = hint.severity || 'low';
                 const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
                 return `
-                    <button class="hint-item" data-node-id="${hint.nodeId || ''}" style="
+                    <div role="button" tabindex="0" class="hint-item" data-node-id="${hint.nodeId || ''}" style="
                         text-align: left;
                         border: 1px solid ${style.border};
                         border-left-width: 3px;
@@ -5557,6 +5558,7 @@ function updateHintsPanel(): void {
                         border-radius: 6px;
                         padding: 8px 10px;
                         cursor: ${hint.nodeId ? 'pointer' : 'default'};
+                        user-select: text;
                     ">
                         <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
                             <span>${style.icon}</span>
@@ -5564,7 +5566,7 @@ function updateHintsPanel(): void {
                             <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
                         ${hint.suggestion ? `<div style="font-size: 11px; color: ${textColorMuted}; margin-top: 4px;">${escapeHtml(hint.suggestion)}</div>` : ''}
-                    </button>
+                    </div>
                 `;
             }).join('')}
             ${!hintsShowAll && remainingCount > 0 ? `
@@ -5593,7 +5595,7 @@ function updateHintsPanel(): void {
     `;
 
     hintsPanel.querySelectorAll('.hint-item').forEach((item) => {
-        const el = item as HTMLButtonElement;
+        const el = item as HTMLElement;
         const nodeId = el.getAttribute('data-node-id');
         if (!nodeId) {
             el.style.cursor = 'default';
@@ -5668,14 +5670,14 @@ function fitView(): void {
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
 
-    // Account for panels
-    const availableWidth = rect.width - 320;
-    const availableHeight = rect.height - 100;
+    // Account for panels (clamp to minimum to prevent negative scale)
+    const availableWidth = Math.max(100, rect.width - 320);
+    const availableHeight = Math.max(100, rect.height - 100);
 
     // Calculate scale to fit
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
-    state.scale = Math.min(scaleX, scaleY, 1.5);
+    state.scale = Math.max(0.05, Math.min(scaleX, scaleY, 1.5));
     fitViewScale = state.scale; // Treat this as 100% for the zoom indicator
 
     // Center the graph

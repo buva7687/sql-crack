@@ -3,7 +3,7 @@ import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 import { getAggregateFunctions, getWindowFunctions } from '../dialects';
 import { getTableValuedFunctionName } from './parser/extractors/tables';
-import { escapeRegex } from '../shared';
+import { escapeRegex, safeString } from '../shared';
 
 // Import types from centralized type definitions
 import {
@@ -4784,8 +4784,8 @@ function findSourceColumn(
     if (sourceNode.type === 'aggregate' && sourceNode.aggregateDetails) {
         for (const aggFunc of sourceNode.aggregateDetails.functions) {
             const outputName = aggFunc.alias || aggFunc.name;
-            if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
-                targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+            if (safeString(outputName).toLowerCase() === safeString(targetColumn.name).toLowerCase() ||
+                safeString(targetColumn.expression).toLowerCase().includes(safeString(outputName).toLowerCase())) {
                 // Include source column info for proper lineage tracing
                 return {
                     name: outputName,
@@ -4801,7 +4801,7 @@ function findSourceColumn(
     // For window nodes, check window functions
     if (sourceNode.type === 'window' && sourceNode.windowDetails) {
         for (const winFunc of sourceNode.windowDetails.functions) {
-            if (winFunc.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(winFunc.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return {
                     name: winFunc.name,
                     expression: `${winFunc.name}() OVER (...)`,
@@ -4815,15 +4815,15 @@ function findSourceColumn(
     if (sourceNode.columns) {
         for (const sourceCol of sourceNode.columns) {
             // Direct name match
-            if (sourceCol.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return sourceCol;
             }
             // Source column match
-            if (sourceCol.name.toLowerCase() === targetColumn.sourceColumn?.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.sourceColumn).toLowerCase()) {
                 return sourceCol;
             }
             // Expression match
-            if (targetColumn.expression?.toLowerCase().includes(sourceCol.name.toLowerCase())) {
+            if (safeString(targetColumn.expression).toLowerCase().includes(safeString(sourceCol.name).toLowerCase())) {
                 return sourceCol;
             }
         }
@@ -4875,7 +4875,7 @@ function getTransformationType(
 
     // Renamed columns
     if (column.sourceColumn &&
-        column.name.toLowerCase() !== column.sourceColumn.toLowerCase()) {
+        safeString(column.name).toLowerCase() !== safeString(column.sourceColumn).toLowerCase()) {
         return 'renamed';
     }
 

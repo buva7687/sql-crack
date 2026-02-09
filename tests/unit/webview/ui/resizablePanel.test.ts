@@ -23,7 +23,7 @@ describe('attachResizablePanel source behavior', () => {
     it('uses stable storage keys for width and collapsed state', () => {
         expect(source).toContain("const WIDTH_PREFIX = 'sql-crack.panelWidth.';");
         expect(source).toContain("const COLLAPSED_PREFIX = 'sql-crack.panelCollapsed.';");
-        expect(source).toContain('window.localStorage.setItem(widthKey, String(width));');
+        expect(source).toContain('window.localStorage.setItem(widthKey, String(nextWidth));');
         expect(source).toContain('window.localStorage.setItem(collapsedKey, String(collapsed));');
     });
 

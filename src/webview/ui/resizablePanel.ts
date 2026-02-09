@@ -87,7 +87,8 @@ export function attachResizablePanel({
     let startX = 0;
     let startWidth = 0;
     let collapsed = false;
-    let expandedWidth = computeClampedPanelWidth(getStoredNumber(widthKey) || defaultWidth, minWidth, maxWidthRatio);
+    let preferredWidth = getStoredNumber(widthKey) || defaultWidth;
+    let expandedWidth = computeClampedPanelWidth(preferredWidth, minWidth, maxWidthRatio);
 
     const applyTheme = (): void => {
         const theme = getComponentUiColors(isDarkTheme());
@@ -103,7 +104,8 @@ export function attachResizablePanel({
         panel.style.maxWidth = 'none';
         expandedWidth = width;
         if (persist) {
-            window.localStorage.setItem(widthKey, String(width));
+            preferredWidth = nextWidth;
+            window.localStorage.setItem(widthKey, String(nextWidth));
         }
     };
 
@@ -178,7 +180,7 @@ export function attachResizablePanel({
             panel.style.width = `${collapsedWidth}px`;
             return;
         }
-        setWidth(expandedWidth, false);
+        setWidth(preferredWidth, false);
     };
 
     const onThemeChange = () => {
