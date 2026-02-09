@@ -5,6 +5,29 @@ import { FlowEdge, FlowNode, LayoutType } from '../types';
 import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
 import { EDGE_THEME } from '../../shared/themeTokens';
 
+/**
+ * Return a legible text color for a badge given its background color.
+ * Parses hex or rgb() backgrounds and applies the W3C relative luminance formula.
+ */
+function contrastTextForBadge(bg: string): string {
+    let r = 0, g = 0, b = 0;
+    if (bg.startsWith('#')) {
+        const hex = bg.replace('#', '');
+        const full = hex.length === 3
+            ? hex.split('').map(c => c + c).join('')
+            : hex;
+        r = parseInt(full.substring(0, 2), 16);
+        g = parseInt(full.substring(2, 4), 16);
+        b = parseInt(full.substring(4, 6), 16);
+    } else {
+        const m = bg.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (m) { r = +m[1]; g = +m[2]; b = +m[3]; }
+    }
+    // Perceived brightness (YIQ)
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 160 ? '#1e293b' : '#ffffff';
+}
+
 // ============================================================
 // Edge Path Calculation
 // ============================================================
@@ -125,6 +148,11 @@ export function renderEdge(edge: FlowEdge, parent: SVGGElement, options: RenderE
     }
     if (edge.startLine) {
         path.setAttribute('data-start-line', String(edge.startLine));
+    }
+
+    const dashPattern = getEdgeDashPattern(edge.clauseType);
+    if (dashPattern) {
+        path.setAttribute('stroke-dasharray', dashPattern);
     }
 
     path.style.cursor = 'pointer';
@@ -323,7 +351,7 @@ export function createTransformationBadge(
     text.setAttribute('x', String(x));
     text.setAttribute('y', String(y + 5));
     text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('fill', 'white');
+    text.setAttribute('fill', contrastTextForBadge(color));
     text.setAttribute('font-size', '9');
     text.setAttribute('font-weight', '700');
     text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
@@ -340,7 +368,3 @@ export function clearLineageBadges(mainGroup: SVGGElement | null): void {
     const badges = mainGroup?.querySelectorAll('.lineage-badge');
     badges?.forEach(badge => badge.remove());
 }
-    const dashPattern = getEdgeDashPattern(edge.clauseType);
-    if (dashPattern) {
-        path.setAttribute('stroke-dasharray', dashPattern);
-    }

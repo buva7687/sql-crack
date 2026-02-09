@@ -115,7 +115,7 @@
 - Cancel closes modal without exporting
 - Transparent background option removes grid from PNG
 
-**Status:** [x] Complete (Phase 2)
+**Status:** [ ] Not started
 
 ---
 
