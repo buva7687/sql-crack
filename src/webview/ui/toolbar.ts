@@ -38,6 +38,8 @@ export interface ToolbarCallbacks {
     onDialectChange: (dialect: SqlDialect) => void;
     onRefresh: () => void;
     onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => void;
+    onToggleCompareMode: () => void;
+    isCompareMode: () => boolean;
     onChangeViewLocation: (location: string) => void;
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
@@ -957,6 +959,26 @@ function createFeatureGroup(
         featureGroup.appendChild(pinnedContainer);
     }
 
+    const compareBtn = createButton('⇆', () => {
+        callbacks.onToggleCompareMode();
+    }, 'Compare with baseline query');
+    compareBtn.id = 'compare-mode-btn';
+    compareBtn.title = 'Compare with baseline query';
+    compareBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    const setCompareButtonState = (active: boolean) => {
+        compareBtn.dataset.active = active ? 'true' : 'false';
+        compareBtn.style.background = active ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        compareBtn.style.color = active ? '#818cf8' : '';
+    };
+    setCompareButtonState(callbacks.isCompareMode());
+    featureGroup.appendChild(compareBtn);
+
+    const compareStateHandler = ((event: CustomEvent) => {
+        setCompareButtonState(Boolean(event.detail?.active));
+    }) as EventListener;
+    document.addEventListener('compare-mode-state', compareStateHandler);
+    documentListeners.push({ type: 'compare-mode-state', handler: compareStateHandler });
+
     // Focus Mode button
     let focusModeActive = false;
     const focusBtn = createButton('👁', () => {
@@ -1705,6 +1727,12 @@ export function updateToolbarTheme(
     actions.querySelectorAll('button').forEach(btn => {
         btn.style.color = textColor;
     });
+
+    const compareBtn = document.getElementById('compare-mode-btn') as HTMLButtonElement | null;
+    if (compareBtn?.dataset.active === 'true') {
+        compareBtn.style.background = 'rgba(99, 102, 241, 0.3)';
+        compareBtn.style.color = dark ? '#a5b4fc' : '#4f46e5';
+    }
 
     // Update floating dropdown menus
     const theme = getComponentUiColors(dark);

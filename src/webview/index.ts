@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseBatchAsync } from './parserClient';
+import { parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
 import { BatchParseResult, LayoutType, SqlDialect } from './types';
@@ -64,6 +64,9 @@ import {
     getActiveTabId,
     setActiveTabId,
     showFirstRunOverlay,
+    showCompareView,
+    hideCompareView,
+    isCompareViewActive,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './ui';
@@ -105,6 +108,7 @@ let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
 let userExplicitlySetDialect = false;
+let compareModeActive = false;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -150,6 +154,8 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
         dialectSelect.value = currentDialect;
     }
 
+    hideCompareView();
+    setCompareModeState(false);
     void visualize(sql);
     clearStaleIndicator();
 }
@@ -161,6 +167,8 @@ function handleSwitchToQuery(queryIndex: number): void {
 
     if (currentQueryIndex !== queryIndex) {
         currentQueryIndex = queryIndex;
+        hideCompareView();
+        setCompareModeState(false);
         renderCurrentQuery();
         updateBatchTabsUI();
     }
@@ -276,6 +284,94 @@ function init(): void {
     }
 }
 
+function setCompareModeState(active: boolean): void {
+    compareModeActive = active;
+    document.dispatchEvent(new CustomEvent('compare-mode-state', {
+        detail: { active: compareModeActive },
+    }));
+}
+
+function resolveCompareBaseline(): { label: string; sql: string; dialect: SqlDialect } | null {
+    const currentSql = getCurrentQuerySql().sql.trim();
+    const pinned = (window.persistedPinnedTabs || [])
+        .filter(pin => pin.sql?.trim() && pin.sql.trim() !== currentSql)
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+    if (pinned.length > 0) {
+        const baseline = pinned[0];
+        return {
+            label: `Pinned • ${baseline.name}`,
+            sql: baseline.sql,
+            dialect: (baseline.dialect as SqlDialect) || currentDialect,
+        };
+    }
+
+    if (batchResult && batchResult.queries.length > 1) {
+        const fallbackIndex = currentQueryIndex > 0 ? currentQueryIndex - 1 : 1;
+        const baselineQuery = batchResult.queries[fallbackIndex];
+        if (baselineQuery?.sql && baselineQuery.sql.trim() !== currentSql) {
+            return {
+                label: `Query ${fallbackIndex + 1}`,
+                sql: baselineQuery.sql,
+                dialect: currentDialect,
+            };
+        }
+    }
+
+    return null;
+}
+
+async function toggleCompareMode(): Promise<void> {
+    if (isCompareViewActive()) {
+        hideCompareView();
+        setCompareModeState(false);
+        return;
+    }
+
+    if (!batchResult || batchResult.queries.length === 0) {
+        return;
+    }
+
+    const baseline = resolveCompareBaseline();
+    if (!baseline) {
+        alert('No baseline available. Pin another query first, or open a multi-query file.');
+        return;
+    }
+
+    const root = document.getElementById('root');
+    if (!root) {
+        return;
+    }
+
+    const currentQuery = batchResult.queries[currentQueryIndex];
+    if (!currentQuery?.sql) {
+        return;
+    }
+
+    const baselineResult = await parseAsync(baseline.sql, baseline.dialect);
+    const currentTitle = batchResult.queries.length > 1
+        ? `Current • Q${currentQueryIndex + 1}`
+        : (window.fileName || 'Current query');
+
+    showCompareView({
+        container: root,
+        left: {
+            label: baseline.label,
+            result: baselineResult,
+        },
+        right: {
+            label: currentTitle,
+            result: currentQuery,
+        },
+        isDarkTheme: isDarkTheme(),
+        onClose: () => {
+            setCompareModeState(false);
+        },
+    });
+
+    setCompareModeState(true);
+}
+
 function createToolbarCallbacks(): ToolbarCallbacks {
     return {
         onUndo: undoLayoutChange,
@@ -339,6 +435,10 @@ function createToolbarCallbacks(): ToolbarCallbacks {
                 });
             }
         },
+        onToggleCompareMode: () => {
+            void toggleCompareMode();
+        },
+        isCompareMode: () => compareModeActive,
         onChangeViewLocation: (location: string) => {
             if (window.vscodeApi) {
                 window.vscodeApi.postMessage({
@@ -378,6 +478,8 @@ async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
 
     // Clear view states when loading new SQL
+    hideCompareView();
+    setCompareModeState(false);
     queryViewStates.clear();
     clearUndoHistory();
 
@@ -494,6 +596,8 @@ function switchToQueryIndex(newIndex: number): void {
 
     // Switch to new query
     currentQueryIndex = newIndex;
+    hideCompareView();
+    setCompareModeState(false);
     clearUndoHistory();
     renderCurrentQuery();
     updateBatchTabsUI();

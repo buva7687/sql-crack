@@ -65,3 +65,15 @@ export type { BreadcrumbSegment, BreadcrumbBarCallbacks } from './breadcrumbBar'
 
 export { showFirstRunOverlay } from './firstRunOverlay';
 export type { FirstRunOverlayCallbacks } from './firstRunOverlay';
+
+export {
+    showCompareView,
+    hideCompareView,
+    isCompareViewActive,
+    computeCompareDiff,
+} from './compareView';
+export type {
+    ComparePaneInput,
+    CompareViewOptions,
+    CompareDiffResult,
+} from './compareView';
