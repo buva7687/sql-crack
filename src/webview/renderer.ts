@@ -53,7 +53,7 @@ import {
 } from './ui';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
-import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors } from './constants/colors';
+import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
 import type { GridStyle } from '../shared/themeTokens';
 import {
     getViewportBounds,
@@ -5628,6 +5628,18 @@ let searchCountIndicator: HTMLSpanElement | null = null;
 export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanElement): void {
     searchBox = input;
     searchCountIndicator = countIndicator;
+
+    // Expandable search box: expand on focus, collapse on blur if empty
+    input.style.transition = 'width 200ms ease';
+    input.addEventListener('focus', () => {
+        input.style.width = '280px';
+    });
+    input.addEventListener('blur', () => {
+        if (!input.value) {
+            input.style.width = '140px';
+        }
+    });
+
     input.addEventListener('input', () => {
         // Clear any existing debounce timer
         if (searchDebounceTimer) {
@@ -7384,6 +7396,10 @@ export function toggleFullscreen(enable?: boolean): void {
                 enable: true
             });
         }
+
+        // Create floating exit button and toast
+        createFullscreenExitButton(rootElement);
+        createFullscreenToast(rootElement);
     } else {
         // Request exit fullscreen via VS Code API
         if (typeof window !== 'undefined' && (window as any).vscodeApi) {
@@ -7392,6 +7408,9 @@ export function toggleFullscreen(enable?: boolean): void {
                 enable: false
             });
         }
+
+        // Remove fullscreen exit button and toast
+        removeFullscreenOverlays();
 
         // Restore UI elements using the consolidated list
         uiElements.forEach(el => {
@@ -7447,6 +7466,110 @@ export function toggleFullscreen(enable?: boolean): void {
         fitView();
         updateMinimap();
     }, 100);
+}
+
+// Fullscreen overlay helpers (exit button + toast)
+let fullscreenMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+let fullscreenFadeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function createFullscreenExitButton(container: HTMLElement): void {
+    const theme = getComponentUiColors(state.isDarkTheme);
+    const btn = document.createElement('button');
+    btn.id = 'fullscreen-exit-btn';
+    btn.textContent = '✕ Exit Fullscreen';
+    Object.assign(btn.style, {
+        position: 'fixed',
+        top: '16px',
+        right: '16px',
+        zIndex: '100000',
+        padding: '8px 16px',
+        border: `1px solid ${theme.border}`,
+        borderRadius: '8px',
+        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        color: theme.text,
+        fontSize: '13px',
+        fontFamily: 'inherit',
+        cursor: 'pointer',
+        opacity: '0',
+        transition: 'opacity 300ms ease',
+        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
+    });
+
+    btn.addEventListener('click', () => toggleFullscreen(false));
+    btn.addEventListener('mouseenter', () => { btn.style.background = theme.accent; btn.style.color = '#fff'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)'; btn.style.color = theme.text; });
+
+    container.appendChild(btn);
+
+    // Show/hide on mouse move with 2s fade timeout
+    const showButton = () => {
+        btn.style.opacity = '1';
+        if (fullscreenFadeTimeout) { clearTimeout(fullscreenFadeTimeout); }
+        fullscreenFadeTimeout = setTimeout(() => { btn.style.opacity = '0'; }, 2000);
+    };
+
+    fullscreenMouseMoveHandler = showButton;
+    document.addEventListener('mousemove', fullscreenMouseMoveHandler);
+
+    // Show briefly on entry
+    showButton();
+}
+
+function createFullscreenToast(container: HTMLElement): void {
+    const theme = getComponentUiColors(state.isDarkTheme);
+    const toast = document.createElement('div');
+    toast.id = 'fullscreen-toast';
+    toast.textContent = 'Press ESC or F to exit fullscreen';
+    Object.assign(toast.style, {
+        position: 'fixed',
+        top: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: '100000',
+        padding: '10px 20px',
+        borderRadius: '8px',
+        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        fontSize: '13px',
+        fontFamily: 'inherit',
+        opacity: '0',
+        transition: 'opacity 400ms ease',
+        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
+    });
+
+    container.appendChild(toast);
+
+    // Fade in
+    requestAnimationFrame(() => { toast.style.opacity = '1'; });
+
+    // Fade out after 3s, then remove
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => { toast.remove(); }, 400);
+    }, 3000);
+}
+
+function removeFullscreenOverlays(): void {
+    const btn = document.getElementById('fullscreen-exit-btn');
+    if (btn) { btn.remove(); }
+
+    const toast = document.getElementById('fullscreen-toast');
+    if (toast) { toast.remove(); }
+
+    if (fullscreenMouseMoveHandler) {
+        document.removeEventListener('mousemove', fullscreenMouseMoveHandler);
+        fullscreenMouseMoveHandler = null;
+    }
+
+    if (fullscreenFadeTimeout) {
+        clearTimeout(fullscreenFadeTimeout);
+        fullscreenFadeTimeout = null;
+    }
 }
 
 export function isFullscreen(): boolean {
