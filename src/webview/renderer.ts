@@ -79,6 +79,11 @@ import { getWarningIndicatorState } from './warningIndicator';
 import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
+import {
+    getCycledNode,
+    getKeyboardNavigableNodes,
+    getSiblingCycleTarget,
+} from './navigation/keyboardNavigation';
 
 const state: ViewState = {
     scale: 1,
@@ -128,6 +133,7 @@ let tooltipElement: HTMLDivElement | null = null;
 let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let columnLineageBanner: HTMLDivElement | null = null;
+let nodeFocusLiveRegion: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
@@ -169,6 +175,47 @@ function isReducedMotionPreferred(): boolean {
         && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+function ensureNodeFocusLiveRegion(container: HTMLElement): void {
+    if (nodeFocusLiveRegion?.isConnected) {
+        return;
+    }
+
+    nodeFocusLiveRegion = document.createElement('div');
+    nodeFocusLiveRegion.id = 'node-focus-live-region';
+    nodeFocusLiveRegion.setAttribute('role', 'status');
+    nodeFocusLiveRegion.setAttribute('aria-live', 'polite');
+    nodeFocusLiveRegion.setAttribute('aria-atomic', 'true');
+    nodeFocusLiveRegion.style.cssText = `
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+    `;
+    container.appendChild(nodeFocusLiveRegion);
+}
+
+function announceFocusedNode(node: FlowNode): void {
+    if (!nodeFocusLiveRegion) { return; }
+
+    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
+    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
+    const message = `${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
+
+    // Clear then set on next frame so repeated focus announcements are spoken.
+    nodeFocusLiveRegion.textContent = '';
+    requestAnimationFrame(() => {
+        if (nodeFocusLiveRegion) {
+            nodeFocusLiveRegion.textContent = message;
+        }
+    });
+}
+
 export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
     const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
@@ -176,6 +223,7 @@ export function initRenderer(container: HTMLElement): void {
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
     backgroundRect = canvas.backgroundRect;
+    ensureNodeFocusLiveRegion(container);
 
     // Create details panel
     detailsPanel = document.createElement('div');
@@ -768,6 +816,21 @@ function setupEventListeners(): void {
 
     // SVG-specific keyboard handler (for when SVG has focus after clicking nodes)
     svg.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+            const orderedNodes = getKeyboardNavigationNodes();
+            if (orderedNodes.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                const seedId = state.selectedNodeId
+                    || (e.shiftKey ? orderedNodes[0].id : orderedNodes[orderedNodes.length - 1].id);
+                const target = getCycledNode(orderedNodes, seedId, e.shiftKey ? 'prev' : 'next');
+                if (target) {
+                    moveKeyboardFocusToNode(target);
+                }
+            }
+            return;
+        }
+
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
@@ -946,17 +1009,20 @@ function setupEventListeners(): void {
             showKeyboardShortcutsHelp(getKeyboardShortcuts(), state.isDarkTheme);
         }
 
-        // Arrow keys to navigate between connected nodes (accessibility)
-        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-            if (state.selectedNodeId) {
-                e.preventDefault();
-                navigateToConnectedNode('upstream');
-            }
+        // Arrow keys for keyboard node navigation (accessibility)
+        if (e.key === 'ArrowUp' && state.selectedNodeId) {
+            e.preventDefault();
+            navigateToConnectedNode('upstream', state.selectedNodeId);
         }
-        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-            if (state.selectedNodeId) {
+        if (e.key === 'ArrowDown' && state.selectedNodeId) {
+            e.preventDefault();
+            navigateToConnectedNode('downstream', state.selectedNodeId);
+        }
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.selectedNodeId) {
+            const selectedNode = currentNodes.find(node => node.id === state.selectedNodeId);
+            if (selectedNode) {
                 e.preventDefault();
-                navigateToConnectedNode('downstream');
+                navigateToSiblingNode(selectedNode, e.key === 'ArrowRight' ? 'next' : 'prev');
             }
         }
     };
@@ -973,6 +1039,8 @@ export function cleanupRenderer(): void {
         document.removeEventListener(type, handler);
     });
     documentListeners.length = 0;
+    nodeFocusLiveRegion?.remove();
+    nodeFocusLiveRegion = null;
     panelResizerCleanup.forEach(cleanup => cleanup());
     panelResizerCleanup = [];
 }
@@ -1804,18 +1872,37 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             return;
         }
 
+        if (key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            navigateToAdjacentNode(node, e.shiftKey ? 'prev' : 'next');
+            return;
+        }
+
         // Arrow keys to navigate between nodes (only when not using modifiers)
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-            if (key === 'ArrowRight' || key === 'ArrowDown') {
+            if (key === 'ArrowUp') {
                 e.preventDefault();
                 e.stopPropagation();
-                navigateToAdjacentNode(node, 'next');
+                navigateToConnectedNode('upstream', node.id);
                 return;
             }
-            if (key === 'ArrowLeft' || key === 'ArrowUp') {
+            if (key === 'ArrowDown') {
                 e.preventDefault();
                 e.stopPropagation();
-                navigateToAdjacentNode(node, 'prev');
+                navigateToConnectedNode('downstream', node.id);
+                return;
+            }
+            if (key === 'ArrowRight') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToSiblingNode(node, 'next');
+                return;
+            }
+            if (key === 'ArrowLeft') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToSiblingNode(node, 'prev');
                 return;
             }
         }
@@ -1837,17 +1924,28 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.addEventListener('focus', () => {
         const rect = group.querySelector('.node-rect') as SVGRectElement;
         if (rect) {
-            rect.setAttribute('stroke', '#6366f1');
-            rect.setAttribute('stroke-width', '3');
+            const focusRingColor = state.isDarkTheme ? UI_COLORS.nodeFocusRingDark : UI_COLORS.nodeFocusRingLight;
+            group.setAttribute('data-keyboard-focus', 'true');
+            rect.setAttribute('stroke', focusRingColor);
+            rect.setAttribute('stroke-width', '4');
+            rect.setAttribute('filter', 'url(#glow)');
         }
+        announceFocusedNode(node);
     });
 
     group.addEventListener('blur', () => {
         const rect = group.querySelector('.node-rect') as SVGRectElement;
-        if (rect && state.selectedNodeId !== node.id) {
-            rect.setAttribute('stroke', state.isDarkTheme ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.15)');
-            rect.setAttribute('stroke-width', '1');
+        if (!rect) { return; }
+        group.removeAttribute('data-keyboard-focus');
+        if (state.selectedNodeId === node.id) {
+            rect.setAttribute('stroke', UI_COLORS.white);
+            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('filter', 'url(#glow)');
+            return;
         }
+        rect.removeAttribute('stroke');
+        rect.removeAttribute('stroke-width');
+        rect.setAttribute('filter', 'url(#shadow)');
     });
 
     // Double click to zoom to node or open cloud
@@ -4366,13 +4464,35 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
 
 /**
  * Navigate to a connected node using arrow keys for accessibility
- * @param direction - 'upstream' (ArrowUp/Left) or 'downstream' (ArrowDown/Right)
+ * @param direction - 'upstream' (ArrowUp) or 'downstream' (ArrowDown)
  * @returns true if navigation occurred, false if no connected node found
  */
-function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean {
-    if (!state.selectedNodeId) { return false; }
+function getKeyboardNavigationNodes(): FlowNode[] {
+    return getKeyboardNavigableNodes({
+        nodes: currentNodes,
+        edges: currentEdges,
+        focusModeEnabled: state.focusModeEnabled,
+        focusMode: state.focusMode,
+        selectedNodeId: state.selectedNodeId,
+    });
+}
 
-    const selectedNode = currentNodes.find(n => n.id === state.selectedNodeId);
+function focusNodeGroup(nodeId: string): void {
+    const nodeGroup = mainGroup?.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
+    nodeGroup?.focus();
+}
+
+function moveKeyboardFocusToNode(targetNode: FlowNode): void {
+    selectNode(targetNode.id, { skipNavigation: true });
+    ensureNodeVisible(targetNode);
+    focusNodeGroup(targetNode.id);
+}
+
+function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
+    const sourceNodeId = fromNodeId || state.selectedNodeId;
+    if (!sourceNodeId) { return false; }
+
+    const selectedNode = currentNodes.find(n => n.id === sourceNodeId);
     if (!selectedNode) { return false; }
 
     // Find connected nodes based on direction
@@ -4381,20 +4501,25 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     if (direction === 'upstream') {
         // Find nodes that are sources (edges where selected node is target)
         connectedNodeIds = currentEdges
-            .filter(e => e.target === state.selectedNodeId)
+            .filter(e => e.target === sourceNodeId)
             .map(e => e.source);
     } else {
         // Find nodes that are targets (edges where selected node is source)
         connectedNodeIds = currentEdges
-            .filter(e => e.source === state.selectedNodeId)
+            .filter(e => e.source === sourceNodeId)
             .map(e => e.target);
+    }
+
+    if (state.focusModeEnabled) {
+        const visibleIds = new Set(getKeyboardNavigationNodes().map(node => node.id));
+        connectedNodeIds = connectedNodeIds.filter(id => visibleIds.has(id));
     }
 
     if (connectedNodeIds.length === 0) { return false; }
 
     // If there are multiple connected nodes, cycle through them
     // Track the last visited index for this direction
-    const stateKey = `lastNav_${direction}_${state.selectedNodeId}`;
+    const stateKey = `lastNav_${direction}_${sourceNodeId}`;
     const lastIndex = (state as any)[stateKey] || -1;
     const nextIndex = (lastIndex + 1) % connectedNodeIds.length;
     (state as any)[stateKey] = nextIndex;
@@ -4404,9 +4529,7 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     const targetNode = currentNodes.find(n => n.id === targetNodeId);
 
     if (targetNode) {
-        selectNode(targetNodeId, { skipNavigation: true });
-        // Only pan if node is outside viewport (don't center, just ensure visibility)
-        ensureNodeVisible(targetNode);
+        moveKeyboardFocusToNode(targetNode);
         return true;
     }
 
@@ -4418,38 +4541,29 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
  * Uses Y position primarily, then X position for nodes at same level
  */
 function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev'): void {
-    if (currentNodes.length === 0) { return; }
+    const sortedNodes = getKeyboardNavigationNodes();
+    const targetNode = getCycledNode(sortedNodes, currentNode.id, direction);
+    if (!targetNode) { return; }
 
-    // Sort nodes by Y position, then X position for consistent navigation
-    const sortedNodes = [...currentNodes].sort((a, b) => {
-        if (Math.abs(a.y - b.y) < 20) {
-            // Same row, sort by X
-            return a.x - b.x;
-        }
-        return a.y - b.y;
+    moveKeyboardFocusToNode(targetNode);
+}
+
+function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'): boolean {
+    const navigableNodes = getKeyboardNavigationNodes();
+    const layoutType = state.layoutType || 'vertical';
+    const targetNode = getSiblingCycleTarget({
+        nodes: navigableNodes,
+        currentNode,
+        direction,
+        layoutType,
     });
 
-    const currentIndex = sortedNodes.findIndex(n => n.id === currentNode.id);
-    if (currentIndex === -1) { return; }
-
-    let targetIndex: number;
-    if (direction === 'next') {
-        targetIndex = (currentIndex + 1) % sortedNodes.length;
-    } else {
-        targetIndex = (currentIndex - 1 + sortedNodes.length) % sortedNodes.length;
+    if (!targetNode || targetNode.id === currentNode.id) {
+        return false;
     }
 
-    const targetNode = sortedNodes[targetIndex];
-    if (targetNode) {
-        selectNode(targetNode.id, { skipNavigation: true });
-        ensureNodeVisible(targetNode);
-
-        // Focus the new node's SVG group for continued keyboard navigation
-        const nodeGroup = mainGroup?.querySelector(`[data-id="${targetNode.id}"]`) as SVGGElement;
-        if (nodeGroup) {
-            nodeGroup.focus();
-        }
-    }
+    moveKeyboardFocusToNode(targetNode);
+    return true;
 }
 
 /**

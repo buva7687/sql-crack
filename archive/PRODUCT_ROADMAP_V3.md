@@ -219,7 +219,7 @@
 - Escape clears focus and returns to SVG container
 - Focus mode filters which nodes Tab visits
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (Phase 3)
 
 ---
 
@@ -536,7 +536,7 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | 3 | Export preview + PDF | P1 | 3 | Not started |
 | 4 | Resizable panels | P1 | 2 | ✅ Complete |
 | 5 | Configurable limits | P1 | 1 | ✅ Complete |
-| 6 | Keyboard node navigation improvements | P2 | 3 | Not started |
+| 6 | Keyboard node navigation improvements | P2 | 3 | ✅ Complete |
 | 7 | Minimap toggle setting | P2 | 1 | ✅ Complete |
 | 8 | Colorblind-safe palette | P2 | 3 | Not started |
 | 9 | Clickable error badge | P2 | 1 | ✅ Complete |

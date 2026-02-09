@@ -50,6 +50,8 @@ export const UI_COLORS = {
     focusBackgroundActive: 'rgba(99, 102, 241, 0.3)',
     focusText: '#a5b4fc',
     focusTextLight: '#6366f1',
+    nodeFocusRingDark: '#fbbf24',
+    nodeFocusRingLight: '#4f46e5',
 
     // Shadows
     shadow: 'rgba(0, 0, 0, 0.3)',
