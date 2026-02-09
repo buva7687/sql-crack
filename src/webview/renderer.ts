@@ -51,6 +51,7 @@ import {
     clearBreadcrumbBar,
     updateHintsSummaryBadge,
 } from './ui';
+import { attachResizablePanel } from './ui/resizablePanel';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
@@ -130,6 +131,7 @@ let columnLineageBanner: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
+let panelResizerCleanup: Array<() => void> = [];
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
@@ -267,12 +269,13 @@ export function initRenderer(container: HTMLElement): void {
         background: ${UI_COLORS.backgroundPanel};
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
+        width: 300px;
         padding: 12px 16px;
+        box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        max-width: 300px;
     `;
     container.appendChild(statsPanel);
 
@@ -286,12 +289,13 @@ export function initRenderer(container: HTMLElement): void {
         background: ${UI_COLORS.backgroundPanel};
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
+        width: 350px;
         padding: 12px 16px;
+        box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        max-width: 350px;
         max-height: 200px;
         overflow-y: auto;
         opacity: 0;
@@ -301,6 +305,28 @@ export function initRenderer(container: HTMLElement): void {
     `;
     container.appendChild(hintsPanel);
     ensureHintsPanelScrollbarStyles();
+
+    // Add drag-to-resize + collapse controls for docked panels
+    panelResizerCleanup = [
+        attachResizablePanel({
+            panel: detailsPanel,
+            side: 'right',
+            storageKey: 'details',
+            isDarkTheme: () => state.isDarkTheme
+        }),
+        attachResizablePanel({
+            panel: statsPanel,
+            side: 'left',
+            storageKey: 'stats',
+            isDarkTheme: () => state.isDarkTheme
+        }),
+        attachResizablePanel({
+            panel: hintsPanel,
+            side: 'right',
+            storageKey: 'hints',
+            isDarkTheme: () => state.isDarkTheme
+        })
+    ];
 
     // Create bottom legend bar (replaces old top-left legend panel)
     legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
@@ -947,6 +973,8 @@ export function cleanupRenderer(): void {
         document.removeEventListener(type, handler);
     });
     documentListeners.length = 0;
+    panelResizerCleanup.forEach(cleanup => cleanup());
+    panelResizerCleanup = [];
 }
 
 function updateTransform(): void {
