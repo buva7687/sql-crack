@@ -56,6 +56,7 @@ import {
     updateHintsSummaryBadge,
 } from './ui';
 import { attachResizablePanel } from './ui/resizablePanel';
+import { UndoManager } from './ui/undoManager';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
@@ -162,6 +163,23 @@ let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 
+interface LayoutHistorySnapshot {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    selectedNodeId: string | null;
+    focusModeEnabled: boolean;
+    focusMode: FocusMode;
+    layoutType: LayoutType;
+    nodePositions: Array<{ id: string; x: number; y: number }>;
+    cloudOffsets: Array<{ nodeId: string; offsetX: number; offsetY: number }>;
+}
+
+const layoutHistory = new UndoManager<LayoutHistorySnapshot>({
+    maxEntries: 50,
+    serialize: (snapshot) => JSON.stringify(snapshot),
+});
+
 // Virtualization state
 let virtualizationEnabled = true;
 let renderedNodeIds: Set<string> = new Set();
@@ -221,6 +239,103 @@ function announceFocusedNode(node: FlowNode): void {
     });
 }
 
+function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
+    return {
+        scale: state.scale,
+        offsetX: state.offsetX,
+        offsetY: state.offsetY,
+        selectedNodeId: state.selectedNodeId,
+        focusModeEnabled: state.focusModeEnabled,
+        focusMode: state.focusMode,
+        layoutType: state.layoutType || 'vertical',
+        nodePositions: currentNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
+        cloudOffsets: Array.from(cloudOffsets.entries()).map(([nodeId, offset]) => ({
+            nodeId,
+            offsetX: offset.offsetX,
+            offsetY: offset.offsetY,
+        })),
+    };
+}
+
+function applyNodePositionsToDom(): void {
+    if (!mainGroup) { return; }
+
+    currentNodes.forEach(node => {
+        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement | null;
+        if (!nodeGroup) { return; }
+        const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement | null;
+        if (!rect) { return; }
+        const origX = Number.parseFloat(rect.getAttribute('x') || '0');
+        const origY = Number.parseFloat(rect.getAttribute('y') || '0');
+        const deltaX = node.x - origX;
+        const deltaY = node.y - origY;
+        nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+    });
+}
+
+function applyEdgePositionsToDom(): void {
+    if (!mainGroup) { return; }
+
+    const layoutType = state.layoutType || 'vertical';
+    const edgeElements = mainGroup.querySelectorAll('.edge:not(.column-flow-edge)');
+    edgeElements.forEach(edgeEl => {
+        const sourceId = edgeEl.getAttribute('data-source');
+        const targetId = edgeEl.getAttribute('data-target');
+        if (!sourceId || !targetId) { return; }
+
+        const sourceNode = currentNodes.find(node => node.id === sourceId);
+        const targetNode = currentNodes.find(node => node.id === targetId);
+        if (!sourceNode || !targetNode) { return; }
+
+        edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
+    });
+}
+
+function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
+    state.scale = snapshot.scale;
+    state.offsetX = snapshot.offsetX;
+    state.offsetY = snapshot.offsetY;
+    state.focusMode = snapshot.focusMode;
+    state.layoutType = snapshot.layoutType;
+    state.selectedNodeId = snapshot.selectedNodeId;
+
+    const positionMap = new Map(snapshot.nodePositions.map(position => [position.id, position]));
+    currentNodes.forEach(node => {
+        const position = positionMap.get(node.id);
+        if (!position) { return; }
+        node.x = position.x;
+        node.y = position.y;
+    });
+
+    cloudOffsets = new Map(
+        snapshot.cloudOffsets.map(entry => [entry.nodeId, { offsetX: entry.offsetX, offsetY: entry.offsetY }])
+    );
+
+    applyNodePositionsToDom();
+    applyEdgePositionsToDom();
+    currentNodes.forEach(node => updateCloudAndArrow(node));
+    updateTransform();
+    selectNode(snapshot.selectedNodeId, { skipNavigation: true });
+
+    if (snapshot.focusModeEnabled && snapshot.selectedNodeId) {
+        state.focusModeEnabled = true;
+        applyFocusMode(snapshot.selectedNodeId);
+    } else {
+        clearFocusMode();
+    }
+}
+
+function syncUndoRedoUiState(): void {
+    document.dispatchEvent(new CustomEvent('undo-redo-state', {
+        detail: { canUndo: layoutHistory.canUndo(), canRedo: layoutHistory.canRedo() },
+    }));
+}
+
+function recordLayoutHistorySnapshot(): void {
+    layoutHistory.record(captureLayoutHistorySnapshot());
+    syncUndoRedoUiState();
+}
+
 export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
     const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
@@ -231,6 +346,7 @@ export function initRenderer(container: HTMLElement): void {
     mainGroup = canvas.mainGroup;
     backgroundRect = canvas.backgroundRect;
     ensureNodeFocusLiveRegion(container);
+    syncUndoRedoUiState();
 
     // Create details panel
     detailsPanel = document.createElement('div');
@@ -740,6 +856,8 @@ function setupEventListeners(): void {
     });
 
     svg.addEventListener('mouseup', () => {
+        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
+
         // Restore cloud opacity if dragging cloud
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
             const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
@@ -762,9 +880,15 @@ function setupEventListeners(): void {
         state.draggingNodeId = null;
         state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
+
+        if (shouldRecordHistory) {
+            recordLayoutHistorySnapshot();
+        }
     });
 
     svg.addEventListener('mouseleave', () => {
+        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
+
         // Restore cloud opacity if dragging cloud
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
             const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
@@ -787,6 +911,10 @@ function setupEventListeners(): void {
         state.draggingNodeId = null;
         state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
+
+        if (shouldRecordHistory) {
+            recordLayoutHistorySnapshot();
+        }
     });
 
     // Zoom
@@ -864,6 +992,16 @@ function setupEventListeners(): void {
         // Don't trigger shortcuts when typing in input fields
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
                                document.activeElement?.tagName === 'TEXTAREA';
+
+        if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            if (e.shiftKey) {
+                redoLayoutChange();
+            } else {
+                undoLayoutChange();
+            }
+            return;
+        }
 
         // Ctrl/Cmd + Shift + P for command bar
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
@@ -1046,6 +1184,7 @@ export function cleanupRenderer(): void {
         document.removeEventListener(type, handler);
     });
     documentListeners.length = 0;
+    layoutHistory.clear();
     nodeFocusLiveRegion?.remove();
     nodeFocusLiveRegion = null;
     panelResizerCleanup.forEach(cleanup => cleanup());
@@ -1693,6 +1832,11 @@ export function render(result: ParseResult): void {
         requestAnimationFrame(() => {
             updateVisibleNodes();
         });
+    }
+
+    if (!layoutHistory.getCurrent()) {
+        layoutHistory.initialize(captureLayoutHistorySnapshot());
+        syncUndoRedoUiState();
     }
 }
 
@@ -5715,12 +5859,14 @@ export function zoomIn(): void {
     state.scale = Math.min(state.scale * 1.2, 3);
     updateTransform();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
 }
 
 export function zoomOut(): void {
     state.scale = Math.max(state.scale / 1.2, 0.2);
     updateTransform();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
 }
 
 export function getZoomLevel(): number {
@@ -5756,6 +5902,42 @@ export function setViewState(viewState: TabViewState): void {
 export function resetView(): void {
     fitView();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
+}
+
+export function undoLayoutChange(): void {
+    const snapshot = layoutHistory.undo();
+    if (!snapshot) {
+        syncUndoRedoUiState();
+        return;
+    }
+
+    restoreLayoutHistorySnapshot(snapshot);
+    syncUndoRedoUiState();
+}
+
+export function redoLayoutChange(): void {
+    const snapshot = layoutHistory.redo();
+    if (!snapshot) {
+        syncUndoRedoUiState();
+        return;
+    }
+
+    restoreLayoutHistorySnapshot(snapshot);
+    syncUndoRedoUiState();
+}
+
+export function canUndoLayoutChanges(): boolean {
+    return layoutHistory.canUndo();
+}
+
+export function canRedoLayoutChanges(): boolean {
+    return layoutHistory.canRedo();
+}
+
+export function clearUndoHistory(): void {
+    layoutHistory.clear();
+    syncUndoRedoUiState();
 }
 
 function resetViewportToCenter(): void {
@@ -6759,6 +6941,8 @@ export function switchLayout(layoutType: LayoutType): void {
                 hideLoading();
             });
         }
+
+        recordLayoutHistorySnapshot();
     });
 }
 
@@ -6852,6 +7036,8 @@ export function toggleFocusMode(enable?: boolean): void {
         clearFocusMode();
         removeBreadcrumbSegment('focus-mode');
     }
+
+    recordLayoutHistorySnapshot();
 }
 
 function applyFocusMode(nodeId: string): void {
@@ -6919,6 +7105,8 @@ export function setFocusMode(mode: FocusMode): void {
     if (state.zoomedNodeId && state.selectedNodeId) {
         // Will be handled by zoom module
     }
+
+    recordLayoutHistorySnapshot();
 }
 
 export function getFocusMode(): FocusMode {
@@ -9032,6 +9220,8 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
     return [
         { key: 'Ctrl/Cmd + Shift + P', description: 'Command palette' },
         { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
+        { key: 'Ctrl/Cmd + Z', description: 'Undo layout change' },
+        { key: 'Ctrl/Cmd + Shift + Z', description: 'Redo layout change' },
         { key: '/', description: 'Focus search' },
         { key: '+/-', description: 'Zoom in/out' },
         { key: 'R', description: 'Reset view' },
@@ -9050,8 +9240,9 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' },
-        { key: '↑/←', description: 'Navigate to upstream node' },
-        { key: '↓/→', description: 'Navigate to downstream node' },
+        { key: '↑', description: 'Navigate to upstream node' },
+        { key: '↓', description: 'Navigate to downstream node' },
+        { key: '←/→', description: 'Cycle sibling nodes at same depth' },
         { key: '[', description: 'Previous query (Q2 → Q1)' },
         { key: ']', description: 'Next query (Q2 → Q3)' },
         { key: '?', description: 'Show all shortcuts' }

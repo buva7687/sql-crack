@@ -16,6 +16,11 @@ import {
     getViewState,
     setViewState,
     TabViewState,
+    undoLayoutChange,
+    redoLayoutChange,
+    canUndoLayoutChanges,
+    canRedoLayoutChanges,
+    clearUndoHistory,
     exportToPng,
     exportToSvg,
     exportToMermaid,
@@ -273,6 +278,10 @@ function init(): void {
 
 function createToolbarCallbacks(): ToolbarCallbacks {
     return {
+        onUndo: undoLayoutChange,
+        onRedo: redoLayoutChange,
+        canUndo: canUndoLayoutChanges,
+        canRedo: canRedoLayoutChanges,
         onZoomIn: zoomIn,
         onZoomOut: zoomOut,
         onResetView: resetView,
@@ -370,6 +379,7 @@ async function visualize(sql: string): Promise<void> {
 
     // Clear view states when loading new SQL
     queryViewStates.clear();
+    clearUndoHistory();
 
     if (!userExplicitlySetDialect) {
         const detection = detectDialect(sql);
@@ -484,6 +494,7 @@ function switchToQueryIndex(newIndex: number): void {
 
     // Switch to new query
     currentQueryIndex = newIndex;
+    clearUndoHistory();
     renderCurrentQuery();
     updateBatchTabsUI();
 

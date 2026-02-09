@@ -10,6 +10,10 @@ import { repositionBreadcrumbBar } from './breadcrumbBar';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
+    onUndo: () => void;
+    onRedo: () => void;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
     onZoomIn: () => void;
     onZoomOut: () => void;
     onResetView: () => void;
@@ -450,7 +454,7 @@ function createActionButtons(
     `;
 
     // Zoom controls
-    actions.appendChild(createZoomGroup(callbacks));
+    actions.appendChild(createZoomGroup(callbacks, documentListeners));
 
     // Feature buttons
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
@@ -738,7 +742,10 @@ function setupOverflowObserver(
     return observer;
 }
 
-function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
+function createZoomGroup(
+    callbacks: ToolbarCallbacks,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
@@ -749,6 +756,22 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
         border-radius: 8px;
         overflow: hidden;
     `;
+
+    const undoBtn = createButton('↶', () => {
+        callbacks.onUndo();
+    }, 'Undo layout change');
+    undoBtn.id = 'sql-crack-undo-btn';
+    undoBtn.title = 'Undo (Ctrl/Cmd+Z)';
+    undoBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(undoBtn);
+
+    const redoBtn = createButton('↷', () => {
+        callbacks.onRedo();
+    }, 'Redo layout change');
+    redoBtn.id = 'sql-crack-redo-btn';
+    redoBtn.title = 'Redo (Ctrl/Cmd+Shift+Z)';
+    redoBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(redoBtn);
 
     const zoomOutBtn = createButton('−', () => {
         callbacks.onZoomOut();
@@ -784,6 +807,24 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     fitBtn.title = 'Fit to view (R)';
     fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     zoomGroup.appendChild(fitBtn);
+
+    const updateUndoRedo = (canUndo: boolean, canRedo: boolean) => {
+        undoBtn.disabled = !canUndo;
+        redoBtn.disabled = !canRedo;
+        undoBtn.style.opacity = canUndo ? '1' : '0.45';
+        redoBtn.style.opacity = canRedo ? '1' : '0.45';
+        undoBtn.style.cursor = canUndo ? 'pointer' : 'default';
+        redoBtn.style.cursor = canRedo ? 'pointer' : 'default';
+    };
+
+    updateUndoRedo(callbacks.canUndo(), callbacks.canRedo());
+
+    const undoRedoStateHandler = ((event: CustomEvent) => {
+        const detail = event.detail || {};
+        updateUndoRedo(Boolean(detail.canUndo), Boolean(detail.canRedo));
+    }) as EventListener;
+    document.addEventListener('undo-redo-state', undoRedoStateHandler);
+    documentListeners.push({ type: 'undo-redo-state', handler: undoRedoStateHandler });
 
     return zoomGroup;
 }

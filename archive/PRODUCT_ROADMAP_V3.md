@@ -421,7 +421,7 @@
 - Max 50 entries, oldest dropped on overflow
 - Cmd+Z / Cmd+Shift+Z shortcuts work
 
-**Status:** [ ] Not started
+**Status:** [x] Complete (Phase 4)
 
 ---
 
@@ -543,6 +543,6 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | 10 | Better batch tab error UX | P2 | 2 | ✅ Complete |
 | 11 | Fullscreen exit button | P2 | 2 | ✅ Complete |
 | 12 | Expandable search box | P3 | 2 | ✅ Complete |
-| 13 | Undo/redo for layout | P3 | 4 | Not started |
+| 13 | Undo/redo for layout | P3 | 4 | ✅ Complete |
 | 14 | Query comparison mode | P3 | 4 | Not started |
 | 15 | Inline VS Code diagnostics | P3 | 4 | Not started |
