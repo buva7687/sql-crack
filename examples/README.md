@@ -27,6 +27,9 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **CASE expressions** | `basic-case-expressions.sql` | Check node details panel for branch logic |
 | **Set operations** | `basic-set-operations.sql` | See UNION/INTERSECT/EXCEPT connecting nodes |
 | **Table-valued functions** | `tvf-bigquery.sql`, `tvf-snowflake.sql`, `tvf-transactsql.sql` | Verify UNNEST/FLATTEN/OPENJSON appear as table-function nodes |
+| **Query compare mode** | `compare-mode-before.sql` + `compare-mode-after.sql` | Pin the first, open second, click `⇆` to inspect added/removed/changed nodes |
+| **Inline diagnostics + quick fix** | `diagnostics-playground.sql` | Save file, open Problems, use **Show in SQL Flow** quick fix |
+| **Parser resilience / mixed batch behavior** | `parser-resilience-playground.sql` | Check mixed valid/invalid/procedural statements and fallback behavior |
 | **Performance hints** | `quality-performance-hints.sql` | Check hints panel (bottom-left) for anti-patterns |
 | **Quality warnings** | `quality-code-warnings.sql` | Look for ⚠ warning badges on nodes |
 | **Write operations** | `dml-write-operations.sql` | See INSERT/UPDATE/DELETE/MERGE badges |
@@ -74,6 +77,14 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | `tvf-bigquery.sql` | BigQuery UNNEST() as source and join input |
 | `tvf-snowflake.sql` | Snowflake LATERAL FLATTEN and TABLE(FLATTEN(...)) |
 | `tvf-transactsql.sql` | SQL Server OPENJSON() source and CROSS APPLY usage |
+
+### Roadmap Workflows
+| File | What it demonstrates |
+|------|---------------------|
+| `compare-mode-before.sql` | Baseline query snapshot for compare mode |
+| `compare-mode-after.sql` | Optimized query revision for compare mode diffing |
+| `diagnostics-playground.sql` | Hint + parse diagnostics surfaced in Problems with quick fix |
+| `parser-resilience-playground.sql` | Comment/procedural splitting edges and mixed batch success/failure |
 
 ### Column Lineage
 | File | What it demonstrates |
@@ -140,6 +151,10 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 9. **Compare query revisions**: Pin a query snapshot, switch to a modified query, then use the compare (`⇆`) toolbar button to see side-by-side added/removed/changed node differences.
 
 10. **Use diagnostics in editor**: Save a SQL file with anti-patterns (for example from `quality-performance-hints.sql`) and check Problems panel entries from **SQL Crack**. Use the quick fix **Show in SQL Flow** to jump straight into the graph.
+
+11. **Validate compare mode quickly**: Visualize `compare-mode-before.sql`, pin it, then visualize `compare-mode-after.sql` and click `⇆`. Confirm green/amber/red diff highlights and stats delta.
+
+12. **Stress parser resilience**: Open `parser-resilience-playground.sql` and navigate batch tabs with `[` and `]` to verify mixed statements stay individually navigable.
 
 ---
 
