@@ -65,9 +65,13 @@ export interface MessageHandlerContext {
     getIsDarkTheme: () => boolean;
     setIsDarkTheme: (dark: boolean) => void;
 
+    // Rebuild state
+    getIsRebuilding: () => boolean;
+
     // Callbacks
     renderCurrentView: () => void;
     getWebviewHtml: (graph: any, searchFilter: SearchFilter) => string;
+    getThemeCss: (isDark: boolean) => string;
     buildIndexWithProgress: () => Promise<void>;
     rebuildAndRenderGraph: () => Promise<void>;
     buildLineageGraph: () => Promise<void>;
@@ -275,8 +279,11 @@ export class MessageHandler {
 
     private handleToggleTheme(): void {
         const currentTheme = this._context.getIsDarkTheme();
-        this._context.setIsDarkTheme(!currentTheme);
-        this._context.renderCurrentView();
+        const newDark = !currentTheme;
+        this._context.setIsDarkTheme(newDark);
+        // Send CSS swap to webview instead of full HTML rebuild to avoid flicker
+        const css = this._context.getThemeCss(newDark);
+        this._context.panel.webview.postMessage({ command: 'themeChanged', css, isDark: newDark });
     }
 
     // ========== File Operations ==========

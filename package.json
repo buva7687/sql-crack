@@ -207,6 +207,34 @@
           "default": false,
           "description": "Always rebuild index when VS Code opens the workspace. Overrides cache TTL. (Advanced)"
         },
+        "sqlCrack.gridStyle": {
+          "type": "string",
+          "default": "dots",
+          "enum": [
+            "dots",
+            "lines",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Dot grid pattern (default, subtle dots at intersections)",
+            "Line grid pattern (subtle grid lines)",
+            "No grid pattern (plain background)"
+          ],
+          "description": "Background grid pattern style for visualizations"
+        },
+        "sqlCrack.nodeAccentPosition": {
+          "type": "string",
+          "default": "left",
+          "enum": [
+            "left",
+            "bottom"
+          ],
+          "enumDescriptions": [
+            "Color accent strip on the left edge of nodes (default)",
+            "Color accent strip on the bottom edge of nodes"
+          ],
+          "description": "Position of the color accent strip on visualization nodes"
+        },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
           "default": "auto",
@@ -262,7 +290,52 @@
           "markdownDescription": "Additional file extensions to treat as SQL files (e.g., `[\".tpt\", \".dbsql\", \".hql\", \".bteq\"]`). Extensions should include the leading dot. These files will show the SQL Crack icon in the editor title bar and can be visualized."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "sqlCrack.getStarted",
+        "title": "Get Started with SQL Crack",
+        "description": "Learn how to visualize SQL queries, explore workspace dependencies, and trace column lineage.",
+        "steps": [
+          {
+            "id": "openSqlFile",
+            "title": "Open a SQL file",
+            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
+            "media": {
+              "altText": "Open a SQL file in the editor",
+              "markdown": ""
+            }
+          },
+          {
+            "id": "visualizeQuery",
+            "title": "Visualize your query",
+            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
+            "media": {
+              "altText": "SQL flow visualization panel",
+              "markdown": ""
+            }
+          },
+          {
+            "id": "exploreWorkspace",
+            "title": "Explore workspace dependencies",
+            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
+            "media": {
+              "altText": "Workspace dependency graph",
+              "markdown": ""
+            }
+          },
+          {
+            "id": "columnLineage",
+            "title": "Try column lineage",
+            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
+            "media": {
+              "altText": "Column lineage tracing",
+              "markdown": ""
+            }
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

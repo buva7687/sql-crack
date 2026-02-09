@@ -3,6 +3,7 @@
 export {
     createToolbar,
     updateToolbarTheme,
+    updateHintsSummaryBadge,
     showKeyboardShortcutsHelp,
     markRefreshButtonStale,
     clearRefreshButtonStale,
@@ -30,3 +31,35 @@ export {
     PinnedTab,
     PinnedTabsCallbacks
 } from './pinnedTabs';
+
+export { createLegendBar, toggleLegendBar, isLegendBarVisible, getLegendBarHeight } from './legendBar';
+export type { LegendBarCallbacks } from './legendBar';
+
+export { createExportDropdown } from './exportDropdown';
+export type { ExportDropdownCallbacks } from './exportDropdown';
+
+export {
+    createCommandBar,
+    showCommandBar,
+    hideCommandBar,
+    toggleCommandBar,
+    isCommandBarVisible,
+    registerCommandBarActions,
+} from './commandBar';
+export type { CommandBarAction } from './commandBar';
+
+export { createLayoutPicker } from './layoutPicker';
+export type { LayoutPickerCallbacks } from './layoutPicker';
+
+export {
+    createBreadcrumbBar,
+    updateBreadcrumbBar,
+    addBreadcrumbSegment,
+    removeBreadcrumbSegment,
+    clearBreadcrumbBar,
+    isBreadcrumbBarVisible,
+} from './breadcrumbBar';
+export type { BreadcrumbSegment, BreadcrumbBarCallbacks } from './breadcrumbBar';
+
+export { showFirstRunOverlay } from './firstRunOverlay';
+export type { FirstRunOverlayCallbacks } from './firstRunOverlay';

@@ -40,6 +40,16 @@ export class VisualizationPanel {
         VisualizationPanel.restorePinnedTabs();
     }
 
+    private static _isFirstRun(): boolean {
+        if (!VisualizationPanel._context) { return false; }
+        const hasLaunched = VisualizationPanel._context.globalState.get<boolean>('sqlCrack.hasLaunched');
+        if (!hasLaunched) {
+            VisualizationPanel._context.globalState.update('sqlCrack.hasLaunched', true);
+            return true;
+        }
+        return false;
+    }
+
     private static getViewColumn(): vscode.ViewColumn {
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const location = config.get<ViewLocation>('viewLocation') || 'beside';
@@ -213,6 +223,10 @@ export class VisualizationPanel {
                 command: 'markStale'
             });
         }
+    }
+
+    public static get sourceDocumentUri(): vscode.Uri | undefined {
+        return VisualizationPanel.currentPanel?._sourceDocumentUri;
     }
 
     public static sendViewLocationOptions() {
@@ -438,6 +452,8 @@ export class VisualizationPanel {
         const flowDirection = config.get<string>('flowDirection') || 'top-down';
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
+        const gridStyle = config.get<string>('gridStyle') || 'dots';
+        const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -480,6 +496,9 @@ export class VisualizationPanel {
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
         window.showDeadColumnHints = ${this._escapeForInlineScript(showDeadColumnHints)};
         window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
+        window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
+        window.nodeAccentPosition = ${this._escapeForInlineScript(nodeAccentPosition)};
+        window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();

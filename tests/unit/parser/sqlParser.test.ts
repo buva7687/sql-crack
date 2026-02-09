@@ -545,14 +545,12 @@ describe('SQL Parser', () => {
       expect(result.nodes).toEqual([]);
     });
 
-    it('includes problematic syntax hint in error message', () => {
-      // This SQL uses INTERVAL syntax that Snowflake parser doesn't recognize
+    it('parses Snowflake DELETE via dialect fallback when native grammar fails', () => {
       const sql = `DELETE FROM test_orders WHERE created_at < CURRENT_DATE - INTERVAL '90 days'`;
       const result = parseSql(sql, 'Snowflake');
 
-      expect(result.error).toBeDefined();
-      // Error should include hint about what syntax failed, not just generic message
-      expect(result.error).toMatch(/near|syntax/i);
+      expect(result.error).toBeUndefined();
+      expect(result.nodes.some(n => n.label === 'DELETE')).toBe(true);
     });
 
     it('provides dialect suggestion in error message', () => {
@@ -562,6 +560,18 @@ describe('SQL Parser', () => {
       expect(result.error).toBeDefined();
       // Should suggest trying PostgreSQL for INTERVAL syntax
       expect(result.error).toMatch(/PostgreSQL|dialect/i);
+    });
+
+    it('includes parser line and column details in syntax errors', () => {
+      const sql = `SELECT
+  customer_id
+FROM orders
+WHERE`;
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/^Line \d+, column \d+:/i);
+      expect(result.error).toMatch(/Snowflake parser/i);
     });
   });
 
@@ -599,6 +609,19 @@ SELECT * FROM orders;`;
 
       expect(result.queryLineRanges).toBeDefined();
       expect(result.queryLineRanges?.length).toBe(2);
+    });
+
+    it('offsets parse error line numbers to absolute lines in batch mode', () => {
+      const sql = `SELECT 1;
+SELECT
+  customer_id
+FROOM orders;`;
+      const result = parseSqlBatch(sql, 'Snowflake');
+
+      expect(result.errorCount).toBe(1);
+      expect(result.parseErrors).toBeDefined();
+      expect(result.parseErrors?.[0].line).toBe(4);
+      expect(result.queries[1].error).toMatch(/^Line 4, column \d+:/i);
     });
 
     it('parses empty batch gracefully', () => {

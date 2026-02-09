@@ -27,6 +27,7 @@ import {
     getFocusMode,
     toggleSqlPreview,
     toggleColumnFlows,
+    toggleHints,
     toggleFullscreen,
     toggleLayout,
     switchLayout,
@@ -50,6 +51,7 @@ import {
     switchToTab,
     getActiveTabId,
     setActiveTabId,
+    showFirstRunOverlay,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './ui';
@@ -68,6 +70,9 @@ declare global {
         flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
+        gridStyle?: string;
+        nodeAccentPosition?: string;
+        isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -177,7 +182,8 @@ function init(): void {
         isPinnedView: window.isPinnedView || false,
         pinId: window.pinId || null,
         viewLocation: window.viewLocation || 'beside',
-        persistedPinnedTabs: window.persistedPinnedTabs || []
+        persistedPinnedTabs: window.persistedPinnedTabs || [],
+        isFirstRun: window.isFirstRun || false
     });
     toolbarCleanup = toolbarResult.cleanup;
 
@@ -220,6 +226,19 @@ function init(): void {
     if (sql) {
         void visualize(sql);
     }
+
+    // Show first-run onboarding overlay
+    if (window.isFirstRun) {
+        requestAnimationFrame(() => {
+            showFirstRunOverlay(container, {
+                isDarkTheme,
+                onDismiss: () => {
+                    // Notify extension to persist dismissal
+                    window.vscodeApi?.postMessage({ type: 'firstRunDismissed' });
+                },
+            });
+        });
+    }
 }
 
 function createToolbarCallbacks(): ToolbarCallbacks {
@@ -238,6 +257,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         getFocusMode: getFocusMode,
         onToggleSqlPreview: toggleSqlPreview,
         onToggleColumnFlows: toggleColumnFlows,
+        onToggleHints: toggleHints,
         onToggleLayout: toggleLayout,
         onLayoutChange: (layout: LayoutType) => {
             switchLayout(layout);
@@ -381,7 +401,8 @@ async function visualize(sql: string): Promise<void> {
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
         const errorDetails = batchResult.parseErrors?.map(e => ({
             queryIndex: e.queryIndex,
-            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message
+            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
+            line: e.line
         }));
         updateErrorBadge(batchResult.errorCount, errorDetails);
     } else {

@@ -2,6 +2,7 @@
 
 import { ImpactReport, ImpactItem } from '../lineage/impactAnalyzer';
 import { LineageGraph, LineageNode } from '../lineage/types';
+import { ICONS } from '../../shared';
 
 /**
  * Generates HTML for impact analysis reports
@@ -30,7 +31,7 @@ export class ImpactView {
             <div class="view-container">
                 <!-- View Header -->
                 <div class="view-header">
-                    <div class="view-header-icon">🎯</div>
+                    <div class="view-header-icon">${ICONS.warning}</div>
                     <div class="view-header-content">
                         <h3 class="view-title">Impact Analysis</h3>
                         <p class="view-subtitle">Analyze the impact of changes to tables or views in your workspace</p>
@@ -335,7 +336,9 @@ export class ImpactView {
                 ? definitionFiles.join('\n')
                 : (filePath || definitionFiles[0] || 'File location not available');
 
-            const severityIcon = item.severity === 'high' ? '⚠️' : item.severity === 'medium' ? '●' : '○';
+            const severityIcon = item.severity === 'high'
+                ? `<span class="severity-icon">${ICONS.warning}</span>`
+                : `<span class="severity-icon">${item.severity === 'medium' ? '●' : '○'}</span>`;
             html += `
                 <div class="impact-item severity-${item.severity}">
                     <div class="item-header">
@@ -345,7 +348,8 @@ export class ImpactView {
                     <div class="item-name">${this.escapeHtml(item.node.name)}</div>
                     <div class="item-reason">${this.escapeHtml(item.reason)}</div>
                     <div class="item-location" title="${this.escapeHtml(tooltip)}">
-                        <span>📄 ${this.escapeHtml(displayFile)}</span>
+                        <span class="file-icon">${ICONS.document}</span>
+                        <span>${this.escapeHtml(displayFile)}</span>
                     </div>
                 </div>
             `;
@@ -405,7 +409,9 @@ export class ImpactView {
         `;
 
         for (const group of sortedGroups) {
-            const severityIcon = group.maxSeverity === 'high' || group.maxSeverity === 'critical' ? '⚠️' : group.maxSeverity === 'medium' ? '●' : '○';
+            const severityIcon = group.maxSeverity === 'high' || group.maxSeverity === 'critical'
+                ? `<span class="severity-icon">${ICONS.warning}</span>`
+                : `<span class="severity-icon">${group.maxSeverity === 'medium' ? '●' : '○'}</span>`;
             const columnNames = group.items.map(i => i.node.name).join(', ');
             const truncatedNames = columnNames.length > 60 ? columnNames.substring(0, 60) + '...' : columnNames;
 
@@ -436,7 +442,7 @@ export class ImpactView {
                 html += `
                             <div class="column-item">
                                 <span class="column-name">${this.escapeHtml(displayName)}</span>
-                                ${location ? `<span class="column-location">📄 ${this.escapeHtml(location)}</span>` : ''}
+                                ${location ? `<span class="column-location"><span class="file-icon">${ICONS.document}</span>${this.escapeHtml(location)}</span>` : ''}
                             </div>
                 `;
             }
@@ -464,8 +470,8 @@ export class ImpactView {
             <div class="export-options">
                 <h3>Export Report</h3>
                 <div class="export-buttons">
-                    <button onclick="exportImpactReport('markdown')">📝 Markdown</button>
-                    <button onclick="exportImpactReport('json')">📋 JSON</button>
+                    <button onclick="exportImpactReport('markdown')">Markdown</button>
+                    <button onclick="exportImpactReport('json')">JSON</button>
                 </div>
             </div>
         `;
@@ -477,7 +483,7 @@ export class ImpactView {
     private generateSuggestions(suggestions: string[]): string {
         let html = `
             <div class="suggestions">
-                <h3>💡 Suggestions</h3>
+                <h3>Suggestions</h3>
                 <ul>
         `;
 

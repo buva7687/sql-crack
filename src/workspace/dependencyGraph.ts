@@ -555,12 +555,23 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         }
     }
 
-    // If no roots found (cyclic graph), use all nodes as potential starts
+    // If no roots found (cyclic graph), pick nodes with minimum in-degree as roots
+    // instead of all nodes, to avoid exponential traversal
     if (roots.length === 0) {
-        nodes.forEach(n => roots.push(n.id));
+        let minInDeg = Infinity;
+        for (const node of nodes) {
+            const deg = inEdges.get(node.id)?.length || 0;
+            if (deg < minInDeg) { minInDeg = deg; }
+        }
+        for (const node of nodes) {
+            if ((inEdges.get(node.id)?.length || 0) === minInDeg) {
+                roots.push(node.id);
+            }
+        }
     }
 
-    // Assign levels using longest path from roots
+    // Assign levels using longest path from roots.
+    // Uses in-place visited set with backtracking to avoid exponential copy overhead.
     function longestPathFrom(nodeId: string, currentLevel: number, visited: Set<string>): void {
         if (visited.has(nodeId)) {return;}
 
@@ -571,8 +582,10 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         visited.add(nodeId);
 
         for (const targetId of outEdges.get(nodeId) || []) {
-            longestPathFrom(targetId, currentLevel + 1, new Set(visited));
+            longestPathFrom(targetId, currentLevel + 1, visited);
         }
+
+        visited.delete(nodeId);
     }
 
     for (const rootId of roots) {

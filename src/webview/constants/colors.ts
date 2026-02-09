@@ -9,24 +9,24 @@ import { NodeType, Severity } from '../types';
 
 export const UI_COLORS = {
     // Backgrounds - Dark theme
-    background: '#0f172a',
-    backgroundDark: '#1e293b',       // Dark slate for clouds/subflows
-    backgroundPanel: 'rgba(15, 23, 42, 0.95)',
-    backgroundPanelSolid: 'rgba(15, 23, 42, 0.98)',
-    backgroundSubtle: 'rgba(30, 41, 59, 0.5)',
-    backgroundSubtleDark: 'rgba(30, 41, 59, 0.6)',
+    background: '#111111',
+    backgroundDark: '#1a1a1a',       // Neutral dark for clouds/subflows
+    backgroundPanel: 'rgba(17, 17, 17, 0.95)',
+    backgroundPanelSolid: 'rgba(17, 17, 17, 0.98)',
+    backgroundSubtle: 'rgba(26, 26, 26, 0.5)',
+    backgroundSubtleDark: 'rgba(26, 26, 26, 0.6)',
     backgroundOverlay: 'rgba(0, 0, 0, 0.2)',
 
     // Backgrounds - Light theme
-    backgroundLight: '#ffffff',
-    backgroundLightGray: '#f8fafc',
+    backgroundLight: '#fafafa',
+    backgroundLightGray: '#ffffff',
     backgroundPanelLight: 'rgba(255, 255, 255, 0.95)',
     backgroundPanelLightSolid: 'rgba(255, 255, 255, 0.98)',
 
     // Borders
-    border: 'rgba(148, 163, 184, 0.2)',
-    borderMedium: 'rgba(148, 163, 184, 0.3)',
-    borderLight: 'rgba(148, 163, 184, 0.1)',
+    border: 'rgba(255, 255, 255, 0.08)',
+    borderMedium: 'rgba(255, 255, 255, 0.12)',
+    borderLight: 'rgba(255, 255, 255, 0.05)',
     borderWhite: 'rgba(255, 255, 255, 0.3)',
     borderWhiteLight: 'rgba(255, 255, 255, 0.2)',
 
@@ -57,9 +57,9 @@ export const UI_COLORS = {
     shadowLight: '0 4px 12px rgba(0, 0, 0, 0.3)',
     shadowMedium: '0 8px 32px rgba(0, 0, 0, 0.4)',
 
-    // Grid pattern (light theme)
-    gridBackground: '#ffffff',
-    gridLine: '#e2e8f0',
+    // Grid pattern
+    gridBackground: '#fafafa',
+    gridLine: '#e5e7eb',
 
     // White variants for node content
     white: '#ffffff',
@@ -75,13 +75,14 @@ export const UI_COLORS = {
 // ============================================================
 
 export const EDGE_COLORS = {
-    default: '#64748b',
-    defaultLight: '#94a3b8',
+    default: '#333333',
+    defaultLight: '#cbd5e1',
     highlight: '#fbbf24',
     selected: '#10b981',
     columnFlow: 'rgba(255, 255, 255, 0.4)',
     columnLineage: '#22d3ee', // Cyan for column lineage path
     focus: '#6366f1',         // Indigo for focus mode highlights
+    hover: '#6366f1',         // Indigo for edge hover
 } as const;
 
 // ============================================================
@@ -174,6 +175,78 @@ export const CLOSE_BUTTON_COLORS = {
     border: 'rgba(255, 255, 255, 0.3)',
 } as const;
 
+export const SCROLLBAR_COLORS = {
+    dark: {
+        thumb: 'rgba(148, 163, 184, 0.42)',
+        thumbHover: 'rgba(148, 163, 184, 0.58)',
+        track: 'rgba(15, 23, 42, 0.35)',
+    },
+    light: {
+        thumb: 'rgba(100, 116, 139, 0.32)',
+        thumbHover: 'rgba(71, 85, 105, 0.42)',
+        track: 'rgba(148, 163, 184, 0.12)',
+    },
+} as const;
+
+export const COMPONENT_UI_COLORS = {
+    dark: {
+        surface: 'rgba(15, 23, 42, 0.95)',
+        surfaceElevated: 'rgba(15, 23, 42, 0.98)',
+        border: 'rgba(148, 163, 184, 0.2)',
+        text: '#f1f5f9',
+        textBright: '#e2e8f0',
+        textMuted: '#94a3b8',
+        textDim: '#64748b',
+        hover: 'rgba(148, 163, 184, 0.1)',
+        hoverStrong: 'rgba(148, 163, 184, 0.2)',
+        accent: '#818cf8',
+        accentSoft: '#a5b4fc',
+        accentBg: 'rgba(99, 102, 241, 0.15)',
+        accentBgSoft: 'rgba(99, 102, 241, 0.12)',
+        accentBgStrong: 'rgba(99, 102, 241, 0.3)',
+        subtleBg: 'rgba(255, 255, 255, 0.06)',
+        subtleBgAlt: 'rgba(255, 255, 255, 0.04)',
+        overlayBg: 'rgba(0, 0, 0, 0.7)',
+        modalBg: 'rgba(17, 17, 17, 0.98)',
+        modalBorder: 'rgba(255, 255, 255, 0.08)',
+        rowBorder: 'rgba(148, 163, 184, 0.1)',
+        selectBg: '#1e293b',
+        shadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        shadowSoft: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        errorBg: 'rgba(239, 68, 68, 0.15)',
+        errorBgHover: 'rgba(239, 68, 68, 0.25)',
+        warningBg: 'rgba(234, 179, 8, 0.3)',
+    },
+    light: {
+        surface: 'rgba(255, 255, 255, 0.95)',
+        surfaceElevated: 'rgba(255, 255, 255, 0.98)',
+        border: 'rgba(148, 163, 184, 0.3)',
+        text: '#1e293b',
+        textBright: '#1e293b',
+        textMuted: '#64748b',
+        textDim: '#94a3b8',
+        hover: 'rgba(0, 0, 0, 0.04)',
+        hoverStrong: 'rgba(15, 23, 42, 0.06)',
+        accent: '#6366f1',
+        accentSoft: '#6366f1',
+        accentBg: 'rgba(99, 102, 241, 0.1)',
+        accentBgSoft: 'rgba(99, 102, 241, 0.08)',
+        accentBgStrong: 'rgba(99, 102, 241, 0.15)',
+        subtleBg: 'rgba(0, 0, 0, 0.06)',
+        subtleBgAlt: 'rgba(0, 0, 0, 0.03)',
+        overlayBg: 'rgba(0, 0, 0, 0.4)',
+        modalBg: 'rgba(255, 255, 255, 0.98)',
+        modalBorder: 'rgba(0, 0, 0, 0.1)',
+        rowBorder: 'rgba(0, 0, 0, 0.06)',
+        selectBg: '#f1f5f9',
+        shadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        shadowSoft: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        errorBg: 'rgba(220, 38, 38, 0.1)',
+        errorBgHover: 'rgba(220, 38, 38, 0.16)',
+        warningBg: 'rgba(234, 179, 8, 0.2)',
+    },
+} as const;
+
 export const NODE_COLORS: Record<NodeType, string> = {
     table: '#93c5fd',      // light blue (blue-300)
     filter: '#c4b5fd',     // light purple (purple-300)
@@ -228,10 +301,66 @@ export function getTransformationColor(type: string): string {
     return TRANSFORMATION_COLORS[type] || TRANSFORMATION_COLORS.default;
 }
 
+// Re-export accent colors from shared tokens for convenience
+export { NODE_ACCENT_COLORS, getNodeAccentColor } from '../../shared/themeTokens';
+
+/** Node surface colors — neutral fill for accent-strip design */
+export const NODE_SURFACE = {
+    light: {
+        fill: '#FFFFFF',
+        border: '#E2E8F0',
+        text: '#1E293B',
+        textMuted: '#64748B',
+    },
+    dark: {
+        fill: '#1A1A1A',
+        border: '#2A2A2A',
+        text: '#F1F5F9',
+        textMuted: '#94A3B8',
+    },
+} as const;
+
 export function getNodeColor(type: NodeType): string {
     return NODE_COLORS[type] || '#6366f1';
 }
 
 export function getWarningColor(severity: Severity): string {
     return WARNING_COLORS[severity] || WARNING_COLORS.low;
+}
+
+export function getScrollbarColors(isDarkTheme: boolean): { thumb: string; thumbHover: string; track: string } {
+    return isDarkTheme ? SCROLLBAR_COLORS.dark : SCROLLBAR_COLORS.light;
+}
+
+export function getComponentUiColors(
+    isDarkTheme: boolean
+): {
+    surface: string;
+    surfaceElevated: string;
+    border: string;
+    text: string;
+    textBright: string;
+    textMuted: string;
+    textDim: string;
+    hover: string;
+    hoverStrong: string;
+    accent: string;
+    accentSoft: string;
+    accentBg: string;
+    accentBgSoft: string;
+    accentBgStrong: string;
+    subtleBg: string;
+    subtleBgAlt: string;
+    overlayBg: string;
+    modalBg: string;
+    modalBorder: string;
+    rowBorder: string;
+    selectBg: string;
+    shadow: string;
+    shadowSoft: string;
+    errorBg: string;
+    errorBgHover: string;
+    warningBg: string;
+} {
+    return isDarkTheme ? COMPONENT_UI_COLORS.dark : COMPONENT_UI_COLORS.light;
 }

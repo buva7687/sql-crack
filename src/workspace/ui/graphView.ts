@@ -4,6 +4,7 @@
 import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } from '../types';
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
+import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Parameters for generating graph view body
@@ -52,7 +53,7 @@ export function generateGraphBody(params: GraphBodyParams): string {
         <!-- Header -->
         <div class="header">
             <div class="header-left">
-                <span class="header-icon">📊</span>
+                <span class="header-icon header-icon-svg">${ICONS.table}</span>
                 <span class="header-title">SQL Workspace Dependencies</span>
                 <span class="header-counts">(${graph.nodes.length} objects, ${graph.edges.length} relationships)</span>
             </div>
@@ -166,7 +167,7 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
             ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
         </div>
 
-        <div class="graph-container">
+        <div id="graph-container" class="graph-container">
             <svg id="graph-svg" class="graph-svg">
                 <g id="main-group">
                     ${generateSVGContent(graph)}
@@ -213,7 +214,7 @@ function generateEdge(edge: WorkspaceEdge, sourceNode: WorkspaceNode, targetNode
     const targetY = targetNode.y || 0;
 
     return `<line class="edge" data-source-id="${escapeHtml(edge.source)}" data-target-id="${escapeHtml(edge.target)}"
-            x1="${sourceX}" y1="${sourceY}" x2="${targetX}" y2="${targetY}" stroke="var(--border-color)" stroke-width="1"/>`;
+            x1="${sourceX}" y1="${sourceY}" x2="${targetX}" y2="${targetY}" stroke="var(--edge-default)" stroke-width="1.5"/>`;
 }
 
 /**
@@ -227,7 +228,7 @@ function generateNode(node: WorkspaceNode): string {
     const icon = getNodeIcon(node.type);
     
     return `
-        <g class="node ${node.type}"
+        <g class="node node-${node.type}"
            data-id="${escapeHtml(node.id)}"
            data-label="${escapeHtml(node.label)}"
            data-type="${node.type}"
@@ -235,8 +236,9 @@ function generateNode(node: WorkspaceNode): string {
            transform="translate(${x - width/2}, ${y - height/2})">
             <title>${escapeHtml(node.label)}</title>
             <rect class="node-bg" width="${width}" height="${height}" rx="8"/>
-            <text x="10" y="25" class="node-icon">${icon}</text>
-            <text x="40" y="35" class="node-label">${escapeHtml(truncateLabel(node.label, 18))}</text>
+            <rect class="node-accent" x="0" y="0" width="4" height="${height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
+            <g class="node-icon-svg" transform="translate(12, 15)">${icon}</g>
+            <text x="42" y="35" class="node-label">${escapeHtml(truncateLabel(node.label, 18))}</text>
         </g>
     `;
 }
@@ -245,13 +247,7 @@ function generateNode(node: WorkspaceNode): string {
  * Get icon for node type
  */
 function getNodeIcon(type: string): string {
-    const icons: Record<string, string> = {
-        'file': '📄',
-        'table': '📊',
-        'view': '👁️',
-        'external': '🌐'
-    };
-    return icons[type] || '📦';
+    return getWorkspaceNodeIcon(type);
 }
 
 /**

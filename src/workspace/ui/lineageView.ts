@@ -4,6 +4,7 @@ import { LineagePath, LineageGraph, LineageNode } from '../lineage/types';
 import { FlowResult, FlowAnalyzer } from '../lineage/flowAnalyzer';
 import { LineageViewOptions } from './types';
 import { LineageGraphRenderer } from './lineageGraphRenderer';
+import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
  * Recent selection for history tracking
@@ -50,7 +51,7 @@ export class LineageView {
             <div class="view-container">
                 <!-- View Header -->
                 <div class="view-header">
-                    <div class="view-header-icon">📈</div>
+                    <div class="view-header-icon">${ICONS.columns}</div>
                     <div class="view-header-content">
                         <h3 class="view-title">Data Lineage</h3>
                         <p class="view-subtitle">Search for a table or view to visualize its data flow and dependencies</p>
@@ -281,77 +282,49 @@ export class LineageView {
                                 <path d="M3 3v5h5"/>
                             </svg>
                         </button>
+                        <div class="zoom-divider"></div>
+                        <button class="zoom-btn" id="lineage-legend-toggle" title="Toggle legend (L)" aria-label="Toggle lineage legend" aria-pressed="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <rect x="4" y="5" width="16" height="14" rx="2"/>
+                                <line x1="8" y1="10" x2="16" y2="10"/>
+                                <line x1="8" y1="14" x2="12" y2="14"/>
+                            </svg>
+                        </button>
                     </div>
 
-                    <!-- Legend Panel -->
-                    <div class="lineage-legend" id="lineage-legend">
-                        <div class="legend-header">
-                            <span class="legend-title">Legend</span>
-                            <button class="legend-toggle" id="legend-toggle" title="Toggle legend" aria-label="Toggle legend panel" aria-expanded="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true">
-                                    <path d="M18 15l-6-6-6 6"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="legend-content" id="legend-content">
-                            <div class="legend-section-title">Nodes</div>
-                            <div class="legend-item">
-                                <span class="legend-color legend-table"></span>
-                                <span class="legend-label">Table</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-color legend-view"></span>
-                                <span class="legend-label">View</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-color legend-cte"></span>
-                                <span class="legend-label">CTE</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-color legend-external"></span>
-                                <span class="legend-label">External</span>
+                    <!-- Bottom Legend Bar -->
+                    <div class="lineage-legend" id="lineage-legend" role="complementary" aria-label="Lineage legend" aria-hidden="false">
+                        <div class="legend-strip" id="lineage-legend-content">
+                            <div class="legend-inline-group">
+                                <span class="legend-section-title">Nodes</span>
+                                <span class="legend-item"><span class="legend-color legend-table"></span><span class="legend-label">Table</span></span>
+                                <span class="legend-item"><span class="legend-color legend-view"></span><span class="legend-label">View</span></span>
+                                <span class="legend-item"><span class="legend-color legend-cte"></span><span class="legend-label">CTE</span></span>
+                                <span class="legend-item"><span class="legend-color legend-external"></span><span class="legend-label">External</span></span>
                             </div>
                             <div class="legend-divider"></div>
-                            <div class="legend-section-title">Column Types</div>
-                            <div class="legend-item">
-                                <span class="legend-dot legend-primary"></span>
-                                <span class="legend-label">Primary Key</span>
+                            <div class="legend-inline-group">
+                                <span class="legend-section-title">Columns</span>
+                                <span class="legend-item"><span class="legend-dot legend-primary"></span><span class="legend-label">Primary Key</span></span>
+                                <span class="legend-item"><span class="legend-dot legend-numeric"></span><span class="legend-label">Numeric</span></span>
+                                <span class="legend-item"><span class="legend-dot legend-text"></span><span class="legend-label">Text</span></span>
+                                <span class="legend-item"><span class="legend-dot legend-datetime"></span><span class="legend-label">Date/Time</span></span>
+                                <span class="legend-item"><span class="legend-dot legend-json"></span><span class="legend-label">JSON</span></span>
                             </div>
-                            <div class="legend-item">
-                                <span class="legend-dot legend-numeric"></span>
-                                <span class="legend-label">Numeric</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-dot legend-text"></span>
-                                <span class="legend-label">Text</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-dot legend-datetime"></span>
-                                <span class="legend-label">Date/Time</span>
-                            </div>
-                            <div class="legend-item">
-                                <span class="legend-dot legend-json"></span>
-                                <span class="legend-label">JSON</span>
+                            <div class="legend-divider"></div>
+                            <div class="legend-inline-group legend-keyboard-hints" id="lineage-keyboard-hints">
+                                <span class="hint-item"><kbd>C</kbd><span>Columns</span></span>
+                                <span class="hint-divider"></span>
+                                <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
+                                <span class="hint-divider"></span>
+                                <span class="hint-item"><kbd>↑↓</kbd><span>Columns</span></span>
+                                <span class="hint-divider"></span>
+                                <span class="hint-item"><kbd>↵</kbd><span>Trace</span></span>
+                                <span class="hint-divider"></span>
+                                <span class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></span>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Keyboard Shortcuts Hint -->
-                    <div class="keyboard-hints" id="keyboard-hints">
-                        <div class="hint-item">
-                            <kbd>C</kbd>
-                            <span>Columns</span>
-                        </div>
-                        <div class="hint-divider"></div>
-                        <div class="hint-item">
-                            <kbd>Scroll</kbd>
-                            <span>Zoom</span>
-                        </div>
-                        <div class="hint-divider"></div>
-                        <div class="hint-item">
-                            <kbd>Drag</kbd>
-                            <span>Pan</span>
-                        </div>
+                        <button class="legend-dismiss" id="legend-dismiss" title="Dismiss legend (L)" aria-label="Dismiss legend strip">×</button>
                     </div>
 
                     <!-- Mini-map -->
@@ -824,15 +797,7 @@ export class LineageView {
      * Get icon for node type
      */
     private getNodeIcon(type: string): string {
-        const icons: Record<string, string> = {
-            'table': '\uD83D\uDCCA',   // 📊
-            'view': '\uD83D\uDC41\uFE0F',    // 👁️
-            'column': '\uD83D\uDCDD',  // 📝
-            'cte': '\uD83D\uDD04',     // 🔄
-            'external': '\uD83C\uDF10' // 🌐
-        };
-
-        return icons[type] || '\uD83D\uDCE6'; // 📦
+        return getWorkspaceNodeIcon(type);
     }
 
     /**
