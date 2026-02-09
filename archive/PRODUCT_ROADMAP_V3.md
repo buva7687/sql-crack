@@ -361,7 +361,7 @@
 - Exit button not present outside fullscreen
 - ESC and F key still work as before
 
-**Status:** [~] In progress
+**Status:** [x] Complete
 
 ---
 
@@ -387,7 +387,7 @@
 - Blur with text stays expanded
 - Toolbar overflow recalculates on expand/collapse
 
-**Status:** [~] In progress
+**Status:** [x] Complete
 
 ---
 
@@ -541,8 +541,8 @@ Items: **13** (undo/redo), **14** (comparison mode), **15** (inline diagnostics)
 | 8 | Colorblind-safe palette | P2 | 3 | Not started |
 | 9 | Clickable error badge | P2 | 1 | ✅ Complete |
 | 10 | Better batch tab error UX | P2 | 2 | Not started |
-| 11 | Fullscreen exit button | P2 | 2 | 🔧 In progress |
-| 12 | Expandable search box | P3 | 2 | 🔧 In progress |
+| 11 | Fullscreen exit button | P2 | 2 | ✅ Complete |
+| 12 | Expandable search box | P3 | 2 | ✅ Complete |
 | 13 | Undo/redo for layout | P3 | 4 | Not started |
 | 14 | Query comparison mode | P3 | 4 | Not started |
 | 15 | Inline VS Code diagnostics | P3 | 4 | Not started |
