@@ -9,6 +9,7 @@ export {
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,
+    setErrorBadgeClickHandler,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './toolbar';

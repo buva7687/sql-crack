@@ -1480,10 +1480,16 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     // Helper to generate node IDs
     const genId = (prefix: string) => `${prefix}_${nodeId++}`;
 
+    // Strip comments before regex extraction to avoid picking up
+    // table-like words from comment text (e.g. "-- JOIN Patterns")
+    const commentStripped = sql
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+        .replace(/--[^\n]*/g, '');            // line comments
+
     // Check for CTEs FIRST (before extracting regular tables)
     // This ensures CTEs are marked with the correct category
     const ctePattern = /WITH\s+(\w+)\s+AS/i;
-    const cteMatch = ctePattern.exec(sql);
+    const cteMatch = ctePattern.exec(commentStripped);
     const cteNames = new Set<string>();
     
     if (cteMatch) {
@@ -1517,7 +1523,7 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
 
     for (const pattern of tablePatterns) {
         let match;
-        while ((match = pattern.exec(sql)) !== null) {
+        while ((match = pattern.exec(commentStripped)) !== null) {
             let tableName = match[1].replace(/[`"']/g, '');
             // Remove schema prefix if present
             tableName = tableName.split('.').pop() || tableName;
@@ -1545,11 +1551,11 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     let joinMatch;
     let previousTable: string | null = null;
 
-    while ((joinMatch = joinPattern.exec(sql)) !== null) {
+    while ((joinMatch = joinPattern.exec(commentStripped)) !== null) {
         const joinTable = joinMatch[1].replace(/[`"']/g, '').split('.').pop() || joinMatch[1];
-        
+
         // Find the table before this JOIN
-        const beforeMatch = sql.substring(0, joinMatch.index).match(/FROM\s+([`"']?[\w.]+[`"']?)\s*$/i);
+        const beforeMatch = commentStripped.substring(0, joinMatch.index).match(/FROM\s+([`"']?[\w.]+[`"']?)\s*$/i);
         if (beforeMatch) {
             previousTable = beforeMatch[1].replace(/[`"']/g, '').split('.').pop() || beforeMatch[1];
         }
@@ -1567,7 +1573,7 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     }
 
     // Detect statement type for hints
-    const upperSql = sql.toUpperCase().trim();
+    const upperSql = commentStripped.toUpperCase().trim();
     let statementType = 'UNKNOWN';
     if (upperSql.startsWith('SELECT')) statementType = 'SELECT';
     else if (upperSql.startsWith('INSERT')) statementType = 'INSERT';
@@ -1583,7 +1589,7 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         // Extract WHEN MATCHED clauses with their action (keyword after THEN)
         const whenMatchedPattern = /WHEN\s+MATCHED\s+(?:AND\s+[^:]+\s+)?THEN\s+(\w+)/gi;
         let match;
-        while ((match = whenMatchedPattern.exec(sql)) !== null) {
+        while ((match = whenMatchedPattern.exec(commentStripped)) !== null) {
             whenClauses.push({
                 type: 'MATCHED',
                 action: match[1] || 'UPDATE',
@@ -1592,7 +1598,7 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         
         // Extract WHEN NOT MATCHED clauses with their action
         const whenNotMatchedPattern = /WHEN\s+NOT\s+MATCHED\s+(?:BY\s+\w+\s+)?THEN\s+(\w+)/gi;
-        while ((match = whenNotMatchedPattern.exec(sql)) !== null) {
+        while ((match = whenNotMatchedPattern.exec(commentStripped)) !== null) {
             whenClauses.push({
                 type: 'NOT MATCHED',
                 action: match[1] || 'INSERT',
@@ -1600,8 +1606,8 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         }
 
         // Find MERGE target and source tables
-        const mergeTargetMatch = sql.match(/MERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/i);
-        const mergeSourceMatch = sql.match(/USING\s+([`"']?[\w.]+[`"']?)/i);
+        const mergeTargetMatch = commentStripped.match(/MERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/i);
+        const mergeSourceMatch = commentStripped.match(/USING\s+([`"']?[\w.]+[`"']?)/i);
         
         if (mergeTargetMatch && mergeSourceMatch) {
             const targetTable = mergeTargetMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeTargetMatch[1];
@@ -1696,12 +1702,12 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     const stats: QueryStats = {
         tables: tableNames.size,
         joins: edges.length,
-        subqueries: (sql.match(/\bsubquery\b/gi) || []).length,
+        subqueries: (commentStripped.match(/\bsubquery\b/gi) || []).length,
         ctes: cteMatch ? 1 : 0,
-        aggregations: (sql.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
-        windowFunctions: (sql.match(/\bOVER\s*\(/gi) || []).length,
-        unions: (sql.match(/\bUNION\b/gi) || []).length,
-        conditions: (sql.match(/\bWHERE\b/gi) || []).length + (sql.match(/\bHAVING\b/gi) || []).length,
+        aggregations: (commentStripped.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
+        windowFunctions: (commentStripped.match(/\bOVER\s*\(/gi) || []).length,
+        unions: (commentStripped.match(/\bUNION\b/gi) || []).length,
+        conditions: (commentStripped.match(/\bWHERE\b/gi) || []).length + (commentStripped.match(/\bHAVING\b/gi) || []).length,
         complexity: 'Simple',
         complexityScore: tableNames.size * 1 + edges.length * 3,
     };

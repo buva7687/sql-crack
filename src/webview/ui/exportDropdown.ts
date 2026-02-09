@@ -8,6 +8,7 @@ export interface ExportDropdownCallbacks {
     onExportSvg: () => void;
     onExportMermaid: () => void;
     onCopyToClipboard: () => void;
+    onCopyMermaidToClipboard?: () => void;
     isDarkTheme: () => boolean;
 }
 
@@ -77,6 +78,7 @@ export function createExportDropdown(
         { type: 'separator' as const },
         { label: 'SVG', shortcut: '', action: callbacks.onExportSvg },
         { label: 'Mermaid', shortcut: '', action: callbacks.onExportMermaid },
+        ...(callbacks.onCopyMermaidToClipboard ? [{ label: 'Copy Mermaid', shortcut: '', action: callbacks.onCopyMermaidToClipboard }] : []),
     ];
 
     items.forEach(item => {

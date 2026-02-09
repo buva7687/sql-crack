@@ -246,6 +246,21 @@
           ],
           "description": "Position of the color accent strip on visualization nodes"
         },
+        "sqlCrack.showMinimap": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Show when graph has 2+ nodes",
+            "Always show the minimap",
+            "Never show the minimap"
+          ],
+          "description": "Controls when the minimap overview is displayed"
+        },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
           "default": "auto",
@@ -270,6 +285,27 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Combine consecutive DDL statements (CREATE TABLE, CREATE VIEW, etc.) into a single visualization block. Useful for schema files with many DDL statements. Shows count of tables/views created. (Advanced)"
+        },
+        "sqlCrack.advanced.maxFileSizeKB": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 10000,
+          "markdownDescription": "Maximum SQL file size in KB before the parser truncates or rejects the input. Increase for very large SQL files. (Advanced)"
+        },
+        "sqlCrack.advanced.maxStatements": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "markdownDescription": "Maximum number of SQL statements to parse in a single file. Statements beyond this limit are skipped. (Advanced)"
+        },
+        "sqlCrack.advanced.parseTimeoutSeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "markdownDescription": "Maximum time in seconds for parsing a single SQL file. Prevents the extension from hanging on very complex queries. (Advanced)"
         },
         "sqlCrack.advanced.debugLogging": {
           "type": "boolean",

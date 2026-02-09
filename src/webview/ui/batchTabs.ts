@@ -135,8 +135,8 @@ export function updateBatchTabs(
         const isActive = i === currentQueryIndex;
         const hasError = !!query.error;
 
-        tab.innerHTML = `Q${i + 1}`;
-        tab.title = truncateSql(query.sql, 100);
+        tab.innerHTML = extractQueryLabel(query.sql, i);
+        tab.title = `Q${i + 1}: ${truncateSql(query.sql, 200)}`;
         tab.style.cssText = `
             background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
             border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : 'transparent'};
@@ -236,4 +236,42 @@ function truncateSql(sql: string, maxLen: number): string {
     const normalized = sql.replace(/\s+/g, ' ').trim();
     if (normalized.length <= maxLen) { return normalized; }
     return normalized.substring(0, maxLen - 3) + '...';
+}
+
+/**
+ * Extract a meaningful label from SQL text for tab display.
+ * Matches common SQL patterns and returns a short label like "INSERT orders".
+ * Falls back to `Q${index}` if no pattern matches.
+ */
+export function extractQueryLabel(sql: string, fallbackIndex?: number): string {
+    // Strip comments before matching so leading comments don't prevent keyword detection
+    const stripped = sql
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+        .replace(/--[^\n]*/g, '');            // line comments
+    const normalized = stripped.replace(/\s+/g, ' ').trim();
+
+    const patterns: Array<{ regex: RegExp; format: (m: RegExpMatchArray) => string }> = [
+        { regex: /^INSERT\s+INTO\s+(\S+)/i, format: m => `INSERT ${m[1]}` },
+        { regex: /^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?(TABLE|VIEW|INDEX|FUNCTION|PROCEDURE)\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)/i, format: m => `CREATE ${m[2]}` },
+        { regex: /^UPDATE\s+(\S+)/i, format: m => `UPDATE ${m[1]}` },
+        { regex: /^DELETE\s+FROM\s+(\S+)/i, format: m => `DELETE ${m[1]}` },
+        { regex: /^MERGE\s+INTO\s+(\S+)/i, format: m => `MERGE ${m[1]}` },
+        { regex: /^ALTER\s+TABLE\s+(\S+)/i, format: m => `ALTER ${m[1]}` },
+        { regex: /^DROP\s+(TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?(\S+)/i, format: m => `DROP ${m[2]}` },
+        { regex: /^WITH\s+(\w+)\s+AS/i, format: m => `CTE ${m[1]}` },
+        { regex: /^SELECT\s+[\s\S]*?\bFROM\s+(\S+)/i, format: m => `SELECT ${m[1]}` },
+    ];
+
+    for (const { regex, format } of patterns) {
+        const match = normalized.match(regex);
+        if (match) {
+            const label = format(match);
+            if (label.length > 20) {
+                return label.substring(0, 19) + '\u2026';
+            }
+            return label;
+        }
+    }
+
+    return fallbackIndex !== undefined ? `Q${fallbackIndex + 1}` : 'Q?';
 }

@@ -454,6 +454,10 @@ export class VisualizationPanel {
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
         const gridStyle = config.get<string>('gridStyle') || 'dots';
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
+        const showMinimap = config.get<string>('showMinimap') || 'auto';
+        const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
+        const maxStatements = config.get<number>('advanced.maxStatements', 50);
+        const parseTimeoutSeconds = config.get<number>('advanced.parseTimeoutSeconds', 5);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -498,6 +502,10 @@ export class VisualizationPanel {
         window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
         window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
         window.nodeAccentPosition = ${this._escapeForInlineScript(nodeAccentPosition)};
+        window.showMinimap = ${this._escapeForInlineScript(showMinimap)};
+        window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
+        window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
+        window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
         window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
 
         // VS Code API for messaging

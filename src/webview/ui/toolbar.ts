@@ -18,6 +18,7 @@ export interface ToolbarCallbacks {
     onExportSvg: () => void;
     onExportMermaid: () => void;
     onCopyToClipboard: () => void;
+    onCopyMermaidToClipboard?: () => void;
     onToggleLegend: () => void;
     onToggleFocusMode: (active: boolean) => void;
     onFocusModeChange: (mode: FocusMode) => void;
@@ -49,6 +50,24 @@ let hintsSummaryBtn: HTMLButtonElement | null = null;
 const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
 const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
 let lineagePulseApplied = false;
+
+/**
+ * Format a timestamp as a relative time string like "5m ago", "2h ago", "3d ago".
+ */
+function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+
+    if (diffMin < 1) { return 'just now'; }
+    if (diffMin < 60) { return `${diffMin}m ago`; }
+    if (diffHr < 24) { return `${diffHr}h ago`; }
+    if (diffDay < 30) { return `${diffDay}d ago`; }
+    return `${Math.floor(diffDay / 30)}mo ago`;
+}
 
 function getOverflowPalette(dark: boolean): {
     background: string;
@@ -783,6 +802,7 @@ function createExportGroup(
         onExportSvg: callbacks.onExportSvg,
         onExportMermaid: callbacks.onExportMermaid,
         onCopyToClipboard: callbacks.onCopyToClipboard,
+        onCopyMermaidToClipboard: callbacks.onCopyMermaidToClipboard,
         isDarkTheme: callbacks.isDarkTheme,
     }, documentListeners);
 
@@ -1401,13 +1421,14 @@ function createPinnedTabsDropdown(
         `;
 
         const date = new Date(pin.timestamp);
-        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const absoluteTimeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const relativeTimeStr = formatRelativeTime(pin.timestamp);
 
         item.innerHTML = `
             <span style="font-size: 12px;">📌</span>
             <div style="flex: 1; overflow: hidden;">
                 <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • ${timeStr}</div>
+                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • <span title="${absoluteTimeStr}">${relativeTimeStr}</span></div>
             </div>
         `;
 
@@ -1696,6 +1717,18 @@ export function clearRefreshButtonStale(): void {
  * Update or hide the error notification badge in the toolbar
  * Shows number of failed queries when errors exist
  */
+let errorBadgeClickCallback: ((queryIndex: number) => void) | null = null;
+let errorCycleIndex = 0;
+let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number }> = [];
+
+/**
+ * Register a callback for when the error badge is clicked.
+ * Cycles through error query indices on each click.
+ */
+export function setErrorBadgeClickHandler(callback: (queryIndex: number) => void): void {
+    errorBadgeClickCallback = callback;
+}
+
 export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number }>): void {
     const existingBadge = document.getElementById('sql-crack-error-badge');
 
@@ -1706,6 +1739,10 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         }
         return;
     }
+
+    // Store current errors for click handler and reset cycle
+    currentBadgeErrors = errors || [];
+    errorCycleIndex = 0;
 
     // Create or update badge
     // Position below the toolbar row to avoid overlap with batch tabs
@@ -1733,6 +1770,14 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         });
         badge.addEventListener('mouseleave', () => {
             badge!.style.background = 'rgba(239, 68, 68, 0.15)';
+        });
+
+        // Click to cycle through errors
+        badge.addEventListener('click', () => {
+            if (currentBadgeErrors.length > 0 && errorBadgeClickCallback) {
+                errorBadgeClickCallback(currentBadgeErrors[errorCycleIndex % currentBadgeErrors.length].queryIndex);
+                errorCycleIndex = (errorCycleIndex + 1) % currentBadgeErrors.length;
+            }
         });
 
         // Insert into root container

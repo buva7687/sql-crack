@@ -2428,9 +2428,11 @@ ${nodesHtml}
      */
     private getEmptyWorkspaceHtml(): string {
         const styles = getStateStyles(this._isDarkTheme);
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2443,8 +2445,12 @@ ${nodesHtml}
             </svg>
         </div>
         <div class="title">No SQL Files Found</div>
-        <div class="subtitle">Add .sql files to your workspace to visualize dependencies.</div>
+        <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
+        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+            Refresh
+        </button>
     </div>
+    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
 </body>
 </html>`;
     }

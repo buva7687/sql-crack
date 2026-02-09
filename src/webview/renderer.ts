@@ -347,7 +347,7 @@ export function initRenderer(container: HTMLElement): void {
     minimapContainer.style.cssText = `
         position: absolute;
         right: 16px;
-        top: 60px;
+        bottom: 16px;
         width: 150px;
         height: 100px;
         background: ${UI_COLORS.backgroundPanel};
@@ -1494,6 +1494,9 @@ export function render(result: ParseResult): void {
         renderNodes = [];
         renderEdges = [];
         renderNodeMap.clear();
+        // Clear stale column data so pressing "C" doesn't show previous query's lineage
+        currentColumnLineage = [];
+        currentColumnFlows = [];
         renderError(result.error);
         updateStatsPanel();
         updateHintsPanel();
@@ -1506,6 +1509,9 @@ export function render(result: ParseResult): void {
         renderNodes = [];
         renderEdges = [];
         renderNodeMap.clear();
+        // Clear stale column data so pressing "C" doesn't show previous query's lineage
+        currentColumnLineage = [];
+        currentColumnFlows = [];
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -6000,6 +6006,28 @@ ${mermaidCode}
     a.click();
 
     URL.revokeObjectURL(url);
+}
+
+/**
+ * Copy Mermaid flowchart code to clipboard
+ */
+export function copyMermaidToClipboard(): void {
+    if (currentNodes.length === 0) {
+        return;
+    }
+
+    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
+    navigator.clipboard.writeText(mermaidCode).catch(() => {
+        // Fallback: use textarea method
+        const textarea = document.createElement('textarea');
+        textarea.value = mermaidCode;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+    });
 }
 
 /**

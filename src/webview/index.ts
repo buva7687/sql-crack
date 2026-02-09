@@ -3,6 +3,8 @@ import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
 import { parseBatchAsync } from './parserClient';
+import { setMinimapMode, MinimapMode } from './minimapVisibility';
+import { setParseTimeout } from './sqlParser';
 import { BatchParseResult, LayoutType, SqlDialect } from './types';
 import {
     initRenderer,
@@ -36,7 +38,8 @@ import {
     toggleTheme,
     isDarkTheme,
     getKeyboardShortcuts,
-    highlightNodeAtLine
+    highlightNodeAtLine,
+    copyMermaidToClipboard
 } from './renderer';
 
 import {
@@ -45,6 +48,7 @@ import {
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,
+    setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
     findPinnedTab,
@@ -72,6 +76,10 @@ declare global {
         combineDdlStatements?: boolean;
         gridStyle?: string;
         nodeAccentPosition?: string;
+        showMinimap?: string;
+        maxFileSizeKB?: number;
+        maxStatements?: number;
+        parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
@@ -176,6 +184,15 @@ function init(): void {
     // Initialize SVG renderer
     initRenderer(container);
 
+    // Apply minimap mode from settings
+    const minimapMode = (window.showMinimap as MinimapMode) || 'auto';
+    setMinimapMode(minimapMode);
+
+    // Apply configurable parse timeout
+    if (window.parseTimeoutSeconds) {
+        setParseTimeout(window.parseTimeoutSeconds * 1000);
+    }
+
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
         currentDialect,
@@ -193,6 +210,11 @@ function init(): void {
             switchToQueryIndex(index);
         },
         isDarkTheme
+    });
+
+    // Wire error badge click to switch to the errored query
+    setErrorBadgeClickHandler((queryIndex: number) => {
+        switchToQueryIndex(queryIndex);
     });
 
     // Keyboard shortcuts for query navigation
@@ -251,6 +273,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onExportSvg: exportToSvg,
         onExportMermaid: exportToMermaid,
         onCopyToClipboard: copyToClipboard,
+        onCopyMermaidToClipboard: copyMermaidToClipboard,
         onToggleLegend: toggleLegend,
         onToggleFocusMode: toggleFocusMode,
         onFocusModeChange: setFocusMode,
@@ -340,10 +363,14 @@ async function visualize(sql: string): Promise<void> {
 
     try {
         const t0 = performance.now();
+        const customLimits = {
+            maxSqlSizeBytes: (window.maxFileSizeKB || 100) * 1024,
+            maxQueryCount: window.maxStatements || 50,
+        };
         const result = await parseBatchAsync(
             sql,
             currentDialect,
-            undefined,
+            customLimits,
             {
                 combineDdlStatements: window.combineDdlStatements === true
             }
