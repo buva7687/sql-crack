@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
+import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 
 interface VisualizationOptions {
     dialect: string;
@@ -264,7 +265,7 @@ export class VisualizationPanel {
 
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
-            message => {
+            (message: SqlFlowWebviewMessage) => {
                 switch (message.command) {
                     case 'error':
                         vscode.window.showErrorMessage(message.text);
@@ -378,7 +379,7 @@ export class VisualizationPanel {
         }
     }
 
-    private _postMessage(message: any) {
+    private _postMessage(message: SqlFlowHostMessage) {
         this._panel.webview.postMessage(message);
     }
 

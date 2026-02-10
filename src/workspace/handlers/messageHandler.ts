@@ -17,6 +17,7 @@ import { LineageView } from '../ui/lineageView';
 import { ImpactView } from '../ui/impactView';
 import { ViewMode } from '../ui/types';
 import { logger } from '../../logger';
+import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../../shared/messages';
 
 /**
  * Context interface for message handler
@@ -176,7 +177,11 @@ export class MessageHandler {
     /**
      * Main message router - dispatches messages to appropriate handlers
      */
-    public async handleMessage(message: any): Promise<void> {
+    private postMessage(msg: WorkspaceHostMessage): void {
+        this._context.panel.webview.postMessage(msg);
+    }
+
+    public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
         switch (message.command) {
             case 'switchView':
                 this.handleSwitchView(message.view);
@@ -318,7 +323,7 @@ export class MessageHandler {
                 break;
 
             default:
-                logger.warn(`Unknown message command: ${message.command}`);
+                logger.warn(`Unknown message command: ${(message as { command: string }).command}`);
         }
     }
 
@@ -383,7 +388,7 @@ export class MessageHandler {
         this._context.setIsDarkTheme(newDark);
         // Send CSS swap to webview instead of full HTML rebuild to avoid flicker
         const css = this._context.getThemeCss(newDark);
-        this._context.panel.webview.postMessage({ command: 'themeChanged', css, isDark: newDark });
+        this.postMessage({ command: 'themeChanged', css, isDark: newDark });
     }
 
     // ========== File Operations ==========
@@ -434,7 +439,7 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
         if (lineageGraph) {
             const html = this._context.getLineageView().generateLineageOverview(lineageGraph);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageOverviewResult',
                 data: { html }
             });
@@ -448,13 +453,13 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
         if (lineageGraph) {
             const html = this._context.getImpactView().generateImpactForm(lineageGraph);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'impactFormResult',
                 data: { html }
             });
         } else {
             const html = this._context.getImpactView().generateImpactForm(null);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'impactFormResult',
                 data: { html }
             });
@@ -492,7 +497,7 @@ export class MessageHandler {
         this._context.setCurrentFlowResult(result);
 
         // Send result to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageResult',
             data: {
                 nodeId,
@@ -533,7 +538,7 @@ export class MessageHandler {
         this._context.setCurrentImpactReport(report);
 
         // Send result to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'impactResult',
             data: {
                 report: {
@@ -589,7 +594,7 @@ export class MessageHandler {
             } else {
                 errorMsg += ' Make sure the table exists in your SQL files and the workspace index is up to date.';
             }
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'tableDetailResult',
                 data: { error: errorMsg }
             });
@@ -603,7 +608,7 @@ export class MessageHandler {
             graph: lineageGraph
         });
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'tableDetailResult',
             data: {
                 table: {
@@ -633,7 +638,7 @@ export class MessageHandler {
 
         const html = this._context.getLineageView().generateColumnLineageView(lineage);
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnLineageResult',
             data: {
                 tableName,
@@ -688,7 +693,7 @@ export class MessageHandler {
         }
 
         if (nodeIds.size === 0) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -709,7 +714,7 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'upstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -746,7 +751,7 @@ export class MessageHandler {
         }
 
         if (nodeIds.size === 0) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -767,7 +772,7 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'downstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -784,7 +789,7 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageSearchResults',
                 data: { results: [] }
             });
@@ -821,7 +826,7 @@ export class MessageHandler {
             return a.name.localeCompare(b.name);
         });
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageSearchResults',
             data: { results: results.slice(0, 15) }
         });
@@ -837,7 +842,7 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageGraphResult',
                 data: { error: 'No lineage graph available. Open SQL files in your workspace and click Refresh to build the dependency index.' }
             });
@@ -855,7 +860,7 @@ export class MessageHandler {
             }
         );
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageGraphResult',
             data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
         });
@@ -871,7 +876,7 @@ export class MessageHandler {
         if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'nodeColumnsResult',
             data: { nodeId }
         });
@@ -887,7 +892,7 @@ export class MessageHandler {
 
     private handleCollapseNodeColumns(nodeId: string): void {
         // Collapse node - send confirmation to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'nodeCollapsedResult',
             data: { nodeId }
         });
@@ -911,7 +916,7 @@ export class MessageHandler {
         );
 
         // Send result back to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnLineageResult',
             data: {
                 tableId,
@@ -923,7 +928,7 @@ export class MessageHandler {
     }
 
     private async handleClearColumnSelection(): Promise<void> {
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnSelectionCleared'
         });
     }

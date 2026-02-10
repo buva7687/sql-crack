@@ -37,6 +37,7 @@ import { MessageHandler, MessageHandlerContext } from './handlers';
 // Shared theme
 import { getReferenceTypeColor, getWorkspaceNodeColor, ICONS } from '../shared';
 import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from './exportUtils';
+import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
 
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_LINEAGE_DEPTH = 5;
@@ -101,6 +102,10 @@ export class WorkspacePanel {
     // Theme state
     private _isDarkTheme: boolean = true;
 
+    private _postMessage(msg: WorkspaceHostMessage): void {
+        this._panel.webview.postMessage(msg);
+    }
+
     /**
      * Create or show the workspace panel
      */
@@ -161,7 +166,7 @@ export class WorkspacePanel {
 
         // Handle messages from webview
         this._panel.webview.onDidReceiveMessage(
-            async message => {
+            async (message: WorkspaceWebviewMessage) => {
                 if (this._messageHandler) {
                     await this._messageHandler.handleMessage(message);
                 }
@@ -180,7 +185,7 @@ export class WorkspacePanel {
             () => {
                 this._isDarkTheme = this.getThemeFromSettings();
                 const css = getWebviewStyles(this._isDarkTheme);
-                this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
+                this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
             this._disposables
@@ -192,12 +197,12 @@ export class WorkspacePanel {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
                     const css = getWebviewStyles(this._isDarkTheme);
-                    this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
+                    this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
                 if (e.affectsConfiguration('sqlCrack.workspaceLineageDepth')) {
                     const lineageDepth = WorkspacePanel.resolveDefaultLineageDepth();
                     this._tableExplorer.setTraversalDepth(lineageDepth);
-                    this._panel.webview.postMessage({
+                    this._postMessage({
                         command: 'workspaceLineageDepthUpdated',
                         depth: lineageDepth
                     });
@@ -529,7 +534,7 @@ export class WorkspacePanel {
         this._currentFlowResult = result;
 
         // Send result to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageResult',
             data: {
                 nodeId,
@@ -571,7 +576,7 @@ export class WorkspacePanel {
         this._currentImpactReport = report;
 
         // Send result to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'impactResult',
             data: {
                 report: {
@@ -613,7 +618,7 @@ export class WorkspacePanel {
         const node = this._lineageGraph.nodes.get(nodeId);
 
         if (!node) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'tableDetailResult',
                 data: { error: `Table "${tableName}" not found in lineage graph` }
             });
@@ -627,7 +632,7 @@ export class WorkspacePanel {
             graph: this._lineageGraph
         });
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'tableDetailResult',
             data: {
                 table: {
@@ -657,7 +662,7 @@ export class WorkspacePanel {
 
         const html = this._lineageView.generateColumnLineageView(lineage);
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnLineageResult',
             data: {
                 tableName,
@@ -709,7 +714,7 @@ export class WorkspacePanel {
         }
 
         if (nodeIds.length === 0) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -730,7 +735,7 @@ export class WorkspacePanel {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'upstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -762,7 +767,7 @@ export class WorkspacePanel {
         }
 
         if (nodeIds.length === 0) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -783,7 +788,7 @@ export class WorkspacePanel {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'downstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -801,7 +806,7 @@ export class WorkspacePanel {
     private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
         await this.buildLineageGraph();
         if (!this._lineageGraph) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'lineageSearchResults',
                 data: { results: [] }
             });
@@ -838,7 +843,7 @@ export class WorkspacePanel {
             return a.name.localeCompare(b.name);
         });
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageSearchResults',
             data: { results: results.slice(0, 15) }
         });
@@ -855,7 +860,7 @@ export class WorkspacePanel {
     ): Promise<void> {
         await this.buildLineageGraph();
         if (!this._lineageGraph) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'lineageGraphResult',
                 data: { error: 'No lineage graph available' }
             });
@@ -873,7 +878,7 @@ export class WorkspacePanel {
             }
         );
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageGraphResult',
             data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
         });
@@ -892,7 +897,7 @@ export class WorkspacePanel {
         if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'nodeColumnsResult',
             data: { nodeId }
         });
@@ -924,7 +929,7 @@ export class WorkspacePanel {
         );
 
         // Send result back to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnLineageResult',
             data: {
                 tableId,
@@ -939,7 +944,7 @@ export class WorkspacePanel {
      * Clear column selection
      */
     private async handleClearColumnSelection(): Promise<void> {
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnSelectionCleared'
         });
     }
@@ -1810,11 +1815,11 @@ ${bodyContent}
         }
 
         if (format === 'clipboard-png') {
-            this._panel.webview.postMessage({ command: 'exportPngClipboard' });
+            this._postMessage({ command: 'exportPngClipboard' });
         } else if (format === 'png') {
             // Request PNG export from webview
             // The webview will convert SVG to PNG via canvas and send back the data
-            this._panel.webview.postMessage({ command: 'exportPng' });
+            this._postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
         } else if (format === 'copy-mermaid') {
