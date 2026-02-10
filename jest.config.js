@@ -18,7 +18,10 @@ module.exports = {
     'src/**/*.ts',
     '!src/**/*.d.ts',
     '!src/test/**',
-    '!src/webview/ui/**'
+    '!src/webview/ui/**',
+    // workspacePanel.ts is a large webview template/renderer shell that is
+    // primarily validated by integration/DOM behavior tests, not line coverage.
+    '!src/workspace/workspacePanel.ts'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
