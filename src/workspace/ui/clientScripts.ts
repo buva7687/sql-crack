@@ -2909,15 +2909,13 @@ function getLineageGraphScript(): string {
                 updateLineageTransform();
             });
 
-            zoomResetBtn?.addEventListener('click', () => {
+            zoomFitBtn?.addEventListener('click', () => {
                 fitToContainer();
                 if (svg) {
                     const nodes = svg.querySelectorAll('.lineage-node');
                     if (nodes) clearLineageFocus(nodes);
                 }
             });
-
-            zoomFitBtn?.addEventListener('click', fitToContainer);
 
             if (!svg || !graphContainer) return;
 

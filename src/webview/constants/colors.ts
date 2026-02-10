@@ -391,13 +391,13 @@ export { NODE_ACCENT_COLORS, getNodeAccentColor } from '../../shared/themeTokens
 export const NODE_SURFACE = {
     light: {
         fill: '#FFFFFF',
-        border: '#E2E8F0',
+        border: '#94A3B8',
         text: '#1E293B',
         textMuted: '#64748B',
     },
     dark: {
         fill: '#1A1A1A',
-        border: '#2A2A2A',
+        border: '#475569',
         text: '#F1F5F9',
         textMuted: '#71717A',
     },
