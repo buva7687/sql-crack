@@ -4,6 +4,7 @@
 
 import type { LayoutType } from '../types';
 import { getComponentUiColors } from '../constants';
+import { ICONS } from '../../shared/icons';
 
 export interface LayoutPickerCallbacks {
     onLayoutChange: (layout: LayoutType) => void;
@@ -12,11 +13,11 @@ export interface LayoutPickerCallbacks {
 }
 
 const LAYOUTS: Array<{ value: LayoutType; label: string; icon: string; desc: string; key: string }> = [
-    { value: 'vertical', label: 'Vertical', icon: '↓', desc: 'Top-to-bottom flow', key: '1' },
-    { value: 'horizontal', label: 'Horizontal', icon: '→', desc: 'Left-to-right flow', key: '2' },
-    { value: 'compact', label: 'Compact', icon: '⊞', desc: 'Tighter spacing', key: '3' },
-    { value: 'force', label: 'Force', icon: '◎', desc: 'Physics-based positioning', key: '4' },
-    { value: 'radial', label: 'Radial', icon: '◉', desc: 'Root at center, rings', key: '5' },
+    { value: 'vertical', label: 'Vertical', icon: ICONS.layoutVertical, desc: 'Top-to-bottom flow', key: '1' },
+    { value: 'horizontal', label: 'Horizontal', icon: ICONS.layoutHorizontal, desc: 'Left-to-right flow', key: '2' },
+    { value: 'compact', label: 'Compact', icon: ICONS.layoutCompact, desc: 'Tighter spacing', key: '3' },
+    { value: 'force', label: 'Force', icon: ICONS.layoutForce, desc: 'Physics-based positioning', key: '4' },
+    { value: 'radial', label: 'Radial', icon: ICONS.layoutRadial, desc: 'Root at center, rings', key: '5' },
 ];
 
 let pickerElement: HTMLDivElement | null = null;
@@ -174,7 +175,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
         `;
 
         item.innerHTML = `
-            <span style="font-size: 14px; min-width: 18px; text-align: center;">${layout.icon}</span>
+            <span style="display: inline-flex; min-width: 18px; align-items: center; justify-content: center;">${layout.icon}</span>
             <div style="flex: 1;">
                 <div style="font-weight: 500;">${layout.label}</div>
                 <div style="font-size: 10px; color: ${theme.textDim};">${layout.desc}</div>
@@ -216,5 +217,5 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
 
 function getLayoutIcon(layout: LayoutType): string {
     const found = LAYOUTS.find(l => l.value === layout);
-    return found ? found.icon : '↓';
+    return found ? found.icon : ICONS.layoutVertical;
 }
