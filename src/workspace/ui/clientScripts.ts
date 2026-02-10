@@ -1209,6 +1209,15 @@ function getViewModeScript(): string {
             return escapeBreadcrumbText(value).replace(/"/g, '&quot;');
         }
 
+        function escapeHtmlSafe(text) {
+            return (text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         function updateWorkspaceBreadcrumb() {
             if (!workspaceBreadcrumb) return;
             if (currentViewMode === 'graph') {
@@ -1754,8 +1763,8 @@ function getMessageHandlingScript(): string {
                         html += '<div style="display: grid; gap: 8px;">';
                         nodes.forEach(n => {
                             html += '<div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;" onclick="vscode.postMessage({command:\\'openFileAtLine\\', filePath:\\'' + (n.filePath || '').replace(/'/g, "\\\\'") + '\\', line: ' + (n.lineNumber || 0) + '})">';
-                            html += '<div style="font-weight: 600; color: var(--text-primary);">' + n.name + '</div>';
-                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + n.type + (n.filePath ? ' • ' + n.filePath.split('/').pop() : '') + '</div>';
+                            html += '<div style="font-weight: 600; color: var(--text-primary);">' + escapeHtmlSafe(n.name) + '</div>';
+                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(n.filePath.split('/').pop()) : '') + '</div>';
                             html += '</div>';
                         });
                         html += '</div>';
@@ -1777,7 +1786,7 @@ function getMessageHandlingScript(): string {
                 case 'tableDetailResult':
                     if (lineageContent) {
                         if (message.data?.error) {
-                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + message.data.error + '</div>';
+                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                         } else if (message.data?.html) {
                             lineageContent.innerHTML = message.data.html;
                         }
