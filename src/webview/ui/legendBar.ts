@@ -24,7 +24,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
 };
 
 let legendBarElement: HTMLDivElement | null = null;
-let legendVisible = false;
+let legendVisible = true;
 const STORAGE_KEY = 'sqlCrack.legendBarVisible';
 
 /**
@@ -42,7 +42,8 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
     // Check stored preference
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        legendVisible = stored === 'true';
+        // Default visible for first-time users; only explicit "false" hides it.
+        legendVisible = stored !== 'false';
     } catch { /* localStorage may not be available */ }
 
     if (!legendVisible) {

@@ -113,7 +113,7 @@ const state: ViewState = {
     searchResults: [],
     currentSearchIndex: -1,
     focusModeEnabled: false,
-    legendVisible: false,
+    legendVisible: true,
     highlightedColumnSources: [],
     isFullscreen: false,
     isDarkTheme: true,
