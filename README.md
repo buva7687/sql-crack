@@ -282,6 +282,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
+| `sqlCrack.advanced.showDiagnosticsInProblems` | `false` | Show SQL Crack hints/errors in VS Code Problems panel |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
 | `sqlCrack.advanced.maxFileSizeKB` | `100` | Max SQL file size before truncation handling (10-10000) |

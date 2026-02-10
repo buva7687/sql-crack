@@ -104,8 +104,17 @@ export function activate(context: vscode.ExtensionContext) {
     const diagnosticsCollection = vscode.languages.createDiagnosticCollection('sql-crack');
     context.subscriptions.push(diagnosticsCollection);
 
+    const shouldShowDiagnosticsInProblems = (): boolean => {
+        return getConfig().get<boolean>('advanced.showDiagnosticsInProblems', false);
+    };
+
     const updateDiagnosticsForDocument = (document: vscode.TextDocument): void => {
         if (!isSqlLikeDocument(document)) {
+            diagnosticsCollection.delete(document.uri);
+            return;
+        }
+
+        if (!shouldShowDiagnosticsInProblems()) {
             diagnosticsCollection.delete(document.uri);
             return;
         }
@@ -369,7 +378,7 @@ export function activate(context: vscode.ExtensionContext) {
         const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
 
-        if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh) {
+        if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh && shouldShowDiagnosticsInProblems()) {
             if (diagnosticsRefreshTimer) {
                 clearTimeout(diagnosticsRefreshTimer);
             }
@@ -422,6 +431,15 @@ export function activate(context: vscode.ExtensionContext) {
             loadAdditionalExtensions();
             // Re-evaluate context for current editor with new extensions
             updateSqlLikeFileContext(vscode.window.activeTextEditor);
+        }
+        if (e.affectsConfiguration('sqlCrack.advanced.showDiagnosticsInProblems')) {
+            if (!shouldShowDiagnosticsInProblems()) {
+                diagnosticsCollection.clear();
+            } else {
+                vscode.workspace.textDocuments.forEach((document) => {
+                    updateDiagnosticsForDocument(document);
+                });
+            }
         }
     });
 

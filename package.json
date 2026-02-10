@@ -293,6 +293,11 @@
           ],
           "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },
+        "sqlCrack.advanced.showDiagnosticsInProblems": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show SQL Crack parser/performance hints in VS Code Problems panel. Disabled by default to reduce noise; enable when you want lint-like feedback in Problems. (Advanced)"
+        },
         "sqlCrack.advanced.showDeadColumnHints": {
           "type": "boolean",
           "default": true,

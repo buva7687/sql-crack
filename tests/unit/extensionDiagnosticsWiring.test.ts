@@ -17,6 +17,13 @@ describe('extension diagnostics wiring', () => {
         expect(source).toContain('diagnosticsCollection.delete(document.uri);');
     });
 
+    it('gates problems diagnostics behind advanced.showDiagnosticsInProblems and clears on disable', () => {
+        expect(source).toContain("get<boolean>('advanced.showDiagnosticsInProblems', false)");
+        expect(source).toContain("if (!shouldShowDiagnosticsInProblems()) {");
+        expect(source).toContain("e.affectsConfiguration('sqlCrack.advanced.showDiagnosticsInProblems')");
+        expect(source).toContain('diagnosticsCollection.clear();');
+    });
+
     it('registers quick-fix code actions for SQL diagnostics', () => {
         expect(source).toContain('vscode.languages.registerCodeActionsProvider');
         expect(source).toContain('new SqlCrackCodeActionProvider()');
