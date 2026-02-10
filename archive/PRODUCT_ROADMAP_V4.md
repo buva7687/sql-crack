@@ -276,11 +276,13 @@ type WebviewMessage =
 ```
 
 **Files:**
-- New file: `src/types/messages.ts` (or split into `sqlFlowMessages.ts` / `workspaceMessages.ts`)
-- `src/visualizationPanel.ts` — type the `onDidReceiveMessage` handler
-- `src/workspace/handlers/messageHandler.ts` — type `handleMessage()`
+- `src/shared/messages/sqlFlowMessages.ts` — `SqlFlowWebviewMessage`, `SqlFlowHostMessage`
+- `src/shared/messages/workspaceMessages.ts` — `WorkspaceWebviewMessage`, `WorkspaceHostMessage`
+- `src/shared/messages/index.ts` — barrel re-exports
+- `src/visualizationPanel.ts` — typed `onDidReceiveMessage` and `_postMessage`
+- `src/workspace/handlers/messageHandler.ts` — typed `handleMessage()` and `postMessage`
 
-**Status:** [ ] Not started
+**Status:** [x] Complete — Types in `src/shared/messages/`, wired into all handlers
 
 ---
 
@@ -419,7 +421,7 @@ Items: **16** (split clientScripts.ts), **17** (split renderer.ts)
 | 9 | Complete prefers-reduced-motion | P2 | 2 | ✅ Complete (`2dc8e01`, follow-up `8d566a3`) |
 | 10 | Toolbar resize debouncing | P2 | 2 | ✅ Complete (`bfbb932`, follow-up `8d566a3`) |
 | 11 | Export preview + PDF (V3 carry) | P1 | 3 | Not started |
-| 12 | Typed message protocol | P2 | 3 | Not started |
+| 12 | Typed message protocol | P2 | 3 | ✅ Complete |
 | 13 | Event listener cleanup | P3 | 3 | ✅ Complete |
 | 14 | Walkthrough media content | P3 | 3 | Not started |
 | 15 | Debug logging docs fix | P3 | 3 | ✅ Complete |
