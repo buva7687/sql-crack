@@ -7,7 +7,7 @@ import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
 /**
  * Type of change being analyzed
  */
-export type ChangeType = 'modify' | 'rename' | 'drop';
+export type ChangeType = 'modify' | 'rename' | 'drop' | 'addColumn';
 
 /**
  * Impact analysis report
@@ -466,6 +466,11 @@ export class ImpactAnalyzer {
         if (changeType === 'rename') {
             suggestions.push(`Update all references to ${type} '${name}' before renaming`);
             suggestions.push(`Consider creating a synonym or alias for backward compatibility`);
+        }
+
+        if (changeType === 'addColumn') {
+            suggestions.push(`Consumers using SELECT * may break if they feed into fixed-schema targets (e.g., INSERT INTO)`);
+            suggestions.push(`Replace SELECT * with explicit column lists in downstream queries to avoid schema drift`);
         }
 
         if (severity === 'critical' || severity === 'high') {

@@ -561,7 +561,7 @@ export class WorkspacePanel {
         type: 'table' | 'column',
         name: string,
         tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' = 'modify'
+        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
     ): Promise<void> {
         await this.buildLineageGraph();
         if (!this._impactAnalyzer) {return;}
@@ -1068,8 +1068,8 @@ ${bodyContent}
                         Lineage
                     </button>
                     <button class="view-tab" data-view="impact" 
-                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."
-                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes.">
+                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes."
+                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes.">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                         </svg>

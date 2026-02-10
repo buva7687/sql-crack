@@ -521,7 +521,7 @@ export class MessageHandler {
         type: 'table' | 'column',
         name: string,
         tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' = 'modify'
+        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const impactAnalyzer = this._context.getImpactAnalyzer();
