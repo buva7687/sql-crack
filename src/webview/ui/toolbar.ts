@@ -728,8 +728,19 @@ function setupOverflowObserver(
         applyOverflowMenuTheme(isDarkTheme());
     };
 
+    let overflowResizeDebounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleOverflowUpdate = () => {
+        if (overflowResizeDebounce) {
+            window.clearTimeout(overflowResizeDebounce);
+        }
+        overflowResizeDebounce = window.setTimeout(() => {
+            overflowResizeDebounce = null;
+            updateOverflow();
+        }, 100);
+    };
+
     const observer = new ResizeObserver(() => {
-        updateOverflow();
+        scheduleOverflowUpdate();
     });
     observer.observe(toolbarWrapper);
 
