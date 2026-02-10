@@ -11,7 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Undo/redo layout history**: Added bounded history for layout-affecting actions (drag, zoom, reset, layout, focus mode) with toolbar controls and keyboard shortcuts (`Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z`).
 - **Query comparison mode**: Added side-by-side baseline/current compare overlay with added/removed/changed node highlighting and stats delta summary.
-- **Inline VS Code diagnostics**: SQL Crack parser hints now surface as editor diagnostics, with a Quick Fix action (**Show in SQL Flow**) to open the visualization directly.
+- **Inline VS Code diagnostics**: SQL Crack parser hints now surface as editor diagnostics, with a Quick Fix action (**Show in SQL Flow**) to open the visualization directly. Gated behind `sqlCrack.advanced.showDiagnosticsInProblems` (off by default) to reduce noise.
+- **Typed message protocol**: Added discriminated union types (`SqlFlowWebviewMessage`, `SqlFlowHostMessage`, `WorkspaceWebviewMessage`, `WorkspaceHostMessage`) for compile-time safety on all webview↔host message handlers.
+- **Impact analysis `addColumn` change type**: Workspace impact analyzer now supports `addColumn` alongside `modify`, `rename`, and `drop`.
+- **MIT license in manifest**: Added `license` field to `package.json` for marketplace compliance.
 - **UI listener lifecycle cleanup**: Added AbortController-based listener teardown for legend bar, command bar, layout picker, and export dropdown module re-initialization paths.
 - **Compare mode KPI example pair**: Added `compare-mode-kpi-before.sql` and `compare-mode-kpi-after.sql` to demonstrate correlated-subquery baseline vs CTE/join refactor diffs.
 
@@ -20,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Toolbar controls**: Added compare toggle and undo/redo controls with active/disabled state synchronization.
 - **Diagnostics lifecycle**: Diagnostics are refreshed on open/save/auto-refresh, and cleared for closed documents or empty/non-SQL content.
 - **Documentation sync**: Updated root and examples README content to reflect roadmap-delivered features/settings (compare mode, undo/redo, diagnostics, parser reliability, and current workspace view model).
+- **Node border contrast**: Increased SQL Flow node border visibility — light theme `#E2E8F0`→`#94A3B8`, dark theme `#2A2A2A`→`#475569` — for better node definition without competing with semantic strokes.
+- **Workspace zoom controls cleanup**: Replaced refresh-style "Reset view" icon with crosshair/target icon on Graph tab; removed redundant "Reset view" button from lineage zoom controls.
 - **Legend default behavior**: Query-view legend now defaults to visible for first-time users while preserving saved dismissal state.
 - **Layout picker visuals**: Replaced unicode layout glyphs with shared SVG icons for consistent rendering across platforms.
 - **Accessibility consistency**: Unified reduced-motion handling across legend bar, breadcrumb bar, export dropdown, command bar, toolbar, and renderer via a shared motion utility.
@@ -41,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parser resilience**: Added safe string handling to prevent `.toLowerCase()` crashes when AST values are non-string objects.
 - **Hints panel interaction**: Hint rows now allow copy/select text (switched from button semantics to text-friendly container rendering).
 - **Hints panel/legend overlap regressions**: Hints panel now reflows above the legend when legend height changes (toggle, wrap, viewport resize), with viewport-clamped panel/list heights.
+- **Lineage fit-to-screen**: Fixed "Fit to screen" button in Data Lineage view — click handler was passing the MouseEvent as the `isAutoFit` parameter, causing the deduplication guard to silently block manual fits.
+- **Diagnostics config key mismatch**: Fixed `advanced.*` config key resolution for diagnostics settings.
 
 ### Tests
 
