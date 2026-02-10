@@ -13,6 +13,7 @@ let commandBarElement: HTMLDivElement | null = null;
 let commandInputElement: HTMLInputElement | null = null;
 let isVisible = false;
 let registeredActions: CommandBarAction[] = [];
+let commandBarThemeResolver: (() => boolean) | null = null;
 
 /**
  * Register a list of actions that the command bar can execute.
@@ -28,6 +29,7 @@ export function createCommandBar(
     container: HTMLElement,
     isDarkTheme: () => boolean
 ): HTMLDivElement {
+    commandBarThemeResolver = isDarkTheme;
     commandBarElement = document.createElement('div');
     commandBarElement.id = 'sql-crack-command-bar';
     commandBarElement.setAttribute('role', 'dialog');
@@ -246,7 +248,7 @@ export function showCommandBar(): void {
     // Render initial results
     const results = commandBarElement.querySelector('#command-bar-results') as HTMLElement;
     if (results) {
-        renderResults(results, '', () => document.documentElement.classList.contains('vscode-dark'));
+        renderResults(results, '', commandBarThemeResolver ?? (() => true));
     }
 }
 
