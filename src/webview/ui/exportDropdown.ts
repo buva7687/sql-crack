@@ -2,6 +2,7 @@
 // Replaces separate PNG, SVG, MMD, clipboard buttons
 // Uses position: fixed and appends to body to escape overflow:hidden clipping
 import { getComponentUiColors } from '../constants';
+import { prefersReducedMotion } from './motion';
 
 export interface ExportDropdownCallbacks {
     onExportPng: () => void;
@@ -30,6 +31,7 @@ export function createExportDropdown(
 
     const isDark = callbacks.isDarkTheme();
     const theme = getComponentUiColors(isDark);
+    const reducedMotion = prefersReducedMotion();
 
     // Trigger button
     const btn = document.createElement('button');
@@ -47,7 +49,7 @@ export function createExportDropdown(
         cursor: pointer;
         font-size: 11px;
         font-weight: 600;
-        transition: background 0.15s;
+        transition: ${reducedMotion ? 'none' : 'background 0.15s'};
     `;
     triggerBtn = btn;
 
@@ -104,7 +106,7 @@ export function createExportDropdown(
             justify-content: space-between;
             gap: 12px;
             color: ${textColor};
-            transition: background 0.1s;
+            transition: ${reducedMotion ? 'none' : 'background 0.1s'};
             font-size: 12px;
         `;
 

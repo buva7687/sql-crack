@@ -3,6 +3,7 @@
 
 import { NODE_ACCENT_COLORS } from '../../shared/themeTokens';
 import type { NodeAccentType } from '../../shared/themeTokens';
+import { prefersReducedMotion } from './motion';
 
 export interface LegendBarCallbacks {
     isDarkTheme: () => boolean;
@@ -66,6 +67,7 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
 }
 
 function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {
+    const reducedMotion = prefersReducedMotion();
     el.style.cssText = `
         position: absolute;
         bottom: 0;
@@ -86,7 +88,7 @@ function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 11px;
         color: ${isDark ? '#94A3B8' : '#64748B'};
-        transition: transform 0.2s ease, opacity 0.2s ease;
+        transition: ${reducedMotion ? 'none' : 'transform 0.2s ease, opacity 0.2s ease'};
     `;
 }
 
@@ -120,7 +122,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         font-size: 14px;
         padding: 4px 8px;
         border-radius: 4px;
-        transition: color 0.15s;
+        transition: ${reducedMotion ? 'none' : 'color 0.15s'};
     ">&times;</button>`;
 
     el.innerHTML = items + dismissBtn;

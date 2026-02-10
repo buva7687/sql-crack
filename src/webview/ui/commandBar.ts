@@ -1,5 +1,6 @@
 // Command Bar — Floating command palette for quick actions
 // Triggered by Ctrl+Shift+P (inside webview) or / key
+import { prefersReducedMotion } from './motion';
 
 export interface CommandBarAction {
     id: string;
@@ -11,6 +12,7 @@ export interface CommandBarAction {
 
 let commandBarElement: HTMLDivElement | null = null;
 let commandInputElement: HTMLInputElement | null = null;
+let commandPaletteElement: HTMLDivElement | null = null;
 let isVisible = false;
 let registeredActions: CommandBarAction[] = [];
 let commandBarThemeResolver: (() => boolean) | null = null;
@@ -34,6 +36,7 @@ export function createCommandBar(
     commandBarElement.id = 'sql-crack-command-bar';
     commandBarElement.setAttribute('role', 'dialog');
     commandBarElement.setAttribute('aria-label', 'Command palette');
+    const reducedMotion = prefersReducedMotion();
     commandBarElement.style.cssText = `
         position: absolute;
         top: 0;
@@ -46,6 +49,8 @@ export function createCommandBar(
         justify-content: center;
         padding-top: 20%;
         background: rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        transition: ${reducedMotion ? 'none' : 'opacity 0.15s ease'};
     `;
 
     const isDark = isDarkTheme();
@@ -58,7 +63,11 @@ export function createCommandBar(
         box-shadow: 0 8px 32px rgba(0, 0, 0, ${isDark ? '0.5' : '0.2'});
         background: ${isDark ? '#1A1A1A' : '#FFFFFF'};
         border: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: ${reducedMotion ? 'none' : 'opacity 0.15s ease, transform 0.15s ease'};
     `;
+    commandPaletteElement = palette;
 
     // Search input
     commandInputElement = document.createElement('input');
@@ -169,7 +178,7 @@ function renderResults(
             color: ${isDark ? '#E2E8F0' : '#1E293B'};
             font-size: 13px;
             background: ${index === 0 ? (isDark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.08)') : 'transparent'};
-            transition: background 0.1s;
+            transition: ${prefersReducedMotion() ? 'none' : 'background 0.1s'};
         `;
 
         const label = document.createElement('span');
@@ -238,9 +247,24 @@ function navigateResults(container: HTMLElement, direction: number, isDarkTheme:
  * Show the command bar.
  */
 export function showCommandBar(): void {
-    if (!commandBarElement) { return; }
+    if (!commandBarElement || !commandPaletteElement) { return; }
     isVisible = true;
     commandBarElement.style.display = 'flex';
+    if (prefersReducedMotion()) {
+        commandBarElement.style.opacity = '1';
+        commandPaletteElement.style.opacity = '1';
+        commandPaletteElement.style.transform = 'translateY(0)';
+    } else {
+        commandBarElement.style.opacity = '0';
+        commandPaletteElement.style.opacity = '0';
+        commandPaletteElement.style.transform = 'translateY(-8px)';
+        requestAnimationFrame(() => {
+            if (!isVisible || !commandBarElement || !commandPaletteElement) { return; }
+            commandBarElement.style.opacity = '1';
+            commandPaletteElement.style.opacity = '1';
+            commandPaletteElement.style.transform = 'translateY(0)';
+        });
+    }
     if (commandInputElement) {
         commandInputElement.value = '';
         commandInputElement.focus();
@@ -256,9 +280,23 @@ export function showCommandBar(): void {
  * Hide the command bar.
  */
 export function hideCommandBar(): void {
-    if (!commandBarElement) { return; }
+    if (!commandBarElement || !commandPaletteElement) { return; }
     isVisible = false;
-    commandBarElement.style.display = 'none';
+    if (prefersReducedMotion()) {
+        commandBarElement.style.display = 'none';
+        commandBarElement.style.opacity = '0';
+        commandPaletteElement.style.opacity = '0';
+        commandPaletteElement.style.transform = 'translateY(-8px)';
+        return;
+    }
+
+    commandBarElement.style.opacity = '0';
+    commandPaletteElement.style.opacity = '0';
+    commandPaletteElement.style.transform = 'translateY(-8px)';
+    window.setTimeout(() => {
+        if (isVisible || !commandBarElement) { return; }
+        commandBarElement.style.display = 'none';
+    }, 150);
 }
 
 /**

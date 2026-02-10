@@ -7,6 +7,7 @@ import { createLayoutPicker } from './layoutPicker';
 import { ICONS } from '../../shared/icons';
 import { getComponentUiColors } from '../constants';
 import { repositionBreadcrumbBar } from './breadcrumbBar';
+import { prefersReducedMotion } from './motion';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
@@ -97,14 +98,8 @@ function getOverflowPalette(dark: boolean): {
     };
 }
 
-function isReducedMotionPreferred(): boolean {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
 function applyFirstRunHelpPulse(helpBtn: HTMLButtonElement, enabled: boolean): void {
-    if (!enabled || isReducedMotionPreferred()) {
+    if (!enabled || prefersReducedMotion()) {
         return;
     }
 
@@ -1010,7 +1005,7 @@ function createFeatureGroup(
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
         columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : '';
         // One-time pulse on first activation
-        if (columnFlowActive && !lineagePulseApplied && !isReducedMotionPreferred()) {
+        if (columnFlowActive && !lineagePulseApplied && !prefersReducedMotion()) {
             lineagePulseApplied = true;
             if (!document.getElementById(LINEAGE_PULSE_STYLE_ID)) {
                 const style = document.createElement('style');

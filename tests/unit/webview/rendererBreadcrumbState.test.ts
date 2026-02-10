@@ -16,8 +16,8 @@ describe('webview renderer filter breadcrumb state reset', () => {
     });
 
     it('gates pulse animations behind reduced-motion preference checks', () => {
-        expect(rendererSource).toContain('function isReducedMotionPreferred()');
-        expect(rendererSource).toContain('if (isReducedMotionPreferred())');
+        expect(rendererSource).toContain("import { prefersReducedMotion } from './ui/motion';");
+        expect(rendererSource).toContain('if (prefersReducedMotion())');
     });
 
     it('uses theme-aware breadcrumb colors instead of hardcoded dark-only values', () => {

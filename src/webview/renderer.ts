@@ -55,6 +55,7 @@ import {
     clearBreadcrumbBar,
     updateHintsSummaryBadge,
 } from './ui';
+import { prefersReducedMotion } from './ui/motion';
 import { attachResizablePanel } from './ui/resizablePanel';
 import { UndoManager } from './ui/undoManager';
 import dagre from 'dagre';
@@ -191,12 +192,6 @@ let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; a
 let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
-
-function isReducedMotionPreferred(): boolean {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 function ensureNodeFocusLiveRegion(container: HTMLElement): void {
     if (nodeFocusLiveRegion?.isConnected) {
@@ -4467,7 +4462,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
 /** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
 function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
-    if (isReducedMotionPreferred()) {
+    if (prefersReducedMotion()) {
         restoreStroke();
         return;
     }
@@ -4543,7 +4538,7 @@ function pulseNode(nodeId: string): void {
  * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
  */
 function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
-    if (isReducedMotionPreferred()) { return; }
+    if (prefersReducedMotion()) { return; }
     const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
     if (!cloudContainer) { return; }
 
