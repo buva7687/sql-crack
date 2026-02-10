@@ -28,65 +28,11 @@ export class ImpactView {
         tables.sort((a, b) => a.name.localeCompare(b.name));
 
         return `
-            <div class="view-container">
-                <!-- View Header -->
-                <div class="view-header">
-                    <div class="view-header-icon">${ICONS.warning}</div>
-                    <div class="view-header-content">
-                        <h3 class="view-title">Impact Analysis</h3>
-                        <p class="view-subtitle">Analyze the impact of changes to tables or views in your workspace</p>
-                    </div>
-                </div>
-
-                <!-- Stats -->
-                <div class="view-stats">
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${tables.length}</span>
-                        <span class="view-stat-label">Total</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${tableCount}</span>
-                        <span class="view-stat-label">Tables</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${viewCount}</span>
-                        <span class="view-stat-label">Views</span>
-                    </div>
-                </div>
-
-                <!-- Search Controls -->
-                <div class="view-controls">
-                    <div class="view-controls-header">
-                        <h4>Search & Filter</h4>
-                        <p class="view-controls-hint">Search for tables or views to analyze</p>
-                    </div>
-                    <div class="view-search-box">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                        </svg>
-                        <input type="text"
-                               id="impact-search-input"
-                               class="view-search-input"
-                               placeholder="Search tables, views..."
-                               autocomplete="off"
-                               value="">
-                        <button class="view-search-clear" id="impact-search-clear">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <path d="M18 6L6 18M6 6l12 12"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="view-filters">
-                        <div class="view-quick-filters">
-                            <span class="view-filter-label">Filter:</span>
-                            <button class="view-filter-chip active" data-filter="all">All</button>
-                            <button class="view-filter-chip" data-filter="table">Tables</button>
-                            <button class="view-filter-chip" data-filter="view">Views</button>
-                        </div>
-                        <div class="view-results-info" id="impact-results-info" style="display: none;">
-                            <span id="impact-results-count">0</span> results
-                        </div>
-                    </div>
+            <div class="view-container view-impact">
+                <div class="view-compact-header">
+                    <span class="view-icon">${ICONS.warning}</span>
+                    <h3>Impact</h3>
+                    <span class="view-inline-stats">${tableCount} tables, ${viewCount} views</span>
                 </div>
 
                 <!-- Form -->
@@ -94,21 +40,45 @@ export class ImpactView {
                     <div class="view-form-card">
                         <div class="view-form-fields">
                             <div class="view-form-field">
-                                <label for="impact-table-select">
+                                <label for="impact-table-input">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
                                     </svg>
                                     Table/View
                                     <span class="field-hint">(${tableCount} tables, ${viewCount} views)</span>
                                 </label>
-                                <select id="impact-table-select" class="form-select">
-                                    <option value="">-- Select a table or view (${tableCount} tables, ${viewCount} views) --</option>
-                                    ${tables.map(table => `
-                                        <option value="${this.escapeHtml(table.id)}" data-name="${this.escapeHtml(table.name)}" data-type="${table.type}">
-                                            ${this.escapeHtml(table.name)} (${table.type})
-                                        </option>
-                                    `).join('')}
-                                </select>
+                                <div class="impact-typeahead">
+                                    <input type="text"
+                                           id="impact-table-input"
+                                           class="impact-typeahead-input"
+                                           placeholder="Type to search tables and views..."
+                                           autocomplete="off"
+                                           role="combobox"
+                                           aria-expanded="false"
+                                           aria-controls="impact-typeahead-results">
+                                    <input type="hidden" id="impact-table-id" value="">
+                                    <div class="impact-typeahead-results" id="impact-typeahead-results" role="listbox" style="display: none;">
+                                        ${tables.map(table => `
+                                            <button type="button"
+                                                    class="impact-typeahead-item"
+                                                    data-node-id="${this.escapeHtml(table.id)}"
+                                                    data-name="${this.escapeHtml(table.name)}"
+                                                    data-type="${table.type}"
+                                                    role="option">
+                                                <span class="impact-typeahead-name">${this.escapeHtml(table.name)}</span>
+                                                <span class="impact-typeahead-type">${table.type}</span>
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                    <div class="typeahead-loading" id="impact-typeahead-loading" style="display: none;">
+                                        <div class="loading-spinner-small"></div>
+                                        <span>Loading...</span>
+                                    </div>
+                                    <div class="impact-selected-badge" id="impact-selected-badge" style="display: none;">
+                                        <span id="impact-selected-label"></span>
+                                        <button type="button" id="impact-selected-clear">Clear</button>
+                                    </div>
+                                </div>
                                 <div class="field-subtext">Available: ${tableCount} tables • ${viewCount} views</div>
                             </div>
                             <div class="view-form-field">
@@ -126,11 +96,11 @@ export class ImpactView {
                                         </svg>
                                         <span>Modify</span>
                                     </button>
-                                    <button class="change-type-btn" data-value="delete" type="button">
+                                    <button class="change-type-btn" data-value="drop" type="button">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                                         </svg>
-                                        <span>Delete</span>
+                                        <span>Drop</span>
                                     </button>
                                     <button class="change-type-btn" data-value="rename" type="button">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -141,19 +111,20 @@ export class ImpactView {
                                     </button>
                                     <button class="change-type-btn" data-value="addColumn" type="button">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                                            <path d="M12 5v14M5 12h14"/>
                                         </svg>
                                         <span>Add Column</span>
                                     </button>
                                 </div>
                             </div>
                             <div class="view-form-actions">
-                                <button id="impact-analyze-btn" class="btn-primary" disabled>
+                                <button id="impact-analyze-btn" class="btn-primary" disabled aria-describedby="impact-analyze-hint">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
                                     </svg>
                                     <span>Analyze Impact</span>
                                 </button>
+                                <p id="impact-analyze-hint" class="form-hint">Select a table or view above to analyze impact</p>
                             </div>
                         </div>
                     </div>
@@ -184,6 +155,11 @@ export class ImpactView {
      * Generate impact analysis report HTML
      */
     generateImpactReport(report: ImpactReport): string {
+        const targetTableName = report.target.type === 'column'
+            ? (report.target.tableName || report.target.name)
+            : report.target.name;
+        const targetNodeId = `table:${targetTableName.toLowerCase()}`;
+
         let html = `
             <div class="impact-report">
                 <div class="report-header">
@@ -195,6 +171,24 @@ export class ImpactView {
                     <h3>Target</h3>
                     <p><strong>${report.changeType.toUpperCase()}:</strong>
                     ${report.target.type} "${this.escapeHtml(report.target.name)}"</p>
+                    <div class="cross-link-actions">
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-lineage"
+                                data-table="${this.escapeHtml(targetTableName)}"
+                                data-node-id="${this.escapeHtml(targetNodeId)}"
+                                data-node-type="table">
+                            View Lineage Graph
+                        </button>
+                        <button type="button"
+                                class="cross-link-btn"
+                                data-action="cross-view-detail"
+                                data-table="${this.escapeHtml(targetTableName)}"
+                                data-node-id="${this.escapeHtml(targetNodeId)}"
+                                data-node-type="table">
+                            View Details
+                        </button>
+                    </div>
                 </div>
 
                 ${this.generateSummary(report)}
@@ -216,26 +210,13 @@ export class ImpactView {
      * Generate severity indicator badge
      */
     generateSeverityBadge(severity: string): string {
-        const colors: Record<string, string> = {
-            'critical': '#dc2626',
-            'high': '#f59e0b',
-            'medium': '#10b981',
-            'low': '#6b7280'
-        };
-
-        const icons: Record<string, string> = {
-            'critical': '🔴',
-            'high': '🟠',
-            'medium': '🟡',
-            'low': '🟢'
-        };
-
-        const color = colors[severity] || colors.low;
-        const icon = icons[severity] || '';
+        const normalizedSeverity = ['critical', 'high', 'medium', 'low'].includes(severity)
+            ? severity
+            : 'low';
 
         return `
-            <div class="severity-badge" style="background-color: ${color}">
-                ${icon} ${severity.toUpperCase()} IMPACT
+            <div class="severity-badge severity-${normalizedSeverity}">
+                ${normalizedSeverity.toUpperCase()} IMPACT
             </div>
         `;
     }
@@ -470,8 +451,8 @@ export class ImpactView {
             <div class="export-options">
                 <h3>Export Report</h3>
                 <div class="export-buttons">
-                    <button onclick="exportImpactReport('markdown')">Markdown</button>
-                    <button onclick="exportImpactReport('json')">JSON</button>
+                    <button type="button" data-action="export-impact-report" data-format="markdown">Markdown</button>
+                    <button type="button" data-action="export-impact-report" data-format="json">JSON</button>
                 </div>
             </div>
         `;

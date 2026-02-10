@@ -2,18 +2,21 @@
 // Replaces separate PNG, SVG, MMD, clipboard buttons
 // Uses position: fixed and appends to body to escape overflow:hidden clipping
 import { getComponentUiColors } from '../constants';
+import { prefersReducedMotion } from './motion';
 
 export interface ExportDropdownCallbacks {
     onExportPng: () => void;
     onExportSvg: () => void;
     onExportMermaid: () => void;
     onCopyToClipboard: () => void;
+    onCopyMermaidToClipboard?: () => void;
     isDarkTheme: () => boolean;
 }
 
 let dropdownElement: HTMLDivElement | null = null;
 let triggerBtn: HTMLButtonElement | null = null;
 let isOpen = false;
+let exportAbortController: AbortController | null = null;
 
 /**
  * Create the export dropdown trigger button and popover.
@@ -24,11 +27,15 @@ export function createExportDropdown(
     callbacks: ExportDropdownCallbacks,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    exportAbortController?.abort();
+    exportAbortController = new AbortController();
+
     const container = document.createElement('div');
     container.style.cssText = 'display: flex; align-items: center;';
 
     const isDark = callbacks.isDarkTheme();
     const theme = getComponentUiColors(isDark);
+    const reducedMotion = prefersReducedMotion();
 
     // Trigger button
     const btn = document.createElement('button');
@@ -46,7 +53,7 @@ export function createExportDropdown(
         cursor: pointer;
         font-size: 11px;
         font-weight: 600;
-        transition: background 0.15s;
+        transition: ${reducedMotion ? 'none' : 'background 0.15s'};
     `;
     triggerBtn = btn;
 
@@ -77,6 +84,7 @@ export function createExportDropdown(
         { type: 'separator' as const },
         { label: 'SVG', shortcut: '', action: callbacks.onExportSvg },
         { label: 'Mermaid', shortcut: '', action: callbacks.onExportMermaid },
+        ...(callbacks.onCopyMermaidToClipboard ? [{ label: 'Copy Mermaid', shortcut: '', action: callbacks.onCopyMermaidToClipboard }] : []),
     ];
 
     items.forEach(item => {
@@ -102,7 +110,7 @@ export function createExportDropdown(
             justify-content: space-between;
             gap: 12px;
             color: ${textColor};
-            transition: background 0.1s;
+            transition: ${reducedMotion ? 'none' : 'background 0.1s'};
             font-size: 12px;
         `;
 
@@ -197,9 +205,17 @@ export function createExportDropdown(
             kbd.style.background = nextTheme.accentBg;
             kbd.style.color = nextTheme.accentSoft;
         });
-    }) as EventListener);
+    }) as EventListener, { signal: exportAbortController.signal });
 
     return container;
+}
+
+/**
+ * Dispose export dropdown event listeners.
+ */
+export function disposeExportDropdown(): void {
+    exportAbortController?.abort();
+    exportAbortController = null;
 }
 
 function openDropdown(): void {

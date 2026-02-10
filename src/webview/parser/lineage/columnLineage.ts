@@ -2,6 +2,32 @@
 
 import { FlowNode, ColumnLineage } from '../../types';
 
+function getAstString(val: any, depth = 0): string | null {
+    if (depth > 6 || val === null || val === undefined) { return null; }
+    if (typeof val === 'string') { return val; }
+    if (typeof val === 'number' || typeof val === 'boolean') { return String(val); }
+
+    if (Array.isArray(val)) {
+        for (const item of val) {
+            const extracted = getAstString(item, depth + 1);
+            if (extracted) { return extracted; }
+        }
+        return null;
+    }
+
+    if (typeof val === 'object') {
+        const candidateKeys = ['value', 'name', 'column', 'table', 'expr'];
+        for (const key of candidateKeys) {
+            if (Object.prototype.hasOwnProperty.call(val, key)) {
+                const extracted = getAstString(val[key], depth + 1);
+                if (extracted) { return extracted; }
+            }
+        }
+    }
+
+    return null;
+}
+
 export function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
     const lineage: ColumnLineage[] = [];
 
@@ -41,7 +67,7 @@ export function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineag
             continue;
         }
 
-        const colName = col.as || col.expr?.column || col.expr?.name || 'expr';
+        const colName = getAstString(col.as) || getAstString(col.expr?.column) || getAstString(col.expr?.name) || 'expr';
         const sources: ColumnLineage['sources'] = [];
 
         // Try to extract source table and column
@@ -69,9 +95,9 @@ export function extractSourcesFromExpr(
 
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {
-        const column = expr.column || expr.name;
+        const column = getAstString(expr.column) || getAstString(expr.name) || 'expr';
         const rawTable = expr.table;
-        const tableAlias = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
+        const tableAlias = getAstString(rawTable) || '';
 
         let tableName = tableAlias;
         if (tableAlias && tableAliasMap.has(tableAlias.toLowerCase())) {
@@ -87,7 +113,7 @@ export function extractSourcesFromExpr(
         if (tableName || tableNodes.length === 1) {
             sources.push({
                 table: tableName || (tableNodes[0]?.label || 'unknown'),
-                column: String(column),
+                column: column,
                 nodeId: tableNode?.id || tableNodes[0]?.id || ''
             });
         }

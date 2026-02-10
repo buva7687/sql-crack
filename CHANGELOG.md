@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-10
+
+### Added
+
+- **Undo/redo layout history**: Added bounded history for layout-affecting actions (drag, zoom, reset, layout, focus mode) with toolbar controls and keyboard shortcuts (`Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z`).
+- **Query comparison mode**: Added side-by-side baseline/current compare overlay with added/removed/changed node highlighting and stats delta summary.
+- **Inline VS Code diagnostics**: SQL Crack parser hints now surface as editor diagnostics, with a Quick Fix action (**Show in SQL Flow**) to open the visualization directly. Gated behind `sqlCrack.advanced.showDiagnosticsInProblems` (off by default) to reduce noise.
+- **Typed message protocol**: Added discriminated union types (`SqlFlowWebviewMessage`, `SqlFlowHostMessage`, `WorkspaceWebviewMessage`, `WorkspaceHostMessage`) for compile-time safety on all webview↔host message handlers.
+- **Impact analysis `addColumn` change type**: Workspace impact analyzer now supports `addColumn` alongside `modify`, `rename`, and `drop`.
+- **MIT license in manifest**: Added `license` field to `package.json` for marketplace compliance.
+- **UI listener lifecycle cleanup**: Added AbortController-based listener teardown for legend bar, command bar, layout picker, and export dropdown module re-initialization paths.
+- **Compare mode KPI example pair**: Added `compare-mode-kpi-before.sql` and `compare-mode-kpi-after.sql` to demonstrate correlated-subquery baseline vs CTE/join refactor diffs.
+
+### Changed
+
+- **Toolbar controls**: Added compare toggle and undo/redo controls with active/disabled state synchronization.
+- **Diagnostics lifecycle**: Diagnostics are refreshed on open/save/auto-refresh, and cleared for closed documents or empty/non-SQL content.
+- **Documentation sync**: Updated root and examples README content to reflect roadmap-delivered features/settings (compare mode, undo/redo, diagnostics, parser reliability, and current workspace view model).
+- **Node border contrast**: Increased SQL Flow node border visibility — light theme `#E2E8F0`→`#94A3B8`, dark theme `#2A2A2A`→`#475569` — for better node definition without competing with semantic strokes.
+- **Workspace zoom controls cleanup**: Replaced refresh-style "Reset view" icon with crosshair/target icon on Graph tab; removed redundant "Reset view" button from lineage zoom controls.
+- **Legend default behavior**: Query-view legend now defaults to visible for first-time users while preserving saved dismissal state.
+- **Layout picker visuals**: Replaced unicode layout glyphs with shared SVG icons for consistent rendering across platforms.
+- **Accessibility consistency**: Unified reduced-motion handling across legend bar, breadcrumb bar, export dropdown, command bar, toolbar, and renderer via a shared motion utility.
+
+### Fixed
+
+- **Workspace graph focus/trace wiring**: Fixed edge data attribute mismatch so focus mode, trace traversal, and neighbor highlighting work reliably.
+- **Workspace lineage XSS hardening**: Escaped dynamic lineage result fields and error content before HTML injection.
+- **Custom extension watcher parity**: Workspace watcher now tracks configured SQL extensions (e.g. `.hql`, `.bteq`, `.tpt`) and recreates watcher on setting changes.
+- **Index build race conditions**: Added in-flight `buildIndex()` promise guard and queue coordination to prevent concurrent build/result clobbering.
+- **Dark node metadata contrast**: Reduced dark-theme muted node text emphasis for clearer hierarchy against node backgrounds.
+- **Command bar theme source**: Removed hardcoded theme class checks in favor of callback-based theme resolution.
+- **Toolbar overflow resize thrash**: Debounced overflow recalculation for high-frequency resize events.
+- **Typecheck regressions in UI polish follow-up**: Fixed legend reduced-motion variable scope and browser timeout handle typing.
+- **Edge dash pattern rendering**: Moved dash pattern handling into edge rendering flow so edge styles are restored correctly after hover and no orphaned scope code remains.
+- **Transformation badge contrast**: Replaced hardcoded white fills with contrast-aware text coloring for improved light-theme legibility.
+- **Viewport fit stability**: Clamped fit-view dimensions/scale to prevent upside-down node rendering on small viewports.
+- **Resizable panel behavior**: Preserved preferred panel width so hints/details resizing behaves predictably across window resizes.
+- **Parser resilience**: Added safe string handling to prevent `.toLowerCase()` crashes when AST values are non-string objects.
+- **Hints panel interaction**: Hint rows now allow copy/select text (switched from button semantics to text-friendly container rendering).
+- **Hints panel/legend overlap regressions**: Hints panel now reflows above the legend when legend height changes (toggle, wrap, viewport resize), with viewport-clamped panel/list heights.
+- **Lineage fit-to-screen**: Fixed "Fit to screen" button in Data Lineage view — click handler was passing the MouseEvent as the `isAutoFit` parameter, causing the deduplication guard to silently block manual fits.
+- **Diagnostics config key mismatch**: Fixed `advanced.*` config key resolution for diagnostics settings.
+
+### Tests
+
+- Added unit/regression coverage for undo manager behavior, compare mode wiring/diff logic, diagnostics mapping, and extension diagnostics wiring.
+- Added regression coverage for Phase 1/2 roadmap fixes, including legend default visibility, dark muted color token, layout picker SVG icon usage, command bar theme callback usage, reduced-motion module coverage, and toolbar resize debounce logic.
+- Added DOM-style panel layout regression tests for legend-height growth and viewport clamping of the performance hints panel.
+
 ## [0.2.1] - 2026-02-06
 
 ### Added
@@ -50,12 +100,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phantom LIMIT node**: PostgreSQL, Snowflake, Trino, and Redshift no longer show a spurious LIMIT node when no LIMIT clause exists. The "No LIMIT clause" optimization hint now correctly appears for these dialects.
 - **Click-outside zoom reset**: Clicking empty canvas now restores the full view when zoomed into a node (previously required Escape).
 - **Auto-refresh for non-`.sql` files**: `.hql`, `.ddl`, `.pgsql`, untitled files, and other non-`.sql` documents now trigger auto-refresh when the visualization panel is open.
+- **Parse error positioning**: Parser diagnostics now preserve absolute line/column coordinates so editor and badge navigation land on the correct source location.
+- **Fullscreen UI recovery**: Exiting fullscreen now consistently restores toolbar wrapper, breadcrumb bar, and parse error badge placement.
+- **Toolbar popover overlays**: Toolbar menus render as floating overlays, preventing clipping and misplaced controls in constrained layouts.
+- **Minimap sync stability**: Minimap visibility and viewport sync are now stable during query/view transitions.
 - **Stats & hints panel overlap**: Panels dynamically shift above the legend bar when it is visible instead of being hidden behind it.
 - **Column lineage banner overlap**: Banner no longer stretches full-width or captures clicks across query tabs; uses `pointer-events: none` with only the close button interactive.
 - **Column lineage Escape dismiss**: Escape now closes column lineage mode from any focus context (SVG, document, or the lineage panel itself).
 - **Snowflake DELETE parsing**: Snowflake DELETE/MERGE statements that fail native grammar now fall back to PostgreSQL AST parsing.
 - **Light-theme toolbar**: Overflow button and dropdown rows use correct light-mode colors.
 - **Breadcrumb/filter state**: Filter chips no longer leak stale state across re-renders.
+- **Theme-toggle jitter**: Switching themes no longer triggers tab jump/flicker artifacts in the webview.
 - **Collapsed sidebar canvas usage**: Graph now auto-fits after sidebar collapse/expand so newly available canvas space is used immediately.
 - **Zoom control displacement**: Removed incorrect `zoom-toolbar` top offset that was applied when the bottom legend was visible.
 

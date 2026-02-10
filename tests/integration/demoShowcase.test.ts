@@ -104,6 +104,26 @@ describe('Demo Showcase E2E Tests', () => {
                 expect(JSON.stringify(q1Outputs)).not.toBe(JSON.stringify(q2Outputs));
             }
         });
+
+        it('Q1 customer lifecycle lineage should keep real output names (no expr fallbacks)', () => {
+            const query1 = result.queries.find(q =>
+                /FROM\s+customer_segments\s+cs/i.test(q.sql) &&
+                /JOIN\s+regional_metrics\s+rm/i.test(q.sql)
+            );
+
+            expect(query1).toBeDefined();
+            const outputColumns = (query1?.columnFlows || []).map(f => f.outputColumn.toLowerCase());
+
+            expect(outputColumns).toEqual(expect.arrayContaining([
+                'customer_id',
+                'customer_name',
+                'regional_customer_count',
+                'revenue_contribution_pct',
+                'contact_email',
+                'avg_customer_value'
+            ]));
+            expect(outputColumns.filter(name => name === 'expr')).toHaveLength(0);
+        });
     });
 
     describe('Query Complexity', () => {
@@ -127,16 +147,17 @@ describe('Demo Showcase E2E Tests', () => {
     });
 
     describe('Edge Cases', () => {
-        it('reports batch parse errors with absolute line and column context', () => {
+        it('handles invalid SQL in batch with fallback parser', () => {
             const brokenSql = `SELECT 1;
 SELECT
   customer_id
 FROOM orders;`;
             const broken = parseSqlBatch(brokenSql, 'Snowflake', DEFAULT_VALIDATION_LIMITS, {});
 
-            expect(broken.errorCount).toBe(1);
-            expect(broken.parseErrors?.[0].line).toBe(4);
-            expect(broken.parseErrors?.[0].message).toMatch(/^Line 4, column \d+:/i);
+            // With fallback parser, invalid SQL produces partial results
+            expect(broken.queries.length).toBe(2);
+            // The second query should be marked as partial
+            expect(broken.queries[1].partial).toBe(true);
         });
 
         it('should handle queries with window functions', () => {

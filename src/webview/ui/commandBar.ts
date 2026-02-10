@@ -1,5 +1,6 @@
 // Command Bar — Floating command palette for quick actions
 // Triggered by Ctrl+Shift+P (inside webview) or / key
+import { prefersReducedMotion } from './motion';
 
 export interface CommandBarAction {
     id: string;
@@ -11,8 +12,11 @@ export interface CommandBarAction {
 
 let commandBarElement: HTMLDivElement | null = null;
 let commandInputElement: HTMLInputElement | null = null;
+let commandPaletteElement: HTMLDivElement | null = null;
 let isVisible = false;
 let registeredActions: CommandBarAction[] = [];
+let commandBarThemeResolver: (() => boolean) | null = null;
+let commandBarAbortController: AbortController | null = null;
 
 /**
  * Register a list of actions that the command bar can execute.
@@ -28,10 +32,17 @@ export function createCommandBar(
     container: HTMLElement,
     isDarkTheme: () => boolean
 ): HTMLDivElement {
+    commandBarThemeResolver = isDarkTheme;
+    // Abort previous listeners if re-initialized
+    commandBarAbortController?.abort();
+    commandBarAbortController = new AbortController();
+    const signal = commandBarAbortController.signal;
+
     commandBarElement = document.createElement('div');
     commandBarElement.id = 'sql-crack-command-bar';
     commandBarElement.setAttribute('role', 'dialog');
     commandBarElement.setAttribute('aria-label', 'Command palette');
+    const reducedMotion = prefersReducedMotion();
     commandBarElement.style.cssText = `
         position: absolute;
         top: 0;
@@ -44,6 +55,8 @@ export function createCommandBar(
         justify-content: center;
         padding-top: 20%;
         background: rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        transition: ${reducedMotion ? 'none' : 'opacity 0.15s ease'};
     `;
 
     const isDark = isDarkTheme();
@@ -56,7 +69,11 @@ export function createCommandBar(
         box-shadow: 0 8px 32px rgba(0, 0, 0, ${isDark ? '0.5' : '0.2'});
         background: ${isDark ? '#1A1A1A' : '#FFFFFF'};
         border: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: ${reducedMotion ? 'none' : 'opacity 0.15s ease, transform 0.15s ease'};
     `;
+    commandPaletteElement = palette;
 
     // Search input
     commandInputElement = document.createElement('input');
@@ -94,7 +111,7 @@ export function createCommandBar(
     commandInputElement.addEventListener('input', () => {
         const query = commandInputElement?.value.toLowerCase() || '';
         renderResults(resultsContainer, query, isDarkTheme);
-    });
+    }, { signal });
 
     // Keyboard navigation
     commandInputElement.addEventListener('keydown', (e) => {
@@ -116,14 +133,14 @@ export function createCommandBar(
             e.preventDefault();
             navigateResults(resultsContainer, e.key === 'ArrowDown' ? 1 : -1, isDarkTheme);
         }
-    });
+    }, { signal });
 
     // Click overlay to dismiss
     commandBarElement.addEventListener('click', (e) => {
         if (e.target === commandBarElement) {
             hideCommandBar();
         }
-    });
+    }, { signal });
 
     // Theme change
     document.addEventListener('theme-change', ((e: CustomEvent) => {
@@ -134,9 +151,17 @@ export function createCommandBar(
             commandInputElement.style.color = dark ? '#F1F5F9' : '#1E293B';
             commandInputElement.style.borderBottomColor = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
         }
-    }) as EventListener);
+    }) as EventListener, { signal });
 
     return commandBarElement;
+}
+
+/**
+ * Dispose command bar event listeners.
+ */
+export function disposeCommandBar(): void {
+    commandBarAbortController?.abort();
+    commandBarAbortController = null;
 }
 
 function renderResults(
@@ -167,7 +192,7 @@ function renderResults(
             color: ${isDark ? '#E2E8F0' : '#1E293B'};
             font-size: 13px;
             background: ${index === 0 ? (isDark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.08)') : 'transparent'};
-            transition: background 0.1s;
+            transition: ${prefersReducedMotion() ? 'none' : 'background 0.1s'};
         `;
 
         const label = document.createElement('span');
@@ -236,9 +261,24 @@ function navigateResults(container: HTMLElement, direction: number, isDarkTheme:
  * Show the command bar.
  */
 export function showCommandBar(): void {
-    if (!commandBarElement) { return; }
+    if (!commandBarElement || !commandPaletteElement) { return; }
     isVisible = true;
     commandBarElement.style.display = 'flex';
+    if (prefersReducedMotion()) {
+        commandBarElement.style.opacity = '1';
+        commandPaletteElement.style.opacity = '1';
+        commandPaletteElement.style.transform = 'translateY(0)';
+    } else {
+        commandBarElement.style.opacity = '0';
+        commandPaletteElement.style.opacity = '0';
+        commandPaletteElement.style.transform = 'translateY(-8px)';
+        requestAnimationFrame(() => {
+            if (!isVisible || !commandBarElement || !commandPaletteElement) { return; }
+            commandBarElement.style.opacity = '1';
+            commandPaletteElement.style.opacity = '1';
+            commandPaletteElement.style.transform = 'translateY(0)';
+        });
+    }
     if (commandInputElement) {
         commandInputElement.value = '';
         commandInputElement.focus();
@@ -246,7 +286,7 @@ export function showCommandBar(): void {
     // Render initial results
     const results = commandBarElement.querySelector('#command-bar-results') as HTMLElement;
     if (results) {
-        renderResults(results, '', () => document.documentElement.classList.contains('vscode-dark'));
+        renderResults(results, '', commandBarThemeResolver ?? (() => true));
     }
 }
 
@@ -254,9 +294,23 @@ export function showCommandBar(): void {
  * Hide the command bar.
  */
 export function hideCommandBar(): void {
-    if (!commandBarElement) { return; }
+    if (!commandBarElement || !commandPaletteElement) { return; }
     isVisible = false;
-    commandBarElement.style.display = 'none';
+    if (prefersReducedMotion()) {
+        commandBarElement.style.display = 'none';
+        commandBarElement.style.opacity = '0';
+        commandPaletteElement.style.opacity = '0';
+        commandPaletteElement.style.transform = 'translateY(-8px)';
+        return;
+    }
+
+    commandBarElement.style.opacity = '0';
+    commandPaletteElement.style.opacity = '0';
+    commandPaletteElement.style.transform = 'translateY(-8px)';
+    window.setTimeout(() => {
+        if (isVisible || !commandBarElement) { return; }
+        commandBarElement.style.display = 'none';
+    }, 150);
 }
 
 /**

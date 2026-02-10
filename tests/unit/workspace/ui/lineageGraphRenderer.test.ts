@@ -36,6 +36,37 @@ describe('LineageGraphRenderer UX markup', () => {
         };
     }
 
+    function createWideColumnGraph(columnCount: number): LineageGraph {
+        const nodes = new Map<string, any>([
+            ['table:orders', {
+                id: 'table:orders',
+                type: 'table',
+                name: 'orders',
+                metadata: { columnCount },
+            }],
+        ]);
+
+        for (let i = 0; i < columnCount; i++) {
+            nodes.set(`column:orders.c${i}`, {
+                id: `column:orders.c${i}`,
+                type: 'column',
+                name: `c${i}`,
+                parentId: 'table:orders',
+                metadata: {},
+                columnInfo: { dataType: 'TEXT' } as any,
+            });
+        }
+
+        return {
+            nodes,
+            edges: [],
+            columnEdges: [],
+            getUpstream: () => [],
+            getDownstream: () => [],
+            getColumnLineage: () => [],
+        };
+    }
+
     it('renders expanded-node metadata for tooltip/discoverability and alternating column rows', () => {
         const renderer = new LineageGraphRenderer(createGraph());
         const graph = renderer.buildGraph({
@@ -69,5 +100,23 @@ describe('LineageGraphRenderer UX markup', () => {
         expect(svg).toContain('<g class="node-icon-svg"');
         expect(svg).toContain('<svg width="16" height="16"');
         expect(svg).not.toMatch(/[📊👁️🔄🌐📦]/u);
+    });
+
+    it('caps expanded columns to avoid layout blowout and renders overflow hint', () => {
+        const renderer = new LineageGraphRenderer(createWideColumnGraph(25));
+        const graph = renderer.buildGraph({
+            centerNodeId: 'table:orders',
+            depth: 1,
+            direction: 'both',
+            expandedNodes: new Set(['table:orders']),
+        });
+
+        const svg = renderer.generateSVG(graph);
+        const renderedColumnRows = (svg.match(/class="column-row(?:\s|")/g) || []).length;
+
+        expect(renderedColumnRows).toBe(20);
+        expect(svg).toContain('Showing first 20 of 25 columns');
+        expect(svg).toContain('column-close-btn-circle');
+        expect(svg).toContain('column-close-btn-icon');
     });
 });

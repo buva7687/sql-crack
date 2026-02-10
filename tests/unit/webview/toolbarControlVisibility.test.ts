@@ -41,4 +41,10 @@ describe('toolbar control visibility and overflow behavior', () => {
         expect(source).not.toContain("createButton('🎨', callbacks.onToggleLegend");
         expect(source).not.toContain("legendBtn.title = 'Show color legend (L)'");
     });
+
+    it('uses distinct compare and focus-direction icons in the toolbar', () => {
+        expect(source).toContain('createButton(ICONS.compareMode');
+        expect(source).toContain('btn.innerHTML = ICONS.focusDirection;');
+        expect(source).toContain('Compare with Baseline Query');
+    });
 });

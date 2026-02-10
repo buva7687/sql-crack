@@ -3,6 +3,7 @@
 
 import { NODE_ACCENT_COLORS } from '../../shared/themeTokens';
 import type { NodeAccentType } from '../../shared/themeTokens';
+import { prefersReducedMotion } from './motion';
 
 export interface LegendBarCallbacks {
     isDarkTheme: () => boolean;
@@ -24,13 +25,18 @@ const NODE_TYPE_LABELS: Record<string, string> = {
 };
 
 let legendBarElement: HTMLDivElement | null = null;
-let legendVisible = false;
+let legendVisible = true;
+let legendAbortController: AbortController | null = null;
 const STORAGE_KEY = 'sqlCrack.legendBarVisible';
 
 /**
  * Create the bottom legend bar element and add to container.
  */
 export function createLegendBar(container: HTMLElement, callbacks: LegendBarCallbacks): HTMLDivElement {
+    // Abort previous listeners if re-initialized
+    legendAbortController?.abort();
+    legendAbortController = new AbortController();
+
     legendBarElement = document.createElement('div');
     legendBarElement.id = 'sql-crack-legend-bar';
     legendBarElement.setAttribute('role', 'complementary');
@@ -42,7 +48,8 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
     // Check stored preference
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        legendVisible = stored === 'true';
+        // Default visible for first-time users; only explicit "false" hides it.
+        legendVisible = stored !== 'false';
     } catch { /* localStorage may not be available */ }
 
     if (!legendVisible) {
@@ -59,12 +66,21 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
             applyLegendStyles(legendBarElement, e.detail.dark);
             renderLegendContent(legendBarElement, e.detail.dark);
         }
-    }) as EventListener);
+    }) as EventListener, { signal: legendAbortController.signal });
 
     return legendBarElement;
 }
 
+/**
+ * Dispose legend bar event listeners.
+ */
+export function disposeLegendBar(): void {
+    legendAbortController?.abort();
+    legendAbortController = null;
+}
+
 function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {
+    const reducedMotion = prefersReducedMotion();
     el.style.cssText = `
         position: absolute;
         bottom: 0;
@@ -85,7 +101,7 @@ function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 11px;
         color: ${isDark ? '#94A3B8' : '#64748B'};
-        transition: transform 0.2s ease, opacity 0.2s ease;
+        transition: ${reducedMotion ? 'none' : 'transform 0.2s ease, opacity 0.2s ease'};
     `;
 }
 
@@ -119,7 +135,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         font-size: 14px;
         padding: 4px 8px;
         border-radius: 4px;
-        transition: color 0.15s;
+        transition: ${prefersReducedMotion() ? 'none' : 'color 0.15s'};
     ">&times;</button>`;
 
     el.innerHTML = items + dismissBtn;

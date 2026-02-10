@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
+import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 
 interface VisualizationOptions {
     dialect: string;
@@ -264,7 +265,7 @@ export class VisualizationPanel {
 
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
-            message => {
+            (message: SqlFlowWebviewMessage) => {
                 switch (message.command) {
                     case 'error':
                         vscode.window.showErrorMessage(message.text);
@@ -378,7 +379,7 @@ export class VisualizationPanel {
         }
     }
 
-    private _postMessage(message: any) {
+    private _postMessage(message: SqlFlowHostMessage) {
         this._panel.webview.postMessage(message);
     }
 
@@ -454,6 +455,11 @@ export class VisualizationPanel {
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
         const gridStyle = config.get<string>('gridStyle') || 'dots';
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
+        const showMinimap = config.get<string>('showMinimap') || 'auto';
+        const colorblindMode = config.get<string>('colorblindMode') || 'off';
+        const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
+        const maxStatements = config.get<number>('advanced.maxStatements', 50);
+        const parseTimeoutSeconds = config.get<number>('advanced.parseTimeoutSeconds', 5);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -498,6 +504,11 @@ export class VisualizationPanel {
         window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
         window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
         window.nodeAccentPosition = ${this._escapeForInlineScript(nodeAccentPosition)};
+        window.showMinimap = ${this._escapeForInlineScript(showMinimap)};
+        window.colorblindMode = ${this._escapeForInlineScript(colorblindMode)};
+        window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
+        window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
+        window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
         window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
 
         // VS Code API for messaging

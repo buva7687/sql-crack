@@ -7,9 +7,14 @@ import { createLayoutPicker } from './layoutPicker';
 import { ICONS } from '../../shared/icons';
 import { getComponentUiColors } from '../constants';
 import { repositionBreadcrumbBar } from './breadcrumbBar';
+import { prefersReducedMotion } from './motion';
 
 // Toolbar callbacks interface
 export interface ToolbarCallbacks {
+    onUndo: () => void;
+    onRedo: () => void;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
     onZoomIn: () => void;
     onZoomOut: () => void;
     onResetView: () => void;
@@ -18,6 +23,7 @@ export interface ToolbarCallbacks {
     onExportSvg: () => void;
     onExportMermaid: () => void;
     onCopyToClipboard: () => void;
+    onCopyMermaidToClipboard?: () => void;
     onToggleLegend: () => void;
     onToggleFocusMode: (active: boolean) => void;
     onFocusModeChange: (mode: FocusMode) => void;
@@ -33,6 +39,9 @@ export interface ToolbarCallbacks {
     onDialectChange: (dialect: SqlDialect) => void;
     onRefresh: () => void;
     onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => void;
+    onToggleCompareMode: () => void;
+    isCompareMode: () => boolean;
+    getCompareBaselineLabel: () => string | null;
     onChangeViewLocation: (location: string) => void;
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
@@ -49,6 +58,24 @@ let hintsSummaryBtn: HTMLButtonElement | null = null;
 const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
 const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
 let lineagePulseApplied = false;
+
+/**
+ * Format a timestamp as a relative time string like "5m ago", "2h ago", "3d ago".
+ */
+function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+
+    if (diffMin < 1) { return 'just now'; }
+    if (diffMin < 60) { return `${diffMin}m ago`; }
+    if (diffHr < 24) { return `${diffHr}h ago`; }
+    if (diffDay < 30) { return `${diffDay}d ago`; }
+    return `${Math.floor(diffDay / 30)}mo ago`;
+}
 
 function getOverflowPalette(dark: boolean): {
     background: string;
@@ -72,14 +99,8 @@ function getOverflowPalette(dark: boolean): {
     };
 }
 
-function isReducedMotionPreferred(): boolean {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
 function applyFirstRunHelpPulse(helpBtn: HTMLButtonElement, enabled: boolean): void {
-    if (!enabled || isReducedMotionPreferred()) {
+    if (!enabled || prefersReducedMotion()) {
         return;
     }
 
@@ -141,16 +162,18 @@ function applyOverflowMenuTheme(dark: boolean): void {
     }
 }
 
-// Button style constants
-const btnStyle = `
+// Button style helper — uses theme-aware text color
+function getBtnStyle(dark: boolean): string {
+    return `
     background: transparent;
     border: none;
-    color: #f1f5f9;
+    color: ${dark ? '#f1f5f9' : '#1e293b'};
     padding: 8px 12px;
     cursor: pointer;
     font-size: 14px;
     transition: background 0.2s;
-`;
+    `;
+}
 
 /**
  * Cleanup function type for removing event listeners
@@ -218,20 +241,20 @@ export function createToolbar(
     `;
 
     // Title and dialect selector
+    const isDark = callbacks.isDarkTheme();
     const title = document.createElement('div');
     title.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 8px 12px;
-        color: #f1f5f9;
+        color: ${isDark ? '#f1f5f9' : '#1e293b'};
         font-size: 13px;
         font-weight: 600;
         display: flex;
         align-items: center;
         gap: 8px;
     `;
-    const isDark = callbacks.isDarkTheme();
     const selectBg = isDark ? '#1e293b' : '#f1f5f9';
     const selectColor = isDark ? '#f1f5f9' : '#1e293b';
 
@@ -259,6 +282,13 @@ export function createToolbar(
             <option value="MariaDB">MariaDB</option>
             <option value="SQLite">SQLite</option>
         </select>
+        <span id="dialect-auto-indicator" style="
+            display: none;
+            color: ${isDark ? '#818cf8' : '#4f46e5'};
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        "></span>
     `;
     toolbar.appendChild(title);
 
@@ -325,11 +355,12 @@ export function createToolbar(
 }
 
 function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
+    const dark = callbacks.isDarkTheme();
     const searchContainer = document.createElement('div');
     searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: ${dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 4px 12px;
         display: flex;
@@ -349,7 +380,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     searchInput.style.cssText = `
         background: transparent;
         border: none;
-        color: #f1f5f9;
+        color: ${dark ? '#f1f5f9' : '#1e293b'};
         font-size: 12px;
         width: 140px;
         outline: none;
@@ -421,7 +452,7 @@ function createActionButtons(
     `;
 
     // Zoom controls
-    actions.appendChild(createZoomGroup(callbacks));
+    actions.appendChild(createZoomGroup(callbacks, documentListeners));
 
     // Feature buttons
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
@@ -445,7 +476,7 @@ function createActionButtons(
     overflowBtn.setAttribute('aria-label', 'More actions');
     overflowBtn.setAttribute('role', 'button');
     overflowBtn.style.cssText = `
-        ${btnStyle}
+        ${getBtnStyle(callbacks.isDarkTheme())}
         background: transparent;
         border: 1px solid transparent;
         border-radius: 8px;
@@ -698,8 +729,19 @@ function setupOverflowObserver(
         applyOverflowMenuTheme(isDarkTheme());
     };
 
+    let overflowResizeDebounce: number | null = null;
+    const scheduleOverflowUpdate = () => {
+        if (overflowResizeDebounce !== null) {
+            window.clearTimeout(overflowResizeDebounce);
+        }
+        overflowResizeDebounce = window.setTimeout(() => {
+            overflowResizeDebounce = null;
+            updateOverflow();
+        }, 100);
+    };
+
     const observer = new ResizeObserver(() => {
-        updateOverflow();
+        scheduleOverflowUpdate();
     });
     observer.observe(toolbarWrapper);
 
@@ -709,7 +751,10 @@ function setupOverflowObserver(
     return observer;
 }
 
-function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
+function createZoomGroup(
+    callbacks: ToolbarCallbacks,
+    documentListeners: Array<{ type: string; handler: EventListener }>
+): HTMLElement {
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
@@ -720,6 +765,22 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
         border-radius: 8px;
         overflow: hidden;
     `;
+
+    const undoBtn = createButton('↶', () => {
+        callbacks.onUndo();
+    }, 'Undo layout change');
+    undoBtn.id = 'sql-crack-undo-btn';
+    undoBtn.title = 'Undo (Ctrl/Cmd+Z)';
+    undoBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(undoBtn);
+
+    const redoBtn = createButton('↷', () => {
+        callbacks.onRedo();
+    }, 'Redo layout change');
+    redoBtn.id = 'sql-crack-redo-btn';
+    redoBtn.title = 'Redo (Ctrl/Cmd+Shift+Z)';
+    redoBtn.style.borderRight = '1px solid rgba(148, 163, 184, 0.2)';
+    zoomGroup.appendChild(redoBtn);
 
     const zoomOutBtn = createButton('−', () => {
         callbacks.onZoomOut();
@@ -756,6 +817,24 @@ function createZoomGroup(callbacks: ToolbarCallbacks): HTMLElement {
     fitBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     zoomGroup.appendChild(fitBtn);
 
+    const updateUndoRedo = (canUndo: boolean, canRedo: boolean) => {
+        undoBtn.disabled = !canUndo;
+        redoBtn.disabled = !canRedo;
+        undoBtn.style.opacity = canUndo ? '1' : '0.45';
+        redoBtn.style.opacity = canRedo ? '1' : '0.45';
+        undoBtn.style.cursor = canUndo ? 'pointer' : 'default';
+        redoBtn.style.cursor = canRedo ? 'pointer' : 'default';
+    };
+
+    updateUndoRedo(callbacks.canUndo(), callbacks.canRedo());
+
+    const undoRedoStateHandler = ((event: CustomEvent) => {
+        const detail = event.detail || {};
+        updateUndoRedo(Boolean(detail.canUndo), Boolean(detail.canRedo));
+    }) as EventListener;
+    document.addEventListener('undo-redo-state', undoRedoStateHandler);
+    documentListeners.push({ type: 'undo-redo-state', handler: undoRedoStateHandler });
+
     return zoomGroup;
 }
 
@@ -780,6 +859,7 @@ function createExportGroup(
         onExportSvg: callbacks.onExportSvg,
         onExportMermaid: callbacks.onExportMermaid,
         onCopyToClipboard: callbacks.onCopyToClipboard,
+        onCopyMermaidToClipboard: callbacks.onCopyMermaidToClipboard,
         isDarkTheme: callbacks.isDarkTheme,
     }, documentListeners);
 
@@ -886,6 +966,33 @@ function createFeatureGroup(
         featureGroup.appendChild(pinnedContainer);
     }
 
+    const compareBtn = createButton(ICONS.compareMode, () => {
+        callbacks.onToggleCompareMode();
+    }, 'Compare with Baseline Query');
+    compareBtn.id = 'compare-mode-btn';
+    const updateCompareButtonTitle = () => {
+        const baselineLabel = callbacks.getCompareBaselineLabel();
+        compareBtn.title = baselineLabel
+            ? `Compare with Baseline Query (${baselineLabel})`
+            : 'Compare with Baseline Query (Pin another query or use multi-query file)';
+    };
+    updateCompareButtonTitle();
+    compareBtn.addEventListener('mouseenter', updateCompareButtonTitle);
+    compareBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    const setCompareButtonState = (active: boolean) => {
+        compareBtn.dataset.active = active ? 'true' : 'false';
+        compareBtn.style.background = active ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        compareBtn.style.color = active ? '#818cf8' : '';
+    };
+    setCompareButtonState(callbacks.isCompareMode());
+    featureGroup.appendChild(compareBtn);
+
+    const compareStateHandler = ((event: CustomEvent) => {
+        setCompareButtonState(Boolean(event.detail?.active));
+    }) as EventListener;
+    document.addEventListener('compare-mode-state', compareStateHandler);
+    documentListeners.push({ type: 'compare-mode-state', handler: compareStateHandler });
+
     // Focus Mode button
     let focusModeActive = false;
     const focusBtn = createButton('👁', () => {
@@ -917,7 +1024,7 @@ function createFeatureGroup(
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
         columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : '';
         // One-time pulse on first activation
-        if (columnFlowActive && !lineagePulseApplied && !isReducedMotionPreferred()) {
+        if (columnFlowActive && !lineagePulseApplied && !prefersReducedMotion()) {
             lineagePulseApplied = true;
             if (!document.getElementById(LINEAGE_PULSE_STYLE_ID)) {
                 const style = document.createElement('style');
@@ -986,10 +1093,10 @@ function createFeatureGroup(
     return featureGroup;
 }
 
-function createButton(label: string, onClick: () => void, ariaLabel?: string): HTMLButtonElement {
+function createButton(label: string, onClick: () => void, ariaLabel?: string, isDark = true): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.innerHTML = label;
-    btn.style.cssText = btnStyle;
+    btn.style.cssText = getBtnStyle(isDark);
     btn.addEventListener('click', onClick);
     btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
     btn.addEventListener('mouseleave', () => {
@@ -1018,9 +1125,9 @@ function createFocusModeSelector(
 
     const btn = document.createElement('button');
     btn.id = 'focus-mode-btn';
-    btn.innerHTML = '⇄';
+    btn.innerHTML = ICONS.focusDirection;
     btn.title = 'Focus Mode Direction (U/D/A)';
-    btn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    btn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = document.createElement('div');
     dropdown.id = 'focus-mode-dropdown';
@@ -1064,7 +1171,7 @@ function createFocusModeSelector(
             display: flex;
             align-items: center;
             gap: 8px;
-            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            color: ${isActive ? '#818cf8' : (callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b')};
             background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
             transition: background 0.15s;
         `;
@@ -1089,7 +1196,7 @@ function createFocusModeSelector(
             callbacks.onFocusModeChange(mode.id);
             dropdown.style.display = 'none';
             btn.innerHTML = mode.icon;
-            updateFocusModeDropdown(dropdown, mode.id);
+            updateFocusModeDropdown(dropdown, mode.id, callbacks.isDarkTheme());
         });
 
         item.addEventListener('mouseenter', () => {
@@ -1148,11 +1255,11 @@ function createFocusModeSelector(
     return container;
 }
 
-function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode): void {
+function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode, isDark = true): void {
     dropdown.querySelectorAll('[data-mode]').forEach(item => {
         const mode = item.getAttribute('data-mode') as FocusMode;
         const isActive = mode === activeMode;
-        (item as HTMLElement).style.color = isActive ? '#818cf8' : '#e2e8f0';
+        (item as HTMLElement).style.color = isActive ? '#818cf8' : (isDark ? '#e2e8f0' : '#1e293b');
         (item as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
 
         // Update checkmark
@@ -1179,7 +1286,7 @@ function createViewLocationButton(
     viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
     viewLocBtn.title = 'Change view location';
-    viewLocBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    viewLocBtn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createViewLocationDropdown(callbacks, currentLocation);
     document.body.appendChild(dropdown);
@@ -1265,7 +1372,7 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
             display: flex;
             align-items: center;
             gap: 8px;
-            color: ${isActive ? '#818cf8' : '#e2e8f0'};
+            color: ${isActive ? '#818cf8' : (callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b')};
             background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
             transition: background 0.15s;
         `;
@@ -1308,7 +1415,7 @@ function createPinnedTabsButton(
     pinsBtn.dataset.overflowKeepVisible = 'true';
     pinsBtn.innerHTML = '📋';
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
-    pinsBtn.style.cssText = btnStyle + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
+    pinsBtn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins);
     document.body.appendChild(dropdown);
@@ -1393,18 +1500,19 @@ function createPinnedTabsDropdown(
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #e2e8f0;
+            color: ${callbacks.isDarkTheme() ? '#e2e8f0' : '#1e293b'};
             transition: background 0.15s;
         `;
 
         const date = new Date(pin.timestamp);
-        const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const absoluteTimeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const relativeTimeStr = formatRelativeTime(pin.timestamp);
 
         item.innerHTML = `
             <span style="font-size: 12px;">📌</span>
             <div style="flex: 1; overflow: hidden;">
                 <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • ${timeStr}</div>
+                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • <span title="${absoluteTimeStr}">${relativeTimeStr}</span></div>
             </div>
         `;
 
@@ -1609,6 +1717,10 @@ export function updateToolbarTheme(
         dialectSelect.style.background = dark ? '#1e293b' : '#f1f5f9';
         dialectSelect.style.color = textColor;
     }
+    const autoDetectIndicator = document.getElementById('dialect-auto-indicator') as HTMLSpanElement | null;
+    if (autoDetectIndicator) {
+        autoDetectIndicator.style.color = dark ? '#818cf8' : '#4f46e5';
+    }
 
     // Update search input colors
     const searchInput = searchContainer.querySelector('input');
@@ -1630,6 +1742,12 @@ export function updateToolbarTheme(
         btn.style.color = textColor;
     });
 
+    const compareBtn = document.getElementById('compare-mode-btn') as HTMLButtonElement | null;
+    if (compareBtn?.dataset.active === 'true') {
+        compareBtn.style.background = 'rgba(99, 102, 241, 0.3)';
+        compareBtn.style.color = dark ? '#a5b4fc' : '#4f46e5';
+    }
+
     // Update floating dropdown menus
     const theme = getComponentUiColors(dark);
     document.querySelectorAll('.sql-crack-floating-toolbar-menu').forEach(menu => {
@@ -1650,6 +1768,20 @@ export function updateToolbarTheme(
     });
 
     applyOverflowMenuTheme(dark);
+}
+
+export function updateAutoDetectIndicator(dialect: string | null): void {
+    const indicator = document.getElementById('dialect-auto-indicator') as HTMLSpanElement | null;
+    if (!indicator) { return; }
+
+    if (!dialect) {
+        indicator.textContent = '';
+        indicator.style.display = 'none';
+        return;
+    }
+
+    indicator.textContent = `auto: ${dialect}`;
+    indicator.style.display = 'inline-flex';
 }
 
 export function updateHintsSummaryBadge(
@@ -1693,6 +1825,18 @@ export function clearRefreshButtonStale(): void {
  * Update or hide the error notification badge in the toolbar
  * Shows number of failed queries when errors exist
  */
+let errorBadgeClickCallback: ((queryIndex: number) => void) | null = null;
+let errorCycleIndex = 0;
+let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number }> = [];
+
+/**
+ * Register a callback for when the error badge is clicked.
+ * Cycles through error query indices on each click.
+ */
+export function setErrorBadgeClickHandler(callback: (queryIndex: number) => void): void {
+    errorBadgeClickCallback = callback;
+}
+
 export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number }>): void {
     const existingBadge = document.getElementById('sql-crack-error-badge');
 
@@ -1703,6 +1847,10 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         }
         return;
     }
+
+    // Store current errors for click handler and reset cycle
+    currentBadgeErrors = errors || [];
+    errorCycleIndex = 0;
 
     // Create or update badge
     // Position below the toolbar row to avoid overlap with batch tabs
@@ -1730,6 +1878,14 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         });
         badge.addEventListener('mouseleave', () => {
             badge!.style.background = 'rgba(239, 68, 68, 0.15)';
+        });
+
+        // Click to cycle through errors
+        badge.addEventListener('click', () => {
+            if (currentBadgeErrors.length > 0 && errorBadgeClickCallback) {
+                errorBadgeClickCallback(currentBadgeErrors[errorCycleIndex % currentBadgeErrors.length].queryIndex);
+                errorCycleIndex = (errorCycleIndex + 1) % currentBadgeErrors.length;
+            }
         });
 
         // Insert into root container

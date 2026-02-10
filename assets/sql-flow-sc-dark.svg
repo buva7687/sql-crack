@@ -1,0 +1,14 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <circle cx="8" cy="8" r="6.25" stroke="#D1D5DB" stroke-width="1.5"/>
+  <text
+    x="8"
+    y="8.2"
+    fill="#E5E7EB"
+    font-family="'Segoe UI', 'SF Pro Text', Arial, sans-serif"
+    font-size="5.4"
+    font-weight="700"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    letter-spacing="0.2"
+  >SC</text>
+</svg>

@@ -17,6 +17,7 @@ import { LineageView } from '../ui/lineageView';
 import { ImpactView } from '../ui/impactView';
 import { ViewMode } from '../ui/types';
 import { logger } from '../../logger';
+import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../../shared/messages';
 
 /**
  * Context interface for message handler
@@ -60,6 +61,7 @@ export interface MessageHandlerContext {
     getTableExplorer: () => TableExplorer;
     getLineageView: () => LineageView;
     getImpactView: () => ImpactView;
+    getDefaultLineageDepth: () => number;
 
     // Theme state
     getIsDarkTheme: () => boolean;
@@ -81,6 +83,60 @@ export interface MessageHandlerContext {
 /**
  * Message handler class for workspace panel webview messages
  */
+/**
+ * Simple edit distance (Levenshtein) between two strings.
+ * Used for fuzzy table name suggestions when a lookup fails.
+ */
+function editDistance(a: string, b: string): number {
+    const la = a.length, lb = b.length;
+    if (la === 0) { return lb; }
+    if (lb === 0) { return la; }
+    const dp: number[] = Array.from({ length: lb + 1 }, (_, i) => i);
+    for (let i = 1; i <= la; i++) {
+        let prev = dp[0];
+        dp[0] = i;
+        for (let j = 1; j <= lb; j++) {
+            const tmp = dp[j];
+            dp[j] = a[i - 1] === b[j - 1]
+                ? prev
+                : 1 + Math.min(prev, dp[j], dp[j - 1]);
+            prev = tmp;
+        }
+    }
+    return dp[lb];
+}
+
+/**
+ * Find table names similar to `query` from the lineage graph.
+ * Returns up to `limit` suggestions sorted by edit distance.
+ */
+export function findSimilarTableNames(
+    graph: LineageGraph,
+    query: string,
+    limit = 3
+): string[] {
+    const queryLower = query.toLowerCase();
+    const candidates: Array<{ name: string; distance: number }> = [];
+
+    for (const [, node] of graph.nodes) {
+        if (node.type === 'column') { continue; }
+        const nameLower = node.name.toLowerCase();
+        // Substring match — always include
+        if (nameLower.includes(queryLower) || queryLower.includes(nameLower)) {
+            candidates.push({ name: node.name, distance: 0 });
+            continue;
+        }
+        const dist = editDistance(queryLower, nameLower);
+        // Only suggest if within ~40% of the query length
+        if (dist <= Math.max(3, Math.ceil(queryLower.length * 0.4))) {
+            candidates.push({ name: node.name, distance: dist });
+        }
+    }
+
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.slice(0, limit).map(c => c.name);
+}
+
 export class MessageHandler {
     private _context: MessageHandlerContext;
 
@@ -88,10 +144,44 @@ export class MessageHandler {
         this._context = context;
     }
 
+    private resolveRequestedDepth(depth: unknown): number {
+        const fallbackDepth = this._context.getDefaultLineageDepth();
+        const numeric = Number(depth);
+        if (!Number.isFinite(numeric)) {
+            return fallbackDepth;
+        }
+        if (numeric === -1) {
+            return -1;
+        }
+        const normalized = Math.floor(numeric);
+        if (normalized < 1) {
+            return fallbackDepth;
+        }
+        return Math.min(20, normalized);
+    }
+
+    private resolveColumnLineageTableName(tableName?: string, tableId?: string): string | undefined {
+        if (tableName && tableName.trim().length > 0) {
+            return tableName;
+        }
+        if (!tableId || tableId.trim().length === 0) {
+            return undefined;
+        }
+        const separatorIndex = tableId.indexOf(':');
+        if (separatorIndex >= 0 && separatorIndex < tableId.length - 1) {
+            return tableId.slice(separatorIndex + 1);
+        }
+        return tableId;
+    }
+
     /**
      * Main message router - dispatches messages to appropriate handlers
      */
-    public async handleMessage(message: any): Promise<void> {
+    private postMessage(msg: WorkspaceHostMessage): void {
+        this._context.panel.webview.postMessage(msg);
+    }
+
+    public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
         switch (message.command) {
             case 'switchView':
                 this.handleSwitchView(message.view);
@@ -142,16 +232,16 @@ export class MessageHandler {
                 await this.handleSwitchToLineageView();
                 break;
 
-            case 'switchToTableExplorer':
-                await this.handleSwitchToTableExplorer();
-                break;
-
             case 'switchToImpactView':
                 await this.handleSwitchToImpactView();
                 break;
 
             case 'getLineage':
-                await this.handleGetLineage(message.nodeId, message.direction, message.depth);
+                await this.handleGetLineage(
+                    message.nodeId,
+                    message.direction,
+                    this.resolveRequestedDepth(message.depth)
+                );
                 break;
 
             case 'analyzeImpact':
@@ -168,7 +258,12 @@ export class MessageHandler {
                 break;
 
             case 'getColumnLineage':
-                await this.handleGetColumnLineage(message.tableName, message.columnName);
+                {
+                    const tableName = this.resolveColumnLineageTableName(message.tableName, message.tableId);
+                    if (tableName && message.columnName) {
+                        await this.handleGetColumnLineage(tableName, message.columnName);
+                    }
+                }
                 break;
 
             case 'selectLineageNode':
@@ -176,11 +271,21 @@ export class MessageHandler {
                 break;
 
             case 'getUpstream':
-                await this.handleGetUpstream(message.nodeId, message.depth, message.nodeType, message.filePath);
+                await this.handleGetUpstream(
+                    message.nodeId,
+                    this.resolveRequestedDepth(message.depth),
+                    message.nodeType,
+                    message.filePath
+                );
                 break;
 
             case 'getDownstream':
-                await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
+                await this.handleGetDownstream(
+                    message.nodeId,
+                    this.resolveRequestedDepth(message.depth),
+                    message.nodeType,
+                    message.filePath
+                );
                 break;
 
             // ========== Visual Lineage Graph Commands ==========
@@ -191,7 +296,7 @@ export class MessageHandler {
             case 'getLineageGraph':
                 await this.handleGetLineageGraph(
                     message.nodeId,
-                    message.depth || 5,
+                    this.resolveRequestedDepth(message.depth),
                     message.direction || 'both',
                     message.expandedNodes
                 );
@@ -218,7 +323,7 @@ export class MessageHandler {
                 break;
 
             default:
-                logger.warn(`Unknown message command: ${message.command}`);
+                logger.warn(`Unknown message command: ${(message as { command: string }).command}`);
         }
     }
 
@@ -283,7 +388,7 @@ export class MessageHandler {
         this._context.setIsDarkTheme(newDark);
         // Send CSS swap to webview instead of full HTML rebuild to avoid flicker
         const css = this._context.getThemeCss(newDark);
-        this._context.panel.webview.postMessage({ command: 'themeChanged', css, isDark: newDark });
+        this.postMessage({ command: 'themeChanged', css, isDark: newDark });
     }
 
     // ========== File Operations ==========
@@ -334,22 +439,8 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
         if (lineageGraph) {
             const html = this._context.getLineageView().generateLineageOverview(lineageGraph);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageOverviewResult',
-                data: { html }
-            });
-        }
-    }
-
-    private async handleSwitchToTableExplorer(): Promise<void> {
-        this._context.setCurrentView('tableExplorer');
-        await this._context.buildLineageGraph();
-
-        const lineageGraph = this._context.getLineageGraph();
-        if (lineageGraph) {
-            const html = this._context.getTableExplorer().generateTableList(lineageGraph);
-            this._context.panel.webview.postMessage({
-                command: 'tableListResult',
                 data: { html }
             });
         }
@@ -362,13 +453,13 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
         if (lineageGraph) {
             const html = this._context.getImpactView().generateImpactForm(lineageGraph);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'impactFormResult',
                 data: { html }
             });
         } else {
             const html = this._context.getImpactView().generateImpactForm(null);
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'impactFormResult',
                 data: { html }
             });
@@ -406,7 +497,7 @@ export class MessageHandler {
         this._context.setCurrentFlowResult(result);
 
         // Send result to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageResult',
             data: {
                 nodeId,
@@ -430,7 +521,7 @@ export class MessageHandler {
         type: 'table' | 'column',
         name: string,
         tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' = 'modify'
+        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const impactAnalyzer = this._context.getImpactAnalyzer();
@@ -447,7 +538,7 @@ export class MessageHandler {
         this._context.setCurrentImpactReport(report);
 
         // Send result to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'impactResult',
             data: {
                 report: {
@@ -496,9 +587,16 @@ export class MessageHandler {
         }
 
         if (!node) {
-            this._context.panel.webview.postMessage({
-                command: 'tableExplorerResult',
-                data: { error: `Table "${tableName}" not found in lineage graph` }
+            const suggestions = findSimilarTableNames(lineageGraph, tableName);
+            let errorMsg = `Table "${tableName}" not found in the lineage graph.`;
+            if (suggestions.length > 0) {
+                errorMsg += ` Did you mean: ${suggestions.map(s => `"${s}"`).join(', ')}?`;
+            } else {
+                errorMsg += ' Make sure the table exists in your SQL files and the workspace index is up to date.';
+            }
+            this.postMessage({
+                command: 'tableDetailResult',
+                data: { error: errorMsg }
             });
             return;
         }
@@ -510,8 +608,8 @@ export class MessageHandler {
             graph: lineageGraph
         });
 
-        this._context.panel.webview.postMessage({
-            command: 'tableExplorerResult',
+        this.postMessage({
+            command: 'tableDetailResult',
             data: {
                 table: {
                     id: node.id,
@@ -540,7 +638,7 @@ export class MessageHandler {
 
         const html = this._context.getLineageView().generateColumnLineageView(lineage);
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnLineageResult',
             data: {
                 tableName,
@@ -575,21 +673,27 @@ export class MessageHandler {
         filePath?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
+        const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) {return;}
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
-        // For file nodes, get all tables defined in the file and aggregate their upstream
-        let nodeIds: string[] = [];
+        // For file nodes, aggregate upstream for all displayable nodes defined in the file.
+        const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            // This would need indexManager access - simplified for now
-            // In full implementation, pass indexManager through context
+            const normalizedPath = filePath.toLowerCase();
+            for (const [id, node] of lineageGraph.nodes) {
+                const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
+                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                    nodeIds.add(id);
+                }
+            }
         } else if (nodeId) {
-            nodeIds = [nodeId];
+            nodeIds.add(nodeId);
         }
 
-        if (nodeIds.length === 0) {
-            this._context.panel.webview.postMessage({
+        if (nodeIds.size === 0) {
+            this.postMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -610,7 +714,7 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'upstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -627,20 +731,27 @@ export class MessageHandler {
         filePath?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
+        const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
-        if (!flowAnalyzer) {return;}
+        if (!flowAnalyzer || !lineageGraph) {return;}
 
-        // For file nodes, get all tables defined in the file and aggregate their downstream
-        let nodeIds: string[] = [];
+        // For file nodes, aggregate downstream for all displayable nodes defined in the file.
+        const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            // This would need indexManager access - simplified for now
+            const normalizedPath = filePath.toLowerCase();
+            for (const [id, node] of lineageGraph.nodes) {
+                const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
+                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                    nodeIds.add(id);
+                }
+            }
         } else if (nodeId) {
-            nodeIds = [nodeId];
+            nodeIds.add(nodeId);
         }
 
-        if (nodeIds.length === 0) {
-            this._context.panel.webview.postMessage({
+        if (nodeIds.size === 0) {
+            this.postMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -661,7 +772,7 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'downstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -678,7 +789,7 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageSearchResults',
                 data: { results: [] }
             });
@@ -715,7 +826,7 @@ export class MessageHandler {
             return a.name.localeCompare(b.name);
         });
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageSearchResults',
             data: { results: results.slice(0, 15) }
         });
@@ -731,9 +842,9 @@ export class MessageHandler {
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this._context.panel.webview.postMessage({
+            this.postMessage({
                 command: 'lineageGraphResult',
-                data: { error: 'No lineage graph available' }
+                data: { error: 'No lineage graph available. Open SQL files in your workspace and click Refresh to build the dependency index.' }
             });
             return;
         }
@@ -749,7 +860,7 @@ export class MessageHandler {
             }
         );
 
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'lineageGraphResult',
             data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
         });
@@ -765,7 +876,7 @@ export class MessageHandler {
         if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'nodeColumnsResult',
             data: { nodeId }
         });
@@ -776,12 +887,12 @@ export class MessageHandler {
         direction: 'both' | 'upstream' | 'downstream'
     ): Promise<void> {
         // Re-generate graph with new direction
-        await this.handleGetLineageGraph(nodeId, 5, direction);
+        await this.handleGetLineageGraph(nodeId, this._context.getDefaultLineageDepth(), direction);
     }
 
     private handleCollapseNodeColumns(nodeId: string): void {
         // Collapse node - send confirmation to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'nodeCollapsedResult',
             data: { nodeId }
         });
@@ -805,7 +916,7 @@ export class MessageHandler {
         );
 
         // Send result back to webview
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnLineageResult',
             data: {
                 tableId,
@@ -817,7 +928,7 @@ export class MessageHandler {
     }
 
     private async handleClearColumnSelection(): Promise<void> {
-        this._context.panel.webview.postMessage({
+        this.postMessage({
             command: 'columnSelectionCleared'
         });
     }

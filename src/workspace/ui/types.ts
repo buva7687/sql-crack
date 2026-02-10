@@ -6,7 +6,7 @@ import { ImpactReport } from '../lineage/impactAnalyzer';
 /**
  * UI view mode
  */
-export type ViewMode = 'graph' | 'lineage' | 'tableExplorer' | 'impact';
+export type ViewMode = 'graph' | 'lineage' | 'impact';
 
 /**
  * Table explorer data

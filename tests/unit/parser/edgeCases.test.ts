@@ -358,8 +358,9 @@ describe('Edge Cases', () => {
             const result = parseSql(sql, 'MySQL');
 
             expect(result).toBeDefined();
-            // Should have an error
-            expect(result.error).toBeDefined();
+            // Fallback parser produces partial result
+            expect(result.partial).toBe(true);
+            expect(result.nodes.length).toBeGreaterThan(0); // Should still extract 'users' table
         });
 
         it('handles unclosed string literal', () => {
@@ -376,7 +377,8 @@ describe('Edge Cases', () => {
             const result = parseSql(sql, 'MySQL');
 
             expect(result).toBeDefined();
-            expect(result.error).toBeDefined();
+            // Fallback parser produces partial result
+            expect(result.partial).toBe(true);
         });
 
         it('handles empty subquery', () => {
@@ -398,8 +400,11 @@ describe('Edge Cases', () => {
 
             const result = parseSqlBatch(sql, 'MySQL');
 
-            expect(result.successCount).toBeGreaterThan(0);
-            expect(result.errorCount).toBeGreaterThan(0);
+            // With fallback parser, all statements produce results (some partial)
+            expect(result.queries.length).toBeGreaterThan(0);
+            // Valid queries should succeed
+            const hasNonPartial = result.queries.some(q => !q.partial && !q.error);
+            expect(hasNonPartial).toBe(true);
         });
     });
 
@@ -475,6 +480,10 @@ describe('Edge Cases', () => {
             const result = parseSql(sql, 'MySQL');
 
             expect(result.error).toBeUndefined();
+            const tableLabels = result.nodes
+                .filter(n => n.type === 'table')
+                .map(n => n.label.toLowerCase());
+            expect(tableLabels).toEqual(expect.arrayContaining(['users', 'orders']));
         });
     });
 });

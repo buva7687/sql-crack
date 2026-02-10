@@ -10,13 +10,24 @@ export interface WebviewScriptParams {
     searchFilterQuery: string;
     initialView?: string;
     currentGraphMode?: 'files' | 'tables' | 'hybrid';
+    lineageDefaultDepth?: number;
 }
 
 /**
  * Generate the complete client script for main webview
  */
 export function getWebviewScript(params: WebviewScriptParams): string {
-    const { nonce, graphData, searchFilterQuery, initialView = 'graph', currentGraphMode = 'tables' } = params;
+    const {
+        nonce,
+        graphData,
+        searchFilterQuery,
+        initialView = 'graph',
+        currentGraphMode = 'tables',
+        lineageDefaultDepth = 5
+    } = params;
+    const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
+        ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
+        : 5;
 
     return `
     <script nonce="${nonce}">
@@ -24,6 +35,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
         let currentGraphMode = '${currentGraphMode}';
+        let lineageDepth = ${normalizedLineageDepth};
+        function normalizeLineageDepth(value, fallbackDepth = 5) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return fallbackDepth;
+            }
+            const normalized = Math.floor(numeric);
+            if (normalized < 1) {
+                return fallbackDepth;
+            }
+            return Math.min(20, normalized);
+        }
+        lineageDepth = normalizeLineageDepth(lineageDepth, 5);
         const prefersReducedMotion = typeof window !== 'undefined'
             && typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -55,6 +79,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const selectionFile = document.getElementById('selection-file');
         const selectionUpstream = document.getElementById('selection-upstream');
         const selectionDownstream = document.getElementById('selection-downstream');
+        const selectionCrossLinks = document.getElementById('selection-cross-links');
         const graphEmptyOverlay = document.getElementById('graph-empty-overlay');
         const graphEmptyTitle = document.getElementById('graph-empty-title');
         const graphEmptyDesc = document.getElementById('graph-empty-desc');
@@ -62,6 +87,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphLegendBar = document.getElementById('workspace-legend-bar');
         const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
         const graphLegendToggleBtn = document.getElementById('btn-legend-toggle');
+        const searchCount = document.getElementById('graph-search-count');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========
@@ -408,6 +434,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 selectionEmpty.textContent = selectionEmptyText;
                 selectionEmpty.style.display = '';
             }
+            if (selectionCrossLinks) {
+                selectionCrossLinks.style.display = 'none';
+            }
+            updateGraphActionButtons();
+        }
+
+        function updateGraphActionButtons() {
+            const hasSelection = !!selectedNodeId;
+            [focusBtn, traceUpBtn, traceDownBtn].forEach(btn => {
+                if (!btn) return;
+                btn.classList.toggle('btn-disabled', !hasSelection);
+                btn.setAttribute('aria-disabled', hasSelection ? 'false' : 'true');
+            });
         }
 
         function updateSelectionPanel(node) {
@@ -427,7 +466,15 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 
             const { upstream, downstream } = getNeighbors(nodeId);
             const connectionCount = upstream.size + downstream.size;
-            const typeLabel = type === 'file' ? 'File' : type === 'table' ? 'Table' : type === 'view' ? 'View' : 'External';
+            const typeLabel = type === 'file'
+                ? 'File'
+                : type === 'table'
+                    ? 'Table'
+                    : type === 'view'
+                        ? 'View'
+                        : type === 'cte'
+                            ? 'CTE'
+                            : 'External';
 
             if (selectionTitle) selectionTitle.textContent = label;
             if (selectionMeta) {
@@ -451,7 +498,25 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             if (selectionUpstream) selectionUpstream.textContent = upstreamList.length ? upstreamList.join(', ') : 'None';
             if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
 
+            if (selectionCrossLinks) {
+                const showCrossLinks = type === 'table' || type === 'view' || type === 'cte';
+                selectionCrossLinks.style.display = showCrossLinks ? '' : 'none';
+
+                selectionCrossLinks.querySelectorAll('[data-graph-action]').forEach(button => {
+                    button.setAttribute('data-node-id', nodeId);
+                    button.setAttribute('data-node-label', label);
+                    button.setAttribute('data-node-type', type);
+                    button.setAttribute('data-file-path', filePath || '');
+                });
+
+                const openFileAction = selectionCrossLinks.querySelector('[data-graph-action="open-file"]');
+                if (openFileAction) {
+                    openFileAction.style.display = filePath ? '' : 'none';
+                }
+            }
+
             if (focusModeEnabled) applyFocusMode();
+            updateGraphActionButtons();
         }
 
         function markWelcomeSeen() {
@@ -695,6 +760,12 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
             updateGraphEmptyState();
             applySearchHighlight();
+            if (searchCount) {
+                const total = graphData?.nodes?.length || 0;
+                const matched = getSearchMatchCount(query, typeFilter === 'all' ? undefined : [typeFilter]);
+                searchCount.textContent = matched + ' / ' + total;
+                searchCount.style.display = '';
+            }
         }
 
         function clearSearch() {
@@ -704,6 +775,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             vscode.postMessage({ command: 'clearSearch' });
             updateGraphEmptyState();
             applySearchHighlight();
+            if (searchCount) { searchCount.textContent = ''; searchCount.style.display = 'none'; }
         }
 
         let searchTimeout;
@@ -836,18 +908,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         });
         traceUpBtn?.addEventListener('click', () => {
             if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream dependencies.';
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream sources.';
                 return;
             }
             setTraceMode('upstream');
         });
         traceDownBtn?.addEventListener('click', () => {
             if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream dependents.';
+                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream consumers.';
                 return;
             }
             setTraceMode('downstream');
         });
+        updateGraphActionButtons();
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
         });
@@ -894,6 +967,78 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 case 'clear-selection':
                     clearSelection();
                     break;
+                case 'view-lineage': {
+                    const nodeId = actionEl.getAttribute('data-node-id') || selectedNodeId;
+                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
+                    const nodeType = actionEl.getAttribute('data-node-type') || '';
+                    if (!nodeId) {
+                        break;
+                    }
+                    switchToView('lineage', false, nodeLabel, nodeType);
+                    if (lineageTitle) {
+                        lineageTitle.textContent = 'Data Lineage';
+                    }
+                    setTimeout(() => {
+                        if (typeof selectLineageNode === 'function') {
+                            selectLineageNode(nodeId);
+                        }
+                    }, 120);
+                    break;
+                }
+                case 'analyze-impact': {
+                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
+                    const nodeType = actionEl.getAttribute('data-node-type') || 'table';
+                    const nodeId = actionEl.getAttribute('data-node-id') || '';
+                    if (!nodeLabel) {
+                        break;
+                    }
+                    switchToView('impact', false, nodeLabel, nodeType);
+                    if (lineageTitle) {
+                        lineageTitle.textContent = 'Impact Analysis';
+                    }
+                    const prefillImpactFromSelection = (attempt = 0) => {
+                        const impactInput = document.getElementById('impact-table-input');
+                        const impactTableId = document.getElementById('impact-table-id');
+                        const impactBadge = document.getElementById('impact-selected-badge');
+                        const impactLabel = document.getElementById('impact-selected-label');
+                        const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+                        const loader = document.getElementById('impact-typeahead-loading');
+
+                        if (!impactInput || !impactTableId) {
+                            if (attempt < 8) {
+                                if (loader && attempt === 0) loader.style.display = 'flex';
+                                setTimeout(() => prefillImpactFromSelection(attempt + 1), 80);
+                            } else {
+                                if (loader) loader.style.display = 'none';
+                            }
+                            return;
+                        }
+                        if (loader) loader.style.display = 'none';
+
+                        impactInput.value = nodeLabel;
+                        impactTableId.value = nodeId;
+                        impactTableId.dataset.name = nodeLabel;
+                        impactTableId.dataset.type = nodeType || 'table';
+                        if (impactBadge) {
+                            impactBadge.style.display = 'inline-flex';
+                        }
+                        if (impactLabel) {
+                            impactLabel.textContent = nodeLabel + ' (' + (nodeType || 'table') + ')';
+                        }
+                        if (impactAnalyzeBtn) {
+                            impactAnalyzeBtn.disabled = false;
+                        }
+                    };
+                    setTimeout(() => prefillImpactFromSelection(), 120);
+                    break;
+                }
+                case 'open-file': {
+                    const filePath = actionEl.getAttribute('data-file-path') || '';
+                    if (filePath) {
+                        openFile(filePath);
+                    }
+                    break;
+                }
                 case 'dismiss-welcome':
                     markWelcomeSeen();
                     updateGraphEmptyState();
@@ -939,7 +1084,6 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         ${getTooltipScript()}
         ${getImpactSummaryScript()}
         ${getImpactFormScript()}
-        ${getTableSearchScript()}
         ${getVisualLineageSearchScript()}
         ${getLineageGraphScript()}
         ${getColumnLineageScript()}
@@ -953,8 +1097,6 @@ function getViewModeScript(): string {
         // ========== View Mode Tabs ==========
         let currentViewMode = 'graph';
         let lineageDetailView = false;
-        let tableExplorerHistory = []; // Stack of {tableName, nodeId} for back navigation
-        let currentExploredTable = null; // Currently viewed table {tableName, nodeId}
 
         // Navigation state stack for cross-view navigation
         const navStack = [];
@@ -972,7 +1114,7 @@ function getViewModeScript(): string {
                     selectedNodeId
                 };
             } else {
-                // Save scroll position for non-graph views (lineage, tableExplorer, impact)
+                // Save scroll position for non-graph views (lineage, impact)
                 const scrollContainer = lineageContent || document.querySelector('.lineage-content');
                 if (scrollContainer) {
                     viewStates[currentViewMode] = {
@@ -1018,14 +1160,35 @@ function getViewModeScript(): string {
 
         const viewTitles = {
             lineage: 'Data Lineage',
-            tableExplorer: 'Table Explorer',
             impact: 'Impact Analysis'
         };
 
+        // Inline skeleton templates keep first-paint placeholders close to the tab switch logic.
+        // If these variants grow much further, move them into dedicated render helpers.
         const viewEmptyStates = {
-            lineage: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            tableExplorer: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>',
-            impact: '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>'
+            lineage: '<div class="view-skeleton view-skeleton-lineage">' +
+                '<div class="view-skeleton-header"></div>' +
+                '<div class="view-skeleton-search"></div>' +
+                '<div class="view-skeleton-grid">' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                    '<div class="view-skeleton-card"></div>' +
+                '</div>' +
+            '</div>',
+            impact: '<div class="view-skeleton view-skeleton-impact">' +
+                '<div class="view-skeleton-header"></div>' +
+                '<div class="view-skeleton-form">' +
+                    '<div class="view-skeleton-field"></div>' +
+                    '<div class="view-skeleton-field"></div>' +
+                    '<div class="view-skeleton-actions">' +
+                        '<div class="view-skeleton-button"></div>' +
+                        '<div class="view-skeleton-button secondary"></div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>'
         };
 
         function updateSidebarSectionsForView() {
@@ -1046,6 +1209,15 @@ function getViewModeScript(): string {
             return escapeBreadcrumbText(value).replace(/"/g, '&quot;');
         }
 
+        function escapeHtmlSafe(text) {
+            return (text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         function updateWorkspaceBreadcrumb() {
             if (!workspaceBreadcrumb) return;
             if (currentViewMode === 'graph') {
@@ -1056,7 +1228,6 @@ function getViewModeScript(): string {
 
             const viewLabels = {
                 lineage: 'Lineage',
-                tableExplorer: 'Tables',
                 impact: 'Impact'
             };
             const segments = [{
@@ -1085,7 +1256,7 @@ function getViewModeScript(): string {
 
             if (lineageDetailView && lineageTitle && lineageTitle.textContent) {
                 const titleText = lineageTitle.textContent.trim();
-                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Table Explorer' && titleText !== 'Impact Analysis') {
+                if (titleText && titleText !== 'Data Lineage' && titleText !== 'Impact Analysis') {
                     segments.push({
                         label: titleText,
                         action: 'detail-root',
@@ -1123,6 +1294,10 @@ function getViewModeScript(): string {
             if (typeof clearColumnHighlighting === 'function') {
                 clearColumnHighlighting();
             }
+
+            // Reset lineage detail mode on explicit tab transitions so the back button
+            // always reflects the current tab's true navigation target.
+            lineageDetailView = false;
 
             // Save state of current view before switching
             saveCurrentViewState();
@@ -1189,7 +1364,7 @@ function getViewModeScript(): string {
                 if (focusBtn) focusBtn.style.display = '';
                 if (graphModeSwitcher) {
                     // Use visibility (not display) so switcher always reserves space in layout.
-                    // This prevents main tabs (Graph|Lineage|Tables|Impact) from shifting position
+                    // This prevents main tabs (Graph|Lineage|Impact) from shifting position
                     // when switching between tabs, ensuring good UX (mouse stays over clicked tab).
                     graphModeSwitcher.style.visibility = 'visible';
                     graphModeSwitcher.style.pointerEvents = 'auto';
@@ -1232,14 +1407,13 @@ function getViewModeScript(): string {
                 if (!skipMessage) {
                     if (view === 'lineage') {
                         vscode.postMessage({ command: 'switchToLineageView' });
-                    } else if (view === 'tableExplorer') {
-                        vscode.postMessage({ command: 'switchToTableExplorer' });
                     } else if (view === 'impact') {
                         vscode.postMessage({ command: 'switchToImpactView' });
                     }
                 }
             }
             updateSidebarSectionsForView();
+            updateBackButtonText();
             updateWorkspaceBreadcrumb();
         }
 
@@ -1271,8 +1445,6 @@ function getViewModeScript(): string {
 
             if (action === 'detail-root') {
                 lineageDetailView = false;
-                tableExplorerHistory = [];
-                currentExploredTable = null;
                 // Clear column trace when resetting to detail root
                 if (typeof clearColumnHighlighting === 'function') {
                     clearColumnHighlighting();
@@ -1281,9 +1453,6 @@ function getViewModeScript(): string {
                 if (currentViewMode === 'lineage') {
                     if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
                     vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'tableExplorer') {
-                    if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
                 } else if (currentViewMode === 'impact') {
                     if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
                     vscode.postMessage({ command: 'switchToImpactView' });
@@ -1385,8 +1554,6 @@ function getViewModeScript(): string {
                 // Re-request the view content from server
                 if (initialViewMode === 'lineage') {
                     vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (initialViewMode === 'tableExplorer') {
-                    vscode.postMessage({ command: 'switchToTableExplorer' });
                 } else if (initialViewMode === 'impact') {
                     vscode.postMessage({ command: 'switchToImpactView' });
                 }
@@ -1395,47 +1562,25 @@ function getViewModeScript(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
-            const tabNames = { graph: 'Graph', lineage: 'Lineage', tableExplorer: 'Tables', impact: 'Impact' };
-            if (lineageDetailView && currentViewMode !== 'graph') {
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[currentViewMode] || 'Overview');
+            if (lineageDetailView && currentViewMode === 'lineage') {
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Lineage';
             } else {
-                const prevView = navStack.length > 0 ? navStack[navStack.length - 1] : 'graph';
-                const fromLabel = prevView === 'graph' && navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
-                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to ' + (tabNames[prevView] || 'Graph') + fromLabel;
+                const fromLabel = navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Graph' + fromLabel;
             }
         }
 
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (lineageDetailView && currentViewMode !== 'graph') {
-                // Check if we have history to go back to (for table explorer)
-                if (currentViewMode === 'tableExplorer' && tableExplorerHistory.length > 0) {
-                    const prev = tableExplorerHistory.pop();
-                    if (lineageTitle) lineageTitle.textContent = 'Table: ' + prev.tableName;
-                    lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                    vscode.postMessage({ command: 'exploreTable', tableName: prev.tableName, nodeId: prev.nodeId });
-                    updateBackButtonText();
-                } else {
-                    // No history, go back to main view
-                    lineageDetailView = false;
-                    tableExplorerHistory = [];
-                    currentExploredTable = null;
-                    updateBackButtonText();
-                    if (currentViewMode === 'lineage') {
-                        if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                        vscode.postMessage({ command: 'switchToLineageView' });
-                    } else if (currentViewMode === 'tableExplorer') {
-                        if (lineageTitle) lineageTitle.textContent = 'Table Explorer';
-                        vscode.postMessage({ command: 'switchToTableExplorer' });
-                    } else if (currentViewMode === 'impact') {
-                        if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                        vscode.postMessage({ command: 'switchToImpactView' });
-                    }
-                }
+            if (lineageDetailView && currentViewMode === 'lineage') {
+                lineageDetailView = false;
+                updateBackButtonText();
+                if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
+                vscode.postMessage({ command: 'switchToLineageView' });
             } else {
-                // Use nav stack to go back to previous view
-                const previousView = navStack.length > 0 ? navStack.pop() : 'graph';
-                switchToView(previousView, true); // skipMessage=true since we're navigating back
+                // Non-detail back always returns to Graph to match button label and user expectation.
+                navStack.length = 0;
+                switchToView('graph', true); // skipMessage=true since this is local navigation
             }
             updateWorkspaceBreadcrumb();
         });
@@ -1529,14 +1674,14 @@ function getContextMenuScript(): string {
                                 command: 'getUpstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
-                                depth: 5
+                                depth: lineageDepth
                             });
                         } else {
                             const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getUpstream',
                                 nodeId: nodeType + ':' + nodeName.toLowerCase(),
-                                depth: 5
+                                depth: lineageDepth
                             });
                         }
                         break;
@@ -1549,14 +1694,14 @@ function getContextMenuScript(): string {
                                 command: 'getDownstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
-                                depth: 5
+                                depth: lineageDepth
                             });
                         } else {
                             const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getDownstream',
                                 nodeId: nodeType + ':' + nodeName.toLowerCase(),
-                                depth: 5
+                                depth: lineageDepth
                             });
                         }
                         break;
@@ -1572,12 +1717,15 @@ function getContextMenuScript(): string {
                         });
                         break;
                     case 'exploreTable':
-                        switchToView('tableExplorer', false, nodeName, nodeType);
+                        switchToView('lineage', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
+                        lineageDetailView = true;
+                        updateBackButtonText();
                         vscode.postMessage({
                             command: 'exploreTable',
-                            tableName: nodeName
+                            tableName: nodeName,
+                            nodeId: contextMenuTarget.id || ''
                         });
                         break;
                     case 'openFile':
@@ -1615,8 +1763,8 @@ function getMessageHandlingScript(): string {
                         html += '<div style="display: grid; gap: 8px;">';
                         nodes.forEach(n => {
                             html += '<div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;" onclick="vscode.postMessage({command:\\'openFileAtLine\\', filePath:\\'' + (n.filePath || '').replace(/'/g, "\\\\'") + '\\', line: ' + (n.lineNumber || 0) + '})">';
-                            html += '<div style="font-weight: 600; color: var(--text-primary);">' + n.name + '</div>';
-                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + n.type + (n.filePath ? ' • ' + n.filePath.split('/').pop() : '') + '</div>';
+                            html += '<div style="font-weight: 600; color: var(--text-primary);">' + escapeHtmlSafe(n.name) + '</div>';
+                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(n.filePath.split('/').pop()) : '') + '</div>';
                             html += '</div>';
                         });
                         html += '</div>';
@@ -1635,10 +1783,10 @@ function getMessageHandlingScript(): string {
                         setupImpactSummaryDetails();
                     }
                     break;
-                case 'tableExplorerResult':
+                case 'tableDetailResult':
                     if (lineageContent) {
                         if (message.data?.error) {
-                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + message.data.error + '</div>';
+                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                         } else if (message.data?.html) {
                             lineageContent.innerHTML = message.data.html;
                         }
@@ -1649,12 +1797,6 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'columnSelectionCleared':
                     clearColumnHighlighting();
-                    break;
-                case 'tableListResult':
-                    if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
-                        setupTableSearchAndFilter();
-                    }
                     break;
                 case 'impactFormResult':
                     if (lineageContent && message.data?.html) {
@@ -1713,6 +1855,18 @@ function getMessageHandlingScript(): string {
                         }
                     }
                     break;
+                case 'workspaceLineageDepthUpdated':
+                    lineageDepth = normalizeLineageDepth(message.depth, lineageDepth);
+                    if (currentViewMode === 'lineage' && lineageDetailView && lineageCurrentNodeId) {
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: lineageCurrentNodeId,
+                            depth: lineageDepth,
+                            direction: lineageCurrentDirection,
+                            expandedNodes: Array.from(lineageExpandedNodes || new Set())
+                        });
+                    }
+                    break;
                 case 'exportPng':
                     // Handle PNG export request from extension
                     exportToPng();
@@ -1758,7 +1912,7 @@ function getMessageHandlingScript(): string {
                 bgRect.setAttribute('y', bbox.y - padding);
                 bgRect.setAttribute('width', width);
                 bgRect.setAttribute('height', height);
-                bgRect.setAttribute('fill', document.body.classList.contains('dark') ? '#111111' : '#fafafa');
+                bgRect.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim());
                 svgClone.insertBefore(bgRect, svgClone.firstChild);
 
                 // Serialize SVG
@@ -1839,6 +1993,98 @@ function getEventDelegationScript(): string {
                 const action = target.getAttribute('data-action');
                 const tableName = target.getAttribute('data-table');
                 const nodeId = target.getAttribute('data-node-id');
+                const nodeType = target.getAttribute('data-node-type') || target.getAttribute('data-type') || 'table';
+
+                if (action === 'export-impact-report') {
+                    const requested = target.getAttribute('data-format') || 'markdown';
+                    const format = requested === 'json' ? 'impact-json' : 'impact-markdown';
+                    vscode.postMessage({
+                        command: 'export',
+                        format: format
+                    });
+                    return;
+                }
+
+                if (action && action.indexOf('cross-view-') === 0) {
+                    const inferredNodeId = nodeId || (tableName ? ('table:' + tableName.toLowerCase()) : '');
+
+                    if (action === 'cross-view-lineage') {
+                        if (!inferredNodeId) { return; }
+
+                        switchToView('lineage', false, tableName || '', nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Data Lineage';
+                        }
+                        setTimeout(() => {
+                            selectLineageNode(inferredNodeId);
+                        }, 120);
+                        return;
+                    }
+
+                    if (action === 'cross-view-detail') {
+                        if (!tableName) { return; }
+
+                        switchToView('lineage', false, tableName, nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Table: ' + tableName;
+                        }
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
+                        }
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        setTimeout(() => {
+                            vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: inferredNodeId || nodeId });
+                        }, 120);
+                        return;
+                    }
+
+                    if (action === 'cross-view-impact') {
+                        if (!tableName) { return; }
+
+                        switchToView('impact', false, tableName, nodeType);
+                        if (lineageTitle) {
+                            lineageTitle.textContent = 'Impact Analysis';
+                        }
+
+                        const prefillImpactForm = (attempt = 0) => {
+                            const impactInput = document.getElementById('impact-table-input');
+                            const impactTableId = document.getElementById('impact-table-id');
+                            const impactBadge = document.getElementById('impact-selected-badge');
+                            const impactLabel = document.getElementById('impact-selected-label');
+                            const impactAnalyzeBtn = document.getElementById('impact-analyze-btn');
+                            const loader = document.getElementById('impact-typeahead-loading');
+
+                            if (!impactInput || !impactTableId) {
+                                if (attempt < 8) {
+                                    if (loader && attempt === 0) loader.style.display = 'flex';
+                                    setTimeout(() => prefillImpactForm(attempt + 1), 80);
+                                } else {
+                                    if (loader) loader.style.display = 'none';
+                                }
+                                return;
+                            }
+                            if (loader) loader.style.display = 'none';
+
+                            impactInput.value = tableName;
+                            impactTableId.value = inferredNodeId;
+                            impactTableId.dataset.name = tableName;
+                            impactTableId.dataset.type = nodeType || 'table';
+                            if (impactBadge) {
+                                impactBadge.style.display = 'inline-flex';
+                            }
+                            if (impactLabel) {
+                                impactLabel.textContent = tableName + ' (' + (nodeType || 'table') + ')';
+                            }
+                            if (impactAnalyzeBtn) {
+                                impactAnalyzeBtn.disabled = false;
+                            }
+                        };
+
+                        setTimeout(() => prefillImpactForm(), 120);
+                        return;
+                    }
+                }
 
                 if (!tableName) return;
 
@@ -1847,11 +2093,6 @@ function getEventDelegationScript(): string {
 
                 switch (action) {
                     case 'explore-table':
-                        // Push current table to history before navigating (for back button)
-                        if (currentViewMode === 'tableExplorer' && currentExploredTable) {
-                            tableExplorerHistory.push(currentExploredTable);
-                        }
-                        currentExploredTable = { tableName: tableName, nodeId: nodeId };
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
@@ -1860,12 +2101,12 @@ function getEventDelegationScript(): string {
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                     case 'show-downstream':
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: 5 });
+                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                 }
             });
@@ -2029,17 +2270,17 @@ function getImpactFormScript(): string {
     return `
         // ========== Impact Form Setup ==========
         function setupImpactForm() {
-            const tableSelect = document.getElementById('impact-table-select');
+            const tableInput = document.getElementById('impact-table-input');
+            const tableIdInput = document.getElementById('impact-table-id');
+            const typeaheadResults = document.getElementById('impact-typeahead-results');
+            const resultItems = typeaheadResults ? Array.from(typeaheadResults.querySelectorAll('.impact-typeahead-item')) : [];
+            const selectedBadge = document.getElementById('impact-selected-badge');
+            const selectedLabel = document.getElementById('impact-selected-label');
+            const selectedClear = document.getElementById('impact-selected-clear');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
-            const searchInput = document.getElementById('impact-search-input');
-            const searchClear = document.getElementById('impact-search-clear');
-            const filterChips = document.querySelectorAll('.view-filter-chip[data-filter]');
-            const resultsInfo = document.getElementById('impact-results-info');
-            const resultsCount = document.getElementById('impact-results-count');
-
-            // Store all original options
-            const allOptions = tableSelect ? Array.from(tableSelect.options) : [];
+            let impactTypeaheadDebounceTimer = null;
+            const impactTypeaheadDebounceMs = 180;
 
             changeTypeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -2048,98 +2289,173 @@ function getImpactFormScript(): string {
                 });
             });
 
-            // Filter function for search and filter chips
-            function filterImpactOptions() {
-                if (!tableSelect) return;
+            const analyzeHint = document.getElementById('impact-analyze-hint');
+            function updateAnalyzeButtonState() {
+                if (analyzeBtn && tableIdInput) {
+                    const hasValue = !!tableIdInput.value;
+                    analyzeBtn.disabled = !hasValue;
+                    if (analyzeHint) {
+                        analyzeHint.classList.toggle('hidden', hasValue);
+                    }
+                }
+            }
 
-                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
-                const activeFilter = document.querySelector('.view-filter-chip.active[data-filter]');
-                const filterValue = activeFilter?.getAttribute('data-filter') || 'all';
+            function closeTypeaheadResults() {
+                if (typeaheadResults) {
+                    typeaheadResults.style.display = 'none';
+                }
+                tableInput?.setAttribute('aria-expanded', 'false');
+            }
 
-                // Clear existing options except the first (placeholder)
-                while (tableSelect.options.length > 1) {
-                    tableSelect.remove(1);
+            function openTypeaheadResults() {
+                if (typeaheadResults) {
+                    typeaheadResults.style.display = 'block';
+                }
+                tableInput?.setAttribute('aria-expanded', 'true');
+            }
+
+            function clearSelectedTable(preserveInputValue = false) {
+                if (!tableIdInput) {
+                    return;
                 }
 
+                tableIdInput.value = '';
+                tableIdInput.dataset.name = '';
+                tableIdInput.dataset.type = '';
+                if (!preserveInputValue && tableInput) {
+                    tableInput.value = '';
+                }
+                if (selectedBadge) {
+                    selectedBadge.style.display = 'none';
+                }
+                if (selectedLabel) {
+                    selectedLabel.textContent = '';
+                }
+                updateAnalyzeButtonState();
+            }
+
+            function selectTypeaheadItem(item) {
+                if (!tableIdInput) {
+                    return;
+                }
+
+                const nodeId = item.getAttribute('data-node-id') || '';
+                const tableName = item.getAttribute('data-name') || '';
+                const tableType = item.getAttribute('data-type') || '';
+                if (!nodeId || !tableName) {
+                    return;
+                }
+
+                tableIdInput.value = nodeId;
+                tableIdInput.dataset.name = tableName;
+                tableIdInput.dataset.type = tableType;
+                if (tableInput) {
+                    tableInput.value = tableName;
+                }
+                if (selectedBadge) {
+                    selectedBadge.style.display = 'inline-flex';
+                }
+                if (selectedLabel) {
+                    selectedLabel.textContent = tableName + ' (' + tableType + ')';
+                }
+                closeTypeaheadResults();
+                updateAnalyzeButtonState();
+            }
+
+            function filterTypeaheadResults() {
+                if (!tableInput || !typeaheadResults) {
+                    return;
+                }
+
+                const query = tableInput.value.trim().toLowerCase();
                 let visibleCount = 0;
-                allOptions.forEach((option, index) => {
-                    if (index === 0) return; // Skip placeholder
 
-                    const tableName = option.getAttribute('data-name') || '';
-                    const tableType = option.getAttribute('data-type') || '';
-                    const nameLower = tableName.toLowerCase();
-
-                    const matchesSearch = !searchQuery || nameLower.includes(searchQuery);
-                    const matchesFilter = filterValue === 'all' || tableType === filterValue;
-
-                    if (matchesSearch && matchesFilter) {
-                        tableSelect.appendChild(option.cloneNode(true));
+                resultItems.forEach(item => {
+                    const itemName = (item.getAttribute('data-name') || '').toLowerCase();
+                    const matches = !query || itemName.includes(query);
+                    item.style.display = matches ? 'flex' : 'none';
+                    if (matches) {
                         visibleCount++;
                     }
                 });
 
-                // Update results info
-                if (resultsInfo && resultsCount) {
-                    if (searchQuery || filterValue !== 'all') {
-                        resultsInfo.style.display = 'block';
-                        resultsCount.textContent = visibleCount;
-                    } else {
-                        resultsInfo.style.display = 'none';
+                if (query && visibleCount > 0) {
+                    openTypeaheadResults();
+                } else {
+                    closeTypeaheadResults();
+                }
+            }
+
+            function scheduleTypeaheadFilter(immediate = false) {
+                if (impactTypeaheadDebounceTimer) {
+                    clearTimeout(impactTypeaheadDebounceTimer);
+                    impactTypeaheadDebounceTimer = null;
+                }
+                if (immediate) {
+                    filterTypeaheadResults();
+                    return;
+                }
+                impactTypeaheadDebounceTimer = setTimeout(() => {
+                    impactTypeaheadDebounceTimer = null;
+                    filterTypeaheadResults();
+                }, impactTypeaheadDebounceMs);
+            }
+
+            tableInput?.addEventListener('input', () => {
+                clearSelectedTable(true);
+                scheduleTypeaheadFilter();
+            });
+
+            tableInput?.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeTypeaheadResults();
+                    if (tableInput) {
+                        tableInput.blur();
+                    }
+                    return;
+                }
+
+                if (event.key === 'Enter') {
+                    const firstVisible = resultItems.find(item => item.style.display !== 'none');
+                    if (firstVisible) {
+                        event.preventDefault();
+                        selectTypeaheadItem(firstVisible);
                     }
                 }
+            });
 
-                // Show/hide clear button
-                if (searchClear) {
-                    searchClear.style.display = searchQuery ? 'flex' : 'none';
+            tableInput?.addEventListener('focus', () => {
+                if (tableInput.value.trim()) {
+                    scheduleTypeaheadFilter(true);
                 }
+            });
 
-                // Update analyze button state
-                if (analyzeBtn) {
-                    analyzeBtn.disabled = !tableSelect.value;
-                }
-            }
+            selectedClear?.addEventListener('click', () => {
+                clearSelectedTable();
+                closeTypeaheadResults();
+                tableInput?.focus();
+            });
 
-            // Search input handler
-            if (searchInput) {
-                let debounceTimeout;
-                searchInput.addEventListener('input', () => {
-                    clearTimeout(debounceTimeout);
-                    debounceTimeout = setTimeout(filterImpactOptions, 200);
-                });
-            }
-
-            // Clear search button
-            if (searchClear) {
-                searchClear.addEventListener('click', () => {
-                    if (searchInput) {
-                        searchInput.value = '';
-                        filterImpactOptions();
-                    }
-                });
-            }
-
-            // Filter chip handlers
-            filterChips.forEach(chip => {
-                chip.addEventListener('click', () => {
-                    filterChips.forEach(c => c.classList.remove('active'));
-                    chip.classList.add('active');
-                    filterImpactOptions();
+            resultItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    selectTypeaheadItem(item);
                 });
             });
 
-            if (tableSelect && analyzeBtn) {
-                tableSelect.addEventListener('change', () => {
-                    analyzeBtn.disabled = !tableSelect.value;
-                });
+            document.addEventListener('click', (event) => {
+                if (event.target.closest('.impact-typeahead')) {
+                    return;
+                }
+                closeTypeaheadResults();
+            });
 
+            if (analyzeBtn && tableIdInput) {
                 analyzeBtn.addEventListener('click', () => {
-                    const selectedOption = tableSelect.options[tableSelect.selectedIndex];
-                    const tableName = selectedOption.getAttribute('data-name');
-                    const tableType = selectedOption.getAttribute('data-type');
+                    const tableName = tableIdInput.dataset.name;
                     const activeButton = document.querySelector('.change-type-btn.active');
                     const changeType = activeButton?.getAttribute('data-value') || 'modify';
 
-                    if (!tableName) return;
+                    if (!tableName) {return;}
 
                     const resultsDiv = document.getElementById('impact-results');
                     if (resultsDiv) {
@@ -2156,8 +2472,7 @@ function getImpactFormScript(): string {
                 });
             }
 
-            // Initial filter
-            filterImpactOptions();
+            updateAnalyzeButtonState();
         }
     `;
 }
@@ -2237,177 +2552,6 @@ function getImpactSummaryScript(): string {
     `;
 }
 
-function getTableSearchScript(): string {
-    return `
-        // ========== Table Search and Filter Setup ==========
-        function setupTableSearchAndFilter() {
-            const searchInput = document.getElementById('table-search-input');
-            const searchClear = document.getElementById('table-search-clear');
-            const typeFilter = document.getElementById('table-type-filter');
-            const sortSelect = document.getElementById('table-sort');
-            const clearFilters = document.getElementById('table-clear-filters');
-            const tableGrid = document.getElementById('table-list-grid');
-            const emptyFilter = document.getElementById('table-list-empty-filter');
-            const resultsInfo = document.getElementById('table-list-results-info');
-            const resultsCount = document.getElementById('table-results-count');
-            const emptyMessage = document.getElementById('empty-filter-message');
-
-            let debounceTimeout;
-            const totalItems = tableGrid ? tableGrid.querySelectorAll('.table-list-item').length : 0;
-
-            function filterTables() {
-                if (!tableGrid) return;
-
-                const searchQuery = (searchInput?.value || '').toLowerCase().trim();
-                const typeValue = typeFilter?.value || 'all';
-                const sortValue = sortSelect?.value || 'connected';
-
-                const items = Array.from(tableGrid.querySelectorAll('.table-list-item'));
-                let visibleItems = [];
-
-                items.forEach(item => {
-                    const tableName = item.getAttribute('data-name') || '';
-                    const tableType = item.getAttribute('data-type') || '';
-                    const nameText = item.querySelector('.table-list-name')?.textContent?.toLowerCase() || '';
-
-                    const matchesSearch = !searchQuery || tableName.includes(searchQuery) || nameText.includes(searchQuery);
-                    const matchesType = typeValue === 'all' || tableType === typeValue;
-
-                    if (matchesSearch && matchesType) {
-                        item.style.display = '';
-                        visibleItems.push(item);
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-
-                visibleItems.sort((a, b) => {
-                    if (sortValue === 'name-asc') {
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameA.localeCompare(nameB);
-                    } else if (sortValue === 'name-desc') {
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameB.localeCompare(nameA);
-                    } else if (sortValue === 'type') {
-                        const typeA = a.getAttribute('data-type') || '';
-                        const typeB = b.getAttribute('data-type') || '';
-                        if (typeA !== typeB) return typeA.localeCompare(typeB);
-                        const nameA = a.querySelector('.table-list-name')?.textContent || '';
-                        const nameB = b.querySelector('.table-list-name')?.textContent || '';
-                        return nameA.localeCompare(nameB);
-                    } else {
-                        return 0;
-                    }
-                });
-
-                visibleItems.forEach(item => tableGrid.appendChild(item));
-
-                if (searchQuery && visibleItems.length > 0) {
-                    visibleItems.forEach(item => {
-                        const nameEl = item.querySelector('.table-list-name');
-                        if (nameEl) {
-                            const text = nameEl.textContent || '';
-                            let escapedQuery = '';
-                            const specialChars = ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\\\\\\\'];
-                            for (let i = 0; i < searchQuery.length; i++) {
-                                const char = searchQuery[i];
-                                if (specialChars.indexOf(char) >= 0) {
-                                    escapedQuery += '\\\\\\\\' + char;
-                                } else {
-                                    escapedQuery += char;
-                                }
-                            }
-                            const regex = new RegExp('(' + escapedQuery + ')', 'gi');
-                            nameEl.innerHTML = text.replace(regex, '<mark>$1</mark>');
-                        }
-                    });
-                } else {
-                    items.forEach(item => {
-                        const nameEl = item.querySelector('.table-list-name');
-                        if (nameEl) {
-                            nameEl.innerHTML = nameEl.textContent || '';
-                        }
-                    });
-                }
-
-                if (resultsInfo && resultsCount) {
-                    resultsInfo.style.display = 'block';
-                    resultsCount.textContent = 'Showing ' + visibleItems.length + ' of ' + totalItems + ' tables';
-                }
-
-                if (emptyFilter && emptyMessage) {
-                    if (visibleItems.length === 0) {
-                        emptyFilter.style.display = 'block';
-                        let message = 'No tables match your search criteria';
-                        if (searchQuery) {
-                            message = 'No tables matching "' + searchQuery + '"';
-                        } else if (typeValue !== 'all') {
-                            message = 'No ' + typeValue + 's found';
-                        }
-                        emptyMessage.textContent = message;
-                    } else {
-                        emptyFilter.style.display = 'none';
-                    }
-                }
-
-                if (searchClear) {
-                    searchClear.style.display = searchQuery || typeValue !== 'all' ? 'flex' : 'none';
-                }
-                if (clearFilters) {
-                    clearFilters.style.display = searchQuery || typeValue !== 'all' ? 'inline-flex' : 'none';
-                }
-            }
-
-            function debouncedFilter() {
-                clearTimeout(debounceTimeout);
-                debounceTimeout = setTimeout(filterTables, 180);
-            }
-
-            searchInput?.addEventListener('input', debouncedFilter);
-            searchClear?.addEventListener('click', () => {
-                if (searchInput) searchInput.value = '';
-                if (typeFilter) typeFilter.value = 'all';
-                filterTables();
-                searchInput?.focus();
-            });
-            clearFilters?.addEventListener('click', () => {
-                if (searchInput) searchInput.value = '';
-                if (typeFilter) typeFilter.value = 'all';
-                if (sortSelect) sortSelect.value = 'connected';
-                filterTables();
-                searchInput?.focus();
-            });
-            typeFilter?.addEventListener('change', filterTables);
-            sortSelect?.addEventListener('change', filterTables);
-
-            searchInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    if (searchInput.value) {
-                        searchInput.value = '';
-                        filterTables();
-                    } else {
-                        searchInput.blur();
-                    }
-                    e.preventDefault();
-                }
-            });
-
-            document.addEventListener('keydown', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                if (e.key === '/' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                    e.preventDefault();
-                    searchInput?.focus();
-                    searchInput?.select();
-                }
-            });
-
-            filterTables();
-        }
-    `;
-}
-
 function getVisualLineageSearchScript(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
@@ -2417,17 +2561,37 @@ function getVisualLineageSearchScript(): string {
             const searchInput = document.getElementById('lineage-search-input');
             const searchClear = document.getElementById('lineage-search-clear');
             const filterChips = document.querySelectorAll('.view-quick-filters .view-filter-chip');
+            const sortSelect = document.getElementById('lineage-sort');
             const tablesGrid = document.getElementById('lineage-tables-grid');
+            const popularSection = document.getElementById('lineage-popular-section');
+            const showAllBtn = document.getElementById('lineage-show-all-btn');
             const emptyFilter = document.getElementById('lineage-empty-filter');
             const resultsInfo = document.getElementById('lineage-results-info');
             const resultsCount = document.getElementById('lineage-results-count');
+            let showAllTables = false;
+            let lineageFilterDebounceTimer = null;
+            const lineageFilterDebounceMs = 180;
+
+            function setLineageGridMode(expanded) {
+                if (tablesGrid) {
+                    tablesGrid.style.display = expanded ? 'grid' : 'none';
+                }
+                if (popularSection) {
+                    popularSection.style.display = expanded ? 'none' : 'block';
+                }
+            }
 
             function filterLineageTables() {
                 if (!tablesGrid) return;
 
                 const searchQuery = (searchInput?.value || '').toLowerCase().trim();
+                const hasActiveFilter = lineageTypeFilter !== 'all';
+                const shouldExpand = showAllTables || !!searchQuery || hasActiveFilter;
+                const sortValue = sortSelect?.value || 'connected';
                 const items = Array.from(tablesGrid.querySelectorAll('.lineage-table-item'));
-                let visibleCount = 0;
+                const visibleItems = [];
+
+                setLineageGridMode(shouldExpand);
 
                 items.forEach(item => {
                     const name = item.getAttribute('data-name') || '';
@@ -2438,7 +2602,7 @@ function getVisualLineageSearchScript(): string {
 
                     if (matchesSearch && matchesType) {
                         item.style.display = '';
-                        visibleCount++;
+                        visibleItems.push(item);
 
                         // Highlight matching text
                         const nameEl = item.querySelector('.table-item-name');
@@ -2464,9 +2628,39 @@ function getVisualLineageSearchScript(): string {
                     }
                 });
 
+                visibleItems.sort((a, b) => {
+                    const nameA = a.getAttribute('data-name') || '';
+                    const nameB = b.getAttribute('data-name') || '';
+                    const typeA = a.getAttribute('data-type') || '';
+                    const typeB = b.getAttribute('data-type') || '';
+                    const totalA = Number(a.getAttribute('data-total') || '0');
+                    const totalB = Number(b.getAttribute('data-total') || '0');
+
+                    if (sortValue === 'name-asc') {
+                        return nameA.localeCompare(nameB);
+                    }
+                    if (sortValue === 'name-desc') {
+                        return nameB.localeCompare(nameA);
+                    }
+                    if (sortValue === 'type') {
+                        if (typeA !== typeB) {
+                            return typeA.localeCompare(typeB);
+                        }
+                        return nameA.localeCompare(nameB);
+                    }
+
+                    if (totalB !== totalA) {
+                        return totalB - totalA;
+                    }
+                    return nameA.localeCompare(nameB);
+                });
+
+                visibleItems.forEach(item => tablesGrid.appendChild(item));
+                const visibleCount = visibleItems.length;
+
                 // Show/hide empty state and results count
                 if (emptyFilter) {
-                    emptyFilter.style.display = visibleCount === 0 ? 'block' : 'none';
+                    emptyFilter.style.display = shouldExpand && visibleCount === 0 ? 'block' : 'none';
                 }
                 if (resultsInfo && resultsCount) {
                     if (searchQuery || lineageTypeFilter !== 'all') {
@@ -2478,17 +2672,36 @@ function getVisualLineageSearchScript(): string {
                 }
             }
 
+            function scheduleLineageFilter(immediate = false) {
+                if (lineageFilterDebounceTimer) {
+                    clearTimeout(lineageFilterDebounceTimer);
+                    lineageFilterDebounceTimer = null;
+                }
+                if (immediate) {
+                    filterLineageTables();
+                    return;
+                }
+                lineageFilterDebounceTimer = setTimeout(() => {
+                    lineageFilterDebounceTimer = null;
+                    filterLineageTables();
+                }, lineageFilterDebounceMs);
+            }
+
             searchInput?.addEventListener('input', () => {
                 const query = searchInput.value.trim();
                 if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
-                filterLineageTables();
+                if (!query) {
+                    showAllTables = false;
+                }
+                scheduleLineageFilter();
             });
 
             searchInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     searchInput.value = '';
                     if (searchClear) searchClear.style.display = 'none';
-                    filterLineageTables();
+                    showAllTables = false;
+                    scheduleLineageFilter(true);
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
                     // Select the first visible item
@@ -2502,7 +2715,8 @@ function getVisualLineageSearchScript(): string {
             searchClear?.addEventListener('click', () => {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
-                filterLineageTables();
+                showAllTables = false;
+                scheduleLineageFilter(true);
                 searchInput?.focus();
             });
 
@@ -2511,12 +2725,22 @@ function getVisualLineageSearchScript(): string {
                     filterChips.forEach(c => c.classList.remove('active'));
                     chip.classList.add('active');
                     lineageTypeFilter = chip.getAttribute('data-filter') || 'all';
-                    filterLineageTables();
+                    if (lineageTypeFilter === 'all' && !(searchInput?.value || '').trim()) {
+                        showAllTables = false;
+                    }
+                    scheduleLineageFilter(true);
                 });
             });
 
-            // Setup click handlers for table items
-            tablesGrid?.querySelectorAll('.lineage-table-item').forEach(item => {
+            sortSelect?.addEventListener('change', () => scheduleLineageFilter(true));
+
+            showAllBtn?.addEventListener('click', () => {
+                showAllTables = true;
+                scheduleLineageFilter(true);
+            });
+
+            // Setup click handlers for table items (both curated and full grids)
+            document.querySelectorAll('.lineage-table-item, .popular-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
                     const nodeId = item.getAttribute('data-node-id');
@@ -2534,8 +2758,8 @@ function getVisualLineageSearchScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: nodeId,
-                depth: 5,
-                direction: 'both'
+                depth: lineageDepth,
+                direction: lineageCurrentDirection
             });
         }
     `;
@@ -2559,6 +2783,7 @@ function getLineageGraphScript(): string {
         let pendingLineageGraphMessage = null;
         let refreshLineageMinimapViewport = null;
         let lineageShortcutHandler = null;
+        let lineageOverlayResizeHandler = null;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
 
         function processLineageGraphResult(message) {
@@ -2579,6 +2804,7 @@ function getLineageGraphScript(): string {
                 setupLineageGraphInteractions();
                 setupDirectionButtons();
                 setupMinimap();
+                initializeLineageLegendBar();
                 setTimeout(() => {
                     lineageSetupInProgress = false;
                     // Process any queued message that arrived during setup
@@ -2683,15 +2909,13 @@ function getLineageGraphScript(): string {
                 updateLineageTransform();
             });
 
-            zoomResetBtn?.addEventListener('click', () => {
+            zoomFitBtn?.addEventListener('click', () => {
                 fitToContainer();
                 if (svg) {
                     const nodes = svg.querySelectorAll('.lineage-node');
                     if (nodes) clearLineageFocus(nodes);
                 }
             });
-
-            zoomFitBtn?.addEventListener('click', fitToContainer);
 
             if (!svg || !graphContainer) return;
 
@@ -2877,7 +3101,7 @@ function getLineageGraphScript(): string {
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5,
+                            depth: lineageDepth,
                             expandedNodes: Array.from(lineageExpandedNodes)
                         });
                     }
@@ -2895,6 +3119,22 @@ function getLineageGraphScript(): string {
             maybeRenderColumnTraceHint();
         }
 
+        function syncLineageOverlayOffsets() {
+            const container = document.getElementById('lineage-graph-container');
+            const legendPanel = document.getElementById('lineage-legend');
+            if (!container) return;
+
+            if (!legendPanel || legendPanel.classList.contains('is-hidden')) {
+                container.style.setProperty('--lineage-legend-height', '0px');
+                return;
+            }
+
+            const measuredHeight = Math.ceil(legendPanel.getBoundingClientRect().height) || legendPanel.offsetHeight || 0;
+            // Clamp to avoid pathological layout values pushing overlays too far upward.
+            const legendHeight = Math.min(Math.max(measuredHeight, 0), 96);
+            container.style.setProperty('--lineage-legend-height', legendHeight + 'px');
+        }
+
         function setLineageLegendVisible(visible) {
             const legendPanel = document.getElementById('lineage-legend');
             if (!legendPanel) return;
@@ -2909,6 +3149,7 @@ function getLineageGraphScript(): string {
             if (container) {
                 container.classList.toggle('lineage-legend-visible', visible);
             }
+            syncLineageOverlayOffsets();
         }
 
         function toggleLineageLegendBar(show) {
@@ -2938,6 +3179,7 @@ function getLineageGraphScript(): string {
             }
 
             setLineageLegendVisible(showLegend);
+            requestAnimationFrame(syncLineageOverlayOffsets);
 
             const dismissBtn = document.getElementById('legend-dismiss');
             dismissBtn?.addEventListener('click', (event) => {
@@ -2951,6 +3193,12 @@ function getLineageGraphScript(): string {
                 event.stopPropagation();
                 toggleLineageLegendBar();
             });
+
+            if (lineageOverlayResizeHandler) {
+                window.removeEventListener('resize', lineageOverlayResizeHandler);
+            }
+            lineageOverlayResizeHandler = () => syncLineageOverlayOffsets();
+            window.addEventListener('resize', lineageOverlayResizeHandler);
         }
 
         function getLineageTypeIcon(type) {
@@ -3139,12 +3387,12 @@ function getLineageGraphScript(): string {
                 },
                 'focus-upstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: 5 });
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: lineageDepth });
                     }
                 },
                 'focus-downstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: 5 });
+                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: lineageDepth });
                     }
                 },
                 'expand-columns': () => {
@@ -3188,7 +3436,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes)
             });
@@ -3206,7 +3454,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes || new Set())
             });
@@ -3251,7 +3499,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: Array.from(lineageExpandedNodes)
             });
@@ -3266,7 +3514,7 @@ function getLineageGraphScript(): string {
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
-                depth: 5,
+                depth: lineageDepth,
                 direction: lineageCurrentDirection,
                 expandedNodes: []
             });
@@ -3644,7 +3892,6 @@ function getColumnLineageScript(): string {
             path.setAttribute('class', 'column-lineage-edge column-edge-' + type);
             path.setAttribute('d', pathD);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', type === 'upstream' ? '#22c55e' : '#3b82f6');
             path.setAttribute('stroke-width', '2');
             path.setAttribute('stroke-opacity', '0.7');
             path.setAttribute('marker-end', 'url(#column-arrowhead-' + type + ')');
@@ -3786,7 +4033,7 @@ function getDirectionButtonsScript(): string {
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
-                            depth: 5,
+                            depth: lineageDepth,
                             expandedNodes: lineageExpandedNodes ? Array.from(lineageExpandedNodes) : []
                         });
                     }

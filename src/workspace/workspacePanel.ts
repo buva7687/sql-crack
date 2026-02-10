@@ -37,8 +37,10 @@ import { MessageHandler, MessageHandlerContext } from './handlers';
 // Shared theme
 import { getReferenceTypeColor, getWorkspaceNodeColor, ICONS } from '../shared';
 import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from './exportUtils';
+import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
 
-const AUTO_INDEX_THRESHOLD = 50;
+const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
+const DEFAULT_LINEAGE_DEPTH = 5;
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
 
@@ -60,6 +62,7 @@ export class WorkspacePanel {
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
+    private readonly _extensionVersion: string;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
@@ -83,6 +86,7 @@ export class WorkspacePanel {
     private _flowAnalyzer: FlowAnalyzer | null = null;
     private _impactAnalyzer: ImpactAnalyzer | null = null;
     private _columnLineageTracker: ColumnLineageTracker | null = null;
+    private _lineageBuildPromise: Promise<void> | null = null;
     private _selectedLineageNode: LineageNode | null = null;
     private _currentImpactReport: ImpactReport | null = null;
     private _currentFlowResult: FlowResult | null = null;
@@ -97,6 +101,10 @@ export class WorkspacePanel {
 
     // Theme state
     private _isDarkTheme: boolean = true;
+
+    private _postMessage(msg: WorkspaceHostMessage): void {
+        this._panel.webview.postMessage(msg);
+    }
 
     /**
      * Create or show the workspace panel
@@ -143,10 +151,12 @@ export class WorkspacePanel {
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
         this._indexManager = new IndexManager(context, dialect);
 
         // Detect theme from settings or VS Code theme
         this._isDarkTheme = this.getThemeFromSettings();
+        this._tableExplorer.setTraversalDepth(WorkspacePanel.resolveDefaultLineageDepth());
 
         // Handle panel disposal
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -156,7 +166,7 @@ export class WorkspacePanel {
 
         // Handle messages from webview
         this._panel.webview.onDidReceiveMessage(
-            async message => {
+            async (message: WorkspaceWebviewMessage) => {
                 if (this._messageHandler) {
                     await this._messageHandler.handleMessage(message);
                 }
@@ -175,7 +185,7 @@ export class WorkspacePanel {
             () => {
                 this._isDarkTheme = this.getThemeFromSettings();
                 const css = getWebviewStyles(this._isDarkTheme);
-                this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
+                this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
             this._disposables
@@ -187,12 +197,66 @@ export class WorkspacePanel {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
                     const css = getWebviewStyles(this._isDarkTheme);
-                    this._panel.webview.postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
+                    this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
+                }
+                if (e.affectsConfiguration('sqlCrack.workspaceLineageDepth')) {
+                    const lineageDepth = WorkspacePanel.resolveDefaultLineageDepth();
+                    this._tableExplorer.setTraversalDepth(lineageDepth);
+                    this._postMessage({
+                        command: 'workspaceLineageDepthUpdated',
+                        depth: lineageDepth
+                    });
                 }
             },
             null,
             this._disposables
         );
+    }
+
+    /**
+     * Resolve extension version for export metadata.
+     */
+    private static resolveExtensionVersion(): string {
+        const extension = vscode.extensions?.getExtension('buvan.sql-crack');
+        const manifestVersion = (extension?.packageJSON as { version?: string } | undefined)?.version;
+        if (manifestVersion && manifestVersion.trim().length > 0) {
+            return manifestVersion;
+        }
+
+        const envVersion = process.env.npm_package_version;
+        if (envVersion && envVersion.trim().length > 0) {
+            return envVersion;
+        }
+
+        return '1.0';
+    }
+
+    /**
+     * Resolve auto-index threshold from settings with bounds checking.
+     */
+    private static resolveAutoIndexThreshold(): number {
+        const configured = vscode.workspace
+            .getConfiguration('sqlCrack')
+            .get<number>('workspaceAutoIndexThreshold', DEFAULT_AUTO_INDEX_THRESHOLD);
+        const numeric = Number(configured);
+        if (!Number.isFinite(numeric)) {
+            return DEFAULT_AUTO_INDEX_THRESHOLD;
+        }
+        return Math.min(500, Math.max(10, Math.floor(numeric)));
+    }
+
+    /**
+     * Resolve default lineage traversal depth from settings.
+     */
+    private static resolveDefaultLineageDepth(): number {
+        const configured = vscode.workspace
+            .getConfiguration('sqlCrack')
+            .get<number>('workspaceLineageDepth', DEFAULT_LINEAGE_DEPTH);
+        const numeric = Number(configured);
+        if (!Number.isFinite(numeric)) {
+            return DEFAULT_LINEAGE_DEPTH;
+        }
+        return Math.min(20, Math.max(1, Math.floor(numeric)));
     }
 
     /**
@@ -203,14 +267,15 @@ export class WorkspacePanel {
         this._panel.webview.html = this.getLoadingHtml();
 
         // Initialize index manager
-        const { autoIndexed, fileCount } = await this._indexManager.initialize(AUTO_INDEX_THRESHOLD);
+        const autoIndexThreshold = WorkspacePanel.resolveAutoIndexThreshold();
+        const { autoIndexed, fileCount } = await this._indexManager.initialize(autoIndexThreshold);
 
         if (fileCount === 0) {
             this._panel.webview.html = this.getEmptyWorkspaceHtml();
             return;
         }
 
-        if (!autoIndexed && fileCount >= AUTO_INDEX_THRESHOLD) {
+        if (!autoIndexed && fileCount >= autoIndexThreshold) {
             // Large workspace - ask user to confirm indexing
             const result = await vscode.window.showInformationMessage(
                 `Found ${fileCount} SQL files in workspace. Index them now?`,
@@ -337,6 +402,7 @@ export class WorkspacePanel {
             getTableExplorer: () => this._tableExplorer,
             getLineageView: () => this._lineageView,
             getImpactView: () => this._impactView,
+            getDefaultLineageDepth: () => WorkspacePanel.resolveDefaultLineageDepth(),
 
             // Theme state
             getIsDarkTheme: () => this._isDarkTheme,
@@ -364,7 +430,10 @@ export class WorkspacePanel {
     private async rebuildAndRenderGraph(): Promise<void> {
         const index = this._indexManager.getIndex();
         if (!index) {
-            this._panel.webview.html = this.getErrorHtml('No index available. Try refreshing.');
+            this._panel.webview.html = this.getErrorHtml(
+                'No workspace index available.',
+                'SQL files need to be scanned before the dependency graph can be built. Click "Refresh" or open SQL files in your workspace to start indexing.'
+            );
             return;
         }
 
@@ -376,6 +445,7 @@ export class WorkspacePanel {
             this._flowAnalyzer = null;
             this._impactAnalyzer = null;
             this._columnLineageTracker = null;
+            this._lineageBuildPromise = null;
 
             this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
             this.renderCurrentView();
@@ -389,7 +459,10 @@ export class WorkspacePanel {
      */
     private renderCurrentView(): void {
         if (!this._currentGraph) {
-            this._panel.webview.html = this.getErrorHtml('No graph data available.');
+            this._panel.webview.html = this.getErrorHtml(
+                'No graph data available.',
+                'The dependency graph could not be built from the current index. Try refreshing or check that your workspace contains SQL files.'
+            );
             return;
         }
 
@@ -400,219 +473,6 @@ export class WorkspacePanel {
         }
     }
 
-    /**
-     * Handle messages from webview
-     */
-    private async handleMessage(message: any): Promise<void> {
-        switch (message.command) {
-            case 'switchView':
-                this._currentView = message.view;
-                this.renderCurrentView();
-                break;
-
-            case 'refresh':
-                await this.buildIndexWithProgress();
-                await this.rebuildAndRenderGraph();
-                break;
-
-            case 'search':
-                this._currentSearchFilter = message.filter as SearchFilter;
-                this._panel.webview.html = this.getWebviewHtml(this._currentGraph!, this._currentSearchFilter);
-                break;
-
-            case 'clearSearch':
-                this._currentSearchFilter = {
-                    query: '',
-                    nodeTypes: undefined,
-                    useRegex: false,
-                    caseSensitive: false
-                };
-                this._panel.webview.html = this.getWebviewHtml(this._currentGraph!, this._currentSearchFilter);
-                break;
-
-            case 'toggleHelp':
-                this._showHelp = !this._showHelp;
-                this.renderCurrentView();
-                break;
-
-            case 'toggleTheme':
-                this._isDarkTheme = !this._isDarkTheme;
-                this.renderCurrentView();
-                break;
-
-            case 'export':
-                await this.handleExport(message.format);
-                break;
-
-            case 'savePng':
-                // Handle PNG data from webview - save to file
-                await this.savePngToFile(message.data, message.filename);
-                break;
-
-            case 'exportPngError':
-                vscode.window.showErrorMessage(`PNG export failed: ${message.error}`);
-                break;
-
-            case 'openFile':
-                try {
-                    const uri = vscode.Uri.file(message.filePath);
-                    const doc = await vscode.workspace.openTextDocument(uri);
-                    await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-                } catch (error) {
-                    logger.error(`[Workspace] Failed to open file: ${message.filePath}`, error);
-                    vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
-                }
-                break;
-
-            case 'openFileAtLine':
-                try {
-                    const fileUri = vscode.Uri.file(message.filePath);
-                    const document = await vscode.workspace.openTextDocument(fileUri);
-                    const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-                    const position = new vscode.Position(Math.max(0, message.line - 1), 0);
-                    editor.selection = new vscode.Selection(position, position);
-                    editor.revealRange(
-                        new vscode.Range(position, position),
-                        vscode.TextEditorRevealType.InCenter
-                    );
-                } catch (error) {
-                    logger.error(`[Workspace] Failed to open file at line: ${message.filePath}:${message.line}`, error);
-                    vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
-                }
-                break;
-
-            case 'visualizeFile':
-                try {
-                    const uri = vscode.Uri.file(message.filePath);
-                    const doc = await vscode.workspace.openTextDocument(uri);
-                    await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-                    await vscode.commands.executeCommand('sql-crack.visualize');
-                } catch (error) {
-                    logger.error(`[Workspace] Failed to visualize file: ${message.filePath}`, error);
-                    vscode.window.showErrorMessage(`Could not visualize file: ${message.filePath}`);
-                }
-                break;
-
-            // ========== Lineage Commands ==========
-            // Note: View switching is handled in webview JS - don't re-render the entire page
-            case 'switchToLineageView':
-                this._currentView = 'lineage';
-                await this.buildLineageGraph();
-                // Send lineage overview data to webview
-                if (this._lineageGraph) {
-                    const html = this._lineageView.generateLineageOverview(this._lineageGraph);
-                    this._panel.webview.postMessage({
-                        command: 'lineageOverviewResult',
-                        data: { html }
-                    });
-                }
-                break;
-
-            case 'switchToTableExplorer':
-                this._currentView = 'tableExplorer';
-                await this.buildLineageGraph();
-                // Send table list to webview
-                if (this._lineageGraph) {
-                    const html = this._tableExplorer.generateTableList(this._lineageGraph);
-                    this._panel.webview.postMessage({
-                        command: 'tableListResult',
-                        data: { html }
-                    });
-                }
-                break;
-
-            case 'switchToImpactView':
-                this._currentView = 'impact';
-                await this.buildLineageGraph();
-                // Send impact form to webview
-                if (this._lineageGraph) {
-                    const html = this._impactView.generateImpactForm(this._lineageGraph);
-                    this._panel.webview.postMessage({
-                        command: 'impactFormResult',
-                        data: { html }
-                    });
-                } else {
-                    const html = this._impactView.generateImpactForm(null);
-                    this._panel.webview.postMessage({
-                        command: 'impactFormResult',
-                        data: { html }
-                    });
-                }
-                break;
-
-            case 'getLineage':
-                await this.handleGetLineage(message.nodeId, message.direction, message.depth);
-                break;
-
-            case 'analyzeImpact':
-                await this.handleAnalyzeImpact(
-                    message.type,
-                    message.name,
-                    message.tableName,
-                    message.changeType
-                );
-                break;
-
-            case 'exploreTable':
-                await this.handleExploreTable(message.tableName);
-                break;
-
-            case 'getColumnLineage':
-                await this.handleGetColumnLineage(message.tableName, message.columnName);
-                break;
-
-            case 'selectLineageNode':
-                this.handleSelectLineageNode(message.nodeId);
-                break;
-
-            case 'getUpstream':
-                await this.handleGetUpstream(message.nodeId, message.depth, message.nodeType, message.filePath);
-                break;
-
-            case 'getDownstream':
-                await this.handleGetDownstream(message.nodeId, message.depth, message.nodeType, message.filePath);
-                break;
-
-            // ========== Visual Lineage Graph Commands ==========
-            case 'searchLineageTables':
-                await this.handleSearchLineageTables(message.query, message.typeFilter);
-                break;
-
-            case 'getLineageGraph':
-                await this.handleGetLineageGraph(
-                    message.nodeId,
-                    message.depth || 5,
-                    message.direction || 'both',
-                    message.expandedNodes
-                );
-                break;
-
-            case 'expandNodeColumns':
-                await this.handleExpandNodeColumns(message.nodeId);
-                break;
-
-            case 'setLineageDirection':
-                await this.handleSetLineageDirection(message.nodeId, message.direction);
-                break;
-            case 'collapseNodeColumns':
-                // Collapse node - send confirmation to webview
-                this._panel.webview.postMessage({
-                    command: 'nodeCollapsedResult',
-                    data: { nodeId: message.nodeId }
-                });
-                break;
-            case 'selectColumn':
-                await this.handleSelectColumn(message.tableId, message.columnName);
-                break;
-            case 'clearColumnSelection':
-                await this.handleClearColumnSelection();
-                break;
-            case 'getColumnLineage':
-                await this.handleGetColumnLineage(message.tableId, message.columnName);
-                break;
-        }
-    }
-
     // ========== Lineage Methods ==========
 
     /**
@@ -620,15 +480,29 @@ export class WorkspacePanel {
      */
     private async buildLineageGraph(): Promise<void> {
         if (this._lineageGraph) {return;} // Already built
+        if (this._lineageBuildPromise) {
+            await this._lineageBuildPromise;
+            return;
+        }
 
-        const index = this._indexManager.getIndex();
-        if (!index) {return;}
+        this._lineageBuildPromise = Promise.resolve().then(() => {
+            if (this._lineageGraph) {return;}
 
-        this._lineageBuilder = new LineageBuilder({ includeExternal: true, includeColumns: true });
-        this._lineageGraph = this._lineageBuilder.buildFromIndex(index);
-        this._flowAnalyzer = new FlowAnalyzer(this._lineageGraph);
-        this._impactAnalyzer = new ImpactAnalyzer(this._lineageGraph, this._flowAnalyzer);
-        this._columnLineageTracker = new ColumnLineageTracker(this._lineageGraph);
+            const index = this._indexManager.getIndex();
+            if (!index) {return;}
+
+            this._lineageBuilder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+            this._lineageGraph = this._lineageBuilder.buildFromIndex(index);
+            this._flowAnalyzer = new FlowAnalyzer(this._lineageGraph);
+            this._impactAnalyzer = new ImpactAnalyzer(this._lineageGraph, this._flowAnalyzer);
+            this._columnLineageTracker = new ColumnLineageTracker(this._lineageGraph);
+        });
+
+        try {
+            await this._lineageBuildPromise;
+        } finally {
+            this._lineageBuildPromise = null;
+        }
     }
 
     /**
@@ -660,7 +534,7 @@ export class WorkspacePanel {
         this._currentFlowResult = result;
 
         // Send result to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageResult',
             data: {
                 nodeId,
@@ -687,7 +561,7 @@ export class WorkspacePanel {
         type: 'table' | 'column',
         name: string,
         tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' = 'modify'
+        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
     ): Promise<void> {
         await this.buildLineageGraph();
         if (!this._impactAnalyzer) {return;}
@@ -702,7 +576,7 @@ export class WorkspacePanel {
         this._currentImpactReport = report;
 
         // Send result to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'impactResult',
             data: {
                 report: {
@@ -744,8 +618,8 @@ export class WorkspacePanel {
         const node = this._lineageGraph.nodes.get(nodeId);
 
         if (!node) {
-            this._panel.webview.postMessage({
-                command: 'tableExplorerResult',
+            this._postMessage({
+                command: 'tableDetailResult',
                 data: { error: `Table "${tableName}" not found in lineage graph` }
             });
             return;
@@ -758,8 +632,8 @@ export class WorkspacePanel {
             graph: this._lineageGraph
         });
 
-        this._panel.webview.postMessage({
-            command: 'tableExplorerResult',
+        this._postMessage({
+            command: 'tableDetailResult',
             data: {
                 table: {
                     id: node.id,
@@ -788,7 +662,7 @@ export class WorkspacePanel {
 
         const html = this._lineageView.generateColumnLineageView(lineage);
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnLineageResult',
             data: {
                 tableName,
@@ -840,7 +714,7 @@ export class WorkspacePanel {
         }
 
         if (nodeIds.length === 0) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -861,7 +735,7 @@ export class WorkspacePanel {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'upstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -893,7 +767,7 @@ export class WorkspacePanel {
         }
 
         if (nodeIds.length === 0) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
             });
@@ -914,7 +788,7 @@ export class WorkspacePanel {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'downstreamResult',
             data: {
                 nodeId: nodeId || filePath,
@@ -932,7 +806,7 @@ export class WorkspacePanel {
     private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
         await this.buildLineageGraph();
         if (!this._lineageGraph) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'lineageSearchResults',
                 data: { results: [] }
             });
@@ -969,7 +843,7 @@ export class WorkspacePanel {
             return a.name.localeCompare(b.name);
         });
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageSearchResults',
             data: { results: results.slice(0, 15) }
         });
@@ -986,7 +860,7 @@ export class WorkspacePanel {
     ): Promise<void> {
         await this.buildLineageGraph();
         if (!this._lineageGraph) {
-            this._panel.webview.postMessage({
+            this._postMessage({
                 command: 'lineageGraphResult',
                 data: { error: 'No lineage graph available' }
             });
@@ -1004,7 +878,7 @@ export class WorkspacePanel {
             }
         );
 
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'lineageGraphResult',
             data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
         });
@@ -1023,7 +897,7 @@ export class WorkspacePanel {
         if (!node) {return;}
 
         // Send confirmation - webview will request graph re-render with this node expanded
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'nodeColumnsResult',
             data: { nodeId }
         });
@@ -1034,7 +908,7 @@ export class WorkspacePanel {
      */
     private async handleSetLineageDirection(nodeId: string, direction: 'both' | 'upstream' | 'downstream'): Promise<void> {
         // Re-generate graph with new direction
-        await this.handleGetLineageGraph(nodeId, 5, direction);
+        await this.handleGetLineageGraph(nodeId, WorkspacePanel.resolveDefaultLineageDepth(), direction);
     }
 
     /**
@@ -1055,7 +929,7 @@ export class WorkspacePanel {
         );
 
         // Send result back to webview
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnLineageResult',
             data: {
                 tableId,
@@ -1070,7 +944,7 @@ export class WorkspacePanel {
      * Clear column selection
      */
     private async handleClearColumnSelection(): Promise<void> {
-        this._panel.webview.postMessage({
+        this._postMessage({
             command: 'columnSelectionCleared'
         });
     }
@@ -1122,7 +996,8 @@ export class WorkspacePanel {
             graphData,
             searchFilterQuery: searchFilter.query || '',
             initialView: this._currentView === 'issues' ? 'graph' : this._currentView,
-            currentGraphMode: this._currentGraphMode
+            currentGraphMode: this._currentGraphMode,
+            lineageDefaultDepth: WorkspacePanel.resolveDefaultLineageDepth()
         };
         const script = getWebviewScript(scriptParams);
 
@@ -1192,17 +1067,9 @@ ${bodyContent}
                         </svg>
                         Lineage
                     </button>
-                    <button class="view-tab" data-view="tableExplorer" 
-                        title="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model."
-                        aria-label="Table Explorer: Browse all tables, views, and CTEs with schema details. View definition locations, connection counts, and relationships. Catalog your data model.">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
-                        </svg>
-                        Tables
-                    </button>
                     <button class="view-tab" data-view="impact" 
-                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes."
-                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP) to see all affected queries and dependencies. Plan safe schema changes.">
+                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes."
+                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes.">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                         </svg>
@@ -1232,6 +1099,7 @@ ${bodyContent}
                 <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
                 <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
                 <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
+                <div class="help-tooltip-hint">Tip: To trace data flow from a specific table, use the Lineage tab.</div>
             </div>
 
             <div class="header-right">
@@ -1252,6 +1120,7 @@ ${bodyContent}
                             <path d="M18 6L6 18M6 6l12 12"/>
                         </svg>
                     </button>
+                    <span class="search-count" id="graph-search-count"></span>
                 </div>
                 <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1287,12 +1156,12 @@ ${bodyContent}
                         <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream dependencies">
+                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 19V5M5 12l7-7 7 7"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream dependents">
+                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 5v14M5 12l7 7 7-7"/>
                     </svg>
@@ -1463,6 +1332,15 @@ ${bodyContent}
                             <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
                             <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
                         </div>
+                        <div class="selection-cross-links" id="selection-cross-links" style="display: none;">
+                            <div class="selection-divider"></div>
+                            <div class="selection-actions-label">Actions</div>
+                            <div class="selection-actions">
+                                <button class="action-chip action-chip-small" data-graph-action="view-lineage">View Lineage</button>
+                                <button class="action-chip action-chip-small" data-graph-action="analyze-impact">Analyze Impact</button>
+                                <button class="action-chip action-chip-small" data-graph-action="open-file">Open File</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1561,7 +1439,7 @@ ${bodyContent}
             <span class="zoom-level" id="zoom-level" aria-live="polite">100%</span>
             <div class="zoom-divider"></div>
             <button class="zoom-btn" id="btn-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
             </button>
             <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
@@ -1621,7 +1499,7 @@ ${bodyContent}
         if (!index) {
             return {
                 text: 'Index not ready',
-                title: 'No index available yet. Click to refresh.',
+                title: 'No index available yet. Open SQL files and click Refresh to scan your workspace.',
                 level: 'missing'
             };
         }
@@ -1773,7 +1651,7 @@ ${bodyContent}
                           stroke-width="2"
                           marker-end="url(#arrowhead-${edge.referenceType})"
                           opacity="0.7"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="${this._isDarkTheme ? '#94a3b8' : '#64748b'}" font-size="10">${edge.count}</text>` : ''}
+                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="var(--text-muted)" font-size="10">${edge.count}</text>` : ''}
                 </g>
             `;
         }).join('');
@@ -1867,7 +1745,7 @@ ${bodyContent}
                 if (ref.columns && ref.columns.length > 0) {
                     const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
                     const moreCount = ref.columns.length - 8;
-                    content += `<br><span style="font-size:9px;color:${this._isDarkTheme ? '#94a3b8' : '#64748b'};">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                    content += `<br><span style="font-size:9px;color:var(--text-muted);">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
                 }
 
                 content += '</li>';
@@ -1881,7 +1759,7 @@ ${bodyContent}
         }
 
         if (node.type === 'external') {
-            content += `<div class="tooltip-content" style="color:${this._isDarkTheme ? '#fbbf24' : '#f59e0b'};">Not defined in workspace</div>`;
+            content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
         }
 
         content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
@@ -1917,6 +1795,16 @@ ${bodyContent}
      * Handle export functionality
      */
     private async handleExport(format: string): Promise<void> {
+        if (format === 'impact-markdown') {
+            await this.exportImpactReport('markdown');
+            return;
+        }
+
+        if (format === 'impact-json') {
+            await this.exportImpactReport('json');
+            return;
+        }
+
         if (this._isRebuilding) {
             vscode.window.showWarningMessage('Graph is being rebuilt. Please try exporting again in a moment.');
             return;
@@ -1927,11 +1815,11 @@ ${bodyContent}
         }
 
         if (format === 'clipboard-png') {
-            this._panel.webview.postMessage({ command: 'exportPngClipboard' });
+            this._postMessage({ command: 'exportPngClipboard' });
         } else if (format === 'png') {
             // Request PNG export from webview
             // The webview will convert SVG to PNG via canvas and send back the data
-            this._panel.webview.postMessage({ command: 'exportPng' });
+            this._postMessage({ command: 'exportPng' });
         } else if (format === 'mermaid') {
             await this.exportAsMermaid();
         } else if (format === 'copy-mermaid') {
@@ -1943,6 +1831,163 @@ ${bodyContent}
         } else if (format === 'dot') {
             await this.exportAsDot();
         }
+    }
+
+    /**
+     * Export the latest impact report in Markdown or JSON format.
+     */
+    private async exportImpactReport(format: 'markdown' | 'json'): Promise<void> {
+        if (!this._currentImpactReport) {
+            vscode.window.showErrorMessage('No impact report available. Run an impact analysis first.');
+            return;
+        }
+
+        const report = this._currentImpactReport;
+        const safeTarget = report.target.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            || 'impact';
+        const extension = format === 'markdown' ? 'md' : 'json';
+        const defaultFilename = `impact-report-${safeTarget}.${extension}`;
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(defaultFilename),
+            filters: format === 'markdown'
+                ? { 'Markdown': ['md'] }
+                : { 'JSON': ['json'] }
+        });
+
+        if (!uri) {
+            return;
+        }
+
+        const payload = this.buildImpactReportExportData(report);
+        const content = format === 'markdown'
+            ? this.generateImpactReportMarkdown(payload)
+            : JSON.stringify(payload, null, 2);
+
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
+        vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
+    }
+
+    /**
+     * Build a stable export payload for impact report serialization.
+     */
+    private buildImpactReportExportData(report: ImpactReport): Record<string, unknown> {
+        const serializeItems = (items: typeof report.directImpacts) => items.map(item => ({
+            node: {
+                id: item.node.id,
+                name: item.node.name,
+                type: item.node.type,
+                filePath: item.node.filePath,
+                lineNumber: item.node.lineNumber
+            },
+            impactType: item.impactType,
+            reason: item.reason,
+            filePath: item.filePath,
+            lineNumber: item.lineNumber,
+            severity: item.severity
+        }));
+
+        return {
+            version: this._extensionVersion,
+            exportedAt: new Date().toISOString(),
+            report: {
+                changeType: report.changeType,
+                target: report.target,
+                severity: report.severity,
+                summary: report.summary,
+                directImpacts: serializeItems(report.directImpacts),
+                transitiveImpacts: serializeItems(report.transitiveImpacts),
+                suggestions: report.suggestions
+            }
+        };
+    }
+
+    /**
+     * Render Markdown output for an impact report export payload.
+     */
+    private generateImpactReportMarkdown(payload: Record<string, any>): string {
+        const report = payload.report as ImpactReport & {
+            directImpacts: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>;
+            transitiveImpacts: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>;
+        };
+        const lines: string[] = [];
+
+        lines.push('# Impact Analysis Report');
+        lines.push('');
+        lines.push(`- Exported: ${payload.exportedAt}`);
+        lines.push(`- Severity: ${report.severity.toUpperCase()}`);
+        lines.push(`- Change Type: ${report.changeType.toUpperCase()}`);
+        lines.push(`- Target: ${report.target.type} \`${report.target.name}\``);
+        lines.push('');
+        lines.push('## Summary');
+        lines.push('');
+        lines.push(`- Total Affected: ${report.summary.totalAffected}`);
+        lines.push(`- Tables Affected: ${report.summary.tablesAffected}`);
+        lines.push(`- Views Affected: ${report.summary.viewsAffected}`);
+        lines.push(`- Queries Affected: ${report.summary.queriesAffected}`);
+        lines.push(`- Files Affected: ${report.summary.filesAffected}`);
+        lines.push('');
+
+        const appendImpactSection = (
+            title: string,
+            items: Array<{
+                node: { name: string; type: string; };
+                reason: string;
+                filePath: string;
+                lineNumber: number;
+                severity: string;
+            }>
+        ) => {
+            lines.push(`## ${title}`);
+            lines.push('');
+            if (items.length === 0) {
+                lines.push('- None');
+                lines.push('');
+                return;
+            }
+
+            for (const item of items) {
+                const location = item.lineNumber > 0
+                    ? `${item.filePath}:${item.lineNumber}`
+                    : item.filePath;
+                lines.push(`- \`${item.node.name}\` (${item.node.type})`);
+                lines.push(`  - Severity: ${item.severity}`);
+                lines.push(`  - Reason: ${item.reason}`);
+                lines.push(`  - Location: ${location}`);
+            }
+            lines.push('');
+        };
+
+        appendImpactSection('Direct Impacts', report.directImpacts);
+        appendImpactSection('Transitive Impacts', report.transitiveImpacts);
+
+        lines.push('## Suggestions');
+        lines.push('');
+        if (report.suggestions.length === 0) {
+            lines.push('- None');
+        } else {
+            for (const suggestion of report.suggestions) {
+                lines.push(`- ${suggestion}`);
+            }
+        }
+        lines.push('');
+
+        return lines.join('\n');
     }
 
     /**
@@ -2007,7 +2052,7 @@ ${bodyContent}
         if (!this._currentGraph) { return; }
 
         const exportData = {
-            version: '1.0',
+            version: this._extensionVersion,
             exportedAt: new Date().toISOString(),
             graph: {
                 nodes: this._currentGraph.nodes.map(node => ({
@@ -2388,9 +2433,11 @@ ${nodesHtml}
      */
     private getEmptyWorkspaceHtml(): string {
         const styles = getStateStyles(this._isDarkTheme);
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2403,8 +2450,12 @@ ${nodesHtml}
             </svg>
         </div>
         <div class="title">No SQL Files Found</div>
-        <div class="subtitle">Add .sql files to your workspace to visualize dependencies.</div>
+        <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
+        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+            Refresh
+        </button>
     </div>
+    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
 </body>
 </html>`;
     }
@@ -2412,9 +2463,13 @@ ${nodesHtml}
     /**
      * Get error HTML
      */
-    private getErrorHtml(message: string): string {
+    private getErrorHtml(message: string, detail?: string): string {
         const nonce = getNonce();
         const styles = getStateStyles(this._isDarkTheme);
+        const indexStatus = this.getIndexStatus();
+        const statusLine = indexStatus.level === 'missing'
+            ? 'Index: not yet built'
+            : indexStatus.title;
         return `<!DOCTYPE html>
 <html>
 <head>
@@ -2431,8 +2486,10 @@ ${nodesHtml}
         </div>
         <div class="title error">Something went wrong</div>
         <div class="message">${message}</div>
+        ${detail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${detail}</div>` : ''}
+        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${statusLine}</div>
         <button class="btn secondary" onclick="vscode.postMessage({command:'refresh'})">
-            Try Again
+            Refresh Index
         </button>
     </div>
     <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>

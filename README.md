@@ -37,7 +37,11 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Execution Flow** | See how your SQL executes step-by-step with color-coded operation nodes |
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
+| **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
+| **Command Palette** | Press `Cmd/Ctrl + Shift + P` or `/` inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
+| **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
+| **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
 **Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • CTE (Purple) • Result (Green)
@@ -48,7 +52,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 ### Workspace Analysis
 
-Analyze cross-file dependencies across your entire SQL project with four powerful views:
+Analyze cross-file dependencies across your entire SQL project with three main views:
 
 #### Graph View
 Dependency graph showing file and table relationships with color-coded edges for SELECT, JOIN, INSERT, UPDATE, and DELETE operations. Includes a selection panel with upstream/downstream context, focus mode, and an index freshness badge, plus guided empty-state prompts when the graph is empty or search yields no matches.
@@ -61,9 +65,7 @@ Explore data lineage across tables, views, and CTEs with:
 - **Column Type Colors** — Primary (Gold), Numeric (Blue), Text (Green), DateTime (Purple), JSON (Teal)
 - **Focus Modes** — View upstream only (`U`), downstream only (`D`), or all connections (`A`)
 - **Trace Controls** — Trace Up/Down buttons to highlight full upstream/downstream lineage
-
-#### Table Explorer
-Browse all tables and views with schema details, column information, and cross-references.
+- **Table Browser** — Search and browse all tables, views, and CTEs with schema details and cross-references
 
 #### Impact Analysis
 Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped transitive impacts, and source → target column paths.
@@ -84,6 +86,17 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **Quality Warnings** | Unused CTEs, dead columns, duplicate subqueries, repeated table scans |
 | **Performance Hints** | Filter pushdown, join order, index suggestions, non-sargable expressions |
 | **Performance Score** | 0-100 score based on detected anti-patterns |
+| **Inline Diagnostics** | SQL Crack hints surface as VS Code diagnostics with a quick fix to open SQL Flow |
+
+### Parser Reliability
+
+| Capability | Description |
+|------------|-------------|
+| **Partial Parse Fallback** | If AST parsing fails, SQL Crack falls back to regex extraction to still render best-effort tables/joins |
+| **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
+| **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
+| **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
+| **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
 
 **Performance Icons**: Filter Pushdown (⬆) • Non-Sargable (🚫) • Join Order (⇄) • Index Suggestion (📇) • Repeated Scan (🔄) • Complex (🧮)
 
@@ -103,7 +116,8 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 
 ### Layout & Export
 
-- **Layout Toggle** — Cycle through vertical, horizontal, compact, force-directed, and radial layouts with `H`
+- **Layout Picker** — Toolbar picker with SVG icons for vertical, horizontal, compact, force, and radial layouts
+- **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
 - **View Modes** — Display beside editor, in tab, or secondary sidebar
@@ -158,6 +172,8 @@ Analyze cross-file dependencies:
 - Right-click folder → **"SQL Crack: Analyze Workspace Dependencies"**
 - Command Palette → **"SQL Crack: Analyze Workspace Dependencies"**
 
+> **Tip:** Re-open the panel anytime by running the same command from the Command Palette.
+
 ---
 
 ## Keyboard Shortcuts
@@ -176,9 +192,12 @@ Analyze cross-file dependencies:
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
 | `H` | Cycle layout (vertical → horizontal → compact → force → radial) |
+| `1-5` | Jump directly to a specific layout option |
 | `E` | Expand/collapse all CTEs |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
+| `Cmd/Ctrl + Z` | Undo latest layout change |
+| `Cmd/Ctrl + Shift + Z` | Redo layout change |
 | `[` / `]` | Previous/next query |
 | `?` | Show all shortcuts |
 
@@ -213,6 +232,8 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 | `Arrow keys` | Navigate between nodes |
 | `Escape` | Deselect and return to canvas |
 
+UI transitions and entrance animations also respect `prefers-reduced-motion`.
+
 ---
 
 ## Configuration
@@ -225,14 +246,20 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab` |
 | `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
+| `sqlCrack.flowDirection` | `top-down` | Flow direction: `top-down`, `bottom-up` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
+| `sqlCrack.gridStyle` | `dots` | Canvas background style: `dots`, `lines`, `none` |
+| `sqlCrack.nodeAccentPosition` | `left` | Node accent strip position: `left`, `bottom` |
+| `sqlCrack.showMinimap` | `auto` | Minimap visibility: `auto`, `always`, `never` |
+| `sqlCrack.colorblindMode` | `off` | Color accessibility mode: `off`, `deuteranopia`, `protanopia`, `tritanopia` |
 
 ### Workspace Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Max files to auto-index (10-500) |
+| `sqlCrack.workspaceLineageDepth` | `5` | Default lineage traversal depth (1-20) |
 | `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, `hybrid` |
 
 ### Custom File Extensions
@@ -241,7 +268,7 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 |---------|---------|-------------|
 | `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). Include the leading dot; with or without dot is accepted and normalized. |
 
-Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index).
+Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes.
 
 ### Custom Functions
 
@@ -255,8 +282,13 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
+| `sqlCrack.advanced.showDiagnosticsInProblems` | `false` | Show SQL Crack hints/errors in VS Code Problems panel |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
+| `sqlCrack.advanced.maxFileSizeKB` | `100` | Max SQL file size before truncation handling (10-10000) |
+| `sqlCrack.advanced.maxStatements` | `50` | Max statements parsed per file (1-500) |
+| `sqlCrack.advanced.parseTimeoutSeconds` | `5` | Parser timeout in seconds (1-60) |
+| `sqlCrack.advanced.debugLogging` | `false` | Enable verbose SQL Crack output-channel logs |
 | `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |
 | `sqlCrack.advanced.clearCacheOnStartup` | `false` | Clear cache when VS Code starts |
 
@@ -278,9 +310,11 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 ### Debug Mode
 
 To see detailed logs:
-1. Open **Help → Toggle Developer Tools**
-2. Go to **Console** tab
-3. Filter by "SQL Crack" to see extension logs
+1. Enable `sqlCrack.advanced.debugLogging` in VS Code settings
+2. Open **View → Output** and select **SQL Crack** from the dropdown
+3. Extension logs appear in the Output Channel as you interact
+
+For lower-level diagnostics you can also open **Help → Toggle Developer Tools → Console** and filter by "SQL Crack".
 
 ### Resetting State
 
@@ -348,13 +382,13 @@ src/
 - ✅ **Phase 1** — Core visualization (execution flow, CTE expansion, fullscreen)
 - ✅ **Phase 2** — Developer productivity (quality warnings, column lineage, cloud panels)
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
-- ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 4 view modes)
+- ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 
 **Planned**:
+- Export preview dialog with PDF support
 - Diff-aware visualization for PR reviews
 - dbt integration (`ref()`, `source()` macros)
-- Query comparison (column diff between two queries)
 - Performance regression detection
 
 ---

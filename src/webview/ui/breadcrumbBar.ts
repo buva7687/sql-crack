@@ -2,6 +2,7 @@
 // Shows active focus mode, search term, column trace, CTE context
 // Each segment is clickable to clear that filter. "x" clears all.
 import { getComponentUiColors } from '../constants';
+import { prefersReducedMotion } from './motion';
 
 export interface BreadcrumbSegment {
     id: string;
@@ -148,6 +149,8 @@ function renderSegments(): void {
     const chipBg = theme.accentBgSoft;
     const chipHoverBg = theme.accentBg;
     const chipColor = theme.accentSoft;
+    const transition = prefersReducedMotion() ? 'none' : 'background 0.1s';
+    const clearTransition = prefersReducedMotion() ? 'none' : 'color 0.1s, background 0.1s';
 
     // Label
     const label = document.createElement('span');
@@ -175,7 +178,7 @@ function renderSegments(): void {
             background: ${chipBg};
             color: ${chipColor};
             cursor: pointer;
-            transition: background 0.1s;
+            transition: ${transition};
             font-size: 11px;
         `;
 
@@ -233,7 +236,7 @@ function renderSegments(): void {
             cursor: pointer;
             padding: 2px 6px;
             border-radius: 3px;
-            transition: color 0.1s, background 0.1s;
+            transition: ${clearTransition};
         `;
 
         clearAll.addEventListener('mouseenter', () => {
