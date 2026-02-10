@@ -6,14 +6,16 @@ export {
     REFERENCE_TYPE_COLORS_DARK,
     WORKSPACE_NODE_COLORS,
     WORKSPACE_NODE_COLORS_DARK,
+    COLORBLIND_WORKSPACE_NODE_COLORS,
     UI_THEME,
     STATUS_COLORS,
     COMPLEXITY_COLORS,
     getReferenceTypeColor,
     getWorkspaceNodeColor,
 } from './theme';
+export type { ColorblindMode } from './theme';
 
-export { escapeRegex } from './stringUtils';
+export { escapeRegex, safeString } from './stringUtils';
 
 export {
     CANVAS,

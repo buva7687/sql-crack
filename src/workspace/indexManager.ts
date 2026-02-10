@@ -32,6 +32,8 @@ export class IndexManager {
     private updateTimer: NodeJS.Timeout | null = null;
     private updateDebounceMs: number = 1000;
     private onIndexUpdated: (() => void) | null = null;
+    private _configDisposable: vscode.Disposable | null = null;
+    private _buildPromise: Promise<WorkspaceIndex> | null = null;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL') {
         this.context = context;
@@ -61,10 +63,26 @@ export class IndexManager {
     }
 
     /**
-     * Build the full workspace index with incremental updates based on content hashes
-     * Supports cancellation via token
+     * Build the full workspace index with incremental updates based on content hashes.
+     * Supports cancellation via token.
+     * Concurrent calls return the same in-flight promise to prevent race conditions.
      */
     async buildIndex(
+        progressCallback?: ProgressCallback,
+        cancellationToken?: CancellationToken
+    ): Promise<WorkspaceIndex> {
+        if (this._buildPromise) {
+            return this._buildPromise;
+        }
+        this._buildPromise = this._doBuildIndex(progressCallback, cancellationToken);
+        try {
+            return await this._buildPromise;
+        } finally {
+            this._buildPromise = null;
+        }
+    }
+
+    private async _doBuildIndex(
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
@@ -384,6 +402,10 @@ export class IndexManager {
             this.fileWatcher.dispose();
             this.fileWatcher = null;
         }
+        if (this._configDisposable) {
+            this._configDisposable.dispose();
+            this._configDisposable = null;
+        }
         if (this.updateTimer) {
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
@@ -457,10 +479,31 @@ export class IndexManager {
     }
 
     /**
+     * Build the file watcher glob pattern from configured extensions.
+     * Always includes .sql, plus any additionalFileExtensions from settings.
+     */
+    private getWatcherGlob(): string {
+        const extensions = ['sql'];
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const additional = config.get<string[]>('additionalFileExtensions') || [];
+
+        for (const ext of additional) {
+            const normalized = ext.toLowerCase().trim().replace(/^\./, '');
+            if (normalized && !extensions.includes(normalized)) {
+                extensions.push(normalized);
+            }
+        }
+
+        return extensions.length === 1
+            ? `**/*.${extensions[0]}`
+            : `**/*.{${extensions.join(',')}}`;
+    }
+
+    /**
      * Setup file watcher for incremental updates
      */
     private setupFileWatcher(): void {
-        this.fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.sql');
+        this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
 
         // Debounced update function
         const queueUpdate = (uri: vscode.Uri) => {
@@ -476,12 +519,31 @@ export class IndexManager {
         this.fileWatcher.onDidChange(uri => queueUpdate(uri));
         this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
         this.fileWatcher.onDidDelete(uri => this.removeFile(uri));
+
+        // Recreate watcher when settings change
+        this._configDisposable = vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
+                if (this.fileWatcher) {
+                    this.fileWatcher.dispose();
+                }
+                this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
+                this.fileWatcher.onDidChange(uri => queueUpdate(uri));
+                this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
+                this.fileWatcher.onDidDelete(uri => this.removeFile(uri));
+            }
+        });
     }
 
     /**
-     * Process queued file updates
+     * Process queued file updates.
+     * Skips processing while a full build is in progress to avoid race conditions.
      */
     private async processUpdateQueue(): Promise<void> {
+        if (this._buildPromise) {
+            // A full build is in progress — defer queue processing until it completes
+            await this._buildPromise;
+        }
+
         const files = [...this.updateQueue];
         this.updateQueue.clear();
 

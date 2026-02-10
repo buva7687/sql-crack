@@ -90,14 +90,14 @@ export function getNodeAccentColor(type: string, isDark: boolean): string {
 export const NODE_SURFACE = {
     light: {
         fill: '#FFFFFF',
-        border: '#E2E8F0',
+        border: '#94A3B8',
         text: '#1E293B',
         textMuted: '#64748B',
         shadow: '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)',
     },
     dark: {
         fill: '#1A1A1A',
-        border: '#2A2A2A',
+        border: '#475569',
         text: '#F1F5F9',
         textMuted: '#94A3B8',
         shadow: '0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)',

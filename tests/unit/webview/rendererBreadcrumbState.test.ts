@@ -16,8 +16,8 @@ describe('webview renderer filter breadcrumb state reset', () => {
     });
 
     it('gates pulse animations behind reduced-motion preference checks', () => {
-        expect(rendererSource).toContain('function isReducedMotionPreferred()');
-        expect(rendererSource).toContain('if (isReducedMotionPreferred())');
+        expect(rendererSource).toContain("import { prefersReducedMotion } from './ui/motion';");
+        expect(rendererSource).toContain('if (prefersReducedMotion())');
     });
 
     it('uses theme-aware breadcrumb colors instead of hardcoded dark-only values', () => {
@@ -50,6 +50,16 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('hints-panel-scroll-style');
         expect(rendererSource).toContain('.hints-panel::-webkit-scrollbar');
         expect(rendererSource).toContain('.hints-panel .hints-list::-webkit-scrollbar');
+    });
+
+    it('keeps performance hints panel above legend as legend height and viewport change', () => {
+        expect(rendererSource).toContain('syncHintsPanelViewportBounds');
+        expect(rendererSource).toContain("from './ui/panelLayout'");
+        expect(rendererSource).toContain('applyHintsPanelBounds');
+        expect(rendererSource).toContain('applyPanelBottomOffsets');
+        expect(rendererSource).toContain('legendResizeObserver = new ResizeObserver');
+        expect(rendererSource).toContain("window.addEventListener('resize', legendResizeHandler);");
+        expect(rendererSource).toContain("documentListeners.push({ type: 'legend-bar-toggle', handler: handleLegendToggle });");
     });
 
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {

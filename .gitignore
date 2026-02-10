@@ -17,6 +17,8 @@ env/
 .idea/
 .cursor/
 .factory/
+.claude/
+claude.md
 *.swp
 *.swo
 *~

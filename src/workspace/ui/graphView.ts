@@ -213,7 +213,7 @@ function generateEdge(edge: WorkspaceEdge, sourceNode: WorkspaceNode, targetNode
     const targetX = targetNode.x || 0;
     const targetY = targetNode.y || 0;
 
-    return `<line class="edge" data-source-id="${escapeHtml(edge.source)}" data-target-id="${escapeHtml(edge.target)}"
+    return `<line class="edge" data-source="${escapeHtml(edge.source)}" data-target="${escapeHtml(edge.target)}"
             x1="${sourceX}" y1="${sourceY}" x2="${targetX}" y2="${targetY}" stroke="var(--edge-default)" stroke-width="1.5"/>`;
 }
 

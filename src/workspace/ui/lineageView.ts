@@ -42,83 +42,72 @@ export class LineageView {
 
         // Stats
         const stats = this.collectStats(graph);
+        const totalNodeCount = searchableNodes.length;
 
         if (searchableNodes.length === 0) {
             return this.generateEmptyState();
         }
 
         let html = `
-            <div class="view-container">
-                <!-- View Header -->
-                <div class="view-header">
-                    <div class="view-header-icon">${ICONS.columns}</div>
-                    <div class="view-header-content">
-                        <h3 class="view-title">Data Lineage</h3>
-                        <p class="view-subtitle">Search for a table or view to visualize its data flow and dependencies</p>
-                    </div>
+            <div class="view-container view-lineage">
+                <div class="view-compact-header">
+                    <span class="view-icon">${ICONS.columns}</span>
+                    <h3>Lineage</h3>
+                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views, ${stats.ctes} CTEs, ${stats.relationships} relationships</span>
                 </div>
-
-                <!-- Stats -->
-                <div class="view-stats">
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${stats.tables}</span>
-                        <span class="view-stat-label">Tables</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${stats.views}</span>
-                        <span class="view-stat-label">Views</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${stats.ctes}</span>
-                        <span class="view-stat-label">CTEs</span>
-                    </div>
-                    <div class="view-stat-badge">
-                        <span class="view-stat-value">${stats.relationships}</span>
-                        <span class="view-stat-label">Relationships</span>
-                    </div>
-                </div>
-
-                <!-- Search Controls -->
-                <div class="view-controls">
-                    <div class="view-controls-header">
-                        <h4>Search & Filter</h4>
-                        <p class="view-controls-hint">Find tables, views, or CTEs to explore their lineage</p>
-                    </div>
-                    <div class="view-search-box">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                <div class="view-search-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    <input type="text"
+                           id="lineage-search-input"
+                           class="view-search-input"
+                           placeholder="Search tables, views, CTEs..."
+                           autocomplete="off"
+                           value="">
+                    <button class="view-search-clear" id="lineage-search-clear">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                            <path d="M18 6L6 18M6 6l12 12"/>
                         </svg>
-                        <input type="text"
-                               id="lineage-search-input"
-                               class="view-search-input"
-                               placeholder="Search tables, views, CTEs..."
-                               autocomplete="off"
-                               value="">
-                        <button class="view-search-clear" id="lineage-search-clear">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <path d="M18 6L6 18M6 6l12 12"/>
-                            </svg>
-                        </button>
+                    </button>
+                </div>
+                <div class="view-filters">
+                    <div class="view-quick-filters">
+                        <span class="view-filter-label">Filter:</span>
+                        <button class="view-filter-chip active" data-filter="all">All</button>
+                        <button class="view-filter-chip" data-filter="table">Tables</button>
+                        <button class="view-filter-chip" data-filter="view">Views</button>
+                        <button class="view-filter-chip" data-filter="cte">CTEs</button>
                     </div>
-                    <div class="view-filters">
-                        <div class="view-quick-filters">
-                            <span class="view-filter-label">Filter:</span>
-                            <button class="view-filter-chip active" data-filter="all">All</button>
-                            <button class="view-filter-chip" data-filter="table">Tables</button>
-                            <button class="view-filter-chip" data-filter="view">Views</button>
-                            <button class="view-filter-chip" data-filter="cte">CTEs</button>
-                        </div>
-                        <div class="view-results-info" id="lineage-results-info" style="display: none;">
-                            <span id="lineage-results-count">0</span> results
-                        </div>
+                    <div class="view-sort-group">
+                        <label class="view-filter-label" for="lineage-sort">Sort:</label>
+                        <select id="lineage-sort" class="view-filter-select">
+                            <option value="connected">Most Connected</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="type">Type</option>
+                        </select>
+                    </div>
+                    <div class="view-results-info" id="lineage-results-info" style="display: none;">
+                        <span id="lineage-results-count">0</span> results
                     </div>
                 </div>
 
                 <!-- Content -->
                 <div class="view-content">
-                    <!-- All Tables Grid -->
                     <div class="lineage-tables-section">
-                        <div class="lineage-tables-grid" id="lineage-tables-grid">
+                        <div class="lineage-popular-section" id="lineage-popular-section">
+                            <div class="lineage-popular-header">
+                                <h4>Most Connected</h4>
+                                <button class="lineage-show-all-btn" id="lineage-show-all-btn" type="button">
+                                    Show all ${totalNodeCount} tables
+                                </button>
+                            </div>
+                            <div class="lineage-popular-grid" id="lineage-popular-grid">
+                                ${this.generatePopularNodes(graph, 6)}
+                            </div>
+                        </div>
+                        <div class="lineage-tables-grid" id="lineage-tables-grid" style="display: none;">
                             ${this.generateAllNodes(graph)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
@@ -222,6 +211,32 @@ export class LineageView {
                             ${renderableGraph.stats.downstreamCount} downstream
                         </span>
                     </div>
+                    <div class="cross-link-actions">
+                        <button type="button"
+                                class="cross-link-btn icon-only"
+                                title="View Details"
+                                data-action="cross-view-detail"
+                                data-table="${this.escapeHtml(centerName)}"
+                                data-node-id="${this.escapeHtml(centerNodeId)}"
+                                data-node-type="${centerNode?.type || 'table'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/>
+                            </svg>
+                            <span>View Details</span>
+                        </button>
+                        <button type="button"
+                                class="cross-link-btn icon-only"
+                                title="Analyze Impact"
+                                data-action="cross-view-impact"
+                                data-table="${this.escapeHtml(centerName)}"
+                                data-node-id="${this.escapeHtml(centerNodeId)}"
+                                data-node-type="${centerNode?.type || 'table'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                            </svg>
+                            <span>Analyze Impact</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Direction Toggle -->
@@ -274,12 +289,6 @@ export class LineageView {
                         <button class="zoom-btn" id="lineage-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                            </svg>
-                        </button>
-                        <button class="zoom-btn" id="lineage-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                <path d="M3 3v5h5"/>
                             </svg>
                         </button>
                         <div class="zoom-divider"></div>
@@ -451,12 +460,13 @@ export class LineageView {
             return '<p class="no-tables">No tables, views, or CTEs found</p>';
         }
 
-        return nodeConnections.map(({ node, upstreamCount, downstreamCount }) => `
-            <button class="lineage-table-item"
+        return nodeConnections.map(({ node, upstreamCount, downstreamCount, total }) => `
+            <button class="lineage-table-item connection-${this.getConnectionStrength(total)}"
                     data-action="select-node"
                     data-node-id="${this.escapeHtml(node.id)}"
                     data-name="${this.escapeHtml(node.name.toLowerCase())}"
-                    data-type="${node.type}">
+                    data-type="${node.type}"
+                    data-total="${total}">
                 <span class="table-item-icon">${this.getNodeIcon(node.type)}</span>
                 <span class="table-item-name">${this.escapeHtml(node.name)}</span>
                 <span class="table-item-type">${node.type}</span>
@@ -477,10 +487,14 @@ export class LineageView {
 
         graph.nodes.forEach((node) => {
             if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+                // Curated "Most Connected" should prioritize internal lineage density.
+                // External endpoints are still visible in full-node exploration views.
                 const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
                 const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
-                const upstreamCount = upstream.nodes.length;
-                const downstreamCount = downstream.nodes.length;
+                // Count only tables, views, CTEs (exclude column nodes to match graph display)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+                const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
+                const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
                 if (total > 0) {
                     nodeConnections.push({ node, upstreamCount, downstreamCount, total });
@@ -495,12 +509,13 @@ export class LineageView {
             return '<p class="no-popular">No connected tables found</p>';
         }
 
-        return nodeConnections.slice(0, limit).map(({ node, upstreamCount, downstreamCount }) => `
-            <button class="popular-item"
+        return nodeConnections.slice(0, limit).map(({ node, upstreamCount, downstreamCount, total }) => `
+            <button class="popular-item connection-${this.getConnectionStrength(total)}"
                     data-action="select-node"
                     data-node-id="${this.escapeHtml(node.id)}"
                     data-node-name="${this.escapeHtml(node.name)}"
-                    data-node-type="${node.type}">
+                    data-node-type="${node.type}"
+                    data-total="${total}">
                 <span class="popular-icon">${this.getNodeIcon(node.type)}</span>
                 <span class="popular-name">${this.escapeHtml(node.name)}</span>
                 <span class="popular-type-badge">${node.type}</span>
@@ -798,6 +813,19 @@ export class LineageView {
      */
     private getNodeIcon(type: string): string {
         return getWorkspaceNodeIcon(type);
+    }
+
+    private getConnectionStrength(total: number): 'none' | 'low' | 'medium' | 'high' {
+        if (total <= 0) {
+            return 'none';
+        }
+        if (total < 3) {
+            return 'low';
+        }
+        if (total < 10) {
+            return 'medium';
+        }
+        return 'high';
     }
 
     /**

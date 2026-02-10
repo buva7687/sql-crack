@@ -16,6 +16,7 @@ export interface PinnedTabsCallbacks {
     getCurrentSql: () => string;
     getCurrentDialect: () => SqlDialect;
     getCurrentResult: () => BatchParseResult | null;
+    isDarkTheme?: () => boolean;
 }
 
 let pinnedTabs: PinnedTab[] = [];
@@ -156,7 +157,7 @@ function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTa
         font-size: 12px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-        color: ${isActive ? '#f1f5f9' : '#94a3b8'};
+        color: ${isActive ? (callbacks.isDarkTheme?.() !== false ? '#f1f5f9' : '#1e293b') : '#94a3b8'};
         transition: background 0.15s;
         white-space: nowrap;
     `;

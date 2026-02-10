@@ -49,4 +49,18 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain("const dismissBtn = document.getElementById('legend-dismiss');");
         expect(script).toContain("const legendToggleBtn = document.getElementById('lineage-legend-toggle');");
     });
+
+    it('debounces lineage table search input for smoother typing on large workspaces', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('lineageFilterDebounceMs = 180');
+        expect(script).toContain('function scheduleLineageFilter(immediate = false)');
+        expect(script).toContain('scheduleLineageFilter();');
+    });
 });

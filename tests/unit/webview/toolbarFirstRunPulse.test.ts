@@ -19,12 +19,11 @@ describe('toolbar first-run help pulse', () => {
     });
 
     it('skips the pulse when reduced-motion is preferred', () => {
-        expect(toolbarSource).toContain("window.matchMedia('(prefers-reduced-motion: reduce)')");
-        expect(toolbarSource).toContain('if (!enabled || isReducedMotionPreferred())');
+        expect(toolbarSource).toContain("import { prefersReducedMotion } from './motion';");
+        expect(toolbarSource).toContain('if (!enabled || prefersReducedMotion())');
     });
 
     it('passes first-run state from webview bootstrap into toolbar options', () => {
         expect(indexSource).toContain('isFirstRun: window.isFirstRun || false');
     });
 });
-

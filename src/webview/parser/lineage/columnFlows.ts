@@ -1,6 +1,7 @@
 // Column flow generation with full lineage paths
 
 import { FlowNode, FlowEdge, ColumnFlow, ColumnInfo, LineageTransformation } from '../../types';
+import { safeString } from '../../../shared';
 
 export function generateColumnFlows(
     stmt: any,
@@ -196,8 +197,8 @@ export function findSourceColumn(
     if (sourceNode.type === 'aggregate' && sourceNode.aggregateDetails) {
         for (const aggFunc of sourceNode.aggregateDetails.functions) {
             const outputName = aggFunc.alias || aggFunc.name;
-            if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
-                targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+            if (safeString(outputName).toLowerCase() === safeString(targetColumn.name).toLowerCase() ||
+                safeString(targetColumn.expression).toLowerCase().includes(safeString(outputName).toLowerCase())) {
                 // Return the source column used in the aggregate function for proper lineage tracing
                 // e.g., COUNT(order_id) -> we should trace order_id, not the output alias
                 return {
@@ -215,7 +216,7 @@ export function findSourceColumn(
     // For window nodes
     if (sourceNode.type === 'window' && sourceNode.windowDetails) {
         for (const winFunc of sourceNode.windowDetails.functions) {
-            if (winFunc.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(winFunc.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return {
                     name: winFunc.name,
                     expression: `${winFunc.name}() OVER (...)`,
@@ -228,13 +229,13 @@ export function findSourceColumn(
     // Check source node columns
     if (sourceNode.columns) {
         for (const sourceCol of sourceNode.columns) {
-            if (sourceCol.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return sourceCol;
             }
-            if (sourceCol.name.toLowerCase() === targetColumn.sourceColumn?.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.sourceColumn).toLowerCase()) {
                 return sourceCol;
             }
-            if (targetColumn.expression?.toLowerCase().includes(sourceCol.name.toLowerCase())) {
+            if (safeString(targetColumn.expression).toLowerCase().includes(safeString(sourceCol.name).toLowerCase())) {
                 return sourceCol;
             }
         }
@@ -279,7 +280,7 @@ export function getTransformationType(
     }
 
     if (column.sourceColumn &&
-        column.name.toLowerCase() !== column.sourceColumn.toLowerCase()) {
+        safeString(column.name).toLowerCase() !== safeString(column.sourceColumn).toLowerCase()) {
         return 'renamed';
     }
 

@@ -2,7 +2,9 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseBatchAsync } from './parserClient';
+import { parseAsync, parseBatchAsync } from './parserClient';
+import { setMinimapMode, MinimapMode } from './minimapVisibility';
+import { detectDialect, setParseTimeout } from './sqlParser';
 import { BatchParseResult, LayoutType, SqlDialect } from './types';
 import {
     initRenderer,
@@ -14,6 +16,11 @@ import {
     getViewState,
     setViewState,
     TabViewState,
+    undoLayoutChange,
+    redoLayoutChange,
+    canUndoLayoutChanges,
+    canRedoLayoutChanges,
+    clearUndoHistory,
     exportToPng,
     exportToSvg,
     exportToMermaid,
@@ -36,8 +43,11 @@ import {
     toggleTheme,
     isDarkTheme,
     getKeyboardShortcuts,
-    highlightNodeAtLine
+    highlightNodeAtLine,
+    copyMermaidToClipboard,
+    setColorblindMode as setRendererColorblindMode,
 } from './renderer';
+import type { ColorblindMode } from '../shared/theme';
 
 import {
     createToolbar,
@@ -45,6 +55,8 @@ import {
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,
+    updateAutoDetectIndicator,
+    setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
     findPinnedTab,
@@ -52,6 +64,9 @@ import {
     getActiveTabId,
     setActiveTabId,
     showFirstRunOverlay,
+    showCompareView,
+    hideCompareView,
+    isCompareViewActive,
     ToolbarCallbacks,
     ToolbarCleanup
 } from './ui';
@@ -72,6 +87,11 @@ declare global {
         combineDdlStatements?: boolean;
         gridStyle?: string;
         nodeAccentPosition?: string;
+        showMinimap?: string;
+        colorblindMode?: ColorblindMode;
+        maxFileSizeKB?: number;
+        maxStatements?: number;
+        parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
         vscodeApi?: {
@@ -87,6 +107,8 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+let userExplicitlySetDialect = false;
+let compareModeActive = false;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -124,12 +146,16 @@ function setupVSCodeMessageListener(): void {
 function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
     window.initialSqlCode = sql;
     currentDialect = options.dialect as SqlDialect;
+    userExplicitlySetDialect = false;
+    updateAutoDetectIndicator(null);
 
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
     }
 
+    hideCompareView();
+    setCompareModeState(false);
     void visualize(sql);
     clearStaleIndicator();
 }
@@ -141,6 +167,8 @@ function handleSwitchToQuery(queryIndex: number): void {
 
     if (currentQueryIndex !== queryIndex) {
         currentQueryIndex = queryIndex;
+        hideCompareView();
+        setCompareModeState(false);
         renderCurrentQuery();
         updateBatchTabsUI();
     }
@@ -175,6 +203,16 @@ function init(): void {
 
     // Initialize SVG renderer
     initRenderer(container);
+    setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
+
+    // Apply minimap mode from settings
+    const minimapMode = (window.showMinimap as MinimapMode) || 'auto';
+    setMinimapMode(minimapMode);
+
+    // Apply configurable parse timeout
+    if (window.parseTimeoutSeconds) {
+        setParseTimeout(window.parseTimeoutSeconds * 1000);
+    }
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
@@ -193,6 +231,11 @@ function init(): void {
             switchToQueryIndex(index);
         },
         isDarkTheme
+    });
+
+    // Wire error badge click to switch to the errored query
+    setErrorBadgeClickHandler((queryIndex: number) => {
+        switchToQueryIndex(queryIndex);
     });
 
     // Keyboard shortcuts for query navigation
@@ -241,8 +284,100 @@ function init(): void {
     }
 }
 
+function setCompareModeState(active: boolean): void {
+    compareModeActive = active;
+    document.dispatchEvent(new CustomEvent('compare-mode-state', {
+        detail: { active: compareModeActive },
+    }));
+}
+
+function resolveCompareBaseline(): { label: string; sql: string; dialect: SqlDialect } | null {
+    const currentSql = getCurrentQuerySql().sql.trim();
+    const pinned = (window.persistedPinnedTabs || [])
+        .filter(pin => pin.sql?.trim() && pin.sql.trim() !== currentSql)
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+    if (pinned.length > 0) {
+        const baseline = pinned[0];
+        return {
+            label: `Pinned • ${baseline.name}`,
+            sql: baseline.sql,
+            dialect: (baseline.dialect as SqlDialect) || currentDialect,
+        };
+    }
+
+    if (batchResult && batchResult.queries.length > 1) {
+        const fallbackIndex = currentQueryIndex > 0 ? currentQueryIndex - 1 : 1;
+        const baselineQuery = batchResult.queries[fallbackIndex];
+        if (baselineQuery?.sql && baselineQuery.sql.trim() !== currentSql) {
+            return {
+                label: `Query ${fallbackIndex + 1}`,
+                sql: baselineQuery.sql,
+                dialect: currentDialect,
+            };
+        }
+    }
+
+    return null;
+}
+
+async function toggleCompareMode(): Promise<void> {
+    if (isCompareViewActive()) {
+        hideCompareView();
+        setCompareModeState(false);
+        return;
+    }
+
+    if (!batchResult || batchResult.queries.length === 0) {
+        return;
+    }
+
+    const baseline = resolveCompareBaseline();
+    if (!baseline) {
+        alert('No baseline available. Baseline is the newest pinned query (if any), otherwise another query in this file. Pin another query first, or open a multi-query file.');
+        return;
+    }
+
+    const root = document.getElementById('root');
+    if (!root) {
+        return;
+    }
+
+    const currentQuery = batchResult.queries[currentQueryIndex];
+    if (!currentQuery?.sql) {
+        return;
+    }
+
+    const baselineResult = await parseAsync(baseline.sql, baseline.dialect);
+    const currentTitle = batchResult.queries.length > 1
+        ? `Current • Q${currentQueryIndex + 1}`
+        : (window.fileName || 'Current query');
+
+    showCompareView({
+        container: root,
+        left: {
+            label: baseline.label,
+            result: baselineResult,
+        },
+        right: {
+            label: currentTitle,
+            result: currentQuery,
+        },
+        isDarkTheme: isDarkTheme(),
+        onClose: () => {
+            setCompareModeState(false);
+        },
+    });
+
+    setCompareModeState(true);
+}
+
 function createToolbarCallbacks(): ToolbarCallbacks {
     return {
+        onUndo: undoLayoutChange,
+        onRedo: redoLayoutChange,
+        canUndo: canUndoLayoutChanges,
+        canRedo: canRedoLayoutChanges,
         onZoomIn: zoomIn,
         onZoomOut: zoomOut,
         onResetView: resetView,
@@ -251,6 +386,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onExportSvg: exportToSvg,
         onExportMermaid: exportToMermaid,
         onCopyToClipboard: copyToClipboard,
+        onCopyMermaidToClipboard: copyMermaidToClipboard,
         onToggleLegend: toggleLegend,
         onToggleFocusMode: toggleFocusMode,
         onFocusModeChange: setFocusMode,
@@ -269,7 +405,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onNextSearchResult: nextSearchResult,
         onPrevSearchResult: prevSearchResult,
         onDialectChange: (dialect: SqlDialect) => {
+            userExplicitlySetDialect = true;
             currentDialect = dialect;
+            updateAutoDetectIndicator(null);
             const sql = window.initialSqlCode || '';
             if (sql) {
                 void visualize(sql);
@@ -297,6 +435,11 @@ function createToolbarCallbacks(): ToolbarCallbacks {
                 });
             }
         },
+        onToggleCompareMode: () => {
+            void toggleCompareMode();
+        },
+        isCompareMode: () => compareModeActive,
+        getCompareBaselineLabel: () => resolveCompareBaseline()?.label || null,
         onChangeViewLocation: (location: string) => {
             if (window.vscodeApi) {
                 window.vscodeApi.postMessage({
@@ -336,14 +479,34 @@ async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
 
     // Clear view states when loading new SQL
+    hideCompareView();
+    setCompareModeState(false);
     queryViewStates.clear();
+    clearUndoHistory();
+
+    if (!userExplicitlySetDialect) {
+        const detection = detectDialect(sql);
+        const detectedDialect = detection.confidence === 'high' ? detection.dialect : null;
+        updateAutoDetectIndicator(detectedDialect);
+        if (detectedDialect && detectedDialect !== currentDialect) {
+            currentDialect = detectedDialect;
+            const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+            if (dialectSelect) {
+                dialectSelect.value = currentDialect;
+            }
+        }
+    }
 
     try {
         const t0 = performance.now();
+        const customLimits = {
+            maxSqlSizeBytes: (window.maxFileSizeKB || 100) * 1024,
+            maxQueryCount: window.maxStatements || 50,
+        };
         const result = await parseBatchAsync(
             sql,
             currentDialect,
-            undefined,
+            customLimits,
             {
                 combineDdlStatements: window.combineDdlStatements === true
             }
@@ -434,6 +597,9 @@ function switchToQueryIndex(newIndex: number): void {
 
     // Switch to new query
     currentQueryIndex = newIndex;
+    hideCompareView();
+    setCompareModeState(false);
+    clearUndoHistory();
     renderCurrentQuery();
     updateBatchTabsUI();
 

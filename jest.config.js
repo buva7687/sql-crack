@@ -18,7 +18,10 @@ module.exports = {
     'src/**/*.ts',
     '!src/**/*.d.ts',
     '!src/test/**',
-    '!src/webview/ui/**'
+    '!src/webview/ui/**',
+    // workspacePanel.ts is a large webview template/renderer shell that is
+    // primarily validated by integration/DOM behavior tests, not line coverage.
+    '!src/workspace/workspacePanel.ts'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
@@ -34,6 +37,6 @@ module.exports = {
   verbose: true,
   // Handle ESM modules
   transformIgnorePatterns: [
-    'node_modules/(?!(node-sql-parser)/)'
+    'node_modules/(?!(node-sql-parser|d3-force|d3-dispatch|d3-quadtree|d3-timer)/)'
   ]
 };

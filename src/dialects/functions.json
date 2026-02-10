@@ -9,32 +9,54 @@
     "window": [
       "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
       "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
-      "CUME_DIST", "PERCENT_RANK"
-    ]
+      "CUME_DIST", "PERCENT_RANK",
+      "PERCENTILE_CONT", "PERCENTILE_DISC"
+    ],
+    "tableValued": []
   },
   "dialects": {
     "mysql": {
       "aggregates": [
         "GROUP_CONCAT", "JSON_ARRAYAGG", "JSON_OBJECTAGG",
+        "ANY_VALUE",
         "BIT_AND", "BIT_OR", "BIT_XOR",
         "STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
         "VAR_POP", "VAR_SAMP", "VARIANCE"
       ],
-      "window": []
+      "window": [],
+      "tableValued": ["JSON_TABLE"]
     },
     "postgresql": {
       "aggregates": [
         "STRING_AGG", "ARRAY_AGG", "JSON_AGG", "JSONB_AGG",
         "JSON_OBJECT_AGG", "JSONB_OBJECT_AGG",
         "BOOL_AND", "BOOL_OR", "EVERY",
-        "XMLAGG", "MODE", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "XMLAGG", "MODE",
         "CORR", "COVAR_POP", "COVAR_SAMP",
         "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
         "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY",
         "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
         "VARIANCE", "VAR_POP", "VAR_SAMP"
       ],
-      "window": []
+      "window": [],
+      "tableValued": [
+        "UNNEST", 
+        "GENERATE_SERIES", 
+        "GENERATE_SUBSCRIPTS", 
+        "REGEXP_SPLIT_TO_TABLE",
+        "JSON_TO_RECORD", 
+        "JSONB_TO_RECORD", 
+        "JSON_TO_RECORDSET",
+        "JSONB_TO_RECORDSET",
+        "JSON_POPULATE_RECORD",
+        "JSON_POPULATE_RECORDSET",
+        "JSONB_POPULATE_RECORDSET",
+        "JSON_ARRAY_ELEMENTS", 
+        "JSONB_ARRAY_ELEMENTS",
+        "JSON_EACH", 
+        "JSONB_EACH",
+        "XMLTABLE"
+      ]
     },
     "transactsql": {
       "aggregates": [
@@ -45,11 +67,13 @@
       ],
       "window": [
         "PERCENTILE_CONT", "PERCENTILE_DISC"
-      ]
+      ],
+      "tableValued": ["OPENJSON", "OPENXML", "STRING_SPLIT", "OPENROWSET", "OPENQUERY", "GENERATE_SERIES"]
     },
     "snowflake": {
       "aggregates": [
         "LISTAGG", "ARRAY_AGG", "OBJECT_AGG",
+        "ARRAY_UNION_AGG", "ARRAY_UNIQUE_AGG",
         "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K",
         "HLL", "HLL_ACCUMULATE", "HLL_COMBINE", "HLL_ESTIMATE", "HLL_EXPORT", "HLL_IMPORT",
         "MINHASH", "MINHASH_COMBINE", "APPROXIMATE_JACCARD_INDEX", "APPROXIMATE_SIMILARITY",
@@ -57,7 +81,7 @@
         "BOOLAND_AGG", "BOOLOR_AGG",
         "HASH_AGG",
         "KURTOSIS", "SKEW",
-        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "MEDIAN", "MODE", "ANY_VALUE",
         "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
         "VARIANCE", "VAR_POP", "VAR_SAMP",
         "CORR", "COVAR_POP", "COVAR_SAMP",
@@ -67,6 +91,14 @@
       "window": [
         "CONDITIONAL_CHANGE_EVENT", "CONDITIONAL_TRUE_EVENT",
         "RATIO_TO_REPORT", "WIDTH_BUCKET"
+      ],
+      "tableValued": [
+        "FLATTEN", 
+        "SPLIT_TO_TABLE", 
+        "STRTOK_SPLIT_TO_TABLE",
+        "GENERATOR", 
+        "RESULT_SCAN", 
+        "VALIDATE"
       ]
     },
     "bigquery": {
@@ -81,20 +113,36 @@
         "VARIANCE", "VAR_POP", "VAR_SAMP"
       ],
       "window": [
-        "PERCENTILE_CONT", "PERCENTILE_DISC"
+        "RATIO_TO_REPORT"
+      ],
+      "tableValued": [
+        "UNNEST", 
+        "GENERATE_ARRAY", 
+        "GENERATE_DATE_ARRAY", 
+        "GENERATE_TIMESTAMP_ARRAY",
+        "JSON_EXTRACT_ARRAY", 
+        "JSON_EXTRACT_STRING_ARRAY",
+        "EXTERNAL_QUERY", 
+        "GAP_FILL", 
+        "RANGE_SESSIONIZE", 
+        "APPENDS", 
+        "CHANGES", 
+        "ML.PREDICT", 
+        "ML.EVALUATE"
       ]
     },
     "redshift": {
       "aggregates": [
         "LISTAGG", "APPROXIMATE", "APPROXIMATE_COUNT", "APPROXIMATE_PERCENTILE_DISC",
-        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "MEDIAN",
         "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
         "VARIANCE", "VAR_POP", "VAR_SAMP",
         "BOOL_AND", "BOOL_OR"
       ],
       "window": [
         "RATIO_TO_REPORT"
-      ]
+      ],
+      "tableValued": []
     },
     "hive": {
       "aggregates": [
@@ -107,7 +155,8 @@
         "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
         "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY"
       ],
-      "window": []
+      "window": [],
+      "tableValued": ["EXPLODE", "POSEXPLODE", "INLINE", "STACK"]
     },
     "athena": {
       "aggregates": [
@@ -122,7 +171,8 @@
         "CORR", "COVAR_POP", "COVAR_SAMP",
         "REGR_INTERCEPT", "REGR_SLOPE"
       ],
-      "window": []
+      "window": [],
+      "tableValued": ["UNNEST"]
     },
     "trino": {
       "aggregates": [
@@ -139,7 +189,8 @@
         "REGR_INTERCEPT", "REGR_SLOPE",
         "KURTOSIS", "SKEWNESS"
       ],
-      "window": []
+      "window": [],
+      "tableValued": ["UNNEST", "SEQUENCE"]
     },
     "mariadb": {
       "aggregates": [
@@ -150,13 +201,15 @@
       ],
       "window": [
         "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC"
-      ]
+      ],
+      "tableValued": ["JSON_TABLE"]
     },
     "sqlite": {
       "aggregates": [
         "GROUP_CONCAT", "TOTAL"
       ],
-      "window": []
+      "window": [],
+      "tableValued": ["JSON_EACH", "JSON_TREE"]
     }
   }
 }

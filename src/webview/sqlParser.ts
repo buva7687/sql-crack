@@ -2,7 +2,8 @@ import { Parser } from 'node-sql-parser';
 import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 import { getAggregateFunctions, getWindowFunctions } from '../dialects';
-import { escapeRegex } from '../shared';
+import { getTableValuedFunctionName } from './parser/extractors/tables';
+import { escapeRegex, safeString } from '../shared';
 
 // Import types from centralized type definitions
 import {
@@ -34,6 +35,26 @@ export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
     maxSqlSizeBytes: 100 * 1024,  // 100KB
     maxQueryCount: 50,             // 50 statements max
 };
+
+/**
+ * Parser timeout in milliseconds. If AST parsing exceeds this duration,
+ * the result is discarded and the regex fallback parser is used instead.
+ * Exported so tests can reference the threshold value.
+ */
+export let PARSE_TIMEOUT_MS = 5000;
+
+/**
+ * Override the parse timeout (for testing). Restores to default when called with no argument.
+ */
+export function setParseTimeout(ms?: number): void {
+    PARSE_TIMEOUT_MS = ms ?? 5000;
+}
+
+export interface DialectDetectionResult {
+    dialect: SqlDialect | null;
+    scores: Partial<Record<SqlDialect, number>>;
+    confidence: 'high' | 'low' | 'none';
+}
 
 /**
  * Validates SQL input against size and query count limits.
@@ -157,6 +178,7 @@ interface ParserContext {
     statementType: string;
     tableUsageMap: Map<string, number>;
     dialect: SqlDialect;
+    functionsUsed: Set<string>; // Track unique function names used
 }
 
 /**
@@ -190,7 +212,8 @@ function createFreshContext(dialect: SqlDialect): ParserContext {
         hasNoLimit: true,
         statementType: '',
         tableUsageMap: new Map(),
-        dialect
+        dialect,
+        functionsUsed: new Set<string>() // Track function names
     };
 }
 
@@ -198,6 +221,13 @@ function createFreshContext(dialect: SqlDialect): ParserContext {
 function trackTableUsage(tableName: string): void {
     const normalizedName = tableName.toLowerCase();
     ctx.tableUsageMap.set(normalizedName, (ctx.tableUsageMap.get(normalizedName) || 0) + 1);
+}
+
+// Track function usage
+function trackFunctionUsage(functionName: unknown, category: 'aggregate' | 'window' | 'tvf' | 'scalar'): void {
+    if (typeof functionName !== 'string' || !functionName) return;
+    const normalizedName = functionName.toUpperCase();
+    ctx.functionsUsed.add(`${normalizedName}:${category}`);
 }
 
 function calculateComplexity(): void {
@@ -486,30 +516,202 @@ export function splitSqlStatements(sql: string): string[] {
     let current = '';
     let inString = false;
     let stringChar = '';
+    let inLineComment = false;
+    let inBlockComment = false;
     let depth = 0;
+    
+    // Track procedural blocks
+    let beginEndDepth = 0;  // Depth of nested BEGIN...END blocks
+    let caseDepth = 0;      // Depth of CASE...END expressions (to avoid false END matches)
+    let inDollarQuotes = false;
+    let dollarQuoteTag = '';  // Dollar quote tag name (empty for $$, 'function' for $function$)
+    let customDelimiter = null as string | null;  // MySQL DELIMITER command
+
+    // Helper to check if we're at a word boundary and match a keyword
+    const matchKeyword = (idx: number, keyword: string): boolean => {
+        if (idx + keyword.length > sql.length) return false;
+        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) return false;
+        // Check word boundary before
+        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) return false;
+        // Check word boundary after
+        const afterIdx = idx + keyword.length;
+        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) return false;
+        return true;
+    };
+
+    // Helper to check if BEGIN starts a procedural block (not BEGIN TRANSACTION, BEGIN TRY, etc.)
+    const isProceduralBegin = (idx: number): boolean => {
+        // Check what follows BEGIN — skip non-block BEGINs
+        const after = sql.substring(idx + 5, idx + 25).trim().toUpperCase();
+        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) return false;
+
+        // Look backwards to see what precedes BEGIN (up to 200 chars for long signatures)
+        const before = sql.substring(Math.max(0, idx - 200), idx).toUpperCase();
+
+        // Procedural BEGIN is preceded by: AS, THEN, ELSE, LOOP, IS
+        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) return true;
+
+        // Or preceded by CREATE FUNCTION/PROCEDURE/TRIGGER with arbitrary signature (no semicolons between)
+        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) return true;
+
+        return false;
+    };
 
     for (let i = 0; i < sql.length; i++) {
         const char = sql[i];
+        const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
         const prevChar = i > 0 ? sql[i - 1] : '';
 
-        // Handle string literals
-        if ((char === "'" || char === '"') && prevChar !== '\\') {
-            if (!inString) {
-                inString = true;
-                stringChar = char;
-            } else if (char === stringChar) {
-                inString = false;
+        // End of line comment on newline
+        if (inLineComment) {
+            current += char;
+            if (char === '\n') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        // Inside block comment — look for closing */
+        if (inBlockComment) {
+            current += char;
+            if (char === '*' && nextChar === '/') {
+                current += '/';
+                i++;
+                inBlockComment = false;
+            }
+            continue;
+        }
+
+        // Detect start of block comment /* (not inside string or dollar quotes)
+        if (!inString && !inDollarQuotes) {
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                current += '/*';
+                i++;
+                continue;
+            }
+
+            // Detect start of line comments: --, //, # (not inside string or dollar quotes)
+            if ((char === '-' && nextChar === '-') || (char === '/' && nextChar === '/')) {
+                inLineComment = true;
+                current += char + nextChar;
+                i++;
+                continue;
+            }
+            if (char === '#') {
+                inLineComment = true;
+                current += char;
+                continue;
             }
         }
 
-        // Handle parentheses depth
-        if (!inString) {
-            if (char === '(') { depth++; }
-            if (char === ')') { depth--; }
+        // Handle PostgreSQL dollar quotes: $$ or $tag$
+        // Must detect both opening and closing
+        if (!inString && char === '$') {
+            // Try to match dollar quote tag: $<optional_tag_name>$
+            let j = i + 1;
+            let tag = '';
+            // Collect tag name (alphanumeric/underscore only)
+            while (j < sql.length && /[a-zA-Z0-9_]/.test(sql[j])) {
+                tag += sql[j];
+                j++;
+            }
+            // Must end with $
+            if (j < sql.length && sql[j] === '$') {
+                const fullTag = '$' + tag + '$';
+                if (inDollarQuotes && tag === dollarQuoteTag) {
+                    // Closing the current dollar quote block
+                    inDollarQuotes = false;
+                    dollarQuoteTag = '';
+                    current += fullTag;
+                    i = j;
+                    continue;
+                } else if (!inDollarQuotes) {
+                    // Opening a new dollar quote block
+                    inDollarQuotes = true;
+                    dollarQuoteTag = tag;
+                    current += fullTag;
+                    i = j;
+                    continue;
+                }
+            }
         }
 
-        // Split on semicolon at depth 0
-        if (char === ';' && !inString && depth === 0) {
+        // Handle MySQL DELIMITER command
+        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+            // Check for DELIMITER command at start of line (after whitespace/comments)
+            const lineStart = current.trim(); // Current line content so far
+            if (lineStart === '' && char.toUpperCase() === 'D') {
+                const remaining = sql.substring(i, i + 20).toUpperCase();
+                if (remaining.startsWith('DELIMITER ')) {
+                    // Extract the delimiter
+                    const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);
+                    if (delimiterMatch) {
+                        customDelimiter = delimiterMatch[1] === ';' ? null : delimiterMatch[1];
+                        // Skip the DELIMITER line (don't add to current statement)
+                        while (i < sql.length && sql[i] !== '\n') {
+                            i++;
+                        }
+                        current = ''; // Reset current statement
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Handle string literals (only when not in dollar quotes)
+        if (!inDollarQuotes) {
+            if ((char === "'" || char === '"') && prevChar !== '\\') {
+                if (!inString) {
+                    inString = true;
+                    stringChar = char;
+                } else if (char === stringChar) {
+                    inString = false;
+                }
+            }
+        }
+
+        // Handle parentheses depth and procedural block tracking
+        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+            if (char === '(') { depth++; }
+            if (char === ')') { depth--; }
+
+            // Track CASE...END to avoid false END matches
+            if (matchKeyword(i, 'CASE')) {
+                caseDepth++;
+            }
+
+            // Handle BEGIN...END blocks
+            if (matchKeyword(i, 'BEGIN')) {
+                if (isProceduralBegin(i)) {
+                    beginEndDepth++;
+                }
+            }
+
+            // END keyword — only decrement beginEndDepth for procedural END
+            if (matchKeyword(i, 'END')) {
+                // Check what follows END: skip END TRY, END CATCH, END IF, END LOOP, END WHILE
+                const afterEnd = sql.substring(i + 3, i + 15).trim().toUpperCase();
+                if (/^(TRY|CATCH|IF|LOOP|WHILE)\b/.test(afterEnd)) {
+                    // Block-qualifier END — don't decrement
+                } else if (caseDepth > 0) {
+                    // This END closes a CASE expression, not a BEGIN block
+                    caseDepth--;
+                } else if (beginEndDepth > 0) {
+                    beginEndDepth--;
+                }
+            }
+        }
+
+        // Determine the current delimiter
+        const delimiter = customDelimiter || ';';
+        
+        // Split on delimiter at depth 0 and not inside BEGIN...END
+        const isDelimiter = delimiter === ';' 
+            ? (char === ';' && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0)
+            : (sql.substring(i).startsWith(delimiter) && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0);
+        
+        if (isDelimiter) {
             const trimmed = current.trim();
             if (trimmed) {
                 const withoutComments = stripLeadingComments(trimmed).trim();
@@ -518,6 +720,11 @@ export function splitSqlStatements(sql: string): string[] {
                 }
             }
             current = '';
+            
+            // Skip past the custom delimiter
+            if (delimiter !== ';') {
+                i += delimiter.length - 1;
+            }
         } else {
             current += char;
         }
@@ -672,41 +879,60 @@ export function parseSqlBatch(
     // Validate SQL before parsing
     const validationError = validateSql(sql, limits);
     if (validationError) {
-        // Return a result with the validation error
+        // For size limits, parse partial result instead of rejecting
+        if (validationError.type === 'size_limit') {
+            const truncatedSql = sql.substring(0, limits.maxSqlSizeBytes);
+            // Recursively parse with infinite limit to avoid double-validation
+            const partialResult = parseSqlBatch(truncatedSql, dialect, { ...limits, maxSqlSizeBytes: Infinity }, options);
+            // Add truncation warning
+            partialResult.queries.forEach(q => {
+                q.hints.push({
+                    type: 'warning',
+                    message: 'Input truncated due to size limit',
+                    suggestion: `Showing first ${formatBytes(limits.maxSqlSizeBytes)} of ${formatBytes(validationError.details.actual)}. Consider splitting into smaller files.`,
+                    category: 'performance',
+                    severity: 'medium',
+                });
+            });
+            partialResult.validationError = validationError;
+            return partialResult;
+        }
+        
+        // For query count limits, parse first N statements
+        if (validationError.type === 'query_count_limit') {
+            const allStatements = splitSqlStatements(sql);
+            const truncatedStatements = allStatements.slice(0, limits.maxQueryCount);
+            const truncatedSql = truncatedStatements.join(';\n');
+            // Recursively parse with infinite limit
+            const partialResult = parseSqlBatch(truncatedSql, dialect, { ...limits, maxQueryCount: Infinity }, options);
+            // Add truncation warning
+            partialResult.queries.forEach(q => {
+                q.hints.push({
+                    type: 'warning',
+                    message: 'Too many statements - showing first batch',
+                    suggestion: `Showing first ${limits.maxQueryCount} of ${validationError.details.actual} statements. Consider splitting into multiple files.`,
+                    category: 'performance',
+                    severity: 'medium',
+                });
+            });
+            partialResult.validationError = validationError;
+            return partialResult;
+        }
+        
+        // Fallback: return empty result (shouldn't reach here with current validation types)
         const emptyStats: QueryStats = {
-            tables: 0,
-            joins: 0,
-            subqueries: 0,
-            ctes: 0,
-            aggregations: 0,
-            windowFunctions: 0,
-            unions: 0,
-            conditions: 0,
-            complexity: 'Simple',
-            complexityScore: 0,
+            tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0,
+            windowFunctions: 0, unions: 0, conditions: 0,
+            complexity: 'Simple', complexityScore: 0,
         };
-
         return {
             queries: [{
-                nodes: [],
-                edges: [],
-                stats: emptyStats,
-                hints: [{
-                    type: 'error',
-                    message: validationError.message,
-                    suggestion: validationError.type === 'size_limit'
-                        ? 'Consider splitting your SQL into smaller files or removing unnecessary whitespace/comments.'
-                        : 'Consider splitting your SQL into multiple files with fewer statements each.',
-                    category: 'performance',
-                    severity: 'high',
-                }],
-                sql: sql.substring(0, 1000) + (sql.length > 1000 ? '...' : ''), // Truncate for display
-                columnLineage: [],
-                tableUsage: new Map(),
-                error: validationError.message,
+                nodes: [], edges: [], stats: emptyStats,
+                hints: [{ type: 'error', message: validationError.message, category: 'performance', severity: 'high' }],
+                sql: sql.substring(0, 1000) + (sql.length > 1000 ? '...' : ''),
+                columnLineage: [], tableUsage: new Map(), error: validationError.message,
             }],
-            totalStats: emptyStats,
-            validationError,
+            totalStats: emptyStats, validationError,
         };
     }
 
@@ -1245,6 +1471,279 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     }
 }
 
+/**
+ * Regex-based fallback parser for when AST parsing fails.
+ * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
+ * This is better than showing nothing - 70% accuracy > 0%.
+ */
+function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+    const tableNames = new Set<string>();
+    const hints: OptimizationHint[] = []; // Declare hints early
+    let nodeId = 0;
+
+    // Helper to generate node IDs
+    const genId = (prefix: string) => `${prefix}_${nodeId++}`;
+
+    // Strip comments before regex extraction to avoid picking up
+    // table-like words from comment text (e.g. "-- JOIN Patterns")
+    const commentStripped = sql
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+        .replace(/--[^\n]*/g, '');            // line comments
+
+    // Check for CTEs FIRST (before extracting regular tables)
+    // This ensures CTEs are marked with the correct category
+    const ctePattern = /WITH\s+(\w+)\s+AS/i;
+    const cteMatch = ctePattern.exec(commentStripped);
+    const cteNames = new Set<string>();
+    
+    if (cteMatch) {
+        const cteName = cteMatch[1];
+        cteNames.add(cteName);
+        tableNames.add(cteName);
+        nodes.push({
+            id: genId('cte'),
+            type: 'table',
+            label: cteName,
+            description: 'CTE (detected by fallback parser)',
+            details: ['Common Table Expression'],
+            x: 0,
+            y: nodes.length * 100,
+            width: 160,
+            height: 60,
+            tableCategory: 'cte_reference',
+        });
+    }
+
+    // Extract table names from FROM, JOIN, INTO, UPDATE, MERGE clauses
+    // Skip CTE names that were already added above
+    const tablePatterns = [
+        /\bFROM\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bJOIN\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bINTO\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bUPDATE\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bMERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bUSING\s+([`"']?[\w.]+[`"']?)/gi,
+    ];
+
+    for (const pattern of tablePatterns) {
+        let match;
+        while ((match = pattern.exec(commentStripped)) !== null) {
+            let tableName = match[1].replace(/[`"']/g, '');
+            // Remove schema prefix if present
+            tableName = tableName.split('.').pop() || tableName;
+            // Skip if it's a CTE (already added) or already exists
+            if (tableName && !tableNames.has(tableName)) {
+                tableNames.add(tableName);
+                nodes.push({
+                    id: genId('table'),
+                    type: 'table',
+                    label: tableName,
+                    description: 'Table (detected by fallback parser)',
+                    details: ['Partial visualization - parsing failed'],
+                    x: 0,
+                    y: nodes.length * 100,
+                    width: 160,
+                    height: 60,
+                    tableCategory: 'physical',
+                });
+            }
+        }
+    }
+
+    // Extract JOIN relationships
+    const joinPattern = /\bJOIN\s+([`"']?[\w.]+[`"']?)\s+(?:ON|USING)/gi;
+    let joinMatch;
+    let previousTable: string | null = null;
+
+    while ((joinMatch = joinPattern.exec(commentStripped)) !== null) {
+        const joinTable = joinMatch[1].replace(/[`"']/g, '').split('.').pop() || joinMatch[1];
+
+        // Find the table before this JOIN
+        const beforeMatch = commentStripped.substring(0, joinMatch.index).match(/FROM\s+([`"']?[\w.]+[`"']?)\s*$/i);
+        if (beforeMatch) {
+            previousTable = beforeMatch[1].replace(/[`"']/g, '').split('.').pop() || beforeMatch[1];
+        }
+        
+        if (previousTable && tableNames.has(previousTable) && tableNames.has(joinTable)) {
+            edges.push({
+                id: genId('edge'),
+                source: nodes.find(n => n.label === previousTable)?.id || '',
+                target: nodes.find(n => n.label === joinTable)?.id || '',
+                sqlClause: 'JOIN',
+                clauseType: 'join',
+            });
+        }
+        previousTable = joinTable;
+    }
+
+    // Detect statement type for hints
+    const upperSql = commentStripped.toUpperCase().trim();
+    let statementType = 'UNKNOWN';
+    if (upperSql.startsWith('SELECT')) statementType = 'SELECT';
+    else if (upperSql.startsWith('INSERT')) statementType = 'INSERT';
+    else if (upperSql.startsWith('UPDATE')) statementType = 'UPDATE';
+    else if (upperSql.startsWith('DELETE')) statementType = 'DELETE';
+    else if (upperSql.startsWith('MERGE')) {
+        statementType = 'MERGE';
+        
+        // Enhanced MERGE statement visualization
+        // Extract WHEN MATCHED/NOT MATCHED clauses
+        const whenClauses = [];
+        
+        // Extract WHEN MATCHED clauses with their action (keyword after THEN)
+        const whenMatchedPattern = /WHEN\s+MATCHED\s+(?:AND\s+[^:]+\s+)?THEN\s+(\w+)/gi;
+        let match;
+        while ((match = whenMatchedPattern.exec(commentStripped)) !== null) {
+            whenClauses.push({
+                type: 'MATCHED',
+                action: match[1] || 'UPDATE',
+            });
+        }
+        
+        // Extract WHEN NOT MATCHED clauses with their action
+        const whenNotMatchedPattern = /WHEN\s+NOT\s+MATCHED\s+(?:BY\s+\w+\s+)?THEN\s+(\w+)/gi;
+        while ((match = whenNotMatchedPattern.exec(commentStripped)) !== null) {
+            whenClauses.push({
+                type: 'NOT MATCHED',
+                action: match[1] || 'INSERT',
+            });
+        }
+
+        // Find MERGE target and source tables
+        const mergeTargetMatch = commentStripped.match(/MERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/i);
+        const mergeSourceMatch = commentStripped.match(/USING\s+([`"']?[\w.]+[`"']?)/i);
+        
+        if (mergeTargetMatch && mergeSourceMatch) {
+            const targetTable = mergeTargetMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeTargetMatch[1];
+            const sourceTable = mergeSourceMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeSourceMatch[1];
+            
+            // Create a dedicated MERGE node
+            const mergeNodeId = genId('merge');
+            nodes.push({
+                id: mergeNodeId,
+                type: 'result',
+                label: 'MERGE',
+                description: 'MERGE operation',
+                details: [
+                    `Target: ${targetTable}`,
+                    `Source: ${sourceTable}`,
+                    `Branches: ${whenClauses.length} WHEN clause${whenClauses.length > 1 ? 's' : ''}`,
+                    ...whenClauses.map(w => `  WHEN ${w.type}: ${w.action}`)
+                ],
+                x: 100,
+                y: nodes.length * 100,
+                width: 180,
+                height: 80 + whenClauses.length * 15,
+                accessMode: 'write',
+                operationType: 'MERGE',
+            });
+
+            // Add edges from source and target to MERGE node
+            const sourceNode = nodes.find(n => n.label === sourceTable);
+            const targetNode = nodes.find(n => n.label === targetTable);
+            
+            if (sourceNode) {
+                edges.push({
+                    id: genId('edge'),
+                    source: sourceNode.id,
+                    target: mergeNodeId,
+                    sqlClause: 'USING',
+                    clauseType: 'merge_source',
+                });
+            }
+            
+            if (targetNode) {
+                edges.push({
+                    id: genId('edge'),
+                    source: mergeNodeId,
+                    target: targetNode.id,
+                    sqlClause: 'INTO',
+                    clauseType: 'merge_target',
+                });
+            }
+        }
+        
+        // Add MERGE-specific hints
+        if (dialect === 'PostgreSQL') {
+            hints.push({
+                type: 'info',
+                message: 'MERGE statement detected (using fallback parser)',
+                suggestion: 'Consider using INSERT ... ON CONFLICT DO UPDATE for PostgreSQL upserts, which is more widely supported.',
+                category: 'best-practice',
+                severity: 'low',
+            });
+        } else if (dialect === 'MySQL') {
+            hints.push({
+                type: 'info',
+                message: 'MERGE statement detected (using fallback parser)',
+                suggestion: 'Consider using INSERT ... ON DUPLICATE KEY UPDATE for MySQL upserts, which is more widely supported.',
+                category: 'best-practice',
+                severity: 'low',
+            });
+        } else if (dialect === 'TransactSQL') {
+            hints.push({
+                type: 'info',
+                message: 'MERGE statement detected (using fallback parser)',
+                suggestion: 'MERGE is fully supported in TransactSQL. This visualization is approximate due to parse limitations.',
+                category: 'best-practice',
+                severity: 'low',
+            });
+        } else {
+            hints.push({
+                type: 'info',
+                message: 'MERGE statement detected (using fallback parser)',
+                suggestion: 'MERGE syntax varies by dialect. This visualization shows approximate table relationships.',
+                category: 'best-practice',
+                severity: 'low',
+            });
+        }
+    }
+    else if (upperSql.startsWith('CREATE')) statementType = 'CREATE';
+    else if (upperSql.startsWith('ALTER')) statementType = 'ALTER';
+    else if (upperSql.startsWith('DROP')) statementType = 'DROP';
+
+    // Build stats
+    const stats: QueryStats = {
+        tables: tableNames.size,
+        joins: edges.length,
+        subqueries: (commentStripped.match(/\bsubquery\b/gi) || []).length,
+        ctes: cteMatch ? 1 : 0,
+        aggregations: (commentStripped.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
+        windowFunctions: (commentStripped.match(/\bOVER\s*\(/gi) || []).length,
+        unions: (commentStripped.match(/\bUNION\b/gi) || []).length,
+        conditions: (commentStripped.match(/\bWHERE\b/gi) || []).length + (commentStripped.match(/\bHAVING\b/gi) || []).length,
+        complexity: 'Simple',
+        complexityScore: tableNames.size * 1 + edges.length * 3,
+    };
+
+    // Update complexity based on score
+    if (stats.complexityScore >= 30) stats.complexity = 'Very Complex';
+    else if (stats.complexityScore >= 15) stats.complexity = 'Complex';
+    else if (stats.complexityScore >= 5) stats.complexity = 'Moderate';
+
+    // Add the partial visualization warning hint
+    hints.push({
+        type: 'warning',
+        message: 'Partial visualization - SQL parser could not parse this query',
+        suggestion: `Showing best-effort approximation with ${tableNames.size} table(s) detected. This query may use syntax not supported by the ${dialect} dialect parser.`,
+        category: 'best-practice',
+        severity: 'medium',
+    });
+
+    return {
+        nodes,
+        edges,
+        stats,
+        hints,
+        sql,
+        columnLineage: [],
+        tableUsage: new Map(),
+        partial: true, // Mark as partial visualization
+    };
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     // Reset all parser state atomically by creating a fresh context
     ctx = createFreshContext(dialect);
@@ -1265,6 +1764,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
     try {
         let ast: any;
+
+        // Timeout protection: measure parse duration and warn/fallback if too slow
+        const parseStartTime = Date.now();
         try {
             ast = parser.astify(sql, { database: dialect });
         } catch (parseError) {
@@ -1273,6 +1775,34 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                 throw parseError;
             }
             ast = fallbackAst;
+        }
+
+        const parseDurationMs = Date.now() - parseStartTime;
+
+        // If parsing exceeded the timeout, fall back to regex parser for a lighter result
+        if (parseDurationMs > PARSE_TIMEOUT_MS) {
+            const timeoutHint = {
+                type: 'warning' as const,
+                message: `Query parsing took ${(parseDurationMs / 1000).toFixed(1)}s — exceeded ${(PARSE_TIMEOUT_MS / 1000).toFixed(0)}s timeout`,
+                suggestion: 'Consider simplifying this query or breaking it into smaller parts. The regex fallback parser was used instead.',
+                category: 'performance' as const,
+                severity: 'high' as const,
+            };
+            // Return regex fallback with the timeout hint merged in
+            const fallbackResult = regexFallbackParse(sql, dialect);
+            fallbackResult.hints.unshift(timeoutHint);
+            return fallbackResult;
+        }
+
+        // Warn if parsing approached the timeout (>70% of limit)
+        if (parseDurationMs > PARSE_TIMEOUT_MS * 0.7) {
+            ctx.hints.push({
+                type: 'warning',
+                message: `Query parsing took ${(parseDurationMs / 1000).toFixed(1)}s — approaching ${(PARSE_TIMEOUT_MS / 1000).toFixed(0)}s timeout limit`,
+                suggestion: 'Consider simplifying this query or breaking it into smaller parts for better performance.',
+                category: 'performance',
+                severity: 'medium',
+            });
         }
         const statements = Array.isArray(ast) ? ast : [ast];
 
@@ -1285,6 +1815,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Generate optimization hints
         generateHints(statements[0]);
+
+        // Detect dialect-specific syntax patterns
+        detectDialectSpecificSyntax(sql, dialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
         detectAdvancedIssues(nodes, edges, sql);
@@ -1341,6 +1874,16 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
         // Update stats.tables to reflect the actual number of unique tables (including from CTEs and subqueries)
         ctx.stats.tables = ctx.tableUsageMap.size;
+
+        // Convert functionsUsed Set to sorted FunctionUsage array
+        if (ctx.functionsUsed.size > 0) {
+            ctx.stats.functionsUsed = Array.from(ctx.functionsUsed)
+                .map(entry => {
+                    const [name, category] = entry.split(':');
+                    return { name, category: category as import('./types/parser').FunctionCategory };
+                })
+                .sort((a, b) => a.name.localeCompare(b.name));
+        }
 
         return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage, columnFlows, tableUsage: ctx.tableUsageMap };
     } catch (err) {
@@ -1404,7 +1947,27 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             message = `${locationPrefix}: ${message}`;
         }
 
-        return { nodes: [], edges: [], stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: message };
+        // Even when parsing fails, try to detect dialect-specific syntax
+        // to provide helpful hints to users
+        detectDialectSpecificSyntax(sql, dialect);
+
+        // Instead of returning empty result, use regex fallback parser
+        // This gives users a best-effort visualization instead of nothing
+        const fallbackResult = regexFallbackParse(sql, dialect);
+
+        // Add the original parse error as a hint so users know what went wrong
+        fallbackResult.hints.unshift({
+            type: 'error',
+            message: `Parse error: ${message}`,
+            suggestion: 'Showing partial visualization using fallback parser. Some elements may be inaccurate.',
+            category: 'best-practice',
+            severity: 'high',
+        });
+
+        // Merge dialect-specific hints from ctx (populated by detectDialectSpecificSyntax above)
+        fallbackResult.hints.push(...ctx.hints);
+
+        return fallbackResult;
     }
 }
 
@@ -2256,20 +2819,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
             // CTE statement can be in different locations depending on parser output
             // Handle various AST structures from node-sql-parser
-            let cteStmt = null;
-            if (cte.stmt?.ast) {
-                cteStmt = cte.stmt.ast;
-            } else if (cte.stmt?.type === 'select' || cte.stmt?.from) {
-                cteStmt = cte.stmt;
-            } else if (cte.ast) {
-                cteStmt = cte.ast;
-            } else if (cte.expr?.ast) {
-                cteStmt = cte.expr.ast;
-            } else if (cte.definition?.ast) {
-                cteStmt = cte.definition.ast;
-            } else if (cte.definition) {
-                cteStmt = cte.definition;
-            }
+            const cteStmt = getCteStatementAst(cte);
 
             if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
@@ -2308,36 +2858,21 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            // Create table node for non-join tables
-            if (!fromItem.join) {
-                const tableId = processFromItem(fromItem, nodes, edges, cteNames);
-                if (tableId) {
-                    tableIds.push(tableId);
-                    const tableName = getTableName(fromItem);
-                    joinTableMap.set(tableName, tableId);
-                }
-            } else {
-                // Create table node for join tables too
-                ctx.stats.tables++;
-                const tableName = getTableName(fromItem);
-                trackTableUsage(tableName);
-                const tableId = genId('table');
-                // Determine table category
-                const isCteRef = cteNames.has(tableName.toLowerCase());
-                nodes.push({
-                    id: tableId,
-                    type: 'table',
-                    label: tableName,
-                    description: isCteRef ? 'CTE reference' : 'Joined table',
-                    details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
-                    tableCategory: isCteRef ? 'cte_reference' : 'physical',
-                    x: 0, y: 0, width: 140, height: 60
-                });
+            const tableId = processFromItem(fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
+            if (tableId) {
                 tableIds.push(tableId);
-                joinTableMap.set(tableName, tableId);
+                joinTableMap.set(getFromItemLookupKey(fromItem), tableId);
             }
         }
     }
+    const seenTableLabels = new Set<string>();
+    for (const tableId of tableIds) {
+        const tableNode = nodes.find(node => node.id === tableId && node.type === 'table');
+        if (tableNode) {
+            seenTableLabels.add(tableNode.label.toLowerCase());
+        }
+    }
+    const scalarSubquerySourceTables = collectScalarSubquerySourceTables(stmt, cteNames, seenTableLabels);
 
     // Process JOINs - create join nodes and connect tables properly
     let lastOutputId = tableIds[0]; // Start with first table as base
@@ -2351,8 +2886,8 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 ctx.stats.joins++;
                 const joinId = genId('join');
                 const joinType = fromItem.join || 'JOIN';
-                const joinTable = getTableName(fromItem);
-                const rightTableId = joinTableMap.get(joinTable);
+                const joinTable = getFromItemDisplayName(fromItem);
+                const rightTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
 
                 // Extract join condition details
                 const joinDetails: string[] = [];
@@ -2414,6 +2949,42 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
                 source: cteId,
                 target: tableIds[0]
             });
+        }
+    }
+
+    // Connect comma-separated FROM items (implicit cross joins) that aren't
+    // already wired by the explicit JOIN logic above. tableIds[0] is the base;
+    // any additional non-join item needs an edge into the flow.
+    if (stmt.from && Array.isArray(stmt.from)) {
+        for (let i = 1; i < stmt.from.length; i++) {
+            const fromItem = stmt.from[i];
+            if (!fromItem.join) {
+                const extraTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
+                if (extraTableId && lastOutputId) {
+                    // Create an implicit CROSS JOIN node
+                    ctx.stats.joins++;
+                    const crossJoinId = genId('join');
+                    nodes.push({
+                        id: crossJoinId,
+                        type: 'join',
+                        label: 'CROSS JOIN',
+                        description: `Implicit join with ${getFromItemDisplayName(fromItem)}`,
+                        details: [getFromItemDisplayName(fromItem)],
+                        x: 0, y: 0, width: 140, height: 60
+                    });
+                    edges.push({
+                        id: genId('e'),
+                        source: lastOutputId,
+                        target: crossJoinId
+                    });
+                    edges.push({
+                        id: genId('e'),
+                        source: extraTableId,
+                        target: crossJoinId
+                    });
+                    lastOutputId = crossJoinId;
+                }
+            }
         }
     }
 
@@ -2606,6 +3177,38 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             target: selectId
         });
     }
+
+    for (const tableName of scalarSubquerySourceTables) {
+        const tableKey = tableName.toLowerCase();
+        if (seenTableLabels.has(tableKey)) {
+            continue;
+        }
+
+        const tableId = genId('table');
+        nodes.push({
+            id: tableId,
+            type: 'table',
+            label: tableName,
+            description: 'Scalar subquery source',
+            tableCategory: 'physical',
+            x: 0, y: 0, width: 140, height: 60
+        });
+        edges.push({
+            id: genId('e'),
+            source: tableId,
+            target: selectId,
+            sqlClause: 'Subquery source',
+            clauseType: 'flow'
+        });
+
+        seenTableLabels.add(tableKey);
+        const hadTable = ctx.tableUsageMap.has(tableKey);
+        trackTableUsage(tableName);
+        if (!hadTable) {
+            ctx.stats.tables++;
+        }
+    }
+
     previousId = selectId;
 
     // Process ORDER BY
@@ -2717,7 +3320,35 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     return resultId;
 }
 
-function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], cteNames: Set<string> = new Set()): string | null {
+function getCteStatementAst(cte: any): any {
+    if (cte?.stmt?.ast) {
+        return cte.stmt.ast;
+    }
+    if (cte?.stmt?.type === 'select' || cte?.stmt?.from) {
+        return cte.stmt;
+    }
+    if (cte?.ast) {
+        return cte.ast;
+    }
+    if (cte?.expr?.ast) {
+        return cte.expr.ast;
+    }
+    if (cte?.definition?.ast) {
+        return cte.definition.ast;
+    }
+    if (cte?.definition) {
+        return cte.definition;
+    }
+    return null;
+}
+
+function processFromItem(
+    fromItem: any,
+    nodes: FlowNode[],
+    _edges: FlowEdge[],
+    cteNames: Set<string> = new Set(),
+    asJoin: boolean = false
+): string | null {
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
         ctx.stats.subqueries++;
@@ -2751,9 +3382,37 @@ function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], c
         return subqueryId;
     }
 
+    // Table-valued function (UNNEST, OPENJSON, FLATTEN, JSON_TABLE, etc.)
+    const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
+    if (tableValuedFunctionName) {
+        trackFunctionUsage(tableValuedFunctionName, 'tvf');
+        ctx.stats.tables++;
+        const tableId = genId('table');
+        const label = getFromItemDisplayName(fromItem);
+        const details: string[] = [`Function: ${tableValuedFunctionName}`];
+        const rawAlias = typeof fromItem.as === 'string' ? fromItem.as.trim() : '';
+        if (rawAlias && rawAlias !== label) {
+            details.push(`Alias: ${rawAlias}`);
+        }
+
+        nodes.push({
+            id: tableId,
+            type: 'table',
+            label,
+            description: asJoin
+                ? `Joined table function (${tableValuedFunctionName})`
+                : `Table function source (${tableValuedFunctionName})`,
+            details,
+            tableCategory: 'table_function',
+            x: 0, y: 0, width: 140, height: 60
+        });
+        trackTableUsage(label);
+        return tableId;
+    }
+
     // Regular table
     const tableName = getTableName(fromItem);
-    if (!tableName || fromItem.join) { return null; } // Skip join tables, handled separately
+    if (!tableName) { return null; }
 
     ctx.stats.tables++;
     trackTableUsage(tableName);
@@ -2764,7 +3423,9 @@ function processFromItem(fromItem: any, nodes: FlowNode[], _edges: FlowEdge[], c
         id: tableId,
         type: 'table',
         label: tableName,
-        description: isCteRef ? 'CTE reference' : 'Source table',
+        description: isCteRef
+            ? (asJoin ? 'Joined CTE reference' : 'CTE reference')
+            : (asJoin ? 'Joined table' : 'Source table'),
         details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
         tableCategory: isCteRef ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
@@ -2790,6 +3451,72 @@ function getTableName(item: any): string {
     return item.name || item.as || 'table';
 }
 
+function getNormalizedFromAlias(item: any): string | null {
+    const rawAlias = typeof item?.as === 'string' ? item.as.trim() : '';
+    if (!rawAlias) {
+        return null;
+    }
+    const parenIndex = rawAlias.indexOf('(');
+    if (parenIndex > 0) {
+        return rawAlias.slice(0, parenIndex).trim();
+    }
+    return rawAlias;
+}
+
+function getFromItemDisplayName(item: any): string {
+    const alias = getNormalizedFromAlias(item);
+    if (alias) {
+        return alias;
+    }
+    const tableName = getTableName(item);
+    if (tableName && tableName !== 'table') {
+        return tableName;
+    }
+    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
+}
+
+function getFromItemLookupKey(item: any): string {
+    const alias = getNormalizedFromAlias(item);
+    if (alias) {
+        return alias;
+    }
+    const tableName = getTableName(item);
+    if (tableName && tableName !== 'table') {
+        return tableName;
+    }
+    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
+}
+
+/**
+ * Extract a readable identifier/value from parser AST nodes across dialects.
+ * Handles wrapped nodes like { expr: { type: 'default', value: 'col' } }.
+ */
+function getAstString(val: any, depth = 0): string | null {
+    if (depth > 6 || val === null || val === undefined) { return null; }
+    if (typeof val === 'string') { return val; }
+    if (typeof val === 'number' || typeof val === 'boolean') { return String(val); }
+
+    if (Array.isArray(val)) {
+        for (const item of val) {
+            const extracted = getAstString(item, depth + 1);
+            if (extracted) { return extracted; }
+        }
+        return null;
+    }
+
+    if (typeof val === 'object') {
+        const candidateKeys = ['value', 'name', 'column', 'table', 'expr'];
+        for (const key of candidateKeys) {
+            if (Object.prototype.hasOwnProperty.call(val, key)) {
+                const extracted = getAstString(val[key], depth + 1);
+                if (extracted) { return extracted; }
+            }
+        }
+    }
+
+    return null;
+}
+
 /**
  * Format an AST expression node into a readable SQL expression string
  */
@@ -2798,13 +3525,16 @@ function formatExpressionFromAst(expr: any): string {
 
     // Simple column reference
     if (expr.type === 'column_ref') {
-        const table = expr.table ? `${expr.table}.` : '';
-        return `${table}${expr.column || '?'}`;
+        const tableName = getAstString(expr.table);
+        const columnName = getAstString(expr.column);
+        const table = tableName ? `${tableName}.` : '';
+        return `${table}${columnName || '?'}`;
     }
 
     // Aggregate function
     if (expr.type === 'aggr_func') {
         const funcName = expr.name || 'AGG';
+        trackFunctionUsage(funcName, 'aggregate');
         const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
         let argsStr = '';
 
@@ -2823,6 +3553,7 @@ function formatExpressionFromAst(expr: any): string {
     // Function call
     if (expr.type === 'function') {
         const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        trackFunctionUsage(funcName, expr.over ? 'window' : 'scalar');
         const args = expr.args?.value || expr.args || [];
         const argsStr = Array.isArray(args)
             ? args.map((arg: any) => formatExpressionFromAst(arg)).join(', ')
@@ -2840,6 +3571,13 @@ function formatExpressionFromAst(expr: any): string {
     // Unary expression
     if (expr.type === 'unary_expr') {
         return `${expr.operator || ''}${formatExpressionFromAst(expr.expr)}`;
+    }
+
+    // CAST expression
+    if (expr.type === 'cast') {
+        const innerExpr = formatExpressionFromAst(expr.expr);
+        const dataType = expr.target?.dataType || expr.target || 'type';
+        return `CAST(${innerExpr} AS ${dataType})`;
     }
 
     // Number or string literal
@@ -2864,9 +3602,9 @@ function formatExpressionFromAst(expr: any): string {
     }
 
     // Fallback: try common properties
-    if (expr.column) { return expr.column; }
+    if (expr.column) { return getAstString(expr.column) || 'expr'; }
     if (expr.value !== undefined) { return String(expr.value); }
-    if (expr.name) { return String(typeof expr.name === 'string' ? expr.name : expr.name?.name || 'expr'); }
+    if (expr.name) { return getAstString(expr.name) || 'expr'; }
 
     return 'expr';
 }
@@ -2879,13 +3617,16 @@ function extractColumns(columns: any): string[] {
     if (!Array.isArray(columns)) { return ['*']; }
 
     return columns.map((col: any) => {
-        if (col === '*' || col.expr?.column === '*') {
+        const exprColumn = getAstString(col?.expr?.column);
+        if (col === '*' || exprColumn === '*') {
             ctx.hasSelectStar = true;
             return '*';
         }
-        if (col.as) { return col.as; }
-        if (col.expr?.column) { return col.expr.column; }
-        if (col.expr?.name) { return `${col.expr.name}()`; }
+        const aliasName = getAstString(col?.as);
+        if (aliasName) { return aliasName; }
+        if (exprColumn) { return exprColumn; }
+        const exprName = getAstString(col?.expr?.name);
+        if (exprName) { return `${exprName}()`; }
         return 'expr';
     }).slice(0, 10); // Limit to first 10
 }
@@ -2908,27 +3649,13 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
     }
     if (!Array.isArray(columns)) { return []; }
 
-    // Helper to safely extract string from AST nodes that may be objects
-    const getStringValue = (val: any): string | null => {
-        if (val === null || val === undefined) {return null;}
-        if (typeof val === 'string') {return val;}
-        if (typeof val === 'number') {return String(val);}
-        // Handle objects with nested name/value properties
-        if (typeof val === 'object') {
-            if (typeof val.name === 'string') {return val.name;}
-            if (typeof val.value === 'string') {return val.value;}
-            if (typeof val.column === 'string') {return val.column;}
-        }
-        return null;
-    };
-
     return columns.map((col: any): ColumnInfo => {
         // Extract column name - prioritize alias, then column name, then expression
         let name: string;
-        const aliasName = getStringValue(col.as);
-        const exprColumn = getStringValue(col.expr?.column);
-        const exprName = getStringValue(col.expr?.name);
-        const exprValue = getStringValue(col.expr?.value);
+        const aliasName = getAstString(col.as);
+        const exprColumn = getAstString(col.expr?.column);
+        const exprName = getAstString(col.expr?.name);
+        const exprValue = getAstString(col.expr?.value);
 
         if (aliasName) {
             name = aliasName;
@@ -2945,9 +3672,21 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
         }
         
         const expression = col.expr ? formatExpressionFromAst(col.expr) : name;
-        const sourceColName = getStringValue(col.expr?.column);
-        const sourceTableName = getStringValue(col.expr?.table) ||
-            (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined);
+        
+        // Extract source column and table
+        // For CAST expressions, the source column is inside col.expr.expr
+        let sourceColName: string | undefined;
+        let sourceTableName: string | undefined;
+        
+        if (col.expr?.type === 'cast') {
+            // CAST expression: extract source from the inner expression
+            sourceColName = getAstString(col.expr.expr?.column) || undefined;
+            sourceTableName = getAstString(col.expr.expr?.table) || undefined;
+        } else {
+            // Regular expression: extract source from the expression itself
+            sourceColName = getAstString(col.expr?.column) || undefined;
+            sourceTableName = getAstString(col.expr?.table) || undefined;
+        }
 
         return {
             name: name,
@@ -2972,15 +3711,12 @@ function extractWindowFunctions(columns: any): string[] {
             // Safely extract function name
             let funcName = 'WINDOW';
             const expr = col.expr;
-            if (typeof expr.name === 'string') {
-                funcName = expr.name;
-            } else if (expr.name?.name && typeof expr.name.name === 'string') {
-                funcName = expr.name.name;
-            } else if (expr.name?.value && typeof expr.name.value === 'string') {
-                funcName = expr.name.value;
-            }
+            const extractedFunc = getAstString(expr.name);
+            if (extractedFunc) { funcName = extractedFunc; }
 
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column || p.expr?.column).join(', ');
+            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
+                getAstString(p.column) || getAstString(p.expr?.column) || '?'
+            ).join(', ');
             let desc = `${funcName}()`;
             if (partitionBy) {
                 desc += ` OVER(PARTITION BY ${partitionBy})`;
@@ -3083,6 +3819,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
 
             // Ensure funcName is a clean string
             const cleanName = typeof funcName === 'string' ? funcName : 'WINDOW';
+            trackFunctionUsage(cleanName, 'window');
 
             details.push({
                 name: cleanName.toUpperCase(),
@@ -3423,14 +4160,163 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 }
 
+function collectScalarSubquerySourceTables(
+    stmt: any,
+    cteNames: Set<string>,
+    excludedTableLabels: Set<string>
+): string[] {
+    const sourceTables = new Set<string>();
+    const scopedCteNames = new Set<string>(Array.from(cteNames).map(name => name.toLowerCase()));
+    const expressions: any[] = [];
+
+    if (stmt?.where) {
+        expressions.push(stmt.where);
+    }
+    if (stmt?.having) {
+        expressions.push(stmt.having);
+    }
+    if (Array.isArray(stmt?.columns)) {
+        for (const col of stmt.columns) {
+            if (col?.expr) {
+                expressions.push(col.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (orderItem?.expr) {
+                expressions.push(orderItem.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem?.on) {
+                expressions.push(fromItem.on);
+            }
+        }
+    }
+
+    for (const expr of expressions) {
+        const subqueries = findSubqueriesInExpression(expr);
+        for (const subquery of subqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    return Array.from(sourceTables).filter(name => !excludedTableLabels.has(name.toLowerCase()));
+}
+
+function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inheritedCteNames: Set<string>): void {
+    if (!stmt || typeof stmt !== 'object') {
+        return;
+    }
+
+    const scopedCteNames = new Set(inheritedCteNames);
+
+    if (Array.isArray(stmt.with)) {
+        for (const cte of stmt.with) {
+            const cteName = (cte?.name?.value || cte?.name || '').toString().trim().toLowerCase();
+            if (cteName) {
+                scopedCteNames.add(cteName);
+            }
+        }
+        for (const cte of stmt.with) {
+            const cteStmt = getCteStatementAst(cte);
+            if (cteStmt) {
+                collectTablesFromSelectTree(cteStmt, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : (stmt.from ? [stmt.from] : []);
+    for (const fromItem of fromItems) {
+        const nestedFromSubquery = fromItem?.expr?.ast || (fromItem?.expr?.type === 'select' ? fromItem.expr : null);
+        if (nestedFromSubquery) {
+            collectTablesFromSelectTree(nestedFromSubquery, sourceTables, scopedCteNames);
+        } else {
+            const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
+            if (tableValuedFunctionName) {
+                sourceTables.add(tableValuedFunctionName);
+            } else {
+                const tableName = getTableName(fromItem);
+                if (tableName && tableName !== 'table' && !scopedCteNames.has(tableName.toLowerCase())) {
+                    sourceTables.add(tableName);
+                }
+            }
+        }
+
+        if (fromItem?.on) {
+            const onSubqueries = findSubqueriesInExpression(fromItem.on);
+            for (const subquery of onSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (stmt.where) {
+        const whereSubqueries = findSubqueriesInExpression(stmt.where);
+        for (const subquery of whereSubqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    if (stmt.having) {
+        const havingSubqueries = findSubqueriesInExpression(stmt.having);
+        for (const subquery of havingSubqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    if (Array.isArray(stmt.columns)) {
+        for (const col of stmt.columns) {
+            if (!col?.expr) {
+                continue;
+            }
+            const columnSubqueries = findSubqueriesInExpression(col.expr);
+            for (const subquery of columnSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (Array.isArray(stmt.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (!orderItem?.expr) {
+                continue;
+            }
+            const orderSubqueries = findSubqueriesInExpression(orderItem.expr);
+            for (const subquery of orderSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (stmt._next) {
+        collectTablesFromSelectTree(stmt._next, sourceTables, scopedCteNames);
+    }
+}
+
 // Helper function to find subqueries in expressions (for counting nested subqueries)
 function findSubqueriesInExpression(expr: any): any[] {
     const subqueries: any[] = [];
     if (!expr) { return subqueries; }
 
     // Check if this expression itself is a subquery
-    if (expr.type === 'select' || (expr.ast && expr.ast.type === 'select')) {
-        subqueries.push(expr.ast || expr);
+    if (expr.type === 'select') {
+        subqueries.push(expr);
+    } else if (expr.ast && expr.ast.type === 'select') {
+        subqueries.push(expr.ast);
+    } else if (expr.ast && typeof expr.ast === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.ast));
+    }
+
+    if (expr.expr) {
+        subqueries.push(...findSubqueriesInExpression(expr.expr));
+    }
+
+    if (expr.value && typeof expr.value === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.value));
     }
 
     // Recursively check left and right sides of binary expressions
@@ -3446,8 +4332,22 @@ function findSubqueriesInExpression(expr: any): any[] {
         for (const arg of expr.args) {
             subqueries.push(...findSubqueriesInExpression(arg));
         }
+    } else if (Array.isArray(expr.args?.value)) {
+        for (const arg of expr.args.value) {
+            subqueries.push(...findSubqueriesInExpression(arg));
+        }
     } else if (expr.args && expr.args.expr) {
         subqueries.push(...findSubqueriesInExpression(expr.args.expr));
+    } else if (expr.args && typeof expr.args === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.args));
+    }
+
+    if (Array.isArray(expr.columns)) {
+        for (const col of expr.columns) {
+            if (col?.expr) {
+                subqueries.push(...findSubqueriesInExpression(col.expr));
+            }
+        }
     }
 
     return subqueries;
@@ -3490,6 +4390,11 @@ function extractTablesFromStatement(stmt: any): string[] {
 
     const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
     for (const item of fromItems) {
+        const tableValuedFunctionName = getTableValuedFunctionName(item, ctx.dialect);
+        if (tableValuedFunctionName) {
+            tables.push(tableValuedFunctionName);
+            continue;
+        }
         const name = getTableName(item);
         if (name && name !== 'table') {
             tables.push(name);
@@ -3575,7 +4480,7 @@ function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
             continue;
         }
 
-        const colName = col.as || col.expr?.column || col.expr?.name || 'expr';
+        const colName = getAstString(col.as) || getAstString(col.expr?.column) || getAstString(col.expr?.name) || 'expr';
         const sources: ColumnLineage['sources'] = [];
 
         // Try to extract source table and column
@@ -3603,9 +4508,9 @@ function extractSourcesFromExpr(
 
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {
-        const column = expr.column || expr.name;
+        const column = getAstString(expr.column) || getAstString(expr.name) || 'expr';
         const rawTable = expr.table;
-        const tableAlias = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
+        const tableAlias = getAstString(rawTable) || '';
 
         let tableName = tableAlias;
         if (tableAlias && tableAliasMap.has(tableAlias.toLowerCase())) {
@@ -3621,7 +4526,7 @@ function extractSourcesFromExpr(
         if (tableName || tableNodes.length === 1) {
             sources.push({
                 table: tableName || (tableNodes[0]?.label || 'unknown'),
-                column: String(column),
+                column: column,
                 nodeId: tableNode?.id || tableNodes[0]?.id || ''
             });
         }
@@ -3846,6 +4751,245 @@ function buildColumnLineagePath(
 }
 
 /**
+ * Detect dialect-specific syntax patterns and add appropriate hints
+ * This helps users identify when they're using syntax that's specific to a certain dialect
+ */
+function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): void {
+    const strippedSql = stripSqlComments(sql);
+    const upperSql = strippedSql.toUpperCase();
+    const syntax = detectDialectSyntaxPatterns(strippedSql);
+    
+    // Snowflake-specific syntax patterns
+    const hasSnowflakePathOperator = syntax.hasSnowflakePathOperator; // e.g., payload:items (excludes :: casts and :params)
+    const hasSnowflakeNamedArgs = syntax.hasSnowflakeNamedArgs; // e.g., input => value
+    const hasFlatten = syntax.hasFlatten;
+    
+    if ((hasSnowflakePathOperator || hasSnowflakeNamedArgs || hasFlatten) && currentDialect !== 'Snowflake') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'Snowflake-specific syntax detected',
+            suggestion: currentDialect === 'MySQL' || currentDialect === 'PostgreSQL'
+                ? `This query uses Snowflake syntax (e.g., : path operator or => named arguments). Try Snowflake dialect for full support.`
+                : `This query uses Snowflake-specific syntax. Consider switching to Snowflake dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // BigQuery-specific syntax patterns
+    const hasBigQueryStruct = syntax.hasBigQueryStruct;
+    const hasBigQueryUnnest = syntax.hasBigQueryUnnest;
+    const hasBigQueryArrayType = syntax.hasBigQueryArrayType;
+    
+    const unnestOnlyDialects: SqlDialect[] = ['BigQuery', 'PostgreSQL', 'Trino', 'Athena'];
+    if ((hasBigQueryStruct || hasBigQueryArrayType || (hasBigQueryUnnest && !unnestOnlyDialects.includes(currentDialect)))
+        && currentDialect !== 'BigQuery') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'BigQuery-specific syntax detected',
+            suggestion: `This query uses BigQuery syntax (e.g., STRUCT, UNNEST, or ARRAY<>). Try BigQuery dialect for full support.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // PostgreSQL-specific syntax patterns
+    const hasPostgresInterval = syntax.hasPostgresInterval;
+    const hasPostgresDollarQuotes = syntax.hasPostgresDollarQuotes;
+    const hasPostgresArrayAccess = syntax.hasPostgresArrayAccess; // e.g., arr[1]
+    const hasPostgresJsonOperators = syntax.hasPostgresJsonOperators;
+    
+    if ((hasPostgresInterval || hasPostgresDollarQuotes || hasPostgresArrayAccess || hasPostgresJsonOperators) 
+        && currentDialect !== 'PostgreSQL' && currentDialect !== 'Snowflake') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'PostgreSQL-specific syntax detected',
+            suggestion: `This query uses PostgreSQL syntax (e.g., INTERVAL '...', $$ quotes, or JSON operators). Try PostgreSQL dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // MySQL-specific syntax patterns
+    const hasMysqlBackticks = syntax.hasMysqlBackticks; // Backtick identifiers
+    const hasMysqlGroupByRollup = syntax.hasMysqlGroupByRollup;
+    const hasMysqlDual = syntax.hasMysqlDual;
+    
+    if ((hasMysqlBackticks || hasMysqlGroupByRollup || hasMysqlDual) 
+        && currentDialect !== 'MySQL' && currentDialect !== 'MariaDB') {
+        ctx.hints.push({
+            type: 'info',
+            message: 'MySQL-specific syntax detected',
+            suggestion: `This query uses MySQL syntax (e.g., backtick identifiers or WITH ROLLUP). Try MySQL dialect.`,
+            category: 'best-practice',
+            severity: 'low'
+        });
+    }
+    
+    // T-SQL (SQL Server) specific syntax
+    const hasTSqlApply = syntax.hasTSqlApply;
+    const hasTSqlTop = syntax.hasTSqlTop;
+    const hasTSqlPivot = syntax.hasTSqlPivot;
+    
+    if ((hasTSqlApply || hasTSqlTop || hasTSqlPivot) && currentDialect !== 'TransactSQL') {
+        ctx.hints.push({
+            type: 'warning',
+            message: 'SQL Server (T-SQL) syntax detected',
+            suggestion: `This query uses SQL Server syntax (e.g., CROSS APPLY, TOP, or PIVOT). Try TransactSQL dialect.`,
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+    
+    // MERGE statement detection (not fully supported by node-sql-parser in most dialects)
+    const hasMerge = /\bMERGE\s+INTO\b/i.test(strippedSql);
+    if (hasMerge) {
+        // Check if we're in a dialect that should support MERGE
+        const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery'];
+        if (!dialectsWithMerge.includes(currentDialect)) {
+            ctx.hints.push({
+                type: 'warning',
+                message: 'MERGE statement detected',
+                suggestion: `MERGE statements are supported in TransactSQL, Oracle, Snowflake, and BigQuery dialects. Current dialect (${currentDialect}) may have limited support. Consider using dialect-specific alternatives: PostgreSQL (INSERT ... ON CONFLICT), MySQL (INSERT ... ON DUPLICATE KEY UPDATE), or SQLite (INSERT OR REPLACE/IGNORE).`,
+                category: 'best-practice',
+                severity: 'medium'
+            });
+        } else {
+            // Even in supported dialects, MERGE may have parsing issues
+            ctx.hints.push({
+                type: 'info',
+                message: 'MERGE statement',
+                suggestion: `MERGE statements are complex and may not render fully in all cases. If parsing fails, try simplifying the query or using dialect-specific alternatives (ON CONFLICT, ON DUPLICATE KEY, etc.).`,
+                category: 'best-practice',
+                severity: 'low'
+            });
+        }
+    }
+}
+
+function stripSqlComments(sql: string): string {
+    return sql
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/--[^\n\r]*/g, ' ');
+}
+
+function detectDialectSyntaxPatterns(sql: string): {
+    hasSnowflakePathOperator: boolean;
+    hasSnowflakeNamedArgs: boolean;
+    hasFlatten: boolean;
+    hasBigQueryStruct: boolean;
+    hasBigQueryUnnest: boolean;
+    hasBigQueryArrayType: boolean;
+    hasPostgresInterval: boolean;
+    hasPostgresDollarQuotes: boolean;
+    hasPostgresArrayAccess: boolean;
+    hasPostgresJsonOperators: boolean;
+    hasMysqlBackticks: boolean;
+    hasMysqlGroupByRollup: boolean;
+    hasMysqlDual: boolean;
+    hasTSqlApply: boolean;
+    hasTSqlTop: boolean;
+    hasTSqlPivot: boolean;
+} {
+    return {
+        hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
+        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
+        hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
+        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
+        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
+        hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
+        hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
+        hasPostgresDollarQuotes: /\$\$/.test(sql),
+        hasPostgresArrayAccess: /\w+\[\d+\]/.test(sql),
+        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(sql),
+        hasMysqlBackticks: /`[\w-]+`/.test(sql),
+        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(sql),
+        hasMysqlDual: /FROM\s+DUAL/i.test(sql),
+        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql),
+        hasTSqlTop: /TOP\s*\(/i.test(sql),
+        hasTSqlPivot: /\bPIVOT\s*\(/i.test(sql),
+    };
+}
+
+export function detectDialect(sql: string): DialectDetectionResult {
+    const strippedSql = stripSqlComments(sql);
+    if (!strippedSql.trim()) {
+        return {
+            dialect: null,
+            scores: {},
+            confidence: 'none'
+        };
+    }
+
+    const syntax = detectDialectSyntaxPatterns(strippedSql);
+    const scores: Partial<Record<SqlDialect, number>> = {};
+    const addScore = (dialect: SqlDialect, points = 1): void => {
+        scores[dialect] = (scores[dialect] || 0) + points;
+    };
+
+    // Snowflake
+    if (syntax.hasSnowflakePathOperator) { addScore('Snowflake'); }
+    if (syntax.hasSnowflakeNamedArgs) { addScore('Snowflake'); }
+    if (syntax.hasFlatten) { addScore('Snowflake'); }
+
+    // BigQuery (UNNEST alone is not enough to disambiguate)
+    if (syntax.hasBigQueryStruct) { addScore('BigQuery'); }
+    if (syntax.hasBigQueryArrayType) { addScore('BigQuery'); }
+    if (syntax.hasBigQueryUnnest && (syntax.hasBigQueryStruct || syntax.hasBigQueryArrayType)) {
+        addScore('BigQuery');
+    }
+
+    // PostgreSQL
+    if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+
+    // MySQL
+    if (syntax.hasMysqlBackticks) { addScore('MySQL'); }
+    if (syntax.hasMysqlGroupByRollup) { addScore('MySQL'); }
+    if (syntax.hasMysqlDual) { addScore('MySQL'); }
+
+    // SQL Server (T-SQL)
+    if (syntax.hasTSqlApply) { addScore('TransactSQL'); }
+    if (syntax.hasTSqlTop) { addScore('TransactSQL'); }
+    if (syntax.hasTSqlPivot) { addScore('TransactSQL'); }
+
+    const candidateDialects: SqlDialect[] = ['Snowflake', 'BigQuery', 'PostgreSQL', 'MySQL', 'TransactSQL'];
+    const matchedDialects = candidateDialects
+        .map(dialect => ({ dialect, score: scores[dialect] || 0 }))
+        .filter(entry => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    if (matchedDialects.length === 0) {
+        return {
+            dialect: null,
+            scores,
+            confidence: 'none'
+        };
+    }
+
+    const topMatch = matchedDialects[0];
+    const allOtherScoresZero = candidateDialects
+        .filter(dialect => dialect !== topMatch.dialect)
+        .every(dialect => (scores[dialect] || 0) === 0);
+    const isHighConfidence = matchedDialects.length === 1 || (topMatch.score >= 2 && allOtherScoresZero);
+
+    if (!isHighConfidence) {
+        return {
+            dialect: null,
+            scores,
+            confidence: 'low'
+        };
+    }
+
+    return {
+        dialect: topMatch.dialect,
+        scores,
+        confidence: 'high'
+    };
+}
+
+/**
  * Find the source column in a source node that maps to the target column
  */
 function findSourceColumn(
@@ -3868,8 +5012,8 @@ function findSourceColumn(
     if (sourceNode.type === 'aggregate' && sourceNode.aggregateDetails) {
         for (const aggFunc of sourceNode.aggregateDetails.functions) {
             const outputName = aggFunc.alias || aggFunc.name;
-            if (outputName.toLowerCase() === targetColumn.name.toLowerCase() ||
-                targetColumn.expression?.toLowerCase().includes(outputName.toLowerCase())) {
+            if (safeString(outputName).toLowerCase() === safeString(targetColumn.name).toLowerCase() ||
+                safeString(targetColumn.expression).toLowerCase().includes(safeString(outputName).toLowerCase())) {
                 // Include source column info for proper lineage tracing
                 return {
                     name: outputName,
@@ -3885,7 +5029,7 @@ function findSourceColumn(
     // For window nodes, check window functions
     if (sourceNode.type === 'window' && sourceNode.windowDetails) {
         for (const winFunc of sourceNode.windowDetails.functions) {
-            if (winFunc.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(winFunc.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return {
                     name: winFunc.name,
                     expression: `${winFunc.name}() OVER (...)`,
@@ -3899,15 +5043,15 @@ function findSourceColumn(
     if (sourceNode.columns) {
         for (const sourceCol of sourceNode.columns) {
             // Direct name match
-            if (sourceCol.name.toLowerCase() === targetColumn.name.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.name).toLowerCase()) {
                 return sourceCol;
             }
             // Source column match
-            if (sourceCol.name.toLowerCase() === targetColumn.sourceColumn?.toLowerCase()) {
+            if (safeString(sourceCol.name).toLowerCase() === safeString(targetColumn.sourceColumn).toLowerCase()) {
                 return sourceCol;
             }
             // Expression match
-            if (targetColumn.expression?.toLowerCase().includes(sourceCol.name.toLowerCase())) {
+            if (safeString(targetColumn.expression).toLowerCase().includes(safeString(sourceCol.name).toLowerCase())) {
                 return sourceCol;
             }
         }
@@ -3959,7 +5103,7 @@ function getTransformationType(
 
     // Renamed columns
     if (column.sourceColumn &&
-        column.name.toLowerCase() !== column.sourceColumn.toLowerCase()) {
+        safeString(column.name).toLowerCase() !== safeString(column.sourceColumn).toLowerCase()) {
         return 'renamed';
     }
 

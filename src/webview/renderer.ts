@@ -19,7 +19,6 @@ import {
     getNodeColor,
     getTransformationColor,
     NODE_COLORS,
-    WARNING_COLORS,
     UI_COLORS,
     EDGE_COLORS,
     BADGE_COLORS,
@@ -30,6 +29,11 @@ import {
     CLOSE_BUTTON_COLORS,
     COMPLEXITY_COLORS,
     HINT_COLORS,
+    getColorblindMode,
+    setColorblindMode as setGlobalColorblindMode,
+    getEdgeDashPattern,
+    getSeverityIcon,
+    getWarningColor as getSeverityColor,
 } from './constants';
 
 import { formatSql, highlightSql } from './sqlFormatter';
@@ -51,9 +55,19 @@ import {
     clearBreadcrumbBar,
     updateHintsSummaryBadge,
 } from './ui';
+import { prefersReducedMotion } from './ui/motion';
+import { attachResizablePanel } from './ui/resizablePanel';
+import { UndoManager } from './ui/undoManager';
+import {
+    PANEL_LAYOUT_DEFAULTS,
+    applyHintsPanelViewportBounds as applyHintsPanelBounds,
+    applyPanelBottomOffsets,
+    parsePixelValue as parsePanelPixelValue,
+} from './ui/panelLayout';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
-import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors } from './constants/colors';
+import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
+import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
 import {
     getViewportBounds,
@@ -78,6 +92,11 @@ import { getWarningIndicatorState } from './warningIndicator';
 import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
+import {
+    getCycledNode,
+    getKeyboardNavigableNodes,
+    getSiblingCycleTarget,
+} from './navigation/keyboardNavigation';
 
 const state: ViewState = {
     scale: 1,
@@ -101,7 +120,7 @@ const state: ViewState = {
     searchResults: [],
     currentSearchIndex: -1,
     focusModeEnabled: false,
-    legendVisible: false,
+    legendVisible: true,
     highlightedColumnSources: [],
     isFullscreen: false,
     isDarkTheme: true,
@@ -127,9 +146,13 @@ let tooltipElement: HTMLDivElement | null = null;
 let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let columnLineageBanner: HTMLDivElement | null = null;
+let nodeFocusLiveRegion: HTMLDivElement | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
+let panelResizerCleanup: Array<() => void> = [];
+let legendResizeObserver: ResizeObserver | null = null;
+let legendResizeHandler: (() => void) | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
@@ -149,6 +172,23 @@ let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 
+interface LayoutHistorySnapshot {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    selectedNodeId: string | null;
+    focusModeEnabled: boolean;
+    focusMode: FocusMode;
+    layoutType: LayoutType;
+    nodePositions: Array<{ id: string; x: number; y: number }>;
+    cloudOffsets: Array<{ nodeId: string; offsetX: number; offsetY: number }>;
+}
+
+const layoutHistory = new UndoManager<LayoutHistorySnapshot>({
+    maxEntries: 50,
+    serialize: (snapshot) => JSON.stringify(snapshot),
+});
+
 // Virtualization state
 let virtualizationEnabled = true;
 let renderedNodeIds: Set<string> = new Set();
@@ -161,19 +201,155 @@ let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 
-function isReducedMotionPreferred(): boolean {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function ensureNodeFocusLiveRegion(container: HTMLElement): void {
+    if (nodeFocusLiveRegion?.isConnected) {
+        return;
+    }
+
+    nodeFocusLiveRegion = document.createElement('div');
+    nodeFocusLiveRegion.id = 'node-focus-live-region';
+    nodeFocusLiveRegion.setAttribute('role', 'status');
+    nodeFocusLiveRegion.setAttribute('aria-live', 'polite');
+    nodeFocusLiveRegion.setAttribute('aria-atomic', 'true');
+    nodeFocusLiveRegion.style.cssText = `
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+    `;
+    container.appendChild(nodeFocusLiveRegion);
+}
+
+function announceFocusedNode(node: FlowNode): void {
+    if (!nodeFocusLiveRegion) { return; }
+
+    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
+    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
+    const message = `${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
+
+    // Clear then set on next frame so repeated focus announcements are spoken.
+    nodeFocusLiveRegion.textContent = '';
+    requestAnimationFrame(() => {
+        if (nodeFocusLiveRegion) {
+            nodeFocusLiveRegion.textContent = message;
+        }
+    });
+}
+
+function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
+    return {
+        scale: state.scale,
+        offsetX: state.offsetX,
+        offsetY: state.offsetY,
+        selectedNodeId: state.selectedNodeId,
+        focusModeEnabled: state.focusModeEnabled,
+        focusMode: state.focusMode,
+        layoutType: state.layoutType || 'vertical',
+        nodePositions: currentNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
+        cloudOffsets: Array.from(cloudOffsets.entries()).map(([nodeId, offset]) => ({
+            nodeId,
+            offsetX: offset.offsetX,
+            offsetY: offset.offsetY,
+        })),
+    };
+}
+
+function applyNodePositionsToDom(): void {
+    if (!mainGroup) { return; }
+
+    currentNodes.forEach(node => {
+        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement | null;
+        if (!nodeGroup) { return; }
+        const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement | null;
+        if (!rect) { return; }
+        const origX = Number.parseFloat(rect.getAttribute('x') || '0');
+        const origY = Number.parseFloat(rect.getAttribute('y') || '0');
+        const deltaX = node.x - origX;
+        const deltaY = node.y - origY;
+        nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+    });
+}
+
+function applyEdgePositionsToDom(): void {
+    if (!mainGroup) { return; }
+
+    const layoutType = state.layoutType || 'vertical';
+    const edgeElements = mainGroup.querySelectorAll('.edge:not(.column-flow-edge)');
+    edgeElements.forEach(edgeEl => {
+        const sourceId = edgeEl.getAttribute('data-source');
+        const targetId = edgeEl.getAttribute('data-target');
+        if (!sourceId || !targetId) { return; }
+
+        const sourceNode = currentNodes.find(node => node.id === sourceId);
+        const targetNode = currentNodes.find(node => node.id === targetId);
+        if (!sourceNode || !targetNode) { return; }
+
+        edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
+    });
+}
+
+function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
+    state.scale = snapshot.scale;
+    state.offsetX = snapshot.offsetX;
+    state.offsetY = snapshot.offsetY;
+    state.focusMode = snapshot.focusMode;
+    state.layoutType = snapshot.layoutType;
+    state.selectedNodeId = snapshot.selectedNodeId;
+
+    const positionMap = new Map(snapshot.nodePositions.map(position => [position.id, position]));
+    currentNodes.forEach(node => {
+        const position = positionMap.get(node.id);
+        if (!position) { return; }
+        node.x = position.x;
+        node.y = position.y;
+    });
+
+    cloudOffsets = new Map(
+        snapshot.cloudOffsets.map(entry => [entry.nodeId, { offsetX: entry.offsetX, offsetY: entry.offsetY }])
+    );
+
+    applyNodePositionsToDom();
+    applyEdgePositionsToDom();
+    currentNodes.forEach(node => updateCloudAndArrow(node));
+    updateTransform();
+    selectNode(snapshot.selectedNodeId, { skipNavigation: true });
+
+    if (snapshot.focusModeEnabled && snapshot.selectedNodeId) {
+        state.focusModeEnabled = true;
+        applyFocusMode(snapshot.selectedNodeId);
+    } else {
+        clearFocusMode();
+    }
+}
+
+function syncUndoRedoUiState(): void {
+    document.dispatchEvent(new CustomEvent('undo-redo-state', {
+        detail: { canUndo: layoutHistory.canUndo(), canRedo: layoutHistory.canRedo() },
+    }));
+}
+
+function recordLayoutHistorySnapshot(): void {
+    layoutHistory.record(captureLayoutHistorySnapshot());
+    syncUndoRedoUiState();
 }
 
 export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
+    const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
+    setGlobalColorblindMode(configuredColorblindMode);
     const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
     backgroundRect = canvas.backgroundRect;
+    ensureNodeFocusLiveRegion(container);
+    syncUndoRedoUiState();
 
     // Create details panel
     detailsPanel = document.createElement('div');
@@ -267,12 +443,13 @@ export function initRenderer(container: HTMLElement): void {
         background: ${UI_COLORS.backgroundPanel};
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
+        width: 300px;
         padding: 12px 16px;
+        box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        max-width: 300px;
     `;
     container.appendChild(statsPanel);
 
@@ -286,12 +463,13 @@ export function initRenderer(container: HTMLElement): void {
         background: ${UI_COLORS.backgroundPanel};
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
+        width: 350px;
         padding: 12px 16px;
+        box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
         z-index: 100;
-        max-width: 350px;
         max-height: 200px;
         overflow-y: auto;
         opacity: 0;
@@ -302,13 +480,58 @@ export function initRenderer(container: HTMLElement): void {
     container.appendChild(hintsPanel);
     ensureHintsPanelScrollbarStyles();
 
+    // Add drag-to-resize + collapse controls for docked panels
+    panelResizerCleanup = [
+        attachResizablePanel({
+            panel: detailsPanel,
+            side: 'right',
+            storageKey: 'details',
+            isDarkTheme: () => state.isDarkTheme
+        }),
+        attachResizablePanel({
+            panel: statsPanel,
+            side: 'left',
+            storageKey: 'stats',
+            isDarkTheme: () => state.isDarkTheme
+        }),
+        attachResizablePanel({
+            panel: hintsPanel,
+            side: 'right',
+            storageKey: 'hints',
+            isDarkTheme: () => state.isDarkTheme
+        })
+    ];
+
     // Create bottom legend bar (replaces old top-left legend panel)
     legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
 
     // Dynamically shift stats & hints panels above the legend bar when it toggles
-    document.addEventListener('legend-bar-toggle', ((e: CustomEvent) => {
-        adjustPanelBottoms(e.detail.visible ? e.detail.height : 0);
-    }) as EventListener);
+    const handleLegendToggle = ((event: Event) => {
+        const e = event as CustomEvent<{ visible?: boolean; height?: number }>;
+        const visible = e?.detail?.visible === true;
+        const legendHeight = visible ? (Number(e?.detail?.height) || 0) : 0;
+        adjustPanelBottoms(legendHeight);
+    }) as EventListener;
+    document.addEventListener('legend-bar-toggle', handleLegendToggle);
+    documentListeners.push({ type: 'legend-bar-toggle', handler: handleLegendToggle });
+
+    // Keep offsets in sync when legend height changes due wrapping or viewport resize.
+    if (legendResizeObserver) {
+        legendResizeObserver.disconnect();
+    }
+    if (legendPanel) {
+        legendResizeObserver = new ResizeObserver(() => {
+            adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+        });
+        legendResizeObserver.observe(legendPanel);
+    }
+    if (legendResizeHandler) {
+        window.removeEventListener('resize', legendResizeHandler);
+    }
+    legendResizeHandler = () => {
+        adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+    };
+    window.addEventListener('resize', legendResizeHandler);
 
     // Apply initial offset if legend starts visible
     if (isLegendBarVisible()) {
@@ -347,7 +570,8 @@ export function initRenderer(container: HTMLElement): void {
     minimapContainer.style.cssText = `
         position: absolute;
         right: 16px;
-        top: 60px;
+        top: 50%;
+        transform: translateY(-50%);
         width: 150px;
         height: 100px;
         background: ${UI_COLORS.backgroundPanel};
@@ -659,6 +883,8 @@ function setupEventListeners(): void {
     });
 
     svg.addEventListener('mouseup', () => {
+        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
+
         // Restore cloud opacity if dragging cloud
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
             const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
@@ -681,9 +907,15 @@ function setupEventListeners(): void {
         state.draggingNodeId = null;
         state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
+
+        if (shouldRecordHistory) {
+            recordLayoutHistorySnapshot();
+        }
     });
 
     svg.addEventListener('mouseleave', () => {
+        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
+
         // Restore cloud opacity if dragging cloud
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
             const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
@@ -706,6 +938,10 @@ function setupEventListeners(): void {
         state.draggingNodeId = null;
         state.draggingCloudNodeId = null;
         svg!.style.cursor = 'grab';
+
+        if (shouldRecordHistory) {
+            recordLayoutHistorySnapshot();
+        }
     });
 
     // Zoom
@@ -742,6 +978,21 @@ function setupEventListeners(): void {
 
     // SVG-specific keyboard handler (for when SVG has focus after clicking nodes)
     svg.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+            const orderedNodes = getKeyboardNavigationNodes();
+            if (orderedNodes.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                const seedId = state.selectedNodeId
+                    || (e.shiftKey ? orderedNodes[0].id : orderedNodes[orderedNodes.length - 1].id);
+                const target = getCycledNode(orderedNodes, seedId, e.shiftKey ? 'prev' : 'next');
+                if (target) {
+                    moveKeyboardFocusToNode(target);
+                }
+            }
+            return;
+        }
+
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
@@ -768,6 +1019,16 @@ function setupEventListeners(): void {
         // Don't trigger shortcuts when typing in input fields
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
                                document.activeElement?.tagName === 'TEXTAREA';
+
+        if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            if (e.shiftKey) {
+                redoLayoutChange();
+            } else {
+                undoLayoutChange();
+            }
+            return;
+        }
 
         // Ctrl/Cmd + Shift + P for command bar
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
@@ -920,17 +1181,20 @@ function setupEventListeners(): void {
             showKeyboardShortcutsHelp(getKeyboardShortcuts(), state.isDarkTheme);
         }
 
-        // Arrow keys to navigate between connected nodes (accessibility)
-        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-            if (state.selectedNodeId) {
-                e.preventDefault();
-                navigateToConnectedNode('upstream');
-            }
+        // Arrow keys for keyboard node navigation (accessibility)
+        if (e.key === 'ArrowUp' && state.selectedNodeId) {
+            e.preventDefault();
+            navigateToConnectedNode('upstream', state.selectedNodeId);
         }
-        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-            if (state.selectedNodeId) {
+        if (e.key === 'ArrowDown' && state.selectedNodeId) {
+            e.preventDefault();
+            navigateToConnectedNode('downstream', state.selectedNodeId);
+        }
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.selectedNodeId) {
+            const selectedNode = currentNodes.find(node => node.id === state.selectedNodeId);
+            if (selectedNode) {
                 e.preventDefault();
-                navigateToConnectedNode('downstream');
+                navigateToSiblingNode(selectedNode, e.key === 'ArrowRight' ? 'next' : 'prev');
             }
         }
     };
@@ -947,6 +1211,17 @@ export function cleanupRenderer(): void {
         document.removeEventListener(type, handler);
     });
     documentListeners.length = 0;
+    if (legendResizeHandler) {
+        window.removeEventListener('resize', legendResizeHandler);
+        legendResizeHandler = null;
+    }
+    legendResizeObserver?.disconnect();
+    legendResizeObserver = null;
+    layoutHistory.clear();
+    nodeFocusLiveRegion?.remove();
+    nodeFocusLiveRegion = null;
+    panelResizerCleanup.forEach(cleanup => cleanup());
+    panelResizerCleanup = [];
 }
 
 function updateTransform(): void {
@@ -1494,6 +1769,9 @@ export function render(result: ParseResult): void {
         renderNodes = [];
         renderEdges = [];
         renderNodeMap.clear();
+        // Clear stale column data so pressing "C" doesn't show previous query's lineage
+        currentColumnLineage = [];
+        currentColumnFlows = [];
         renderError(result.error);
         updateStatsPanel();
         updateHintsPanel();
@@ -1506,6 +1784,9 @@ export function render(result: ParseResult): void {
         renderNodes = [];
         renderEdges = [];
         renderNodeMap.clear();
+        // Clear stale column data so pressing "C" doesn't show previous query's lineage
+        currentColumnLineage = [];
+        currentColumnFlows = [];
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -1585,6 +1866,11 @@ export function render(result: ParseResult): void {
             updateVisibleNodes();
         });
     }
+
+    if (!layoutHistory.getCurrent()) {
+        layoutHistory.initialize(captureLayoutHistorySnapshot());
+        syncUndoRedoUiState();
+    }
 }
 
 function renderNode(node: FlowNode, parent: SVGGElement): void {
@@ -1592,6 +1878,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.setAttribute('class', 'node');
     group.setAttribute('data-id', node.id);
     group.setAttribute('data-label', node.label.toLowerCase());
+    group.setAttribute('data-node-type', node.type);
+    if (node.accessMode) {
+        group.setAttribute('data-access-mode', node.accessMode);
+    }
     group.style.cursor = 'pointer';
 
     // Accessibility: make nodes focusable and provide context for screen readers
@@ -1770,18 +2060,37 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
             return;
         }
 
+        if (key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            navigateToAdjacentNode(node, e.shiftKey ? 'prev' : 'next');
+            return;
+        }
+
         // Arrow keys to navigate between nodes (only when not using modifiers)
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-            if (key === 'ArrowRight' || key === 'ArrowDown') {
+            if (key === 'ArrowUp') {
                 e.preventDefault();
                 e.stopPropagation();
-                navigateToAdjacentNode(node, 'next');
+                navigateToConnectedNode('upstream', node.id);
                 return;
             }
-            if (key === 'ArrowLeft' || key === 'ArrowUp') {
+            if (key === 'ArrowDown') {
                 e.preventDefault();
                 e.stopPropagation();
-                navigateToAdjacentNode(node, 'prev');
+                navigateToConnectedNode('downstream', node.id);
+                return;
+            }
+            if (key === 'ArrowRight') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToSiblingNode(node, 'next');
+                return;
+            }
+            if (key === 'ArrowLeft') {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateToSiblingNode(node, 'prev');
                 return;
             }
         }
@@ -1803,17 +2112,28 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     group.addEventListener('focus', () => {
         const rect = group.querySelector('.node-rect') as SVGRectElement;
         if (rect) {
-            rect.setAttribute('stroke', '#6366f1');
-            rect.setAttribute('stroke-width', '3');
+            const focusRingColor = state.isDarkTheme ? UI_COLORS.nodeFocusRingDark : UI_COLORS.nodeFocusRingLight;
+            group.setAttribute('data-keyboard-focus', 'true');
+            rect.setAttribute('stroke', focusRingColor);
+            rect.setAttribute('stroke-width', '4');
+            rect.setAttribute('filter', 'url(#glow)');
         }
+        announceFocusedNode(node);
     });
 
     group.addEventListener('blur', () => {
         const rect = group.querySelector('.node-rect') as SVGRectElement;
-        if (rect && state.selectedNodeId !== node.id) {
-            rect.setAttribute('stroke', 'rgba(255, 255, 255, 0.3)');
-            rect.setAttribute('stroke-width', '1');
+        if (!rect) { return; }
+        group.removeAttribute('data-keyboard-focus');
+        if (state.selectedNodeId === node.id) {
+            rect.setAttribute('stroke', UI_COLORS.white);
+            rect.setAttribute('stroke-width', '3');
+            rect.setAttribute('filter', 'url(#glow)');
+            return;
         }
+        rect.removeAttribute('stroke');
+        rect.removeAttribute('stroke-width');
+        rect.setAttribute('filter', 'url(#shadow)');
     });
 
     // Double click to zoom to node or open cloud
@@ -2002,6 +2322,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         accentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
     }
     accentStrip.setAttribute('fill', accentColor);
+    accentStrip.setAttribute('class', 'node-accent');
     group.appendChild(accentStrip);
 
     // Add badges for access mode and category
@@ -2072,6 +2393,7 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         const triangleTop = node.y + 6;
 
         const warningTriangle = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        warningTriangle.setAttribute('class', 'node-warning-triangle');
         warningTriangle.setAttribute('d', `M ${triangleLeft} ${triangleTop + triangleSize} L ${triangleLeft + triangleSize / 2} ${triangleTop} L ${triangleLeft + triangleSize} ${triangleTop + triangleSize} Z`);
         warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
         warningTriangle.setAttribute('opacity', '0.95');
@@ -2079,13 +2401,14 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
         group.appendChild(warningTriangle);
 
         const exclamation = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        exclamation.setAttribute('class', 'node-warning-icon');
         exclamation.setAttribute('x', String(triangleLeft + triangleSize / 2));
         exclamation.setAttribute('y', String(triangleTop + triangleSize - 2));
         exclamation.setAttribute('text-anchor', 'middle');
         exclamation.setAttribute('fill', 'white');
         exclamation.setAttribute('font-size', '9');
         exclamation.setAttribute('font-weight', '700');
-        exclamation.textContent = '!';
+        exclamation.textContent = getSeverityIcon(warningIndicator.severity);
         group.appendChild(exclamation);
 
         if (warningIndicator.count > 1) {
@@ -2102,8 +2425,9 @@ function renderStandardNode(node: FlowNode, group: SVGGElement): void {
     }
 
     // Icon based on type
-    const icon = getNodeIcon(node.type);
+    const icon = getNodeVisualIcon(node);
     const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconText.setAttribute('class', 'node-main-icon');
     iconText.setAttribute('x', String(node.x + 12));
     iconText.setAttribute('y', String(node.y + 24));
     iconText.setAttribute('fill', textColorMuted);
@@ -4175,7 +4499,7 @@ function selectNode(nodeId: string | null, options?: { skipNavigation?: boolean 
 
 /** Apply pulse animation to a rect element (shared by pulseNode and pulseNodeInCloud) */
 function applyPulseToRect(rect: SVGRectElement, restoreStroke: () => void): void {
-    if (isReducedMotionPreferred()) {
+    if (prefersReducedMotion()) {
         restoreStroke();
         return;
     }
@@ -4251,7 +4575,7 @@ function pulseNode(nodeId: string): void {
  * Uses a more prominent multi-pulse animation with persistent highlight since sub-nodes are smaller.
  */
 function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
-    if (isReducedMotionPreferred()) { return; }
+    if (prefersReducedMotion()) { return; }
     const cloudContainer = mainGroup?.querySelector(`.cloud-container[data-node-id="${parentNodeId}"]`) as SVGGElement;
     if (!cloudContainer) { return; }
 
@@ -4332,13 +4656,35 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
 
 /**
  * Navigate to a connected node using arrow keys for accessibility
- * @param direction - 'upstream' (ArrowUp/Left) or 'downstream' (ArrowDown/Right)
+ * @param direction - 'upstream' (ArrowUp) or 'downstream' (ArrowDown)
  * @returns true if navigation occurred, false if no connected node found
  */
-function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean {
-    if (!state.selectedNodeId) { return false; }
+function getKeyboardNavigationNodes(): FlowNode[] {
+    return getKeyboardNavigableNodes({
+        nodes: currentNodes,
+        edges: currentEdges,
+        focusModeEnabled: state.focusModeEnabled,
+        focusMode: state.focusMode,
+        selectedNodeId: state.selectedNodeId,
+    });
+}
 
-    const selectedNode = currentNodes.find(n => n.id === state.selectedNodeId);
+function focusNodeGroup(nodeId: string): void {
+    const nodeGroup = mainGroup?.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
+    nodeGroup?.focus();
+}
+
+function moveKeyboardFocusToNode(targetNode: FlowNode): void {
+    selectNode(targetNode.id, { skipNavigation: true });
+    ensureNodeVisible(targetNode);
+    focusNodeGroup(targetNode.id);
+}
+
+function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
+    const sourceNodeId = fromNodeId || state.selectedNodeId;
+    if (!sourceNodeId) { return false; }
+
+    const selectedNode = currentNodes.find(n => n.id === sourceNodeId);
     if (!selectedNode) { return false; }
 
     // Find connected nodes based on direction
@@ -4347,20 +4693,25 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     if (direction === 'upstream') {
         // Find nodes that are sources (edges where selected node is target)
         connectedNodeIds = currentEdges
-            .filter(e => e.target === state.selectedNodeId)
+            .filter(e => e.target === sourceNodeId)
             .map(e => e.source);
     } else {
         // Find nodes that are targets (edges where selected node is source)
         connectedNodeIds = currentEdges
-            .filter(e => e.source === state.selectedNodeId)
+            .filter(e => e.source === sourceNodeId)
             .map(e => e.target);
+    }
+
+    if (state.focusModeEnabled) {
+        const visibleIds = new Set(getKeyboardNavigationNodes().map(node => node.id));
+        connectedNodeIds = connectedNodeIds.filter(id => visibleIds.has(id));
     }
 
     if (connectedNodeIds.length === 0) { return false; }
 
     // If there are multiple connected nodes, cycle through them
     // Track the last visited index for this direction
-    const stateKey = `lastNav_${direction}_${state.selectedNodeId}`;
+    const stateKey = `lastNav_${direction}_${sourceNodeId}`;
     const lastIndex = (state as any)[stateKey] || -1;
     const nextIndex = (lastIndex + 1) % connectedNodeIds.length;
     (state as any)[stateKey] = nextIndex;
@@ -4370,9 +4721,7 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
     const targetNode = currentNodes.find(n => n.id === targetNodeId);
 
     if (targetNode) {
-        selectNode(targetNodeId, { skipNavigation: true });
-        // Only pan if node is outside viewport (don't center, just ensure visibility)
-        ensureNodeVisible(targetNode);
+        moveKeyboardFocusToNode(targetNode);
         return true;
     }
 
@@ -4384,38 +4733,29 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream'): boolean 
  * Uses Y position primarily, then X position for nodes at same level
  */
 function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev'): void {
-    if (currentNodes.length === 0) { return; }
+    const sortedNodes = getKeyboardNavigationNodes();
+    const targetNode = getCycledNode(sortedNodes, currentNode.id, direction);
+    if (!targetNode) { return; }
 
-    // Sort nodes by Y position, then X position for consistent navigation
-    const sortedNodes = [...currentNodes].sort((a, b) => {
-        if (Math.abs(a.y - b.y) < 20) {
-            // Same row, sort by X
-            return a.x - b.x;
-        }
-        return a.y - b.y;
+    moveKeyboardFocusToNode(targetNode);
+}
+
+function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'): boolean {
+    const navigableNodes = getKeyboardNavigationNodes();
+    const layoutType = state.layoutType || 'vertical';
+    const targetNode = getSiblingCycleTarget({
+        nodes: navigableNodes,
+        currentNode,
+        direction,
+        layoutType,
     });
 
-    const currentIndex = sortedNodes.findIndex(n => n.id === currentNode.id);
-    if (currentIndex === -1) { return; }
-
-    let targetIndex: number;
-    if (direction === 'next') {
-        targetIndex = (currentIndex + 1) % sortedNodes.length;
-    } else {
-        targetIndex = (currentIndex - 1 + sortedNodes.length) % sortedNodes.length;
+    if (!targetNode || targetNode.id === currentNode.id) {
+        return false;
     }
 
-    const targetNode = sortedNodes[targetIndex];
-    if (targetNode) {
-        selectNode(targetNode.id, { skipNavigation: true });
-        ensureNodeVisible(targetNode);
-
-        // Focus the new node's SVG group for continued keyboard navigation
-        const nodeGroup = mainGroup?.querySelector(`[data-id="${targetNode.id}"]`) as SVGGElement;
-        if (nodeGroup) {
-            nodeGroup.focus();
-        }
-    }
+    moveKeyboardFocusToNode(targetNode);
+    return true;
 }
 
 /**
@@ -4626,7 +4966,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                     ${node.children.map(child => `
                         <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
                             <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
-                                ${getNodeIcon(child.type)} ${escapeHtml(child.label)}
+                                ${getNodeVisualIcon(child)} ${escapeHtml(child.label)}
                             </span>
                         </div>
                     `).join('')}
@@ -4672,7 +5012,7 @@ function updateDetailsPanel(nodeId: string | null): void {
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
             <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
-                ${getNodeIcon(node.type)} ${escapeHtml(node.label)}
+                ${getNodeVisualIcon(node)} ${escapeHtml(node.label)}
             </div>
             <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
                 ${escapeHtml(node.description || '')}
@@ -4867,6 +5207,50 @@ function updateStatsPanel(): void {
                 ` : ''}
             </div>
         ` : ''}
+        ${currentStats.functionsUsed && currentStats.functionsUsed.length > 0 ? (() => {
+            const funcs = currentStats.functionsUsed!;
+            const categoryOrder = ['aggregate', 'window', 'tvf', 'scalar', 'unknown'] as const;
+            const categoryLabels: Record<string, string> = { aggregate: 'Aggregate', window: 'Window', tvf: 'Table-Valued', scalar: 'Scalar', unknown: 'Other' };
+            const categoryColors: Record<string, string> = {
+                aggregate: isDark ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)',
+                window: isDark ? 'rgba(139, 92, 246, 0.2)' : 'rgba(139, 92, 246, 0.15)',
+                tvf: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+                scalar: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)',
+                unknown: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)'
+            };
+            const categoryTextColors: Record<string, string> = {
+                aggregate: '#f59e0b', window: isDark ? '#a78bfa' : '#7c3aed',
+                tvf: isDark ? '#34d399' : '#059669', scalar: textColorMuted, unknown: textColorMuted
+            };
+            const grouped = new Map<string, string[]>();
+            for (const f of funcs) {
+                const cat = f.category || 'unknown';
+                if (!grouped.has(cat)) grouped.set(cat, []);
+                grouped.get(cat)!.push(f.name);
+            }
+            return `
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid ${borderColor};">
+                <div style="font-size: 10px; color: ${textColorMuted}; font-weight: 600; margin-bottom: 6px;">Functions Used (${funcs.length}):</div>
+                ${categoryOrder.filter(c => grouped.has(c)).map(cat => `
+                    <div style="margin-bottom: 4px;">
+                        <div style="font-size: 9px; color: ${textColorDim}; margin-bottom: 2px;">${categoryLabels[cat]}</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 3px;">
+                            ${grouped.get(cat)!.map(name => `
+                                <span style="
+                                    background: ${categoryColors[cat]};
+                                    color: ${categoryTextColors[cat]};
+                                    padding: 1px 6px;
+                                    border-radius: 3px;
+                                    font-size: 9px;
+                                    font-family: monospace;
+                                    font-weight: 500;
+                                ">${escapeHtml(name)}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>`;
+        })() : ''}
         ${tableListHtml}
     `;
 
@@ -5163,6 +5547,7 @@ function updateStatsPanel(): void {
 
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
+    const panelBottom = parsePixelValue(hintsPanel.style.bottom, PANEL_BASE_BOTTOM);
 
     const badgeState = getHintBadgeState(currentHints || []);
     updateHintsSummaryBadge(badgeState);
@@ -5172,6 +5557,7 @@ function updateHintsPanel(): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
         hintsShowAll = false;
+        syncHintsPanelViewportBounds(panelBottom);
         return;
     }
 
@@ -5198,7 +5584,7 @@ function updateHintsPanel(): void {
                 const severity = hint.severity || 'low';
                 const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
                 return `
-                    <button class="hint-item" data-node-id="${hint.nodeId || ''}" style="
+                    <div role="button" tabindex="0" class="hint-item" data-node-id="${hint.nodeId || ''}" style="
                         text-align: left;
                         border: 1px solid ${style.border};
                         border-left-width: 3px;
@@ -5206,6 +5592,7 @@ function updateHintsPanel(): void {
                         border-radius: 6px;
                         padding: 8px 10px;
                         cursor: ${hint.nodeId ? 'pointer' : 'default'};
+                        user-select: text;
                     ">
                         <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
                             <span>${style.icon}</span>
@@ -5213,7 +5600,7 @@ function updateHintsPanel(): void {
                             <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
                         ${hint.suggestion ? `<div style="font-size: 11px; color: ${textColorMuted}; margin-top: 4px;">${escapeHtml(hint.suggestion)}</div>` : ''}
-                    </button>
+                    </div>
                 `;
             }).join('')}
             ${!hintsShowAll && remainingCount > 0 ? `
@@ -5242,7 +5629,7 @@ function updateHintsPanel(): void {
     `;
 
     hintsPanel.querySelectorAll('.hint-item').forEach((item) => {
-        const el = item as HTMLButtonElement;
+        const el = item as HTMLElement;
         const nodeId = el.getAttribute('data-node-id');
         if (!nodeId) {
             el.style.cursor = 'default';
@@ -5268,6 +5655,8 @@ function updateHintsPanel(): void {
         hintsShowAll = false;
         updateHintsPanel();
     });
+
+    syncHintsPanelViewportBounds(panelBottom);
 }
 
 function fitView(): void {
@@ -5317,14 +5706,14 @@ function fitView(): void {
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
 
-    // Account for panels
-    const availableWidth = rect.width - 320;
-    const availableHeight = rect.height - 100;
+    // Account for panels (clamp to minimum to prevent negative scale)
+    const availableWidth = Math.max(100, rect.width - 320);
+    const availableHeight = Math.max(100, rect.height - 100);
 
     // Calculate scale to fit
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
-    state.scale = Math.min(scaleX, scaleY, 1.5);
+    state.scale = Math.max(0.05, Math.min(scaleX, scaleY, 1.5));
     fitViewScale = state.scale; // Treat this as 100% for the zoom indicator
 
     // Center the graph
@@ -5508,12 +5897,14 @@ export function zoomIn(): void {
     state.scale = Math.min(state.scale * 1.2, 3);
     updateTransform();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
 }
 
 export function zoomOut(): void {
     state.scale = Math.max(state.scale / 1.2, 0.2);
     updateTransform();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
 }
 
 export function getZoomLevel(): number {
@@ -5549,6 +5940,42 @@ export function setViewState(viewState: TabViewState): void {
 export function resetView(): void {
     fitView();
     updateZoomIndicator();
+    recordLayoutHistorySnapshot();
+}
+
+export function undoLayoutChange(): void {
+    const snapshot = layoutHistory.undo();
+    if (!snapshot) {
+        syncUndoRedoUiState();
+        return;
+    }
+
+    restoreLayoutHistorySnapshot(snapshot);
+    syncUndoRedoUiState();
+}
+
+export function redoLayoutChange(): void {
+    const snapshot = layoutHistory.redo();
+    if (!snapshot) {
+        syncUndoRedoUiState();
+        return;
+    }
+
+    restoreLayoutHistorySnapshot(snapshot);
+    syncUndoRedoUiState();
+}
+
+export function canUndoLayoutChanges(): boolean {
+    return layoutHistory.canUndo();
+}
+
+export function canRedoLayoutChanges(): boolean {
+    return layoutHistory.canRedo();
+}
+
+export function clearUndoHistory(): void {
+    layoutHistory.clear();
+    syncUndoRedoUiState();
 }
 
 function resetViewportToCenter(): void {
@@ -5578,6 +6005,18 @@ let searchCountIndicator: HTMLSpanElement | null = null;
 export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanElement): void {
     searchBox = input;
     searchCountIndicator = countIndicator;
+
+    // Expandable search box: expand on focus, collapse on blur if empty
+    input.style.transition = 'width 200ms ease';
+    input.addEventListener('focus', () => {
+        input.style.width = '280px';
+    });
+    input.addEventListener('blur', () => {
+        if (!input.value) {
+            input.style.width = '140px';
+        }
+    });
+
     input.addEventListener('input', () => {
         // Clear any existing debounce timer
         if (searchDebounceTimer) {
@@ -5959,6 +6398,28 @@ ${mermaidCode}
 }
 
 /**
+ * Copy Mermaid flowchart code to clipboard
+ */
+export function copyMermaidToClipboard(): void {
+    if (currentNodes.length === 0) {
+        return;
+    }
+
+    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
+    navigator.clipboard.writeText(mermaidCode).catch(() => {
+        // Fallback: use textarea method
+        const textarea = document.createElement('textarea');
+        textarea.value = mermaidCode;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+    });
+}
+
+/**
  * Generate Mermaid flowchart code from nodes and edges
  */
 function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
@@ -6299,6 +6760,13 @@ function getNodeIcon(type: FlowNode['type']): string {
     return icons[type] || '○';
 }
 
+function getNodeVisualIcon(node: FlowNode): string {
+    if (getColorblindMode() !== 'off' && node.accessMode === 'write') {
+        return '✎';
+    }
+    return getNodeIcon(node.type);
+}
+
 function getWarningIcon(warningType: string): string {
     const icons: Record<string, string> = {
         'unused': '⚠',
@@ -6316,8 +6784,7 @@ function getWarningIcon(warningType: string): string {
 }
 
 function getWarningColor(severity: string): string {
-    const colors: Record<string, string> = WARNING_COLORS;
-    return colors[severity] || colors.low;
+    return getSeverityColor((severity as any) || 'low', getColorblindMode());
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -6387,16 +6854,39 @@ export function toggleHints(show?: boolean): void {
     }
 }
 
-const PANEL_BASE_BOTTOM = 16; // default bottom offset for stats & hints panels
+const PANEL_BASE_BOTTOM = PANEL_LAYOUT_DEFAULTS.baseBottom;
+const HINTS_PANEL_TOP_CLEARANCE = PANEL_LAYOUT_DEFAULTS.topClearance;
+const HINTS_PANEL_MIN_HEIGHT = PANEL_LAYOUT_DEFAULTS.minPanelHeight;
+const HINTS_LIST_CHROME_HEIGHT = PANEL_LAYOUT_DEFAULTS.listChromeHeight;
+const HINTS_LIST_MIN_HEIGHT = PANEL_LAYOUT_DEFAULTS.minListHeight;
+
+const PANEL_LAYOUT_CONFIG = {
+    baseBottom: PANEL_BASE_BOTTOM,
+    topClearance: HINTS_PANEL_TOP_CLEARANCE,
+    minPanelHeight: HINTS_PANEL_MIN_HEIGHT,
+    listChromeHeight: HINTS_LIST_CHROME_HEIGHT,
+    minListHeight: HINTS_LIST_MIN_HEIGHT,
+};
+
+function parsePixelValue(raw: string | null | undefined, fallback: number): number {
+    return parsePanelPixelValue(raw, fallback);
+}
+
+function syncHintsPanelViewportBounds(bottomPx: number): void {
+    applyHintsPanelBounds(hintsPanel, bottomPx, window.innerHeight, PANEL_LAYOUT_CONFIG);
+}
 
 /**
  * Shift stats and hints panels up so they sit above the legend bar.
  * Called whenever the legend bar toggles or on initial render.
  */
 function adjustPanelBottoms(legendHeight: number): void {
-    const bottom = `${PANEL_BASE_BOTTOM + legendHeight}px`;
-    if (statsPanel) { statsPanel.style.bottom = bottom; }
-    if (hintsPanel) { hintsPanel.style.bottom = bottom; }
+    applyPanelBottomOffsets(
+        { statsPanel, hintsPanel },
+        legendHeight,
+        window.innerHeight,
+        PANEL_LAYOUT_CONFIG
+    );
 }
 
 // Layout order for cycling
@@ -6512,6 +7002,8 @@ export function switchLayout(layoutType: LayoutType): void {
                 hideLoading();
             });
         }
+
+        recordLayoutHistorySnapshot();
     });
 }
 
@@ -6605,6 +7097,8 @@ export function toggleFocusMode(enable?: boolean): void {
         clearFocusMode();
         removeBreadcrumbSegment('focus-mode');
     }
+
+    recordLayoutHistorySnapshot();
 }
 
 function applyFocusMode(nodeId: string): void {
@@ -6672,6 +7166,8 @@ export function setFocusMode(mode: FocusMode): void {
     if (state.zoomedNodeId && state.selectedNodeId) {
         // Will be handled by zoom module
     }
+
+    recordLayoutHistorySnapshot();
 }
 
 export function getFocusMode(): FocusMode {
@@ -7196,6 +7692,10 @@ function calculateQueryDepth(): number {
 // Hides all UI elements (toolbars, panels) and makes SVG fill the viewport.
 // Uses individual style properties instead of cssText to preserve fonts and sizes.
 
+import { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS } from './constants/fullscreen';
+// Re-export so callers that import from renderer still get them
+export { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS };
+
 export function toggleFullscreen(enable?: boolean): void {
     state.isFullscreen = enable ?? !state.isFullscreen;
 
@@ -7208,16 +7708,16 @@ export function toggleFullscreen(enable?: boolean): void {
         return;
     }
 
-    // Find all UI elements to hide/show using IDs and classes
-    const toolbar = document.getElementById('sql-crack-toolbar') as HTMLElement;
-    const actions = document.getElementById('sql-crack-actions') as HTMLElement;
-    const batchTabs = document.getElementById('batch-tabs') as HTMLElement;
-    const breadcrumb = document.querySelector('.breadcrumb-panel') as HTMLElement;
-    const detailsPanel = document.querySelector('.details-panel') as HTMLElement;
-    const statsPanel = document.querySelector('.stats-panel') as HTMLElement;
-    const hintsPanel = document.querySelector('.hints-panel') as HTMLElement;
-    const legendPanel = document.querySelector('.legend-panel') as HTMLElement;
-    const sqlPreviewPanel = document.querySelector('.sql-preview-panel') as HTMLElement;
+    // Single source of truth: all UI elements that should be hidden in fullscreen
+    // Resolved from FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS, columnLineageBanner,
+    // plus any elements with data-fullscreen-hide attribute
+    const uiElements = [
+        ...FULLSCREEN_HIDE_IDS.map(id => document.getElementById(id) as HTMLElement),
+        ...FULLSCREEN_HIDE_SELECTORS.map(sel => document.querySelector(sel) as HTMLElement),
+        columnLineageBanner as HTMLElement,
+        // Also find any elements with data-fullscreen-hide attribute
+        ...Array.from(document.querySelectorAll('[data-fullscreen-hide]'))
+    ];
 
     if (state.isFullscreen) {
         // Save original styles and visibility (only save what we'll change)
@@ -7256,15 +7756,11 @@ export function toggleFullscreen(enable?: boolean): void {
             html.dataset.originalHeight = html.style.height || '';
         }
         
-        // Hide UI elements (toolbars, panels, breadcrumbs) to maximize visualization area
-        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
-        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
-        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
+        // Hide UI elements using the consolidated list
         uiElements.forEach(el => {
             if (el) {
-                el.dataset.originalDisplay = el.style.display || '';
-                el.style.display = 'none';
+                (el as HTMLElement).dataset.originalDisplay = (el as HTMLElement).style.display || '';
+                (el as HTMLElement).style.display = 'none';
             }
         });
 
@@ -7312,6 +7808,10 @@ export function toggleFullscreen(enable?: boolean): void {
                 enable: true
             });
         }
+
+        // Create floating exit button and toast
+        createFullscreenExitButton(rootElement);
+        createFullscreenToast(rootElement);
     } else {
         // Request exit fullscreen via VS Code API
         if (typeof window !== 'undefined' && (window as any).vscodeApi) {
@@ -7321,15 +7821,14 @@ export function toggleFullscreen(enable?: boolean): void {
             });
         }
 
-        // Restore UI elements (must match the hide list above)
-        const errorBadge = document.getElementById('sql-crack-error-badge') as HTMLElement;
-        const breadcrumbBar = document.getElementById('sql-crack-breadcrumb-bar') as HTMLElement;
-        const toolbarWrapper = document.getElementById('sql-crack-toolbar-wrapper') as HTMLElement;
-        const uiElements = [toolbar, actions, batchTabs, breadcrumb, detailsPanel, statsPanel, hintsPanel, legendPanel, sqlPreviewPanel, columnLineageBanner, errorBadge, breadcrumbBar, toolbarWrapper];
+        // Remove fullscreen exit button and toast
+        removeFullscreenOverlays();
+
+        // Restore UI elements using the consolidated list
         uiElements.forEach(el => {
-            if (el && el.dataset.originalDisplay !== undefined) {
-                el.style.display = el.dataset.originalDisplay;
-                delete el.dataset.originalDisplay;
+            if (el && (el as HTMLElement).dataset.originalDisplay !== undefined) {
+                (el as HTMLElement).style.display = (el as HTMLElement).dataset.originalDisplay || '';
+                delete (el as HTMLElement).dataset.originalDisplay;
             }
         });
 
@@ -7381,8 +7880,162 @@ export function toggleFullscreen(enable?: boolean): void {
     }, 100);
 }
 
+// Fullscreen overlay helpers (exit button + toast)
+let fullscreenMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+let fullscreenFadeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function createFullscreenExitButton(container: HTMLElement): void {
+    const theme = getComponentUiColors(state.isDarkTheme);
+    const btn = document.createElement('button');
+    btn.id = 'fullscreen-exit-btn';
+    btn.textContent = '✕ Exit Fullscreen';
+    Object.assign(btn.style, {
+        position: 'fixed',
+        top: '16px',
+        right: '16px',
+        zIndex: '100000',
+        padding: '8px 16px',
+        border: `1px solid ${theme.border}`,
+        borderRadius: '8px',
+        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        color: theme.text,
+        fontSize: '13px',
+        fontFamily: 'inherit',
+        cursor: 'pointer',
+        opacity: '0',
+        transition: 'opacity 300ms ease',
+        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
+    });
+
+    btn.addEventListener('click', () => toggleFullscreen(false));
+    btn.addEventListener('mouseenter', () => { btn.style.background = theme.accent; btn.style.color = '#fff'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)'; btn.style.color = theme.text; });
+
+    container.appendChild(btn);
+
+    // Show/hide on mouse move with 2s fade timeout
+    const showButton = () => {
+        btn.style.opacity = '1';
+        if (fullscreenFadeTimeout) { clearTimeout(fullscreenFadeTimeout); }
+        fullscreenFadeTimeout = setTimeout(() => { btn.style.opacity = '0'; }, 2000);
+    };
+
+    fullscreenMouseMoveHandler = showButton;
+    document.addEventListener('mousemove', fullscreenMouseMoveHandler);
+
+    // Show briefly on entry
+    showButton();
+}
+
+function createFullscreenToast(container: HTMLElement): void {
+    const theme = getComponentUiColors(state.isDarkTheme);
+    const toast = document.createElement('div');
+    toast.id = 'fullscreen-toast';
+    toast.textContent = 'Press ESC or F to exit fullscreen';
+    Object.assign(toast.style, {
+        position: 'fixed',
+        top: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: '100000',
+        padding: '10px 20px',
+        borderRadius: '8px',
+        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        fontSize: '13px',
+        fontFamily: 'inherit',
+        opacity: '0',
+        transition: 'opacity 400ms ease',
+        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
+    });
+
+    container.appendChild(toast);
+
+    // Fade in
+    requestAnimationFrame(() => { toast.style.opacity = '1'; });
+
+    // Fade out after 3s, then remove
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => { toast.remove(); }, 400);
+    }, 3000);
+}
+
+function removeFullscreenOverlays(): void {
+    const btn = document.getElementById('fullscreen-exit-btn');
+    if (btn) { btn.remove(); }
+
+    const toast = document.getElementById('fullscreen-toast');
+    if (toast) { toast.remove(); }
+
+    if (fullscreenMouseMoveHandler) {
+        document.removeEventListener('mousemove', fullscreenMouseMoveHandler);
+        fullscreenMouseMoveHandler = null;
+    }
+
+    if (fullscreenFadeTimeout) {
+        clearTimeout(fullscreenFadeTimeout);
+        fullscreenFadeTimeout = null;
+    }
+}
+
 export function isFullscreen(): boolean {
     return state.isFullscreen;
+}
+
+function applyColorblindModeToRenderedGraph(): void {
+    if (!mainGroup) { return; }
+
+    const allNodeGroups = mainGroup.querySelectorAll('.node');
+    allNodeGroups.forEach(group => {
+        const nodeId = group.getAttribute('data-id');
+        if (!nodeId) { return; }
+        const node = currentNodes.find(candidate => candidate.id === nodeId);
+        if (!node) { return; }
+
+        const accent = group.querySelector('.node-accent') as SVGRectElement | null;
+        if (accent) {
+            accent.setAttribute('fill', getNodeColor(node.type));
+        }
+
+        const nodeIcon = group.querySelector('.node-main-icon') as SVGTextElement | null;
+        if (nodeIcon) {
+            nodeIcon.textContent = getNodeVisualIcon(node);
+        }
+
+        const warningIndicator = getWarningIndicatorState(node.warnings);
+        const warningTriangle = group.querySelector('.node-warning-triangle') as SVGPathElement | null;
+        if (warningTriangle && warningIndicator) {
+            warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
+        }
+
+        const warningIcon = group.querySelector('.node-warning-icon') as SVGTextElement | null;
+        if (warningIcon && warningIndicator) {
+            warningIcon.textContent = getSeverityIcon(warningIndicator.severity);
+        }
+    });
+
+    const allEdges = mainGroup.querySelectorAll('.edge');
+    allEdges.forEach(edge => {
+        const clauseType = edge.getAttribute('data-clause-type') || undefined;
+        const dashPattern = getEdgeDashPattern(clauseType || undefined);
+        if (dashPattern) {
+            edge.setAttribute('stroke-dasharray', dashPattern);
+        } else {
+            edge.removeAttribute('stroke-dasharray');
+        }
+    });
+}
+
+export function setColorblindMode(mode: ColorblindMode): void {
+    setGlobalColorblindMode(mode);
+    (window as any).colorblindMode = mode;
+    applyColorblindModeToRenderedGraph();
 }
 
 // ============================================================
@@ -7485,7 +8138,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                 font-size: 10px;
                 font-weight: 600;
                 color: white;
-            ">${getNodeIcon(node.type)} ${node.type.toUpperCase()}</span>
+            ">${getNodeVisualIcon(node)} ${node.type.toUpperCase()}</span>
         </div>
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${escapeHtml(node.label)}</div>
     `;
@@ -8628,6 +9281,8 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
     return [
         { key: 'Ctrl/Cmd + Shift + P', description: 'Command palette' },
         { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
+        { key: 'Ctrl/Cmd + Z', description: 'Undo layout change' },
+        { key: 'Ctrl/Cmd + Shift + Z', description: 'Redo layout change' },
         { key: '/', description: 'Focus search' },
         { key: '+/-', description: 'Zoom in/out' },
         { key: 'R', description: 'Reset view' },
@@ -8646,8 +9301,9 @@ export function getKeyboardShortcuts(): Array<{ key: string; description: string
         { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen' },
         { key: 'Enter', description: 'Next search result' },
-        { key: '↑/←', description: 'Navigate to upstream node' },
-        { key: '↓/→', description: 'Navigate to downstream node' },
+        { key: '↑', description: 'Navigate to upstream node' },
+        { key: '↓', description: 'Navigate to downstream node' },
+        { key: '←/→', description: 'Cycle sibling nodes at same depth' },
         { key: '[', description: 'Previous query (Q2 → Q1)' },
         { key: ']', description: 'Next query (Q2 → Q3)' },
         { key: '?', description: 'Show all shortcuts' }
