@@ -728,9 +728,9 @@ function setupOverflowObserver(
         applyOverflowMenuTheme(isDarkTheme());
     };
 
-    let overflowResizeDebounce: ReturnType<typeof setTimeout> | null = null;
+    let overflowResizeDebounce: number | null = null;
     const scheduleOverflowUpdate = () => {
-        if (overflowResizeDebounce) {
+        if (overflowResizeDebounce !== null) {
             window.clearTimeout(overflowResizeDebounce);
         }
         overflowResizeDebounce = window.setTimeout(() => {

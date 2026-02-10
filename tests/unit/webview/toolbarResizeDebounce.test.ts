@@ -8,7 +8,7 @@ describe('toolbar resize overflow debounce', () => {
     );
 
     it('debounces overflow recomputation from ResizeObserver callbacks', () => {
-        expect(source).toContain('let overflowResizeDebounce: ReturnType<typeof setTimeout> | null = null;');
+        expect(source).toContain('let overflowResizeDebounce: number | null = null;');
         expect(source).toContain('const scheduleOverflowUpdate = () => {');
         expect(source).toContain('window.clearTimeout(overflowResizeDebounce);');
         expect(source).toContain('window.setTimeout(() => {');

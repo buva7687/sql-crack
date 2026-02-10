@@ -122,7 +122,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         font-size: 14px;
         padding: 4px 8px;
         border-radius: 4px;
-        transition: ${reducedMotion ? 'none' : 'color 0.15s'};
+        transition: ${prefersReducedMotion() ? 'none' : 'color 0.15s'};
     ">&times;</button>`;
 
     el.innerHTML = items + dismissBtn;
