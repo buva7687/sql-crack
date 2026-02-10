@@ -399,7 +399,7 @@ export const NODE_SURFACE = {
         fill: '#1A1A1A',
         border: '#2A2A2A',
         text: '#F1F5F9',
-        textMuted: '#94A3B8',
+        textMuted: '#71717A',
     },
 } as const;
 

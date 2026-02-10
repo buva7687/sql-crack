@@ -10,6 +10,7 @@ import {
     WARNING_COLORS,
     TRANSFORMATION_COLORS,
     SCROLLBAR_COLORS,
+    NODE_SURFACE,
     getTransformationColor,
     getNodeColor,
     getWarningColor,
@@ -131,6 +132,13 @@ describe('Constants Colors', () => {
 
         it('returns light palette when dark theme is disabled', () => {
             expect(getScrollbarColors(false)).toEqual(SCROLLBAR_COLORS.light);
+        });
+    });
+
+    describe('NODE_SURFACE', () => {
+        it('uses lower-emphasis muted metadata color for dark node surfaces', () => {
+            expect(NODE_SURFACE.dark.textMuted).toBe('#71717A');
+            expect(NODE_SURFACE.dark.textMuted).not.toBe('#94A3B8');
         });
     });
 });
