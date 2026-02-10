@@ -119,9 +119,9 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             const config = getConfig();
             const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
-            const maxFileSizeKB = config.get<number>('maxFileSizeKB', 100);
-            const maxStatements = config.get<number>('maxStatements', 50);
-            const combineDdlStatements = config.get<boolean>('combineDdlStatements', true);
+            const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
+            const maxStatements = config.get<number>('advanced.maxStatements', 50);
+            const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
             const batch = parseSqlBatch(
                 sql,
                 defaultDialect as any,
