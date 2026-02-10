@@ -58,6 +58,12 @@ import {
 import { prefersReducedMotion } from './ui/motion';
 import { attachResizablePanel } from './ui/resizablePanel';
 import { UndoManager } from './ui/undoManager';
+import {
+    PANEL_LAYOUT_DEFAULTS,
+    applyHintsPanelViewportBounds as applyHintsPanelBounds,
+    applyPanelBottomOffsets,
+    parsePixelValue as parsePanelPixelValue,
+} from './ui/panelLayout';
 import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
@@ -145,6 +151,8 @@ let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
 let panelResizerCleanup: Array<() => void> = [];
+let legendResizeObserver: ResizeObserver | null = null;
+let legendResizeHandler: (() => void) | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
@@ -498,9 +506,32 @@ export function initRenderer(container: HTMLElement): void {
     legendPanel = createLegendBar(container, { isDarkTheme: () => state.isDarkTheme }) as HTMLDivElement;
 
     // Dynamically shift stats & hints panels above the legend bar when it toggles
-    document.addEventListener('legend-bar-toggle', ((e: CustomEvent) => {
-        adjustPanelBottoms(e.detail.visible ? e.detail.height : 0);
-    }) as EventListener);
+    const handleLegendToggle = ((event: Event) => {
+        const e = event as CustomEvent<{ visible?: boolean; height?: number }>;
+        const visible = e?.detail?.visible === true;
+        const legendHeight = visible ? (Number(e?.detail?.height) || 0) : 0;
+        adjustPanelBottoms(legendHeight);
+    }) as EventListener;
+    document.addEventListener('legend-bar-toggle', handleLegendToggle);
+    documentListeners.push({ type: 'legend-bar-toggle', handler: handleLegendToggle });
+
+    // Keep offsets in sync when legend height changes due wrapping or viewport resize.
+    if (legendResizeObserver) {
+        legendResizeObserver.disconnect();
+    }
+    if (legendPanel) {
+        legendResizeObserver = new ResizeObserver(() => {
+            adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+        });
+        legendResizeObserver.observe(legendPanel);
+    }
+    if (legendResizeHandler) {
+        window.removeEventListener('resize', legendResizeHandler);
+    }
+    legendResizeHandler = () => {
+        adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+    };
+    window.addEventListener('resize', legendResizeHandler);
 
     // Apply initial offset if legend starts visible
     if (isLegendBarVisible()) {
@@ -1180,6 +1211,12 @@ export function cleanupRenderer(): void {
         document.removeEventListener(type, handler);
     });
     documentListeners.length = 0;
+    if (legendResizeHandler) {
+        window.removeEventListener('resize', legendResizeHandler);
+        legendResizeHandler = null;
+    }
+    legendResizeObserver?.disconnect();
+    legendResizeObserver = null;
     layoutHistory.clear();
     nodeFocusLiveRegion?.remove();
     nodeFocusLiveRegion = null;
@@ -5510,6 +5547,7 @@ function updateStatsPanel(): void {
 
 function updateHintsPanel(): void {
     if (!hintsPanel) { return; }
+    const panelBottom = parsePixelValue(hintsPanel.style.bottom, PANEL_BASE_BOTTOM);
 
     const badgeState = getHintBadgeState(currentHints || []);
     updateHintsSummaryBadge(badgeState);
@@ -5519,6 +5557,7 @@ function updateHintsPanel(): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
         hintsShowAll = false;
+        syncHintsPanelViewportBounds(panelBottom);
         return;
     }
 
@@ -5616,6 +5655,8 @@ function updateHintsPanel(): void {
         hintsShowAll = false;
         updateHintsPanel();
     });
+
+    syncHintsPanelViewportBounds(panelBottom);
 }
 
 function fitView(): void {
@@ -6813,16 +6854,39 @@ export function toggleHints(show?: boolean): void {
     }
 }
 
-const PANEL_BASE_BOTTOM = 16; // default bottom offset for stats & hints panels
+const PANEL_BASE_BOTTOM = PANEL_LAYOUT_DEFAULTS.baseBottom;
+const HINTS_PANEL_TOP_CLEARANCE = PANEL_LAYOUT_DEFAULTS.topClearance;
+const HINTS_PANEL_MIN_HEIGHT = PANEL_LAYOUT_DEFAULTS.minPanelHeight;
+const HINTS_LIST_CHROME_HEIGHT = PANEL_LAYOUT_DEFAULTS.listChromeHeight;
+const HINTS_LIST_MIN_HEIGHT = PANEL_LAYOUT_DEFAULTS.minListHeight;
+
+const PANEL_LAYOUT_CONFIG = {
+    baseBottom: PANEL_BASE_BOTTOM,
+    topClearance: HINTS_PANEL_TOP_CLEARANCE,
+    minPanelHeight: HINTS_PANEL_MIN_HEIGHT,
+    listChromeHeight: HINTS_LIST_CHROME_HEIGHT,
+    minListHeight: HINTS_LIST_MIN_HEIGHT,
+};
+
+function parsePixelValue(raw: string | null | undefined, fallback: number): number {
+    return parsePanelPixelValue(raw, fallback);
+}
+
+function syncHintsPanelViewportBounds(bottomPx: number): void {
+    applyHintsPanelBounds(hintsPanel, bottomPx, window.innerHeight, PANEL_LAYOUT_CONFIG);
+}
 
 /**
  * Shift stats and hints panels up so they sit above the legend bar.
  * Called whenever the legend bar toggles or on initial render.
  */
 function adjustPanelBottoms(legendHeight: number): void {
-    const bottom = `${PANEL_BASE_BOTTOM + legendHeight}px`;
-    if (statsPanel) { statsPanel.style.bottom = bottom; }
-    if (hintsPanel) { hintsPanel.style.bottom = bottom; }
+    applyPanelBottomOffsets(
+        { statsPanel, hintsPanel },
+        legendHeight,
+        window.innerHeight,
+        PANEL_LAYOUT_CONFIG
+    );
 }
 
 // Layout order for cycling

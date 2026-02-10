@@ -28,6 +28,8 @@ export const ICONS = {
     pin: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9 2L6 5v2L3 10h3v4l2-3h2l3-3-2-2h2L9 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
     help: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M6 6a2 2 0 0 1 3.5 1.5c0 1-1.5 1-1.5 2M8 12v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
     columnLineage: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 3v4M12 9v4M4 7c0 1.5 8-1.5 8 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="3" r="1.5" fill="currentColor"/><circle cx="12" cy="13" r="1.5" fill="currentColor"/></svg>',
+    compareMode: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="5" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="3" width="5" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 8h3M8.5 6l1 1-1 1M7.5 10l-1-1 1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    focusDirection: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M8 3v2.2M8 12.8V10.6M3 8h2.2M12.8 8H10.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M8 2.2l1 1M8 2.2l-1 1M8 13.8l1-1M8 13.8l-1-1M2.2 8l1-1M2.2 8l1 1M13.8 8l-1-1M13.8 8l-1 1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 } as const;
 
 /**

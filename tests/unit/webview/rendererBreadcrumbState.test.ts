@@ -52,6 +52,16 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('.hints-panel .hints-list::-webkit-scrollbar');
     });
 
+    it('keeps performance hints panel above legend as legend height and viewport change', () => {
+        expect(rendererSource).toContain('syncHintsPanelViewportBounds');
+        expect(rendererSource).toContain("from './ui/panelLayout'");
+        expect(rendererSource).toContain('applyHintsPanelBounds');
+        expect(rendererSource).toContain('applyPanelBottomOffsets');
+        expect(rendererSource).toContain('legendResizeObserver = new ResizeObserver');
+        expect(rendererSource).toContain("window.addEventListener('resize', legendResizeHandler);");
+        expect(rendererSource).toContain("documentListeners.push({ type: 'legend-bar-toggle', handler: handleLegendToggle });");
+    });
+
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
         expect(rendererSource).toContain('if (sqlSnippet.truncated)');
         expect(rendererSource).toContain('Press S for full SQL');

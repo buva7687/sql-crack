@@ -12,25 +12,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Undo/redo layout history**: Added bounded history for layout-affecting actions (drag, zoom, reset, layout, focus mode) with toolbar controls and keyboard shortcuts (`Cmd/Ctrl+Z`, `Cmd/Ctrl+Shift+Z`).
 - **Query comparison mode**: Added side-by-side baseline/current compare overlay with added/removed/changed node highlighting and stats delta summary.
 - **Inline VS Code diagnostics**: SQL Crack parser hints now surface as editor diagnostics, with a Quick Fix action (**Show in SQL Flow**) to open the visualization directly.
+- **UI listener lifecycle cleanup**: Added AbortController-based listener teardown for legend bar, command bar, layout picker, and export dropdown module re-initialization paths.
+- **Compare mode KPI example pair**: Added `compare-mode-kpi-before.sql` and `compare-mode-kpi-after.sql` to demonstrate correlated-subquery baseline vs CTE/join refactor diffs.
 
 ### Changed
 
 - **Toolbar controls**: Added compare toggle and undo/redo controls with active/disabled state synchronization.
 - **Diagnostics lifecycle**: Diagnostics are refreshed on open/save/auto-refresh, and cleared for closed documents or empty/non-SQL content.
 - **Documentation sync**: Updated root and examples README content to reflect roadmap-delivered features/settings (compare mode, undo/redo, diagnostics, parser reliability, and current workspace view model).
+- **Legend default behavior**: Query-view legend now defaults to visible for first-time users while preserving saved dismissal state.
+- **Layout picker visuals**: Replaced unicode layout glyphs with shared SVG icons for consistent rendering across platforms.
+- **Accessibility consistency**: Unified reduced-motion handling across legend bar, breadcrumb bar, export dropdown, command bar, toolbar, and renderer via a shared motion utility.
 
 ### Fixed
 
+- **Workspace graph focus/trace wiring**: Fixed edge data attribute mismatch so focus mode, trace traversal, and neighbor highlighting work reliably.
+- **Workspace lineage XSS hardening**: Escaped dynamic lineage result fields and error content before HTML injection.
+- **Custom extension watcher parity**: Workspace watcher now tracks configured SQL extensions (e.g. `.hql`, `.bteq`, `.tpt`) and recreates watcher on setting changes.
+- **Index build race conditions**: Added in-flight `buildIndex()` promise guard and queue coordination to prevent concurrent build/result clobbering.
+- **Dark node metadata contrast**: Reduced dark-theme muted node text emphasis for clearer hierarchy against node backgrounds.
+- **Command bar theme source**: Removed hardcoded theme class checks in favor of callback-based theme resolution.
+- **Toolbar overflow resize thrash**: Debounced overflow recalculation for high-frequency resize events.
+- **Typecheck regressions in UI polish follow-up**: Fixed legend reduced-motion variable scope and browser timeout handle typing.
 - **Edge dash pattern rendering**: Moved dash pattern handling into edge rendering flow so edge styles are restored correctly after hover and no orphaned scope code remains.
 - **Transformation badge contrast**: Replaced hardcoded white fills with contrast-aware text coloring for improved light-theme legibility.
 - **Viewport fit stability**: Clamped fit-view dimensions/scale to prevent upside-down node rendering on small viewports.
 - **Resizable panel behavior**: Preserved preferred panel width so hints/details resizing behaves predictably across window resizes.
 - **Parser resilience**: Added safe string handling to prevent `.toLowerCase()` crashes when AST values are non-string objects.
 - **Hints panel interaction**: Hint rows now allow copy/select text (switched from button semantics to text-friendly container rendering).
+- **Hints panel/legend overlap regressions**: Hints panel now reflows above the legend when legend height changes (toggle, wrap, viewport resize), with viewport-clamped panel/list heights.
 
 ### Tests
 
 - Added unit/regression coverage for undo manager behavior, compare mode wiring/diff logic, diagnostics mapping, and extension diagnostics wiring.
+- Added regression coverage for Phase 1/2 roadmap fixes, including legend default visibility, dark muted color token, layout picker SVG icon usage, command bar theme callback usage, reduced-motion module coverage, and toolbar resize debounce logic.
+- Added DOM-style panel layout regression tests for legend-height growth and viewport clamping of the performance hints panel.
 
 ## [0.2.1] - 2026-02-06
 

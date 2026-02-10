@@ -9,6 +9,7 @@ describe('compare mode wiring', () => {
     it('adds compare callbacks and compare button state sync in toolbar', () => {
         expect(toolbarSource).toContain('onToggleCompareMode: () => void;');
         expect(toolbarSource).toContain('isCompareMode: () => boolean;');
+        expect(toolbarSource).toContain('getCompareBaselineLabel: () => string | null;');
         expect(toolbarSource).toContain("compareBtn.id = 'compare-mode-btn';");
         expect(toolbarSource).toContain("document.addEventListener('compare-mode-state', compareStateHandler);");
     });
@@ -19,6 +20,7 @@ describe('compare mode wiring', () => {
         expect(indexSource).toContain('showCompareView({');
         expect(indexSource).toContain('hideCompareView();');
         expect(indexSource).toContain("new CustomEvent('compare-mode-state'");
+        expect(indexSource).toContain('getCompareBaselineLabel: () => resolveCompareBaseline()?.label || null,');
     });
 
     it('re-exports compare view helpers from UI barrel', () => {

@@ -31,8 +31,16 @@ interface PaneInteractionCleanup {
     cleanup: () => void;
 }
 
+interface ActiveCompareContext {
+    container: HTMLElement;
+    left: ComparePaneInput;
+    right: ComparePaneInput;
+    onClose?: () => void;
+}
+
 let activeOverlay: HTMLDivElement | null = null;
 let activeCleanupHandlers: Array<() => void> = [];
+let activeCompareContext: ActiveCompareContext | null = null;
 
 function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label'>): string {
     const normalizedLabel = node.label.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -380,6 +388,7 @@ function buildDeltaSummary(delta: CompareDiffResult['statsDelta']): string {
 function closeActiveCompareView(): void {
     activeCleanupHandlers.forEach(cleanup => cleanup());
     activeCleanupHandlers = [];
+    activeCompareContext = null;
 
     if (activeOverlay) {
         activeOverlay.remove();
@@ -395,8 +404,28 @@ export function isCompareViewActive(): boolean {
     return activeOverlay !== null;
 }
 
+function rerenderActiveCompareView(dark: boolean): void {
+    const context = activeCompareContext;
+    if (!context) {
+        return;
+    }
+    showCompareView({
+        container: context.container,
+        left: context.left,
+        right: context.right,
+        isDarkTheme: dark,
+        onClose: context.onClose,
+    });
+}
+
 export function showCompareView(options: CompareViewOptions): void {
     closeActiveCompareView();
+    activeCompareContext = {
+        container: options.container,
+        left: options.left,
+        right: options.right,
+        onClose: options.onClose,
+    };
 
     const diff = computeCompareDiff(options.left.result, options.right.result);
     const leftNodeMap = toNodeMap(options.left.result.nodes);
@@ -550,6 +579,13 @@ export function showCompareView(options: CompareViewOptions): void {
         options.onClose?.();
     };
 
+    const themeChangeHandler = ((event: CustomEvent<{ dark?: boolean }>) => {
+        const nextDark = typeof event.detail?.dark === 'boolean'
+            ? event.detail.dark
+            : options.isDarkTheme;
+        rerenderActiveCompareView(nextDark);
+    }) as EventListener;
+
     const escHandler = (event: KeyboardEvent) => {
         if (event.key !== 'Escape') {
             return;
@@ -559,10 +595,12 @@ export function showCompareView(options: CompareViewOptions): void {
     };
 
     closeButton.addEventListener('click', finishClose);
+    document.addEventListener('theme-change', themeChangeHandler);
     document.addEventListener('keydown', escHandler);
 
     activeCleanupHandlers.push(leftCleanup.cleanup);
     activeCleanupHandlers.push(rightCleanup.cleanup);
     activeCleanupHandlers.push(() => closeButton.removeEventListener('click', finishClose));
+    activeCleanupHandlers.push(() => document.removeEventListener('theme-change', themeChangeHandler));
     activeCleanupHandlers.push(() => document.removeEventListener('keydown', escHandler));
 }

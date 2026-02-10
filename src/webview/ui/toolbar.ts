@@ -41,6 +41,7 @@ export interface ToolbarCallbacks {
     onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => void;
     onToggleCompareMode: () => void;
     isCompareMode: () => boolean;
+    getCompareBaselineLabel: () => string | null;
     onChangeViewLocation: (location: string) => void;
     onOpenPinnedTab: (pinId: string) => void;
     onUnpinTab: (pinId: string) => void;
@@ -965,11 +966,18 @@ function createFeatureGroup(
         featureGroup.appendChild(pinnedContainer);
     }
 
-    const compareBtn = createButton('⇆', () => {
+    const compareBtn = createButton(ICONS.compareMode, () => {
         callbacks.onToggleCompareMode();
-    }, 'Compare with baseline query');
+    }, 'Compare with Baseline Query');
     compareBtn.id = 'compare-mode-btn';
-    compareBtn.title = 'Compare with baseline query';
+    const updateCompareButtonTitle = () => {
+        const baselineLabel = callbacks.getCompareBaselineLabel();
+        compareBtn.title = baselineLabel
+            ? `Compare with Baseline Query (${baselineLabel})`
+            : 'Compare with Baseline Query (Pin another query or use multi-query file)';
+    };
+    updateCompareButtonTitle();
+    compareBtn.addEventListener('mouseenter', updateCompareButtonTitle);
     compareBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     const setCompareButtonState = (active: boolean) => {
         compareBtn.dataset.active = active ? 'true' : 'false';
@@ -1117,7 +1125,7 @@ function createFocusModeSelector(
 
     const btn = document.createElement('button');
     btn.id = 'focus-mode-btn';
-    btn.innerHTML = '⇄';
+    btn.innerHTML = ICONS.focusDirection;
     btn.title = 'Focus Mode Direction (U/D/A)';
     btn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 

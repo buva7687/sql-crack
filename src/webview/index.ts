@@ -334,7 +334,7 @@ async function toggleCompareMode(): Promise<void> {
 
     const baseline = resolveCompareBaseline();
     if (!baseline) {
-        alert('No baseline available. Pin another query first, or open a multi-query file.');
+        alert('No baseline available. Baseline is the newest pinned query (if any), otherwise another query in this file. Pin another query first, or open a multi-query file.');
         return;
     }
 
@@ -439,6 +439,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             void toggleCompareMode();
         },
         isCompareMode: () => compareModeActive,
+        getCompareBaselineLabel: () => resolveCompareBaseline()?.label || null,
         onChangeViewLocation: (location: string) => {
             if (window.vscodeApi) {
                 window.vscodeApi.postMessage({

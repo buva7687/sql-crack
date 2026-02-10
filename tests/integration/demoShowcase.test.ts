@@ -104,6 +104,26 @@ describe('Demo Showcase E2E Tests', () => {
                 expect(JSON.stringify(q1Outputs)).not.toBe(JSON.stringify(q2Outputs));
             }
         });
+
+        it('Q1 customer lifecycle lineage should keep real output names (no expr fallbacks)', () => {
+            const query1 = result.queries.find(q =>
+                /FROM\s+customer_segments\s+cs/i.test(q.sql) &&
+                /JOIN\s+regional_metrics\s+rm/i.test(q.sql)
+            );
+
+            expect(query1).toBeDefined();
+            const outputColumns = (query1?.columnFlows || []).map(f => f.outputColumn.toLowerCase());
+
+            expect(outputColumns).toEqual(expect.arrayContaining([
+                'customer_id',
+                'customer_name',
+                'regional_customer_count',
+                'revenue_contribution_pct',
+                'contact_email',
+                'avg_customer_value'
+            ]));
+            expect(outputColumns.filter(name => name === 'expr')).toHaveLength(0);
+        });
     });
 
     describe('Query Complexity', () => {

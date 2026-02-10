@@ -480,6 +480,10 @@ describe('Edge Cases', () => {
             const result = parseSql(sql, 'MySQL');
 
             expect(result.error).toBeUndefined();
+            const tableLabels = result.nodes
+                .filter(n => n.type === 'table')
+                .map(n => n.label.toLowerCase());
+            expect(tableLabels).toEqual(expect.arrayContaining(['users', 'orders']));
         });
     });
 });

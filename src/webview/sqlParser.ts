@@ -2819,20 +2819,7 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
 
             // CTE statement can be in different locations depending on parser output
             // Handle various AST structures from node-sql-parser
-            let cteStmt = null;
-            if (cte.stmt?.ast) {
-                cteStmt = cte.stmt.ast;
-            } else if (cte.stmt?.type === 'select' || cte.stmt?.from) {
-                cteStmt = cte.stmt;
-            } else if (cte.ast) {
-                cteStmt = cte.ast;
-            } else if (cte.expr?.ast) {
-                cteStmt = cte.expr.ast;
-            } else if (cte.definition?.ast) {
-                cteStmt = cte.definition.ast;
-            } else if (cte.definition) {
-                cteStmt = cte.definition;
-            }
+            const cteStmt = getCteStatementAst(cte);
 
             if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
@@ -2878,6 +2865,14 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             }
         }
     }
+    const seenTableLabels = new Set<string>();
+    for (const tableId of tableIds) {
+        const tableNode = nodes.find(node => node.id === tableId && node.type === 'table');
+        if (tableNode) {
+            seenTableLabels.add(tableNode.label.toLowerCase());
+        }
+    }
+    const scalarSubquerySourceTables = collectScalarSubquerySourceTables(stmt, cteNames, seenTableLabels);
 
     // Process JOINs - create join nodes and connect tables properly
     let lastOutputId = tableIds[0]; // Start with first table as base
@@ -3182,6 +3177,38 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
             target: selectId
         });
     }
+
+    for (const tableName of scalarSubquerySourceTables) {
+        const tableKey = tableName.toLowerCase();
+        if (seenTableLabels.has(tableKey)) {
+            continue;
+        }
+
+        const tableId = genId('table');
+        nodes.push({
+            id: tableId,
+            type: 'table',
+            label: tableName,
+            description: 'Scalar subquery source',
+            tableCategory: 'physical',
+            x: 0, y: 0, width: 140, height: 60
+        });
+        edges.push({
+            id: genId('e'),
+            source: tableId,
+            target: selectId,
+            sqlClause: 'Subquery source',
+            clauseType: 'flow'
+        });
+
+        seenTableLabels.add(tableKey);
+        const hadTable = ctx.tableUsageMap.has(tableKey);
+        trackTableUsage(tableName);
+        if (!hadTable) {
+            ctx.stats.tables++;
+        }
+    }
+
     previousId = selectId;
 
     // Process ORDER BY
@@ -3291,6 +3318,28 @@ function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames
     }
 
     return resultId;
+}
+
+function getCteStatementAst(cte: any): any {
+    if (cte?.stmt?.ast) {
+        return cte.stmt.ast;
+    }
+    if (cte?.stmt?.type === 'select' || cte?.stmt?.from) {
+        return cte.stmt;
+    }
+    if (cte?.ast) {
+        return cte.ast;
+    }
+    if (cte?.expr?.ast) {
+        return cte.expr.ast;
+    }
+    if (cte?.definition?.ast) {
+        return cte.definition.ast;
+    }
+    if (cte?.definition) {
+        return cte.definition;
+    }
+    return null;
 }
 
 function processFromItem(
@@ -3439,6 +3488,36 @@ function getFromItemLookupKey(item: any): string {
 }
 
 /**
+ * Extract a readable identifier/value from parser AST nodes across dialects.
+ * Handles wrapped nodes like { expr: { type: 'default', value: 'col' } }.
+ */
+function getAstString(val: any, depth = 0): string | null {
+    if (depth > 6 || val === null || val === undefined) { return null; }
+    if (typeof val === 'string') { return val; }
+    if (typeof val === 'number' || typeof val === 'boolean') { return String(val); }
+
+    if (Array.isArray(val)) {
+        for (const item of val) {
+            const extracted = getAstString(item, depth + 1);
+            if (extracted) { return extracted; }
+        }
+        return null;
+    }
+
+    if (typeof val === 'object') {
+        const candidateKeys = ['value', 'name', 'column', 'table', 'expr'];
+        for (const key of candidateKeys) {
+            if (Object.prototype.hasOwnProperty.call(val, key)) {
+                const extracted = getAstString(val[key], depth + 1);
+                if (extracted) { return extracted; }
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
  * Format an AST expression node into a readable SQL expression string
  */
 function formatExpressionFromAst(expr: any): string {
@@ -3446,8 +3525,10 @@ function formatExpressionFromAst(expr: any): string {
 
     // Simple column reference
     if (expr.type === 'column_ref') {
-        const table = expr.table ? `${expr.table}.` : '';
-        return `${table}${expr.column || '?'}`;
+        const tableName = getAstString(expr.table);
+        const columnName = getAstString(expr.column);
+        const table = tableName ? `${tableName}.` : '';
+        return `${table}${columnName || '?'}`;
     }
 
     // Aggregate function
@@ -3521,9 +3602,9 @@ function formatExpressionFromAst(expr: any): string {
     }
 
     // Fallback: try common properties
-    if (expr.column) { return expr.column; }
+    if (expr.column) { return getAstString(expr.column) || 'expr'; }
     if (expr.value !== undefined) { return String(expr.value); }
-    if (expr.name) { return String(typeof expr.name === 'string' ? expr.name : expr.name?.name || 'expr'); }
+    if (expr.name) { return getAstString(expr.name) || 'expr'; }
 
     return 'expr';
 }
@@ -3536,13 +3617,16 @@ function extractColumns(columns: any): string[] {
     if (!Array.isArray(columns)) { return ['*']; }
 
     return columns.map((col: any) => {
-        if (col === '*' || col.expr?.column === '*') {
+        const exprColumn = getAstString(col?.expr?.column);
+        if (col === '*' || exprColumn === '*') {
             ctx.hasSelectStar = true;
             return '*';
         }
-        if (col.as) { return col.as; }
-        if (col.expr?.column) { return col.expr.column; }
-        if (col.expr?.name) { return `${col.expr.name}()`; }
+        const aliasName = getAstString(col?.as);
+        if (aliasName) { return aliasName; }
+        if (exprColumn) { return exprColumn; }
+        const exprName = getAstString(col?.expr?.name);
+        if (exprName) { return `${exprName}()`; }
         return 'expr';
     }).slice(0, 10); // Limit to first 10
 }
@@ -3565,27 +3649,13 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
     }
     if (!Array.isArray(columns)) { return []; }
 
-    // Helper to safely extract string from AST nodes that may be objects
-    const getStringValue = (val: any): string | null => {
-        if (val === null || val === undefined) {return null;}
-        if (typeof val === 'string') {return val;}
-        if (typeof val === 'number') {return String(val);}
-        // Handle objects with nested name/value properties
-        if (typeof val === 'object') {
-            if (typeof val.name === 'string') {return val.name;}
-            if (typeof val.value === 'string') {return val.value;}
-            if (typeof val.column === 'string') {return val.column;}
-        }
-        return null;
-    };
-
     return columns.map((col: any): ColumnInfo => {
         // Extract column name - prioritize alias, then column name, then expression
         let name: string;
-        const aliasName = getStringValue(col.as);
-        const exprColumn = getStringValue(col.expr?.column);
-        const exprName = getStringValue(col.expr?.name);
-        const exprValue = getStringValue(col.expr?.value);
+        const aliasName = getAstString(col.as);
+        const exprColumn = getAstString(col.expr?.column);
+        const exprName = getAstString(col.expr?.name);
+        const exprValue = getAstString(col.expr?.value);
 
         if (aliasName) {
             name = aliasName;
@@ -3610,14 +3680,12 @@ function extractColumnInfos(columns: any): ColumnInfo[] {
         
         if (col.expr?.type === 'cast') {
             // CAST expression: extract source from the inner expression
-            sourceColName = getStringValue(col.expr.expr?.column) || undefined;
-            sourceTableName = getStringValue(col.expr.expr?.table) ||
-                (col.expr.expr?.table ? getStringValue(col.expr.expr.table.table) || getStringValue(col.expr.expr.table.name) : undefined) || undefined;
+            sourceColName = getAstString(col.expr.expr?.column) || undefined;
+            sourceTableName = getAstString(col.expr.expr?.table) || undefined;
         } else {
             // Regular expression: extract source from the expression itself
-            sourceColName = getStringValue(col.expr?.column) || undefined;
-            sourceTableName = getStringValue(col.expr?.table) ||
-                (col.expr?.table ? getStringValue(col.expr.table.table) || getStringValue(col.expr.table.name) : undefined) || undefined;
+            sourceColName = getAstString(col.expr?.column) || undefined;
+            sourceTableName = getAstString(col.expr?.table) || undefined;
         }
 
         return {
@@ -3643,15 +3711,12 @@ function extractWindowFunctions(columns: any): string[] {
             // Safely extract function name
             let funcName = 'WINDOW';
             const expr = col.expr;
-            if (typeof expr.name === 'string') {
-                funcName = expr.name;
-            } else if (expr.name?.name && typeof expr.name.name === 'string') {
-                funcName = expr.name.name;
-            } else if (expr.name?.value && typeof expr.name.value === 'string') {
-                funcName = expr.name.value;
-            }
+            const extractedFunc = getAstString(expr.name);
+            if (extractedFunc) { funcName = extractedFunc; }
 
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) => p.column || p.expr?.column).join(', ');
+            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
+                getAstString(p.column) || getAstString(p.expr?.column) || '?'
+            ).join(', ');
             let desc = `${funcName}()`;
             if (partitionBy) {
                 desc += ` OVER(PARTITION BY ${partitionBy})`;
@@ -4095,14 +4160,163 @@ function parseCteOrSubqueryInternals(stmt: any, nodes: FlowNode[], edges: FlowEd
     }
 }
 
+function collectScalarSubquerySourceTables(
+    stmt: any,
+    cteNames: Set<string>,
+    excludedTableLabels: Set<string>
+): string[] {
+    const sourceTables = new Set<string>();
+    const scopedCteNames = new Set<string>(Array.from(cteNames).map(name => name.toLowerCase()));
+    const expressions: any[] = [];
+
+    if (stmt?.where) {
+        expressions.push(stmt.where);
+    }
+    if (stmt?.having) {
+        expressions.push(stmt.having);
+    }
+    if (Array.isArray(stmt?.columns)) {
+        for (const col of stmt.columns) {
+            if (col?.expr) {
+                expressions.push(col.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (orderItem?.expr) {
+                expressions.push(orderItem.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem?.on) {
+                expressions.push(fromItem.on);
+            }
+        }
+    }
+
+    for (const expr of expressions) {
+        const subqueries = findSubqueriesInExpression(expr);
+        for (const subquery of subqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    return Array.from(sourceTables).filter(name => !excludedTableLabels.has(name.toLowerCase()));
+}
+
+function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inheritedCteNames: Set<string>): void {
+    if (!stmt || typeof stmt !== 'object') {
+        return;
+    }
+
+    const scopedCteNames = new Set(inheritedCteNames);
+
+    if (Array.isArray(stmt.with)) {
+        for (const cte of stmt.with) {
+            const cteName = (cte?.name?.value || cte?.name || '').toString().trim().toLowerCase();
+            if (cteName) {
+                scopedCteNames.add(cteName);
+            }
+        }
+        for (const cte of stmt.with) {
+            const cteStmt = getCteStatementAst(cte);
+            if (cteStmt) {
+                collectTablesFromSelectTree(cteStmt, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : (stmt.from ? [stmt.from] : []);
+    for (const fromItem of fromItems) {
+        const nestedFromSubquery = fromItem?.expr?.ast || (fromItem?.expr?.type === 'select' ? fromItem.expr : null);
+        if (nestedFromSubquery) {
+            collectTablesFromSelectTree(nestedFromSubquery, sourceTables, scopedCteNames);
+        } else {
+            const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
+            if (tableValuedFunctionName) {
+                sourceTables.add(tableValuedFunctionName);
+            } else {
+                const tableName = getTableName(fromItem);
+                if (tableName && tableName !== 'table' && !scopedCteNames.has(tableName.toLowerCase())) {
+                    sourceTables.add(tableName);
+                }
+            }
+        }
+
+        if (fromItem?.on) {
+            const onSubqueries = findSubqueriesInExpression(fromItem.on);
+            for (const subquery of onSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (stmt.where) {
+        const whereSubqueries = findSubqueriesInExpression(stmt.where);
+        for (const subquery of whereSubqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    if (stmt.having) {
+        const havingSubqueries = findSubqueriesInExpression(stmt.having);
+        for (const subquery of havingSubqueries) {
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+        }
+    }
+
+    if (Array.isArray(stmt.columns)) {
+        for (const col of stmt.columns) {
+            if (!col?.expr) {
+                continue;
+            }
+            const columnSubqueries = findSubqueriesInExpression(col.expr);
+            for (const subquery of columnSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (Array.isArray(stmt.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (!orderItem?.expr) {
+                continue;
+            }
+            const orderSubqueries = findSubqueriesInExpression(orderItem.expr);
+            for (const subquery of orderSubqueries) {
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            }
+        }
+    }
+
+    if (stmt._next) {
+        collectTablesFromSelectTree(stmt._next, sourceTables, scopedCteNames);
+    }
+}
+
 // Helper function to find subqueries in expressions (for counting nested subqueries)
 function findSubqueriesInExpression(expr: any): any[] {
     const subqueries: any[] = [];
     if (!expr) { return subqueries; }
 
     // Check if this expression itself is a subquery
-    if (expr.type === 'select' || (expr.ast && expr.ast.type === 'select')) {
-        subqueries.push(expr.ast || expr);
+    if (expr.type === 'select') {
+        subqueries.push(expr);
+    } else if (expr.ast && expr.ast.type === 'select') {
+        subqueries.push(expr.ast);
+    } else if (expr.ast && typeof expr.ast === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.ast));
+    }
+
+    if (expr.expr) {
+        subqueries.push(...findSubqueriesInExpression(expr.expr));
+    }
+
+    if (expr.value && typeof expr.value === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.value));
     }
 
     // Recursively check left and right sides of binary expressions
@@ -4118,8 +4332,22 @@ function findSubqueriesInExpression(expr: any): any[] {
         for (const arg of expr.args) {
             subqueries.push(...findSubqueriesInExpression(arg));
         }
+    } else if (Array.isArray(expr.args?.value)) {
+        for (const arg of expr.args.value) {
+            subqueries.push(...findSubqueriesInExpression(arg));
+        }
     } else if (expr.args && expr.args.expr) {
         subqueries.push(...findSubqueriesInExpression(expr.args.expr));
+    } else if (expr.args && typeof expr.args === 'object') {
+        subqueries.push(...findSubqueriesInExpression(expr.args));
+    }
+
+    if (Array.isArray(expr.columns)) {
+        for (const col of expr.columns) {
+            if (col?.expr) {
+                subqueries.push(...findSubqueriesInExpression(col.expr));
+            }
+        }
     }
 
     return subqueries;
@@ -4252,7 +4480,7 @@ function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
             continue;
         }
 
-        const colName = col.as || col.expr?.column || col.expr?.name || 'expr';
+        const colName = getAstString(col.as) || getAstString(col.expr?.column) || getAstString(col.expr?.name) || 'expr';
         const sources: ColumnLineage['sources'] = [];
 
         // Try to extract source table and column
@@ -4280,9 +4508,9 @@ function extractSourcesFromExpr(
 
     // Direct column reference
     if (expr.type === 'column_ref' || expr.column) {
-        const column = expr.column || expr.name;
+        const column = getAstString(expr.column) || getAstString(expr.name) || 'expr';
         const rawTable = expr.table;
-        const tableAlias = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
+        const tableAlias = getAstString(rawTable) || '';
 
         let tableName = tableAlias;
         if (tableAlias && tableAliasMap.has(tableAlias.toLowerCase())) {
@@ -4298,7 +4526,7 @@ function extractSourcesFromExpr(
         if (tableName || tableNodes.length === 1) {
             sources.push({
                 table: tableName || (tableNodes[0]?.label || 'unknown'),
-                column: String(column),
+                column: column,
                 nodeId: tableNode?.id || tableNodes[0]?.id || ''
             });
         }

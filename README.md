@@ -37,6 +37,8 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Execution Flow** | See how your SQL executes step-by-step with color-coded operation nodes |
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
+| **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
+| **Command Palette** | Press `Cmd/Ctrl + Shift + P` or `/` inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
 | **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
@@ -114,7 +116,8 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 
 ### Layout & Export
 
-- **Layout Toggle** — Cycle through vertical, horizontal, compact, force-directed, and radial layouts with `H`
+- **Layout Picker** — Toolbar picker with SVG icons for vertical, horizontal, compact, force, and radial layouts
+- **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
 - **View Modes** — Display beside editor, in tab, or secondary sidebar
@@ -189,6 +192,7 @@ Analyze cross-file dependencies:
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
 | `H` | Cycle layout (vertical → horizontal → compact → force → radial) |
+| `1-5` | Jump directly to a specific layout option |
 | `E` | Expand/collapse all CTEs |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
@@ -228,6 +232,8 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 | `Arrow keys` | Navigate between nodes |
 | `Escape` | Deselect and return to canvas |
 
+UI transitions and entrance animations also respect `prefers-reduced-motion`.
+
 ---
 
 ## Configuration
@@ -262,7 +268,7 @@ All toolbar buttons have ARIA labels for screen readers. Graph nodes are keyboar
 |---------|---------|-------------|
 | `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). Include the leading dot; with or without dot is accepted and normalized. |
 
-Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index).
+Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes.
 
 ### Custom Functions
 

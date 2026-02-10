@@ -94,4 +94,11 @@ describe('compareView', () => {
         expect(source).toContain("document.addEventListener('keydown', escHandler);");
         expect(source).toContain('closeButton.addEventListener(\'click\', finishClose);');
     });
+
+    it('re-renders compare overlay on theme changes', () => {
+        expect(source).toContain('function rerenderActiveCompareView(dark: boolean): void {');
+        expect(source).toContain("document.addEventListener('theme-change', themeChangeHandler);");
+        expect(source).toContain('rerenderActiveCompareView(nextDark);');
+        expect(source).toContain("document.removeEventListener('theme-change', themeChangeHandler)");
+    });
 });
