@@ -16,6 +16,7 @@ let commandPaletteElement: HTMLDivElement | null = null;
 let isVisible = false;
 let registeredActions: CommandBarAction[] = [];
 let commandBarThemeResolver: (() => boolean) | null = null;
+let commandBarAbortController: AbortController | null = null;
 
 /**
  * Register a list of actions that the command bar can execute.
@@ -32,6 +33,11 @@ export function createCommandBar(
     isDarkTheme: () => boolean
 ): HTMLDivElement {
     commandBarThemeResolver = isDarkTheme;
+    // Abort previous listeners if re-initialized
+    commandBarAbortController?.abort();
+    commandBarAbortController = new AbortController();
+    const signal = commandBarAbortController.signal;
+
     commandBarElement = document.createElement('div');
     commandBarElement.id = 'sql-crack-command-bar';
     commandBarElement.setAttribute('role', 'dialog');
@@ -105,7 +111,7 @@ export function createCommandBar(
     commandInputElement.addEventListener('input', () => {
         const query = commandInputElement?.value.toLowerCase() || '';
         renderResults(resultsContainer, query, isDarkTheme);
-    });
+    }, { signal });
 
     // Keyboard navigation
     commandInputElement.addEventListener('keydown', (e) => {
@@ -127,14 +133,14 @@ export function createCommandBar(
             e.preventDefault();
             navigateResults(resultsContainer, e.key === 'ArrowDown' ? 1 : -1, isDarkTheme);
         }
-    });
+    }, { signal });
 
     // Click overlay to dismiss
     commandBarElement.addEventListener('click', (e) => {
         if (e.target === commandBarElement) {
             hideCommandBar();
         }
-    });
+    }, { signal });
 
     // Theme change
     document.addEventListener('theme-change', ((e: CustomEvent) => {
@@ -145,9 +151,17 @@ export function createCommandBar(
             commandInputElement.style.color = dark ? '#F1F5F9' : '#1E293B';
             commandInputElement.style.borderBottomColor = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
         }
-    }) as EventListener);
+    }) as EventListener, { signal });
 
     return commandBarElement;
+}
+
+/**
+ * Dispose command bar event listeners.
+ */
+export function disposeCommandBar(): void {
+    commandBarAbortController?.abort();
+    commandBarAbortController = null;
 }
 
 function renderResults(

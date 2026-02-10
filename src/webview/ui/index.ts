@@ -34,10 +34,10 @@ export {
     PinnedTabsCallbacks
 } from './pinnedTabs';
 
-export { createLegendBar, toggleLegendBar, isLegendBarVisible, getLegendBarHeight } from './legendBar';
+export { createLegendBar, toggleLegendBar, isLegendBarVisible, getLegendBarHeight, disposeLegendBar } from './legendBar';
 export type { LegendBarCallbacks } from './legendBar';
 
-export { createExportDropdown } from './exportDropdown';
+export { createExportDropdown, disposeExportDropdown } from './exportDropdown';
 export type { ExportDropdownCallbacks } from './exportDropdown';
 
 export {
@@ -47,10 +47,11 @@ export {
     toggleCommandBar,
     isCommandBarVisible,
     registerCommandBarActions,
+    disposeCommandBar,
 } from './commandBar';
 export type { CommandBarAction } from './commandBar';
 
-export { createLayoutPicker } from './layoutPicker';
+export { createLayoutPicker, disposeLayoutPicker } from './layoutPicker';
 export type { LayoutPickerCallbacks } from './layoutPicker';
 
 export {

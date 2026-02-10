@@ -26,12 +26,17 @@ const NODE_TYPE_LABELS: Record<string, string> = {
 
 let legendBarElement: HTMLDivElement | null = null;
 let legendVisible = true;
+let legendAbortController: AbortController | null = null;
 const STORAGE_KEY = 'sqlCrack.legendBarVisible';
 
 /**
  * Create the bottom legend bar element and add to container.
  */
 export function createLegendBar(container: HTMLElement, callbacks: LegendBarCallbacks): HTMLDivElement {
+    // Abort previous listeners if re-initialized
+    legendAbortController?.abort();
+    legendAbortController = new AbortController();
+
     legendBarElement = document.createElement('div');
     legendBarElement.id = 'sql-crack-legend-bar';
     legendBarElement.setAttribute('role', 'complementary');
@@ -61,9 +66,17 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
             applyLegendStyles(legendBarElement, e.detail.dark);
             renderLegendContent(legendBarElement, e.detail.dark);
         }
-    }) as EventListener);
+    }) as EventListener, { signal: legendAbortController.signal });
 
     return legendBarElement;
+}
+
+/**
+ * Dispose legend bar event listeners.
+ */
+export function disposeLegendBar(): void {
+    legendAbortController?.abort();
+    legendAbortController = null;
 }
 
 function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {

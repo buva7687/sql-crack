@@ -303,9 +303,11 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 ### Debug Mode
 
 To see detailed logs:
-1. Open **Help → Toggle Developer Tools**
-2. Go to **Console** tab
-3. Filter by "SQL Crack" to see extension logs
+1. Enable `sqlCrack.advanced.debugLogging` in VS Code settings
+2. Open **View → Output** and select **SQL Crack** from the dropdown
+3. Extension logs appear in the Output Channel as you interact
+
+For lower-level diagnostics you can also open **Help → Toggle Developer Tools → Console** and filter by "SQL Crack".
 
 ### Resetting State
 

@@ -144,7 +144,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 **Files:**
 - `src/webview/renderer.ts` — line ~116 (`legendVisible: false` → `true`)
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `9e2993a`
 
 ---
 
@@ -160,7 +160,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 - `src/webview/constants/colors.ts` — `NODE_SURFACE.dark.textMuted` (line ~212)
 - Grep for any other hardcoded `#94A3B8` or `#94a3b8` usage
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `200d856`
 
 ---
 
@@ -176,7 +176,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 - `src/webview/ui/layoutPicker.ts` — lines ~15-19 (LAYOUTS array icon field)
 - `src/shared/icons.ts` — add layout-specific icons if not present
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `fa086f2`
 
 ---
 
@@ -190,7 +190,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 **Files:**
 - `src/webview/ui/commandBar.ts` — line ~249
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `e098099`
 
 ---
 
@@ -209,7 +209,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 - `src/webview/ui/exportDropdown.ts` — hover transitions
 - `src/webview/ui/commandBar.ts` — entrance animation
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `2dc8e01`, follow-up fix `8d566a3`
 
 ---
 
@@ -223,7 +223,7 @@ async buildIndex(...): Promise<WorkspaceIndex> {
 **Files:**
 - `src/webview/ui/toolbar.ts` — lines ~649, ~737
 
-**Status:** [ ] Not started
+**Status:** [x] Completed (2026-02-10) — `bfbb932`, follow-up fix `8d566a3`
 
 ---
 
@@ -306,7 +306,7 @@ element.addEventListener('click', handler, { signal: controller.signal });
 - `src/webview/ui/layoutPicker.ts`
 - `src/webview/ui/exportDropdown.ts`
 
-**Status:** [ ] Not started
+**Status:** [x] Complete — AbortController added to legendBar, commandBar, layoutPicker, exportDropdown with dispose functions exported via barrel index
 
 ---
 
@@ -337,7 +337,7 @@ element.addEventListener('click', handler, { signal: controller.signal });
 **Files:**
 - `README.md` — Troubleshooting section
 
-**Status:** [ ] Not started
+**Status:** [x] Complete — README updated to recommend Output Channel + `debugLogging` as primary, DevTools as secondary
 
 ---
 
@@ -412,16 +412,16 @@ Items: **16** (split clientScripts.ts), **17** (split renderer.ts)
 | 2 | HTML escaping in lineage (SECURITY) | P1 | 1 | ✅ Complete |
 | 3 | File watcher custom extensions (BUG) | P1 | 1 | ✅ Complete |
 | 4 | Concurrency guard on buildIndex (BUG) | P1 | 1 | ✅ Complete |
-| 5 | Legend bar default to visible | P2 | 2 | Not started |
-| 6 | Dark theme textMuted contrast | P2 | 2 | Not started |
-| 7 | Unicode icons in layout picker | P2 | 2 | Not started |
-| 8 | Command bar theme detection | P2 | 2 | Not started |
-| 9 | Complete prefers-reduced-motion | P2 | 2 | Not started |
-| 10 | Toolbar resize debouncing | P2 | 2 | Not started |
+| 5 | Legend bar default to visible | P2 | 2 | ✅ Complete (`9e2993a`) |
+| 6 | Dark theme textMuted contrast | P2 | 2 | ✅ Complete (`200d856`) |
+| 7 | Unicode icons in layout picker | P2 | 2 | ✅ Complete (`fa086f2`) |
+| 8 | Command bar theme detection | P2 | 2 | ✅ Complete (`e098099`) |
+| 9 | Complete prefers-reduced-motion | P2 | 2 | ✅ Complete (`2dc8e01`, follow-up `8d566a3`) |
+| 10 | Toolbar resize debouncing | P2 | 2 | ✅ Complete (`bfbb932`, follow-up `8d566a3`) |
 | 11 | Export preview + PDF (V3 carry) | P1 | 3 | Not started |
 | 12 | Typed message protocol | P2 | 3 | Not started |
-| 13 | Event listener cleanup | P3 | 3 | Not started |
+| 13 | Event listener cleanup | P3 | 3 | ✅ Complete |
 | 14 | Walkthrough media content | P3 | 3 | Not started |
-| 15 | Debug logging docs fix | P3 | 3 | Not started |
+| 15 | Debug logging docs fix | P3 | 3 | ✅ Complete |
 | 16 | Split clientScripts.ts (~3,843 lines) | P3 | 4 | Not started |
 | 17 | Split renderer.ts (~8,818 lines) | P3 | 4 | Not started |

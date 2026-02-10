@@ -23,6 +23,7 @@ const LAYOUTS: Array<{ value: LayoutType; label: string; icon: string; desc: str
 let pickerElement: HTMLDivElement | null = null;
 let triggerBtn: HTMLButtonElement | null = null;
 let isOpen = false;
+let layoutPickerAbortController: AbortController | null = null;
 
 /**
  * Create the layout picker trigger button + popover.
@@ -32,6 +33,9 @@ export function createLayoutPicker(
     callbacks: LayoutPickerCallbacks,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    layoutPickerAbortController?.abort();
+    layoutPickerAbortController = new AbortController();
+
     const container = document.createElement('div');
     container.style.cssText = 'display: flex; align-items: center;';
 
@@ -111,9 +115,17 @@ export function createLayoutPicker(
         dropdown.style.background = nextTheme.surfaceElevated;
         dropdown.style.borderColor = nextTheme.border;
         dropdown.style.boxShadow = nextTheme.shadow;
-    }) as EventListener);
+    }) as EventListener, { signal: layoutPickerAbortController.signal });
 
     return container;
+}
+
+/**
+ * Dispose layout picker event listeners.
+ */
+export function disposeLayoutPicker(): void {
+    layoutPickerAbortController?.abort();
+    layoutPickerAbortController = null;
 }
 
 function openPicker(callbacks: LayoutPickerCallbacks): void {

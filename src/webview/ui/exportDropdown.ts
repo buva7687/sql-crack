@@ -16,6 +16,7 @@ export interface ExportDropdownCallbacks {
 let dropdownElement: HTMLDivElement | null = null;
 let triggerBtn: HTMLButtonElement | null = null;
 let isOpen = false;
+let exportAbortController: AbortController | null = null;
 
 /**
  * Create the export dropdown trigger button and popover.
@@ -26,6 +27,9 @@ export function createExportDropdown(
     callbacks: ExportDropdownCallbacks,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    exportAbortController?.abort();
+    exportAbortController = new AbortController();
+
     const container = document.createElement('div');
     container.style.cssText = 'display: flex; align-items: center;';
 
@@ -201,9 +205,17 @@ export function createExportDropdown(
             kbd.style.background = nextTheme.accentBg;
             kbd.style.color = nextTheme.accentSoft;
         });
-    }) as EventListener);
+    }) as EventListener, { signal: exportAbortController.signal });
 
     return container;
+}
+
+/**
+ * Dispose export dropdown event listeners.
+ */
+export function disposeExportDropdown(): void {
+    exportAbortController?.abort();
+    exportAbortController = null;
 }
 
 function openDropdown(): void {
