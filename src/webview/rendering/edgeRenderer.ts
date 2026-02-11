@@ -281,7 +281,7 @@ export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
-        " onclick="this.parentElement.style.display='none'">&#x2715;</button>
+        " class="clause-panel-close-btn">&#x2715;</button>
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             <div style="
                 background: ${clauseColor};
@@ -293,7 +293,7 @@ export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
             <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
-                ${edge.label || 'Data Flow'}
+                ${escapeHtml(edge.label || 'Data Flow')}
             </div>
         </div>
         <div style="
@@ -315,6 +315,13 @@ export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement
             </div>
         ` : ''}
     `;
+
+    const closeBtn = clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn');
+    closeBtn?.addEventListener('click', () => {
+        if (clausePanel) {
+            clausePanel.style.display = 'none';
+        }
+    });
 
     clausePanel.style.display = 'block';
 }

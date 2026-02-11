@@ -99,6 +99,11 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const traceDownBtn = document.getElementById('btn-trace-down');
         const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
 
+        function basenameFromPath(filePath) {
+            const normalized = (filePath || '').replace(/\\\\/g, '/');
+            return normalized.split('/').pop() || filePath || '';
+        }
+
         function setGraphLegendVisible(visible) {
             if (!graphLegendBar) return;
             graphLegendBar.classList.toggle('is-hidden', !visible);
@@ -1754,6 +1759,47 @@ function getContextMenuScript(): string {
 function getMessageHandlingScript(): string {
     return `
         // ========== Message Handling from Extension ==========
+        function sanitizeExtensionHtml(html) {
+            const template = document.createElement('template');
+            template.innerHTML = typeof html === 'string' ? html : '';
+
+            // Remove high-risk elements entirely.
+            template.content.querySelectorAll('script, iframe, object, embed, link, meta, base, form').forEach((el) => {
+                el.remove();
+            });
+
+            // Strip event handlers and javascript: URLs from remaining elements.
+            template.content.querySelectorAll('*').forEach((el) => {
+                Array.from(el.attributes).forEach((attr) => {
+                    const name = attr.name.toLowerCase();
+                    const value = attr.value || '';
+
+                    if (name.startsWith('on')) {
+                        el.removeAttribute(attr.name);
+                        return;
+                    }
+
+                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                        el.removeAttribute(attr.name);
+                        return;
+                    }
+
+                    if (name === 'style' && /(expression\\s*\\(|javascript:)/i.test(value)) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+            });
+
+            return template.innerHTML;
+        }
+
+        function setSafeHtml(target, html) {
+            if (!target) {
+                return;
+            }
+            target.innerHTML = sanitizeExtensionHtml(html);
+        }
+
         window.addEventListener('message', event => {
             const message = event.data;
             switch (message.command) {
@@ -1768,7 +1814,7 @@ function getMessageHandlingScript(): string {
                         nodes.forEach(n => {
                             html += '<div class="lineage-clickable" data-filepath="' + escapeHtmlSafe(n.filePath || '') + '" data-line="' + (n.lineNumber || 0) + '" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;">';
                             html += '<div style="font-weight: 600; color: var(--text-primary);">' + escapeHtmlSafe(n.name) + '</div>';
-                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(n.filePath.split('/').pop()) : '') + '</div>';
+                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(basenameFromPath(n.filePath)) : '') + '</div>';
                             html += '</div>';
                         });
                         html += '</div>';
@@ -1790,9 +1836,9 @@ function getMessageHandlingScript(): string {
                         const resultsDiv = document.getElementById('impact-results');
                         if (resultsDiv) {
                             resultsDiv.style.display = 'block';
-                            resultsDiv.innerHTML = message.data.html;
+                            setSafeHtml(resultsDiv, message.data.html);
                         } else {
-                            lineageContent.innerHTML = message.data.html;
+                            setSafeHtml(lineageContent, message.data.html);
                         }
                         setupImpactSummaryDetails();
                     }
@@ -1802,7 +1848,7 @@ function getMessageHandlingScript(): string {
                         if (message.data?.error) {
                             lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                         } else if (message.data?.html) {
-                            lineageContent.innerHTML = message.data.html;
+                            setSafeHtml(lineageContent, message.data.html);
                         }
                     }
                     break;
@@ -1814,13 +1860,13 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'impactFormResult':
                     if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
+                        setSafeHtml(lineageContent, message.data.html);
                         setupImpactForm();
                     }
                     break;
                 case 'lineageOverviewResult':
                     if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
+                        setSafeHtml(lineageContent, message.data.html);
                         setupVisualLineageSearch();
                     }
                     break;
@@ -2823,7 +2869,7 @@ function getLineageGraphScript(): string {
         function processLineageGraphResult(message) {
             if (lineageContent && message.data?.html) {
                 lineageSetupInProgress = true;
-                lineageContent.innerHTML = message.data.html;
+                setSafeHtml(lineageContent, message.data.html);
                 lineageDetailView = true;
                 if (message.data.nodeId) {
                     lineageCurrentNodeId = message.data.nodeId;
@@ -3320,7 +3366,7 @@ function getLineageGraphScript(): string {
             const typeEl = tooltip.querySelector('.type-value');
             if (typeEl) typeEl.textContent = type;
             const fileEl = tooltip.querySelector('.file-value');
-            if (fileEl) fileEl.textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            if (fileEl) fileEl.textContent = filePath ? basenameFromPath(filePath) : 'N/A';
             const lineEl = tooltip.querySelector('.line-value');
             if (lineEl) lineEl.textContent = lineNumber || 'N/A';
             const columnsEl = tooltip.querySelector('.columns-value');

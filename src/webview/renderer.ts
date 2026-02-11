@@ -4196,7 +4196,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
-        " onclick="this.parentElement.style.display='none'">✕</button>
+        " class="clause-panel-close-btn">✕</button>
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             <div style="
                 background: ${clauseColor};
@@ -4208,7 +4208,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
             <div style="color: ${headingText}; font-size: 13px; font-weight: 600;">
-                ${edge.label || 'Data Flow'}
+                ${escapeHtml(edge.label || 'Data Flow')}
             </div>
         </div>
         <div style="
@@ -4231,6 +4231,13 @@ function showSqlClausePanel(edge: FlowEdge): void {
             </div>
         ` : ''}
     `;
+
+    const closeBtn = clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn');
+    closeBtn?.addEventListener('click', () => {
+        if (clausePanel) {
+            clausePanel.style.display = 'none';
+        }
+    });
 
     clausePanel.style.display = 'block';
 }
@@ -4905,6 +4912,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
     const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
     const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const badgeTextColor = isDark ? '#ffffff' : UI_COLORS.textLight;
+    const nodeBadgeTitleColor = isDark ? '#ffffff' : UI_COLORS.textLight;
+    const nodeBadgeSubtitleColor = isDark ? UI_COLORS.whiteMuted : UI_COLORS.textLightMuted;
 
     detailsPanel.style.transform = 'translate(0, -50%)';
 
@@ -4923,19 +4933,19 @@ function updateDetailsPanel(nodeId: string | null): void {
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
+                                <span style="background: ${BADGE_COLORS.partitionBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
                                 <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
+                                <span style="background: ${BADGE_COLORS.orderBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
                                 <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
                                 <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
@@ -4987,18 +4997,18 @@ function updateDetailsPanel(nodeId: string | null): void {
                         ${caseStmt.conditions.map((cond) => `
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
-                                    <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
+                                    <span style="background: ${BADGE_COLORS.partitionBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
                                     <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
-                                    <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
+                                    <span style="background: ${BADGE_COLORS.orderBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
                                     <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
-                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
                                 <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
@@ -5015,7 +5025,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                 <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
                         <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
-                            <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
+                            <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: ${badgeTextColor}; font-size: 9px; font-weight: 500;">
                                 ${getNodeVisualIcon(child)} ${escapeHtml(child.label)}
                             </span>
                         </div>
@@ -5065,10 +5075,10 @@ function updateDetailsPanel(nodeId: string | null): void {
             <button id="close-details" style="background: none; border: none; color: ${closeButtonColor}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
-            <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
+            <div style="color: ${nodeBadgeTitleColor}; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
                 ${getNodeVisualIcon(node)} ${escapeHtml(node.label)}
             </div>
-            <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
+            <div style="color: ${nodeBadgeSubtitleColor}; font-size: 11px;">
                 ${escapeHtml(node.description || '')}
             </div>
         </div>
@@ -6539,17 +6549,18 @@ function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
     });
 
     // Add styling section
+    const mermaidTextColor = state.isDarkTheme ? '#fff' : '#111827';
     lines.push('');
     lines.push('    %% Node styling');
-    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
-    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
-    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
-    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
-    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
-    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
-    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
-    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
-    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
+    lines.push(`    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:${mermaidTextColor}`);
+    lines.push(`    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:${mermaidTextColor}`);
+    lines.push(`    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:${mermaidTextColor}`);
+    lines.push(`    classDef aggregateStyle fill:#10b981,stroke:#047857,color:${mermaidTextColor}`);
+    lines.push(`    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:${mermaidTextColor}`);
+    lines.push(`    classDef resultStyle fill:#22c55e,stroke:#15803d,color:${mermaidTextColor}`);
+    lines.push(`    classDef cteStyle fill:#ec4899,stroke:#be185d,color:${mermaidTextColor}`);
+    lines.push(`    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:${mermaidTextColor}`);
+    lines.push(`    classDef defaultStyle fill:#64748b,stroke:#475569,color:${mermaidTextColor}`);
 
     // Apply classes to nodes
     const styleAssignments = generateStyleAssignments(nodes);

@@ -427,7 +427,6 @@ export class LineageBuilder implements LineageGraph {
             return;
         }
 
-        const fileName = filePath.split('/').pop() || filePath;
         let edgesAdded = 0;
 
         for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
