@@ -671,7 +671,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
                 scale = Math.max(0.2, Math.min(3, scale * delta));
                 updateTransform();
-            });
+            }, { passive: false });
         }
 
         // ========== Zoom Toolbar Events ==========
@@ -1762,13 +1762,23 @@ function getMessageHandlingScript(): string {
                         html += '<p style="color: var(--text-muted); margin-bottom: 16px;">Found ' + nodes.length + ' related nodes</p>';
                         html += '<div style="display: grid; gap: 8px;">';
                         nodes.forEach(n => {
-                            html += '<div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;" onclick="vscode.postMessage({command:\\'openFileAtLine\\', filePath:\\'' + (n.filePath || '').replace(/'/g, "\\\\'") + '\\', line: ' + (n.lineNumber || 0) + '})">';
+                            html += '<div class="lineage-clickable" data-filepath="' + escapeHtmlSafe(n.filePath || '') + '" data-line="' + (n.lineNumber || 0) + '" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;">';
                             html += '<div style="font-weight: 600; color: var(--text-primary);">' + escapeHtmlSafe(n.name) + '</div>';
                             html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(n.filePath.split('/').pop()) : '') + '</div>';
                             html += '</div>';
                         });
                         html += '</div>';
                         lineageContent.innerHTML = html;
+                        // Delegated click handler — avoids inline onclick XSS
+                        lineageContent.querySelectorAll('.lineage-clickable').forEach(el => {
+                            el.addEventListener('click', () => {
+                                vscode.postMessage({
+                                    command: 'openFileAtLine',
+                                    filePath: el.getAttribute('data-filepath') || '',
+                                    line: parseInt(el.getAttribute('data-line') || '0', 10)
+                                });
+                            });
+                        });
                     }
                     break;
                 case 'impactResult':
@@ -2253,8 +2263,25 @@ function getNodeInteractionsScript(): string {
 function getTooltipScript(): string {
     return `
         // ========== Tooltip Functions ==========
+        function sanitizeTooltipHtml(html) {
+            // Escape everything first, then restore only known-safe tooltip tags
+            var div = document.createElement('div');
+            div.textContent = html;
+            var safe = div.innerHTML;
+            // Restore only the structural tags used by tooltip content:
+            // <div class="tooltip-*">, <ul class="tooltip-list">, <li>, <strong>, <span>
+            // Opening tags with optional class/style attributes (no event handlers)
+            safe = safe.replace(/&lt;(div|ul|li|strong|span)(\\s+(?:class|style)=&quot;[^&]*?&quot;)*\\s*&gt;/gi, function(m, tag, attrs) {
+                var restored = '<' + tag;
+                if (attrs) restored += attrs.replace(/&quot;/g, '"');
+                return restored + '>';
+            });
+            // Closing tags
+            safe = safe.replace(/&lt;\\/(div|ul|li|strong|span)&gt;/gi, '</$1>');
+            return safe;
+        }
         function showTooltip(e, content) {
-            tooltip.innerHTML = content;
+            tooltip.innerHTML = sanitizeTooltipHtml(content);
             tooltip.style.display = 'block';
             tooltip.style.left = (e.clientX + 12) + 'px';
             tooltip.style.top = (e.clientY + 12) + 'px';
@@ -2819,7 +2846,8 @@ function getLineageGraphScript(): string {
 
         const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
         let pendingColumnTraceHintNodeId = null;
-        let columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';
+        let columnTraceHintDismissed = false;
+        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch {}
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -2928,7 +2956,7 @@ function getLineageGraphScript(): string {
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
                 lineageScale = Math.max(0.2, Math.min(3, lineageScale * delta));
                 updateLineageTransform();
-            });
+            }, { passive: false });
 
             svg.addEventListener('mousedown', (e) => {
                 if (e.target === svg || e.target.closest('.lineage-edge')) {
@@ -3219,7 +3247,7 @@ function getLineageGraphScript(): string {
         function dismissColumnTraceHint() {
             columnTraceHintDismissed = true;
             pendingColumnTraceHintNodeId = null;
-            localStorage.setItem(columnTraceHintStorageKey, '1');
+            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch {}
             const hint = document.getElementById('column-trace-onboarding');
             if (hint) hint.remove();
         }

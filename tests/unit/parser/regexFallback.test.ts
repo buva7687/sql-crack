@@ -235,11 +235,13 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
         });
 
         it('should handle schema-qualified table names', () => {
-            const sql = 'SELECT * FROM schema.table_name JOIN database2.schema2.table2 ON INVALID';
+            // Three-part names now trigger dialect retry (Snowflake/TransactSQL),
+            // so use SQL that fails across all dialects to test regex fallback.
+            const sql = 'SELECT * FROM schema.table_name JOIN schema2.table2 ON INVALID SYNTAX HERE @@@';
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
             expect(result.partial).toBe(true);
-            
+
             const labels = result.nodes.map((n: any) => n.label);
             expect(labels).toContain('table_name');
             expect(labels).toContain('table2');

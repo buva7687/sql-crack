@@ -1,6 +1,12 @@
 // Batch tabs UI module - for navigating multiple queries in a SQL file
 
 import { BatchParseResult } from '../sqlParser';
+import { ICONS } from '../../shared/icons';
+import { Z_INDEX } from '../../shared/zIndex';
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 export interface BatchTabsCallbacks {
     onQuerySelect: (index: number) => void;
@@ -12,13 +18,22 @@ let currentBatchResult: BatchParseResult | null = null;
 let currentQueryIdx: number = 0;
 let currentCallbacks: BatchTabsCallbacks | null = null;
 let errorSummaryCleanup: (() => void) | null = null;
+let batchTabsAbortController: AbortController | null = null;
+
+function getBatchTabsListenerOptions(): AddEventListenerOptions | undefined {
+    return batchTabsAbortController ? { signal: batchTabsAbortController.signal } : undefined;
+}
 
 export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCallbacks): void {
+    batchTabsAbortController?.abort();
+    batchTabsAbortController = new AbortController();
+    const listenerOptions = getBatchTabsListenerOptions();
+
     const tabsContainer = document.createElement('div');
     tabsContainer.id = 'batch-tabs';
 
     const isDark = callbacks.isDarkTheme();
-    const bgColor = isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     tabsContainer.style.cssText = `
@@ -33,7 +48,7 @@ export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCall
         border: 1px solid ${borderColor};
         border-radius: 8px;
         padding: 6px 12px;
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
     `;
     container.appendChild(tabsContainer);
 
@@ -44,14 +59,23 @@ export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCall
         if (currentBatchResult && currentCallbacks) {
             updateBatchTabs(currentBatchResult, currentQueryIdx, currentCallbacks);
         }
-    }) as EventListener);
+    }) as EventListener, listenerOptions);
+}
+
+export function disposeBatchTabs(): void {
+    batchTabsAbortController?.abort();
+    batchTabsAbortController = null;
+    if (errorSummaryCleanup) {
+        errorSummaryCleanup();
+        errorSummaryCleanup = null;
+    }
 }
 
 function updateBatchTabsTheme(dark: boolean): void {
     const tabsContainer = document.getElementById('batch-tabs');
     if (!tabsContainer) { return; }
 
-    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     tabsContainer.style.background = bgColor;
@@ -63,6 +87,8 @@ export function updateBatchTabs(
     currentQueryIndex: number,
     callbacks: BatchTabsCallbacks
 ): void {
+    const listenerOptions = getBatchTabsListenerOptions();
+
     if (errorSummaryCleanup) {
         errorSummaryCleanup();
         errorSummaryCleanup = null;
@@ -122,7 +148,7 @@ export function updateBatchTabs(
         if (currentQueryIndex > 0) {
             callbacks.onQuerySelect(0);
         }
-    });
+    }, listenerOptions);
     tabsContainer.appendChild(firstBtn);
 
     // Previous button
@@ -135,7 +161,7 @@ export function updateBatchTabs(
         if (currentQueryIndex > 0) {
             callbacks.onQuerySelect(currentQueryIndex - 1);
         }
-    });
+    }, listenerOptions);
     tabsContainer.appendChild(prevBtn);
 
     // Query tabs (show up to 7)
@@ -150,13 +176,13 @@ export function updateBatchTabs(
         const hasError = !!query.error;
         const isPartial = !!query.partial && !hasError;
 
-        const stateIcon = hasError ? '⚠' : isPartial ? '⚡' : '✓';
+        const stateIcon = hasError ? ICONS.warning : isPartial ? ICONS.bolt : ICONS.check;
         const stateIconColor = hasError ? errorColor : isPartial ? warningColor : successColor;
         const stateBaseColor = hasError ? errorColor : isPartial ? warningColor : textColorMuted;
         const idleBg = hasError ? errorBgTint : isPartial ? warningBgTint : successBgTint;
         const hoverBg = hasError ? errorBgTintHover : isPartial ? warningBgTintHover : successBgTintHover;
 
-        tab.innerHTML = `<span style="color: ${isActive ? activeColor : stateIconColor};">${stateIcon}</span> ${extractQueryLabel(query.sql, i)}`;
+        tab.innerHTML = `<span style="color: ${isActive ? activeColor : stateIconColor}; display: inline-flex; width: 12px; height: 12px;">${stateIcon}</span> ${escapeHtml(extractQueryLabel(query.sql, i))}`;
         tab.title = hasError
             ? `Q${i + 1}: ${query.error}`
             : isPartial
@@ -176,19 +202,19 @@ export function updateBatchTabs(
 
         tab.addEventListener('click', () => {
             callbacks.onQuerySelect(i);
-        });
+        }, listenerOptions);
 
         tab.addEventListener('mouseenter', () => {
             if (!isActive) {
                 tab.style.background = hoverBg;
             }
-        });
+        }, listenerOptions);
 
         tab.addEventListener('mouseleave', () => {
             if (!isActive) {
                 tab.style.background = idleBg;
             }
-        });
+        }, listenerOptions);
 
         tabsContainer.appendChild(tab);
     }
@@ -203,7 +229,7 @@ export function updateBatchTabs(
         if (currentQueryIndex < queryCount - 1) {
             callbacks.onQuerySelect(currentQueryIndex + 1);
         }
-    });
+    }, listenerOptions);
     tabsContainer.appendChild(nextBtn);
 
     // Last button
@@ -216,7 +242,7 @@ export function updateBatchTabs(
         if (currentQueryIndex < queryCount - 1) {
             callbacks.onQuerySelect(queryCount - 1);
         }
-    });
+    }, listenerOptions);
     tabsContainer.appendChild(lastBtn);
 
     // Query counter
@@ -251,7 +277,7 @@ export function updateBatchTabs(
             align-items: center;
             gap: 4px;
         `;
-        const statusIcon = errorCount > 0 ? '⚠' : '⚡';
+        const statusIcon = errorCount > 0 ? ICONS.warning : ICONS.bolt;
         const failedPart = errorCount > 0
             ? `<button type="button" id="batch-tabs-failed-trigger" style="
                 border: none;
@@ -266,7 +292,7 @@ export function updateBatchTabs(
             ">${errorCount} failed</button>`
             : `0 failed`;
         errorSummary.innerHTML = `
-            <span style="font-size: 10px;">${statusIcon}</span>
+            <span style="font-size: 10px; display: inline-flex; width: 12px; height: 12px;">${statusIcon}</span>
             <span>
                 ${successCount} ok, ${failedPart}, ${partialCount} partial
             </span>
@@ -287,11 +313,11 @@ export function updateBatchTabs(
                     max-width: 420px;
                     max-height: 220px;
                     overflow-y: auto;
-                    background: ${isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
+                    background: ${isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
                     border: 1px solid ${isDark ? 'rgba(248, 113, 113, 0.35)' : 'rgba(220, 38, 38, 0.35)'};
                     border-radius: 6px;
                     box-shadow: ${isDark ? '0 8px 20px rgba(0, 0, 0, 0.4)' : '0 8px 20px rgba(15, 23, 42, 0.2)'};
-                    z-index: 140;
+                    z-index: ${Z_INDEX.floatingPanel};
                 `;
 
                 const parseErrors = batchResult.parseErrors || [];
@@ -314,15 +340,15 @@ export function updateBatchTabs(
                     item.title = parseError.message;
                     item.addEventListener('mouseenter', () => {
                         item.style.background = isDark ? 'rgba(248, 113, 113, 0.12)' : 'rgba(220, 38, 38, 0.10)';
-                    });
+                    }, listenerOptions);
                     item.addEventListener('mouseleave', () => {
                         item.style.background = 'transparent';
-                    });
+                    }, listenerOptions);
                     item.addEventListener('click', (event) => {
                         event.stopPropagation();
                         errorList.style.display = 'none';
                         callbacks.onQuerySelect(parseError.queryIndex);
-                    });
+                    }, listenerOptions);
                     errorList.appendChild(item);
                 });
 
@@ -331,7 +357,7 @@ export function updateBatchTabs(
                 trigger.addEventListener('click', (event) => {
                     event.stopPropagation();
                     errorList.style.display = errorList.style.display === 'none' ? 'block' : 'none';
-                });
+                }, listenerOptions);
 
                 const onDocumentClick = (event: Event) => {
                     const target = event.target as Node | null;
@@ -339,7 +365,7 @@ export function updateBatchTabs(
                         errorList.style.display = 'none';
                     }
                 };
-                document.addEventListener('click', onDocumentClick);
+                document.addEventListener('click', onDocumentClick, listenerOptions);
                 errorSummaryCleanup = () => {
                     document.removeEventListener('click', onDocumentClick);
                 };

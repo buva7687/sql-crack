@@ -9,7 +9,7 @@
  * - Very large queries
  */
 
-import { parseSql, parseSqlBatch, validateSql } from '../../../src/webview/sqlParser';
+import { parseSql, parseSqlBatch, validateSql, hoistNestedCtes } from '../../../src/webview/sqlParser';
 
 describe('Edge Cases', () => {
     describe('Deeply Nested CTEs', () => {
@@ -287,6 +287,46 @@ describe('Edge Cases', () => {
 
             expect(result.error).toBeUndefined();
         });
+
+        it('strips MySQL-style # line comments', () => {
+            const sql = `
+                # This is a MySQL comment
+                SELECT id, name # inline comment
+                FROM users
+                WHERE active = 1
+            `;
+
+            const result = parseSql(sql, 'MySQL');
+
+            expect(result.error).toBeUndefined();
+            const tableNode = result.nodes.find((n: any) => n.type === 'table' && n.label?.toLowerCase() === 'users');
+            expect(tableNode).toBeDefined();
+        });
+
+        it('does not extract table names from # comments', () => {
+            const sql = `
+                # SELECT * FROM fake_table
+                SELECT id FROM real_table
+            `;
+
+            const result = parseSql(sql, 'MySQL');
+
+            expect(result.error).toBeUndefined();
+            const fakeNode = result.nodes.find((n: any) => n.label?.toLowerCase() === 'fake_table');
+            expect(fakeNode).toBeUndefined();
+            const realNode = result.nodes.find((n: any) => n.label?.toLowerCase() === 'real_table');
+            expect(realNode).toBeDefined();
+        });
+
+        it('handles unclosed block comments gracefully', () => {
+            const sql = `/* This block comment is never closed
+                SELECT id FROM users`;
+
+            const result = parseSql(sql, 'MySQL');
+
+            // Should not crash — either parses partially or returns empty/error
+            expect(result).toBeDefined();
+        });
     });
 
     describe('Very Large Queries', () => {
@@ -484,6 +524,107 @@ describe('Edge Cases', () => {
                 .filter(n => n.type === 'table')
                 .map(n => n.label.toLowerCase());
             expect(tableLabels).toEqual(expect.arrayContaining(['users', 'orders']));
+        });
+    });
+
+    describe('CTE Hoisting (hoistNestedCtes)', () => {
+        it('should return null when no nested CTEs exist', () => {
+            const sql = 'SELECT * FROM users WHERE id = 1';
+            expect(hoistNestedCtes(sql)).toBeNull();
+        });
+
+        it('should return null for standard top-level CTEs', () => {
+            const sql = 'WITH cte AS (SELECT 1) SELECT * FROM cte';
+            expect(hoistNestedCtes(sql)).toBeNull();
+        });
+
+        it('should hoist a single nested CTE from a subquery', () => {
+            const sql = `SELECT t.* FROM (
+  WITH cte1 AS (SELECT id, name FROM users)
+  SELECT * FROM cte1
+) t`;
+            const result = hoistNestedCtes(sql);
+            expect(result).not.toBeNull();
+            // CTE should appear at the top level
+            expect(result!.trimStart()).toMatch(/^WITH\s+cte1\s+AS\s*\(/i);
+            // The subquery should no longer contain WITH
+            expect(result!.replace(/^WITH[\s\S]*?\)\s*\n/i, '')).not.toMatch(/\(\s*WITH\b/i);
+        });
+
+        it('should hoist multiple nested CTEs', () => {
+            const sql = `SELECT t.col1
+FROM (
+  WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y)
+  SELECT * FROM a JOIN b ON a.x = b.y
+) t`;
+            const result = hoistNestedCtes(sql);
+            expect(result).not.toBeNull();
+            expect(result!).toMatch(/WITH\s+a\s+AS/i);
+            expect(result!).toMatch(/b\s+AS/i);
+        });
+
+        it('should merge with existing top-level CTEs', () => {
+            const sql = `WITH existing AS (SELECT 99 AS z)
+SELECT t.*, e.*
+FROM existing e, (
+  WITH nested AS (SELECT 1 AS x)
+  SELECT * FROM nested
+) t`;
+            const result = hoistNestedCtes(sql);
+            expect(result).not.toBeNull();
+            // Both CTEs should be at the top
+            expect(result!).toMatch(/WITH\s+existing\s+AS/i);
+            expect(result!).toMatch(/nested\s+AS/i);
+            // No nested WITH remaining
+            const maskedResult = result!.replace(/'[^']*'/g, "''");
+            expect(maskedResult).not.toMatch(/\(\s*WITH\b/i);
+        });
+
+        it('should not match WITH inside string literals', () => {
+            const sql = `SELECT * FROM users WHERE note = 'WITH cte AS (SELECT 1) SELECT * FROM cte'`;
+            expect(hoistNestedCtes(sql)).toBeNull();
+        });
+
+        it('should not match WITH inside comments', () => {
+            const sql = `SELECT * FROM users /* FROM (WITH cte AS (SELECT 1) SELECT * FROM cte) */`;
+            expect(hoistNestedCtes(sql)).toBeNull();
+        });
+
+        it('should handle CTE bodies with nested subqueries', () => {
+            const sql = `SELECT t.* FROM (
+  WITH cte1 AS (
+    SELECT id FROM (SELECT id FROM users WHERE active = 1) sub
+  )
+  SELECT * FROM cte1
+) t`;
+            const result = hoistNestedCtes(sql);
+            expect(result).not.toBeNull();
+            expect(result!.trimStart()).toMatch(/^WITH\s+cte1\s+AS/i);
+        });
+
+        it('should produce parseable SQL from a Tableau-style query', () => {
+            const sql = `SELECT t."COL1", t."COL2"
+FROM (
+  WITH cte1 AS (SELECT a, b FROM source_table),
+       cte2 AS (SELECT c, d FROM other_table)
+  SELECT cte1.a, cte2.c FROM cte1 JOIN cte2 ON cte1.a = cte2.c
+) t`;
+            const result = parseSql(sql, 'Snowflake');
+            // Should parse without falling back to regex
+            expect(result.error).toBeUndefined();
+            // Should have a hint about hoisting
+            expect(result.hints.some(h => h.message.includes('Hoisted nested CTE'))).toBe(true);
+        });
+
+        it('should parse basic nested CTE after hoisting', () => {
+            const sql = `SELECT t.* FROM (
+  WITH cte AS (SELECT 1 AS val)
+  SELECT val FROM cte
+) t`;
+            const result = parseSql(sql, 'MySQL');
+            expect(result.error).toBeUndefined();
+            const cteNodes = result.nodes.filter(n => n.type === 'cte');
+            expect(cteNodes.length).toBeGreaterThanOrEqual(1);
         });
     });
 });

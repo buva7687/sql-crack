@@ -14,6 +14,10 @@ const uiDir = join(__dirname, '../../../src/webview/ui');
 
 describe('AbortController event listener cleanup', () => {
     const modules = [
+        { name: 'toolbar', file: 'toolbar.ts', disposeFn: 'disposeToolbar' },
+        { name: 'batchTabs', file: 'batchTabs.ts', disposeFn: 'disposeBatchTabs' },
+        { name: 'pinnedTabs', file: 'pinnedTabs.ts', disposeFn: 'disposePinnedTabs' },
+        { name: 'breadcrumbBar', file: 'breadcrumbBar.ts', disposeFn: 'disposeBreadcrumbBar' },
         { name: 'legendBar', file: 'legendBar.ts', disposeFn: 'disposeLegendBar' },
         { name: 'commandBar', file: 'commandBar.ts', disposeFn: 'disposeCommandBar' },
         { name: 'layoutPicker', file: 'layoutPicker.ts', disposeFn: 'disposeLayoutPicker' },
@@ -37,7 +41,7 @@ describe('AbortController event listener cleanup', () => {
             });
 
             it('passes signal to at least one addEventListener call', () => {
-                expect(source).toMatch(/signal.*AbortController\.signal|{ signal }/);
+                expect(source).toMatch(/signal.*AbortController\.signal|{ signal }|get[A-Za-z]+ListenerOptions\(\)/);
             });
 
             it(`exports a ${disposeFn} function`, () => {
@@ -48,9 +52,30 @@ describe('AbortController event listener cleanup', () => {
 
     it('barrel index re-exports all dispose functions', () => {
         const indexSource = readFileSync(join(uiDir, 'index.ts'), 'utf8');
+        expect(indexSource).toContain('disposeToolbar');
+        expect(indexSource).toContain('disposeBatchTabs');
+        expect(indexSource).toContain('disposePinnedTabs');
+        expect(indexSource).toContain('disposeBreadcrumbBar');
         expect(indexSource).toContain('disposeLegendBar');
         expect(indexSource).toContain('disposeCommandBar');
         expect(indexSource).toContain('disposeLayoutPicker');
         expect(indexSource).toContain('disposeExportDropdown');
+    });
+
+    describe('resizablePanel', () => {
+        const source = readFileSync(join(uiDir, 'resizablePanel.ts'), 'utf8');
+
+        it('creates a per-panel AbortController and uses its signal for listeners', () => {
+            expect(source).toContain('const panelAbortController = new AbortController();');
+            expect(source).toContain('signal: panelAbortController.signal');
+            expect(source).toContain("addEventListener('mousemove', onMouseMove, listenerOptions)");
+            expect(source).toContain("addEventListener('mouseup', onMouseUp, listenerOptions)");
+            expect(source).toContain("addEventListener('resize', onResize, listenerOptions)");
+        });
+
+        it('aborts listeners in returned cleanup', () => {
+            expect(source).toContain('panelAbortController.abort();');
+            expect(source).toContain('handle.remove();');
+        });
     });
 });

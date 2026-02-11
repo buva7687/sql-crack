@@ -85,7 +85,7 @@ export const UI_THEME = {
         backgroundSecondary: '#1a1a1a',
         backgroundPanel: 'rgba(17, 17, 17, 0.95)',
         text: '#f1f5f9',
-        textMuted: '#94a3b8',
+        textMuted: '#71717a',
         textDim: '#64748b',
         border: 'rgba(255, 255, 255, 0.08)',
     },

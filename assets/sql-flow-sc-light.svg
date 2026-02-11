@@ -1,14 +1,7 @@
 <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
   <circle cx="8" cy="8" r="6.25" stroke="#475569" stroke-width="1.5"/>
-  <text
-    x="8"
-    y="8.2"
-    fill="#334155"
-    font-family="'Segoe UI', 'SF Pro Text', Arial, sans-serif"
-    font-size="5.4"
-    font-weight="700"
-    text-anchor="middle"
-    dominant-baseline="middle"
-    letter-spacing="0.2"
-  >SC</text>
+  <circle cx="5.1" cy="5.1" r="1.05" fill="#334155"/>
+  <circle cx="10.9" cy="5.1" r="1.05" fill="#334155"/>
+  <circle cx="8" cy="10.9" r="1.05" fill="#334155"/>
+  <path d="M5.9 5.8L7.2 7.1M10.1 5.8L8.8 7.1M6.2 9.4L8 10.2L9.8 9.4" stroke="#334155" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

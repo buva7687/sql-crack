@@ -22,7 +22,7 @@ describe('workspace sharedStyles accessibility rules', () => {
         const lightVars = getCssVariables(false);
 
         expect(darkVars).toContain('--scrollbar-thumb: rgba(148, 163, 184, 0.42)');
-        expect(darkVars).toContain('--scrollbar-track: rgba(15, 23, 42, 0.35)');
+        expect(darkVars).toContain('--scrollbar-track: rgba(0, 0, 0, 0.35)');
         expect(lightVars).toContain('--scrollbar-thumb: rgba(100, 116, 139, 0.32)');
         expect(lightVars).toContain('--scrollbar-track: rgba(148, 163, 184, 0.12)');
     });

@@ -26,9 +26,12 @@ export {
     UI_SURFACE,
     ACCENT_STRIP,
     WORKSPACE_ACCENT_COLORS,
+    MONO_FONT_STACK,
     getNodeAccentColor,
 } from './themeTokens';
 
 export type { GridStyle, AccentPosition, NodeAccentType } from './themeTokens';
 
 export { ICONS, getNodeTypeIcon, getWorkspaceNodeIcon } from './icons';
+
+export { Z_INDEX } from './zIndex';
