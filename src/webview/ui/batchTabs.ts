@@ -22,7 +22,7 @@ export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCall
     tabsContainer.id = 'batch-tabs';
 
     const isDark = callbacks.isDarkTheme();
-    const bgColor = isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     tabsContainer.style.cssText = `
@@ -55,7 +55,7 @@ function updateBatchTabsTheme(dark: boolean): void {
     const tabsContainer = document.getElementById('batch-tabs');
     if (!tabsContainer) { return; }
 
-    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     tabsContainer.style.background = bgColor;
@@ -291,7 +291,7 @@ export function updateBatchTabs(
                     max-width: 420px;
                     max-height: 220px;
                     overflow-y: auto;
-                    background: ${isDark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
+                    background: ${isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
                     border: 1px solid ${isDark ? 'rgba(248, 113, 113, 0.35)' : 'rgba(220, 38, 38, 0.35)'};
                     border-radius: 6px;
                     box-shadow: ${isDark ? '0 8px 20px rgba(0, 0, 0, 0.4)' : '0 8px 20px rgba(15, 23, 42, 0.2)'};

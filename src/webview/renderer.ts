@@ -69,6 +69,7 @@ import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
+import { MONO_FONT_STACK } from '../shared/themeTokens';
 import {
     getViewportBounds,
     getVisibleElements,
@@ -552,7 +553,7 @@ export function initRenderer(container: HTMLElement): void {
         border-top: 1px solid ${UI_COLORS.border};
         padding: 12px 16px;
         box-sizing: border-box;
-        font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+        font-family: ${MONO_FONT_STACK};
         font-size: 12px;
         color: ${UI_COLORS.textBright};
         z-index: 150;
@@ -650,7 +651,7 @@ export function initRenderer(container: HTMLElement): void {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(15, 23, 42, 0.6);
+        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
@@ -4138,7 +4139,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
         max-width: 600px;
         z-index: 1000;
         box-shadow: ${panelShadow};
-        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-family: ${MONO_FONT_STACK};
     `;
 
     // Build content
@@ -5225,7 +5226,7 @@ function updateStatsPanel(): void {
             const grouped = new Map<string, string[]>();
             for (const f of funcs) {
                 const cat = f.category || 'unknown';
-                if (!grouped.has(cat)) grouped.set(cat, []);
+                if (!grouped.has(cat)) {grouped.set(cat, []);}
                 grouped.get(cat)!.push(f.name);
             }
             return `
@@ -8158,7 +8159,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     background: rgba(30, 41, 59, 0.6);
                     border: 1px solid rgba(148, 163, 184, 0.2);
                     border-radius: 4px;
-                    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+                    font-family: ${MONO_FONT_STACK};
                     font-size: 10px;
                     color: ${UI_COLORS.textBright};
                     line-height: 1.4;

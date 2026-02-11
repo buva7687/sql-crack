@@ -17,6 +17,7 @@ export function escapeRegex(str: string): string {
  */
 export function safeString(value: unknown): string {
     if (typeof value === 'string') { return value; }
+    // eslint-disable-next-line eqeqeq -- intentional: catches both null and undefined
     if (value == null) { return ''; }
     if (typeof value === 'object') {
         const v = value as Record<string, unknown>;

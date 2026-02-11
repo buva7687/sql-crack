@@ -225,7 +225,7 @@ function trackTableUsage(tableName: string): void {
 
 // Track function usage
 function trackFunctionUsage(functionName: unknown, category: 'aggregate' | 'window' | 'tvf' | 'scalar'): void {
-    if (typeof functionName !== 'string' || !functionName) return;
+    if (typeof functionName !== 'string' || !functionName) {return;}
     const normalizedName = functionName.toUpperCase();
     ctx.functionsUsed.add(`${normalizedName}:${category}`);
 }
@@ -529,13 +529,13 @@ export function splitSqlStatements(sql: string): string[] {
 
     // Helper to check if we're at a word boundary and match a keyword
     const matchKeyword = (idx: number, keyword: string): boolean => {
-        if (idx + keyword.length > sql.length) return false;
-        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) return false;
+        if (idx + keyword.length > sql.length) {return false;}
+        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) {return false;}
         // Check word boundary before
-        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) return false;
+        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {return false;}
         // Check word boundary after
         const afterIdx = idx + keyword.length;
-        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) return false;
+        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) {return false;}
         return true;
     };
 
@@ -543,16 +543,16 @@ export function splitSqlStatements(sql: string): string[] {
     const isProceduralBegin = (idx: number): boolean => {
         // Check what follows BEGIN — skip non-block BEGINs
         const after = sql.substring(idx + 5, idx + 25).trim().toUpperCase();
-        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) return false;
+        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) {return false;}
 
         // Look backwards to see what precedes BEGIN (up to 200 chars for long signatures)
         const before = sql.substring(Math.max(0, idx - 200), idx).toUpperCase();
 
         // Procedural BEGIN is preceded by: AS, THEN, ELSE, LOOP, IS
-        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) return true;
+        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) {return true;}
 
         // Or preceded by CREATE FUNCTION/PROCEDURE/TRIGGER with arbitrary signature (no semicolons between)
-        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) return true;
+        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) {return true;}
 
         return false;
     };
@@ -1581,10 +1581,10 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     // Detect statement type for hints
     const upperSql = commentStripped.toUpperCase().trim();
     let statementType = 'UNKNOWN';
-    if (upperSql.startsWith('SELECT')) statementType = 'SELECT';
-    else if (upperSql.startsWith('INSERT')) statementType = 'INSERT';
-    else if (upperSql.startsWith('UPDATE')) statementType = 'UPDATE';
-    else if (upperSql.startsWith('DELETE')) statementType = 'DELETE';
+    if (upperSql.startsWith('SELECT')) {statementType = 'SELECT';}
+    else if (upperSql.startsWith('INSERT')) {statementType = 'INSERT';}
+    else if (upperSql.startsWith('UPDATE')) {statementType = 'UPDATE';}
+    else if (upperSql.startsWith('DELETE')) {statementType = 'DELETE';}
     else if (upperSql.startsWith('MERGE')) {
         statementType = 'MERGE';
         
@@ -1700,9 +1700,9 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
             });
         }
     }
-    else if (upperSql.startsWith('CREATE')) statementType = 'CREATE';
-    else if (upperSql.startsWith('ALTER')) statementType = 'ALTER';
-    else if (upperSql.startsWith('DROP')) statementType = 'DROP';
+    else if (upperSql.startsWith('CREATE')) {statementType = 'CREATE';}
+    else if (upperSql.startsWith('ALTER')) {statementType = 'ALTER';}
+    else if (upperSql.startsWith('DROP')) {statementType = 'DROP';}
 
     // Build stats
     const stats: QueryStats = {
@@ -1719,9 +1719,9 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     };
 
     // Update complexity based on score
-    if (stats.complexityScore >= 30) stats.complexity = 'Very Complex';
-    else if (stats.complexityScore >= 15) stats.complexity = 'Complex';
-    else if (stats.complexityScore >= 5) stats.complexity = 'Moderate';
+    if (stats.complexityScore >= 30) {stats.complexity = 'Very Complex';}
+    else if (stats.complexityScore >= 15) {stats.complexity = 'Complex';}
+    else if (stats.complexityScore >= 5) {stats.complexity = 'Moderate';}
 
     // Add the partial visualization warning hint
     hints.push({

@@ -85,7 +85,7 @@ function getOverflowPalette(dark: boolean): {
     shadow: string;
 } {
     return dark ? {
-        background: 'rgba(15, 23, 42, 0.95)',
+        background: 'rgba(17, 17, 17, 0.95)',
         border: 'rgba(148, 163, 184, 0.2)',
         text: '#e2e8f0',
         hover: 'rgba(148, 163, 184, 0.2)',
@@ -152,7 +152,7 @@ function applyOverflowMenuTheme(dark: boolean): void {
     }
 
     if (overflowDropdown) {
-        overflowDropdown.style.background = dark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+        overflowDropdown.style.background = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
         overflowDropdown.style.borderColor = palette.border;
         overflowDropdown.style.boxShadow = palette.shadow;
         overflowDropdown.querySelectorAll('[data-overflow-row="true"]').forEach((row) => {
@@ -244,7 +244,7 @@ export function createToolbar(
     const isDark = callbacks.isDarkTheme();
     const title = document.createElement('div');
     title.style.cssText = `
-        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 8px 12px;
@@ -359,7 +359,7 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     const searchContainer = document.createElement('div');
     searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
-        background: ${dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 4px 12px;
@@ -760,7 +760,7 @@ function createZoomGroup(
         display: flex;
         flex-shrink: 0;
         align-items: center;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(17, 17, 17, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
@@ -847,7 +847,7 @@ function createExportGroup(
     exportGroup.style.cssText = `
         display: flex;
         flex-shrink: 0;
-        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         overflow: visible;
@@ -883,7 +883,7 @@ function createFeatureGroup(
     featureGroup.style.cssText = `
         display: flex;
         flex-shrink: 0;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(17, 17, 17, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
@@ -1135,7 +1135,7 @@ function createFocusModeSelector(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
@@ -1338,7 +1338,7 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
@@ -1470,7 +1470,7 @@ function createPinnedTabsDropdown(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
@@ -1697,12 +1697,12 @@ export function updateToolbarTheme(
     actions: HTMLElement,
     searchContainer: HTMLElement
 ): void {
-    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const textColor = dark ? '#f1f5f9' : '#1e293b';
     const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     toolbar.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+        if (el.style.background?.includes('rgba(17, 17, 17') || el.style.background?.includes('rgba(255, 255, 255')) {
             el.style.background = bgColor;
             el.style.borderColor = borderColor;
         }
@@ -1732,7 +1732,7 @@ export function updateToolbarTheme(
     searchContainer.style.borderColor = borderColor;
 
     actions.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+        if (el.style.background?.includes('rgba(17, 17, 17') || el.style.background?.includes('rgba(255, 255, 255')) {
             el.style.background = bgColor;
             el.style.borderColor = borderColor;
         }

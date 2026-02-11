@@ -2846,7 +2846,8 @@ function getLineageGraphScript(): string {
 
         const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
         let pendingColumnTraceHintNodeId = null;
-        let columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';
+        let columnTraceHintDismissed = false;
+        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch {}
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -3246,7 +3247,7 @@ function getLineageGraphScript(): string {
         function dismissColumnTraceHint() {
             columnTraceHintDismissed = true;
             pendingColumnTraceHintNodeId = null;
-            localStorage.setItem(columnTraceHintStorageKey, '1');
+            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch {}
             const hint = document.getElementById('column-trace-onboarding');
             if (hint) hint.remove();
         }

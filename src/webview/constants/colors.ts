@@ -33,7 +33,7 @@ export const UI_COLORS = {
 
     // Text colors - Dark theme
     text: '#f1f5f9',
-    textMuted: '#94a3b8',
+    textMuted: '#71717a',
     textDim: '#64748b',
     textSubtle: '#cbd5e1',
     textBright: '#e2e8f0',
@@ -193,7 +193,7 @@ export const SCROLLBAR_COLORS = {
     dark: {
         thumb: 'rgba(148, 163, 184, 0.42)',
         thumbHover: 'rgba(148, 163, 184, 0.58)',
-        track: 'rgba(15, 23, 42, 0.35)',
+        track: 'rgba(0, 0, 0, 0.35)',
     },
     light: {
         thumb: 'rgba(100, 116, 139, 0.32)',
@@ -204,12 +204,12 @@ export const SCROLLBAR_COLORS = {
 
 export const COMPONENT_UI_COLORS = {
     dark: {
-        surface: 'rgba(15, 23, 42, 0.95)',
-        surfaceElevated: 'rgba(15, 23, 42, 0.98)',
+        surface: 'rgba(17, 17, 17, 0.95)',
+        surfaceElevated: 'rgba(17, 17, 17, 0.98)',
         border: 'rgba(148, 163, 184, 0.2)',
         text: '#f1f5f9',
         textBright: '#e2e8f0',
-        textMuted: '#94a3b8',
+        textMuted: '#71717a',
         textDim: '#64748b',
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
@@ -226,7 +226,7 @@ export const COMPONENT_UI_COLORS = {
         rowBorder: 'rgba(148, 163, 184, 0.1)',
         selectBg: '#1e293b',
         shadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-        shadowSoft: '0 4px 12px rgba(15, 23, 42, 0.12)',
+        shadowSoft: '0 4px 12px rgba(0, 0, 0, 0.12)',
         errorBg: 'rgba(239, 68, 68, 0.15)',
         errorBgHover: 'rgba(239, 68, 68, 0.25)',
         warningBg: 'rgba(234, 179, 8, 0.3)',

@@ -14,10 +14,12 @@ const WIDTH_PREFIX = 'sql-crack.panelWidth.';
 const COLLAPSED_PREFIX = 'sql-crack.panelCollapsed.';
 
 function getStoredNumber(key: string): number | null {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) { return null; }
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? parsed : null;
+    try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) { return null; }
+        const parsed = Number.parseInt(raw, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    } catch { return null; }
 }
 
 export function computeClampedPanelWidth(
@@ -105,13 +107,13 @@ export function attachResizablePanel({
         expandedWidth = width;
         if (persist) {
             preferredWidth = nextWidth;
-            window.localStorage.setItem(widthKey, String(nextWidth));
+            try { window.localStorage.setItem(widthKey, String(nextWidth)); } catch {}
         }
     };
 
     const applyCollapseState = (nextCollapsed: boolean): void => {
         collapsed = nextCollapsed;
-        window.localStorage.setItem(collapsedKey, String(collapsed));
+        try { window.localStorage.setItem(collapsedKey, String(collapsed)); } catch {}
 
         if (collapsed) {
             setWidth(expandedWidth, false);
@@ -194,7 +196,8 @@ export function attachResizablePanel({
 
     // Initialize persisted state
     setWidth(expandedWidth, false);
-    const storedCollapsed = window.localStorage.getItem(collapsedKey) === 'true';
+    let storedCollapsed = false;
+    try { storedCollapsed = window.localStorage.getItem(collapsedKey) === 'true'; } catch {}
     applyCollapseState(storedCollapsed);
     applyTheme();
 

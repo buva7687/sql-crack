@@ -216,7 +216,7 @@ function renderGraphPane(
         border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.32)'};
         border-radius: 10px;
         overflow: hidden;
-        background: ${dark ? 'linear-gradient(180deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96))' : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))'};
+        background: ${dark ? 'linear-gradient(180deg, rgba(17,17,17,0.96), rgba(10,10,10,0.96))' : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))'};
         cursor: grab;
     `;
     pane.appendChild(viewport);
@@ -506,7 +506,7 @@ export function showCompareView(options: CompareViewOptions): void {
     closeButton.textContent = 'Close';
     closeButton.style.cssText = `
         border: 1px solid ${options.isDarkTheme ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.35)'};
-        background: ${options.isDarkTheme ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.92)'};
+        background: ${options.isDarkTheme ? 'rgba(17, 17, 17, 0.9)' : 'rgba(255, 255, 255, 0.92)'};
         color: ${options.isDarkTheme ? '#f8fafc' : '#0f172a'};
         border-radius: 8px;
         font-size: 11px;

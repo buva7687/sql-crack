@@ -26,6 +26,7 @@ export {
     UI_SURFACE,
     ACCENT_STRIP,
     WORKSPACE_ACCENT_COLORS,
+    MONO_FONT_STACK,
     getNodeAccentColor,
 } from './themeTokens';
 

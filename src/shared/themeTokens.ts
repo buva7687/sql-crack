@@ -99,7 +99,7 @@ export const NODE_SURFACE = {
         fill: '#1A1A1A',
         border: '#475569',
         text: '#F1F5F9',
-        textMuted: '#94A3B8',
+        textMuted: '#71717A',
         shadow: '0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)',
     },
 } as const;
@@ -134,7 +134,7 @@ export const UI_SURFACE = {
         backgroundPanel: 'rgba(17, 17, 17, 0.95)',
         backgroundOverlay: 'rgba(17, 17, 17, 0.9)',
         text: '#F1F5F9',
-        textMuted: '#94A3B8',
+        textMuted: '#71717A',
         textDim: '#64748B',
         border: 'rgba(255, 255, 255, 0.08)',
         borderMedium: 'rgba(255, 255, 255, 0.12)',
@@ -151,6 +151,13 @@ export const UI_SURFACE = {
         borderMedium: 'rgba(0, 0, 0, 0.12)',
     },
 } as const;
+
+// ============================================================
+// Typography
+// ============================================================
+
+/** Shared monospace font stack for code/SQL text across all webviews */
+export const MONO_FONT_STACK = "'SF Mono', Monaco, 'Cascadia Code', 'Menlo', 'Consolas', monospace";
 
 // ============================================================
 // Accent Strip Config

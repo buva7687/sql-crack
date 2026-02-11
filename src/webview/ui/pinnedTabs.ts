@@ -123,7 +123,7 @@ function createTabsContainer(): HTMLElement {
         display: none;
         align-items: center;
         gap: 4px;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(17, 17, 17, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 4px;
