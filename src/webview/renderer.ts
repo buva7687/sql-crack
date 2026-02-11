@@ -169,6 +169,8 @@ let currentColumnFlows: ColumnFlow[] = [];
 let currentStats: QueryStats | null = null;
 let currentHints: OptimizationHint[] = [];
 let hintsShowAll = false;
+let hintsMinimized = false;
+let statsMinimized = false;
 let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
@@ -643,6 +645,9 @@ export function initRenderer(container: HTMLElement): void {
     `;
     minimapContainer.appendChild(viewportRect);
     container.appendChild(minimapContainer);
+
+    // Minimap drag-to-pan: click or drag inside minimap to move the main viewport
+    setupMinimapDrag(minimapContainer);
 
     // Create tooltip element
     tooltipElement = document.createElement('div');
@@ -5237,17 +5242,21 @@ function updateStatsPanel(): void {
         .join('');
 
     statsPanel.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
-            <span style="
-                background: ${COMPLEXITY_COLORS[currentStats.complexity]};
-                color: white;
-                padding: 2px 8px;
-                border-radius: 4px;
-                font-size: 10px;
-                font-weight: 600;
-            ">${currentStats.complexity}</span>
+        <div id="stats-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${statsMinimized ? '' : ' margin-bottom: 8px;'} cursor: pointer; user-select: none;" title="${statsMinimized ? 'Expand' : 'Minimize'}">
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
+                <span style="
+                    background: ${COMPLEXITY_COLORS[currentStats.complexity]};
+                    color: white;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-weight: 600;
+                ">${currentStats.complexity}</span>
+            </span>
+            <span style="display: inline-flex; width: 14px; height: 14px; color: ${textColorMuted}; transform: rotate(${statsMinimized ? '-90deg' : '0deg'}); transition: transform 0.2s ease;">${ICONS.chevronDown}</span>
         </div>
+        <div id="stats-body" style="display: ${statsMinimized ? 'none' : 'block'};">
         <div id="query-stats-summary-row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px;">
             ${summaryRowHtml}
         </div>
@@ -5296,7 +5305,15 @@ function updateStatsPanel(): void {
             </div>`;
         })() : ''}
         ${tableListHtml}
+        </div>
     `;
+
+    // Add event listener for stats header toggle
+    const statsHeader = statsPanel.querySelector('#stats-header') as HTMLElement | null;
+    statsHeader?.addEventListener('click', () => {
+        statsMinimized = !statsMinimized;
+        updateStatsPanel();
+    });
 
     // Add event listener for copy button
     const copyBtn = statsPanel.querySelector('#copy-tables-btn') as HTMLButtonElement | null;
@@ -5618,14 +5635,17 @@ function updateHintsPanel(): void {
     const remainingCount = Math.max(0, sortedHints.length - visibleHints.length);
 
     hintsPanel.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+        <div id="hints-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${hintsMinimized ? '' : ' margin-bottom: 10px;'} cursor: pointer; user-select: none;" title="${hintsMinimized ? 'Expand' : 'Minimize'}">
             <span style="font-weight: 600; color: ${textColor}; display: inline-flex; align-items: center; gap: 6px;">
                 <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
                 <span>Performance Hints</span>
             </span>
-            <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+                <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
+                <span style="display: inline-flex; width: 14px; height: 14px; color: ${textColorMuted}; transform: rotate(${hintsMinimized ? '-90deg' : '0deg'}); transition: transform 0.2s ease;">${ICONS.chevronDown}</span>
+            </span>
         </div>
-        <div class="hints-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+        <div class="hints-list" style="display: ${hintsMinimized ? 'none' : 'flex'}; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
             ${visibleHints.map(hint => {
                 const style = hintColors[hint.type] || hintColors.info;
                 const severity = hint.severity || 'low';
@@ -5700,6 +5720,12 @@ function updateHintsPanel(): void {
     const showTopBtn = hintsPanel.querySelector('#show-top-hints') as HTMLButtonElement | null;
     showTopBtn?.addEventListener('click', () => {
         hintsShowAll = false;
+        updateHintsPanel();
+    });
+
+    const hintsHeader = hintsPanel.querySelector('#hints-header') as HTMLElement | null;
+    hintsHeader?.addEventListener('click', () => {
+        hintsMinimized = !hintsMinimized;
         updateHintsPanel();
     });
 
@@ -7690,6 +7716,65 @@ function updateMinimapViewport(): void {
     viewport.style.top = `${Math.max(0, vpTop)}px`;
     viewport.style.width = `${Math.min(mapWidth, vpWidth)}px`;
     viewport.style.height = `${Math.min(mapHeight, vpHeight)}px`;
+}
+
+function setupMinimapDrag(minimapContainer: HTMLDivElement): void {
+    let dragging = false;
+
+    function panToMinimapPosition(e: MouseEvent): void {
+        if (!svg) { return; }
+        const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
+        if (!shouldShowMinimap(nodesForMinimap.length)) { return; }
+
+        const bounds = calculateBounds();
+        const svgRect = svg.getBoundingClientRect();
+        const containerRect = minimapContainer.getBoundingClientRect();
+        const mapWidth = 150;
+        const mapHeight = 100;
+        const padding = 10;
+
+        const scaleX = (mapWidth - padding * 2) / bounds.width;
+        const scaleY = (mapHeight - padding * 2) / bounds.height;
+        const mapScale = Math.min(scaleX, scaleY, 0.15);
+
+        // Click position relative to minimap content area
+        const clickX = e.clientX - containerRect.left;
+        const clickY = e.clientY - containerRect.top;
+
+        // Convert minimap coordinates to graph coordinates
+        const graphX = (clickX - padding) / mapScale + bounds.minX;
+        const graphY = (clickY - padding) / mapScale + bounds.minY;
+
+        // Center viewport on the clicked point
+        const visibleWidth = svgRect.width / state.scale;
+        const visibleHeight = svgRect.height / state.scale;
+
+        state.offsetX = -(graphX - visibleWidth / 2) * state.scale;
+        state.offsetY = -(graphY - visibleHeight / 2) * state.scale;
+
+        updateTransform();
+    }
+
+    function onMouseMove(e: MouseEvent): void {
+        if (dragging) {
+            panToMinimapPosition(e);
+        }
+    }
+
+    function onMouseUp(): void {
+        dragging = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    minimapContainer.addEventListener('mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = true;
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        panToMinimapPosition(e);
+    });
 }
 
 // ============================================================

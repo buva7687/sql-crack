@@ -1027,9 +1027,10 @@ function createFeatureGroup(
     compareBtn.dataset.overflowIcon = ICONS.compareMode;
     compareBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     const setCompareButtonState = (active: boolean) => {
+        const dark = callbacks.isDarkTheme();
         compareBtn.dataset.active = active ? 'true' : 'false';
         compareBtn.style.background = active ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-        compareBtn.style.color = active ? '#818cf8' : '';
+        compareBtn.style.color = active ? (dark ? '#a5b4fc' : '#4f46e5') : (dark ? '#f1f5f9' : '#1e293b');
     };
     setCompareButtonState(callbacks.isCompareMode());
     featureGroup.appendChild(compareBtn);

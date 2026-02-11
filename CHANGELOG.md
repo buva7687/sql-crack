@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-02-11
+
+### Added
+
+- **Collapsible Performance Hints panel**: Added a minimize/expand toggle to the Performance Hints header. Collapsed state persists across query switches.
+- **Collapsible Query Stats panel**: Added the same minimize/expand toggle to the Query Stats header, with independent persistent state.
+- **Minimap drag-to-pan in SQL Flow**: Clicking or dragging inside the minimap now pans the main viewport to that position, matching the existing Workspace Dependencies minimap behavior.
+
 ## [0.3.1] - 2026-02-11
 
 ### Added

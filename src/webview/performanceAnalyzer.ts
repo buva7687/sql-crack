@@ -1,4 +1,5 @@
 import { FlowNode, FlowEdge, OptimizationHint } from './types';
+import { unwrapIdentifierValue } from './parser/astUtils';
 
 export interface IndexSuggestion {
     columns: string[];
@@ -20,36 +21,61 @@ export interface PerformanceAnalysisResult {
     refactoringOpportunities: RefactoringHint[];
 }
 
+function normalizeColumnReference(columnRef: any): string | null {
+    if (!columnRef || typeof columnRef !== 'object') {
+        return typeof columnRef === 'string' ? columnRef : null;
+    }
+
+    if (columnRef.type !== 'column_ref') {
+        return null;
+    }
+
+    const table = unwrapIdentifierValue(columnRef.table);
+    const column = unwrapIdentifierValue(columnRef.column);
+
+    if (!column) {
+        return null;
+    }
+    return table ? `${table}.${column}` : column;
+}
+
+function extractColumnHintLabel(columnRef: any): string | null {
+    const normalized = normalizeColumnReference(columnRef);
+    if (!normalized) {
+        return null;
+    }
+    return normalized.includes('.') ? normalized.split('.').pop() || normalized : normalized;
+}
+
 // Helper function to extract column references from an expression
 function extractColumnReferences(expr: any): string[] {
     const columns: string[] = [];
-    
-    if (!expr) {return columns;}
-    
-    if (typeof expr === 'string') {
-        // Simple column reference
-        columns.push(expr);
-    } else if (expr.type === 'column_ref') {
-        columns.push(expr.column || expr.table + '.' + expr.column);
-    } else if (expr.type === 'binary_expr') {
-        // Recursively extract from left and right
-        columns.push(...extractColumnReferences(expr.left));
-        columns.push(...extractColumnReferences(expr.right));
-    } else if (expr.type === 'function') {
-        // Extract from function arguments
-        if (expr.args && Array.isArray(expr.args)) {
-            expr.args.forEach((arg: any) => {
-                columns.push(...extractColumnReferences(arg));
-            });
+    const seen = new Set<any>();
+
+    function walk(node: any): void {
+        if (!node) {return;}
+        if (typeof node !== 'object') {return;}
+        if (seen.has(node)) {return;}
+        seen.add(node);
+
+        if (Array.isArray(node)) {
+            node.forEach(walk);
+            return;
         }
-    } else if (expr.expr) {
-        columns.push(...extractColumnReferences(expr.expr));
-    } else if (expr.left) {
-        columns.push(...extractColumnReferences(expr.left));
-    } else if (expr.right) {
-        columns.push(...extractColumnReferences(expr.right));
+
+        if (node.type === 'column_ref') {
+            const normalized = normalizeColumnReference(node);
+            if (normalized) {
+                columns.push(normalized);
+            }
+        }
+
+        for (const value of Object.values(node)) {
+            walk(value);
+        }
     }
-    
+
+    walk(expr);
     return columns;
 }
 
@@ -309,10 +335,12 @@ function detectSubqueryConversionOpportunities(
         if (expr.operator === 'IN' && expr.right && expr.right.subquery) {
             const subq = expr.right.subquery;
             if (subq.from && subq.columns && subq.columns.length === 1) {
+                const leftColumn = extractColumnHintLabel(expr.left) || 'column';
+                const rightColumn = extractColumnHintLabel(subq.columns[0]?.expr) || 'column';
                 hints.push({
                     type: 'info',
                     message: 'IN subquery could be converted to JOIN',
-                    suggestion: `Consider: JOIN ${subq.from[0]?.table || 'table'} ON ${expr.left?.column || 'column'} = ${subq.columns[0]?.expr?.column || 'column'}`,
+                    suggestion: `Consider: JOIN ${subq.from[0]?.table || 'table'} ON ${leftColumn} = ${rightColumn}`,
                     category: 'performance',
                     severity: 'medium'
                 });
@@ -405,18 +433,16 @@ function generateIndexHints(
     // Extract ORDER BY columns
     if (ast.orderby && Array.isArray(ast.orderby)) {
         ast.orderby.forEach((orderItem: any) => {
-            if (orderItem.expr && orderItem.expr.column) {
-                columnsByPurpose.sort.add(orderItem.expr.column);
-            }
+            const columns = extractColumnReferences(orderItem.expr || orderItem);
+            columns.forEach(col => columnsByPurpose.sort.add(col));
         });
     }
 
     // Extract GROUP BY columns
     if (ast.groupby && Array.isArray(ast.groupby)) {
         ast.groupby.forEach((groupItem: any) => {
-            if (groupItem.expr && groupItem.expr.column) {
-                columnsByPurpose.group.add(groupItem.expr.column);
-            }
+            const columns = extractColumnReferences(groupItem.expr || groupItem);
+            columns.forEach(col => columnsByPurpose.group.add(col));
         });
     }
 
@@ -516,7 +542,7 @@ function detectNonSargableExpressions(
             const args = expr.args?.expr || expr.args;
             
             if (args && args.type === 'column_ref') {
-                const columnName = args.column || (args.table ? `${args.table}.${args.column}` : '');
+                const columnName = extractColumnHintLabel(args) || 'column';
 
                 // Common non-sargable patterns - functions that prevent index usage
                 if (funcName === 'YEAR' || funcName === 'MONTH' || funcName === 'DAY' ||
@@ -772,4 +798,3 @@ export function analyzePerformance(
 
     return { hints, indexSuggestions, refactoringOpportunities };
 }
-
