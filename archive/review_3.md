@@ -795,8 +795,8 @@ These structural changes require multi-day effort and are tracked separately. Th
 | 3.11 | File watcher excludes | P3 Polish | 15 min | None | Medium | DONE |
 | 3.12 | Renderer polish (5 items) | P3 Polish | 30 min | Low | Low-Med | DONE |
 | 3.13 | Walkthrough media + keywords | P3 Polish | 1-2 hrs | None | Medium | DONE |
-| 4.1 | INSERT...SELECT visualization | P4 Feature | 2-4 hrs | Medium | High | TODO |
-| 4.2 | All DML write ops | P4 Feature | 1-3 days | Medium | High | TODO |
+| 4.1 | INSERT...SELECT visualization | P4 Feature | 2-4 hrs | Medium | High | DONE |
+| 4.2 | All DML write ops (Tier 1) | P4 Feature | 1-3 days | Medium | High | DONE |
 | 4.3 | Dialect auto-detection | P4 Feature | 2-3 hrs | Low | High | TODO |
 | 4.4 | Auto-hoist nested CTEs | P4 Feature | 3-4 hrs | Medium | High | TODO |
 | 4.5 | Parser: # comments + edge cases | P4 Feature | 1 hr | Low | Medium | TODO |
