@@ -206,3 +206,23 @@ describe('defensive guards in visualizationPanel.ts', () => {
         expect(source).toContain("'Cannot pin: extension context not available'");
     });
 });
+
+// =========================================================================
+// 9. Additional escaping regressions
+// =========================================================================
+
+describe('XSS: renderer tooltip escaping', () => {
+    const source = readFileSync(join(__dirname, '../../src/webview/renderer.ts'), 'utf8');
+
+    it('should escape window function PARTITION BY values in tooltip markup', () => {
+        expect(source).toContain('escapeHtml(fn.partitionBy.join(\', \'))');
+    });
+});
+
+describe('XSS: lineageGraphRenderer column datatype escaping', () => {
+    const source = readFileSync(join(__dirname, '../../src/workspace/ui/lineageGraphRenderer.ts'), 'utf8');
+
+    it('should escape column dataType before injecting into SVG text', () => {
+        expect(source).toContain("this.escapeHtml(column.dataType)");
+    });
+});

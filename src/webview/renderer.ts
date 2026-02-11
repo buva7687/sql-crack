@@ -8345,7 +8345,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
         node.windowDetails.functions.forEach((fn, idx) => {
             if (idx < 3) { // Show first 3
                 content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
-                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${fn.partitionBy.join(', ')})` : ''}
+                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${escapeHtml(fn.partitionBy.join(', '))})` : ''}
                 </div>`;
             }
         });

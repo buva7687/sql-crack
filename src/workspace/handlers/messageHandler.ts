@@ -2,6 +2,7 @@
 // Extracted from workspacePanel.ts for modularity
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { SearchFilter, GraphMode } from '../types';
 import {
     LineageGraph,
@@ -172,6 +173,30 @@ export class MessageHandler {
             return tableId.slice(separatorIndex + 1);
         }
         return tableId;
+    }
+
+    private normalizePathForComparison(filePath: string): string {
+        const normalized = path.resolve(filePath);
+        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    }
+
+    private isFilePathAllowed(filePath: string): boolean {
+        if (!filePath || filePath.trim().length === 0) {
+            return false;
+        }
+
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            // Workspace panel is only available with workspace folders,
+            // but keep behavior safe if state is unexpectedly unavailable.
+            return false;
+        }
+
+        const candidate = this.normalizePathForComparison(filePath);
+        return workspaceFolders.some(folder => {
+            const root = this.normalizePathForComparison(folder.uri.fsPath);
+            return candidate === root || candidate.startsWith(root + path.sep);
+        });
     }
 
     /**
@@ -395,6 +420,11 @@ export class MessageHandler {
 
     private async handleOpenFile(filePath: string): Promise<void> {
         try {
+            if (!this.isFilePathAllowed(filePath)) {
+                logger.warn(`Blocked openFile outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const uri = vscode.Uri.file(filePath);
             const doc = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
@@ -405,10 +435,16 @@ export class MessageHandler {
 
     private async handleOpenFileAtLine(filePath: string, line: number): Promise<void> {
         try {
+            if (!this.isFilePathAllowed(filePath)) {
+                logger.warn(`Blocked openFileAtLine outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const fileUri = vscode.Uri.file(filePath);
             const document = await vscode.workspace.openTextDocument(fileUri);
             const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-            const position = new vscode.Position(Math.max(0, line - 1), 0);
+            const safeLine = Number.isFinite(line) ? Math.max(0, Math.floor(line) - 1) : 0;
+            const position = new vscode.Position(safeLine, 0);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(
                 new vscode.Range(position, position),
@@ -421,6 +457,11 @@ export class MessageHandler {
 
     private async handleVisualizeFile(filePath: string): Promise<void> {
         try {
+            if (!this.isFilePathAllowed(filePath)) {
+                logger.warn(`Blocked visualizeFile outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const uri = vscode.Uri.file(filePath);
             const doc = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);

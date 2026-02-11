@@ -689,7 +689,7 @@ export class IndexManager {
             logger.warn(`[IndexManager] Skipping cache persist (${Math.round(sizeBytes / 1024)}KB > ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024)}KB).`);
             vscode.window.showWarningMessage(
                 `SQL Crack: Workspace index (${Math.round(sizeBytes / 1024)}KB) exceeds the ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024 / 1024)}MB cache limit. ` +
-                'The index will not persist across restarts. Consider narrowing file scope with sqlCrack.advanced.includePatterns.'
+                'The index will not persist across restarts. Consider excluding generated SQL folders or reducing workspace file scope.'
             );
             return;
         }

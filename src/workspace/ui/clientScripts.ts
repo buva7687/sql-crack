@@ -550,11 +550,12 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             const trimmedQuery = (query || '').trim();
             const hasQuery = trimmedQuery.length > 0;
             const queryLower = trimmedQuery.toLowerCase();
+            const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;
             let count = 0;
 
             for (const node of graphData.nodes) {
                 if (!node) continue;
-                if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+                if (normalizedTypeFilter && normalizedTypeFilter !== 'all' && node.type !== normalizedTypeFilter) continue;
                 if (!hasQuery) {
                     count += 1;
                     continue;
@@ -762,7 +763,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             applySearchHighlight();
             if (searchCount) {
                 const total = graphData?.nodes?.length || 0;
-                const matched = getSearchMatchCount(query, typeFilter === 'all' ? undefined : [typeFilter]);
+                const matched = getSearchMatchCount(query, typeFilter);
                 searchCount.textContent = matched + ' / ' + total;
                 searchCount.style.display = '';
             }
@@ -1133,7 +1134,10 @@ function getViewModeScript(): string {
                 offsetY = typeof graphState.offsetY === 'number' ? graphState.offsetY : offsetY;
                 updateTransform();
                 if (graphState.selectedNodeId) {
-                    const selectedNode = document.querySelector('.node[data-id="' + graphState.selectedNodeId.replace(/"/g, '\\"') + '"]');
+                    const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                        ? CSS.escape(graphState.selectedNodeId)
+                        : graphState.selectedNodeId.replace(/"/g, '\\"');
+                    const selectedNode = document.querySelector('.node[data-id="' + escapedNodeId + '"]');
                     if (selectedNode) {
                         updateSelectionPanel(selectedNode);
                     }

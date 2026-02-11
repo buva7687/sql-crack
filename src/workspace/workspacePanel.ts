@@ -2382,9 +2382,11 @@ ${nodesHtml}
      */
     private getLoadingHtml(): string {
         const styles = getStateStyles(this._isDarkTheme);
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2406,6 +2408,7 @@ ${nodesHtml}
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2419,11 +2422,16 @@ ${nodesHtml}
         <div class="file-count">${fileCount}</div>
         <div class="title">SQL Files Found</div>
         <div class="subtitle">Large workspace detected. This may take a moment to analyze all dependencies.</div>
-        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+        <button class="btn" id="manual-refresh-btn">
             Start Analysis
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('manual-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
@@ -2451,11 +2459,16 @@ ${nodesHtml}
         </div>
         <div class="title">No SQL Files Found</div>
         <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
-        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+        <button class="btn" id="empty-refresh-btn">
             Refresh
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('empty-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
@@ -2470,9 +2483,13 @@ ${nodesHtml}
         const statusLine = indexStatus.level === 'missing'
             ? 'Index: not yet built'
             : indexStatus.title;
+        const safeMessage = this.escapeHtml(message);
+        const safeDetail = detail ? this.escapeHtml(detail) : '';
+        const safeStatusLine = this.escapeHtml(statusLine);
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2485,14 +2502,19 @@ ${nodesHtml}
             </svg>
         </div>
         <div class="title error">Something went wrong</div>
-        <div class="message">${message}</div>
-        ${detail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${detail}</div>` : ''}
-        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${statusLine}</div>
-        <button class="btn secondary" onclick="vscode.postMessage({command:'refresh'})">
+        <div class="message">${safeMessage}</div>
+        ${safeDetail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${safeDetail}</div>` : ''}
+        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${safeStatusLine}</div>
+        <button class="btn secondary" id="error-refresh-btn">
             Refresh Index
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('error-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
