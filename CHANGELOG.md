@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-11
+
+### Added
+
+- **Marketplace keywords**: Added SQL/discovery keywords in `package.json` to improve extension discoverability in VS Code Marketplace search.
+
+### Changed
+
+- **Walkthrough metadata cleanup**: Removed empty walkthrough `media.markdown` placeholders from onboarding steps to avoid blank media blocks.
+- **New default preferences**: Default settings now open SQL Flow in `tab` view, use `lines` grid style, and use `light` theme preference.
+
+### Fixed
+
+- **Workspace watcher exclusion parity**: Incremental workspace watcher now skips `node_modules`, `.git`, `dist`, and `build`, matching scanner exclusion behavior.
+- **Renderer null-guard hardening**: Replaced unsafe cloud map non-null assertions with safe state/offset initialization helpers.
+- **Renderer lifecycle cleanup**: Cleanup now disconnects renderer resize observers/timers and removes injected style elements.
+- **SVG accessibility metadata**: Main query canvas SVG now has `role="img"` and an `aria-label`.
+- **Wheel event listener options**: Workspace graph and lineage wheel handlers now use `{ passive: false }` where `preventDefault()` is required.
+
+### Tests
+
+- Added regression tests for watcher exclude behavior, renderer polish guards, canvas accessibility metadata, wheel listener passive options, and package metadata checks.
+
 ## [0.3.0] - 2026-02-10
 
 ### Added

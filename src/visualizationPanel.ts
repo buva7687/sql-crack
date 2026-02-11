@@ -53,7 +53,7 @@ export class VisualizationPanel {
 
     private static getViewColumn(): vscode.ViewColumn {
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const location = config.get<ViewLocation>('viewLocation') || 'beside';
+        const location = config.get<ViewLocation>('viewLocation') || 'tab';
 
         switch (location) {
             case 'tab':
@@ -233,7 +233,7 @@ export class VisualizationPanel {
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');
-            const location = config.get<ViewLocation>('viewLocation') || 'beside';
+            const location = config.get<ViewLocation>('viewLocation') || 'tab';
             VisualizationPanel.currentPanel._postMessage({
                 command: 'viewLocationOptions',
                 currentLocation: location,
@@ -463,12 +463,12 @@ export class VisualizationPanel {
         const vscodeTheme = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
 
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const viewLocation = config.get<ViewLocation>('viewLocation') || 'beside';
+        const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
         const flowDirection = config.get<string>('flowDirection') || 'top-down';
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
-        const gridStyle = config.get<string>('gridStyle') || 'dots';
+        const gridStyle = config.get<string>('gridStyle') || 'lines';
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
         const showMinimap = config.get<string>('showMinimap') || 'auto';
         const colorblindMode = config.get<string>('colorblindMode') || 'off';

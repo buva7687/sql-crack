@@ -233,7 +233,7 @@ function init(): void {
         currentDialect,
         isPinnedView: window.isPinnedView || false,
         pinId: window.pinId || null,
-        viewLocation: window.viewLocation || 'beside',
+        viewLocation: window.viewLocation || 'tab',
         persistedPinnedTabs: window.persistedPinnedTabs || [],
         isFirstRun: window.isFirstRun || false
     });

@@ -383,7 +383,7 @@ export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
     const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
-    const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+    const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
@@ -8121,7 +8121,7 @@ function applyTheme(dark: boolean): void {
 
     // Apply canvas theme using extracted module
     if (svg && backgroundRect) {
-        const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+        const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
         updateCanvasTheme(svg, backgroundRect, dark, gridStyle);
     }
 

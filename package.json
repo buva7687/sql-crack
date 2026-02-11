@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -136,14 +136,14 @@
         },
         "sqlCrack.viewLocation": {
           "type": "string",
-          "default": "beside",
+          "default": "tab",
           "enum": [
             "beside",
             "tab"
           ],
           "enumDescriptions": [
             "Opens beside the SQL file (like Markdown preview)",
-            "Opens as a new tab in the editor area"
+            "Opens as a new tab in the editor area (default)"
           ],
           "description": "Where to display the SQL visualization panel"
         },
@@ -234,15 +234,15 @@
         },
         "sqlCrack.gridStyle": {
           "type": "string",
-          "default": "dots",
+          "default": "lines",
           "enum": [
             "dots",
             "lines",
             "none"
           ],
           "enumDescriptions": [
-            "Dot grid pattern (default, subtle dots at intersections)",
-            "Line grid pattern (subtle grid lines)",
+            "Dot grid pattern (subtle dots at intersections)",
+            "Line grid pattern (default, subtle grid lines)",
             "No grid pattern (plain background)"
           ],
           "description": "Background grid pattern style for visualizations"
@@ -294,16 +294,16 @@
         },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
-          "default": "auto",
+          "default": "light",
           "enum": [
             "auto",
             "dark",
             "light"
           ],
           "enumDescriptions": [
-            "Automatically match VS Code theme (default)",
+            "Automatically match VS Code theme",
             "Always use dark theme",
-            "Always use light theme"
+            "Always use light theme (default)"
           ],
           "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },

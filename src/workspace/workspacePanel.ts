@@ -2502,7 +2502,7 @@ ${nodesHtml}
      */
     private getThemeFromSettings(): boolean {
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const themePreference = config.get<string>('advanced.defaultTheme', 'auto');
+        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
 
         if (themePreference === 'light') {
             return false;
