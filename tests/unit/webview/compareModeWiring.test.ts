@@ -12,6 +12,7 @@ describe('compare mode wiring', () => {
         expect(toolbarSource).toContain('getCompareBaselineLabel: () => string | null;');
         expect(toolbarSource).toContain("compareBtn.id = 'compare-mode-btn';");
         expect(toolbarSource).toContain("document.addEventListener('compare-mode-state', compareStateHandler, listenerOptions);");
+        expect(toolbarSource).toContain("compareBtn.style.color = active ? (dark ? '#a5b4fc' : '#4f46e5') : (dark ? '#f1f5f9' : '#1e293b');");
     });
 
     it('toggles compare mode from webview bootstrap with parsed baseline query', () => {
