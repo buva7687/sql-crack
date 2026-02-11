@@ -71,6 +71,8 @@ export function initCanvas(
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.setAttribute('tabindex', '-1');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'SQL query flow diagram');
     svg.style.background = isDark ? CANVAS.dark.background : CANVAS.light.background;
     svg.style.cursor = 'grab';
     svg.style.position = 'absolute';

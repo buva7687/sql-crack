@@ -522,6 +522,14 @@ export class IndexManager {
     }
 
     /**
+     * Apply the same ignore policy used by workspace scanning so watcher updates
+     * do not re-index generated/dependency folders.
+     */
+    private shouldIndexFile(uri: vscode.Uri): boolean {
+        return !/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath);
+    }
+
+    /**
      * Setup file watcher for incremental updates
      */
     private setupFileWatcher(): void {
@@ -529,6 +537,9 @@ export class IndexManager {
 
         // Debounced update function
         const queueUpdate = (uri: vscode.Uri) => {
+            if (!this.shouldIndexFile(uri)) {
+                return;
+            }
             this.updateQueue.add(uri.fsPath);
             if (this.updateTimer) {
                 clearTimeout(this.updateTimer);
@@ -540,7 +551,11 @@ export class IndexManager {
 
         this.fileWatcher.onDidChange(uri => queueUpdate(uri));
         this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
-        this.fileWatcher.onDidDelete(uri => this.removeFile(uri));
+        this.fileWatcher.onDidDelete(uri => {
+            if (this.shouldIndexFile(uri)) {
+                void this.removeFile(uri);
+            }
+        });
 
         // Recreate watcher when settings change
         this._configDisposable = vscode.workspace.onDidChangeConfiguration(e => {
@@ -551,7 +566,11 @@ export class IndexManager {
                 this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
                 this.fileWatcher.onDidChange(uri => queueUpdate(uri));
                 this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
-                this.fileWatcher.onDidDelete(uri => this.removeFile(uri));
+                this.fileWatcher.onDidDelete(uri => {
+                    if (this.shouldIndexFile(uri)) {
+                        void this.removeFile(uri);
+                    }
+                });
             }
         });
     }
@@ -571,6 +590,9 @@ export class IndexManager {
 
         for (const filePath of files) {
             const uri = vscode.Uri.file(filePath);
+            if (!this.shouldIndexFile(uri)) {
+                continue;
+            }
             try {
                 // Guard: skip if file was deleted while queued
                 try {

@@ -154,6 +154,8 @@ let loadingOverlay: HTMLDivElement | null = null;
 let panelResizerCleanup: Array<() => void> = [];
 let legendResizeObserver: ResizeObserver | null = null;
 let legendResizeHandler: (() => void) | null = null;
+let rendererResizeObserver: ResizeObserver | null = null;
+let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
@@ -201,6 +203,43 @@ let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; a
 let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
+let spinnerStyleElement: HTMLStyleElement | null = null;
+let reducedMotionStyleElement: HTMLStyleElement | null = null;
+
+function getDefaultCloudOffset(cloudWidth: number, cloudHeight: number, nodeHeight: number, cloudGap: number): { offsetX: number; offsetY: number } {
+    return {
+        offsetX: -cloudWidth - cloudGap,
+        offsetY: -(cloudHeight - nodeHeight) / 2,
+    };
+}
+
+function ensureCloudOffset(nodeId: string, cloudWidth: number, cloudHeight: number, nodeHeight: number, cloudGap: number): { offsetX: number; offsetY: number } {
+    const existing = cloudOffsets.get(nodeId);
+    if (existing) {
+        return existing;
+    }
+    const fallback = getDefaultCloudOffset(cloudWidth, cloudHeight, nodeHeight, cloudGap);
+    cloudOffsets.set(nodeId, fallback);
+    return fallback;
+}
+
+function ensureCloudViewState(nodeId: string): CloudViewState {
+    const existing = cloudViewStates.get(nodeId);
+    if (existing) {
+        return existing;
+    }
+
+    const initialState: CloudViewState = {
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        isDragging: false,
+        dragStartX: 0,
+        dragStartY: 0
+    };
+    cloudViewStates.set(nodeId, initialState);
+    return initialState;
+}
 
 function ensureNodeFocusLiveRegion(container: HTMLElement): void {
     if (nodeFocusLiveRegion?.isConnected) {
@@ -686,13 +725,14 @@ export function initRenderer(container: HTMLElement): void {
     `;
 
     // Add spinner animation
-    const spinnerStyle = document.createElement('style');
-    spinnerStyle.textContent = `
+    spinnerStyleElement?.remove();
+    spinnerStyleElement = document.createElement('style');
+    spinnerStyleElement.textContent = `
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
     `;
-    document.head.appendChild(spinnerStyle);
+    document.head.appendChild(spinnerStyleElement);
     container.appendChild(loadingOverlay);
 
     // Create command bar (Ctrl+Shift+P palette)
@@ -746,8 +786,9 @@ export function initRenderer(container: HTMLElement): void {
     containerElement = container;
 
     // Accessibility: reduced motion and high contrast support
-    const reducedMotionStyle = document.createElement('style');
-    reducedMotionStyle.textContent = `
+    reducedMotionStyleElement?.remove();
+    reducedMotionStyleElement = document.createElement('style');
+    reducedMotionStyleElement.textContent = `
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -782,7 +823,7 @@ export function initRenderer(container: HTMLElement): void {
             }
         }
     `;
-    document.head.appendChild(reducedMotionStyle);
+    document.head.appendChild(reducedMotionStyleElement);
 
     // Apply initial theme
     applyTheme(state.isDarkTheme);
@@ -791,19 +832,23 @@ export function initRenderer(container: HTMLElement): void {
     setupEventListeners();
 
     // Setup ResizeObserver for auto-resize when panel changes
-    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
+    rendererResizeObserver?.disconnect();
+    if (resizeObserverDebounceTimer) {
+        clearTimeout(resizeObserverDebounceTimer);
+        resizeObserverDebounceTimer = null;
+    }
+    rendererResizeObserver = new ResizeObserver(() => {
         // Debounce resize events
-        if (resizeTimeout) {
-            clearTimeout(resizeTimeout);
+        if (resizeObserverDebounceTimer) {
+            clearTimeout(resizeObserverDebounceTimer);
         }
-        resizeTimeout = setTimeout(() => {
+        resizeObserverDebounceTimer = setTimeout(() => {
             if (currentNodes.length > 0) {
                 fitView();
             }
         }, 150);
     });
-    resizeObserver.observe(container);
+    rendererResizeObserver.observe(container);
 }
 
 function setupEventListeners(): void {
@@ -1221,6 +1266,16 @@ export function cleanupRenderer(): void {
     }
     legendResizeObserver?.disconnect();
     legendResizeObserver = null;
+    rendererResizeObserver?.disconnect();
+    rendererResizeObserver = null;
+    if (resizeObserverDebounceTimer) {
+        clearTimeout(resizeObserverDebounceTimer);
+        resizeObserverDebounceTimer = null;
+    }
+    spinnerStyleElement?.remove();
+    spinnerStyleElement = null;
+    reducedMotionStyleElement?.remove();
+    reducedMotionStyleElement = null;
     layoutHistory.clear();
     nodeFocusLiveRegion?.remove();
     nodeFocusLiveRegion = null;
@@ -1507,10 +1562,7 @@ function updateCloudAndArrow(node: FlowNode): void {
 
     // Get custom offset or use default (to the left)
     // If no offset exists, initialize it with default position
-    if (!cloudOffsets.has(node.id)) {
-        cloudOffsets.set(node.id, { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 });
-    }
-    const offset = cloudOffsets.get(node.id)!;
+    const offset = ensureCloudOffset(node.id, cloudWidth, cloudHeight, nodeHeight, cloudGap);
     const cloudX = node.x + offset.offsetX;
     const cloudY = node.y + offset.offsetY;
 
@@ -2640,18 +2692,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         nestedSvg.setAttribute('overflow', 'hidden');
         nestedSvg.style.cursor = 'grab';
 
-        // Initialize cloud view state if not exists
-        if (!cloudViewStates.has(node.id)) {
-            cloudViewStates.set(node.id, {
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0,
-                isDragging: false,
-                dragStartX: 0,
-                dragStartY: 0
-            });
-        }
-        const cloudState = cloudViewStates.get(node.id)!;
+        const cloudState = ensureCloudViewState(node.id);
 
         // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2675,7 +2716,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         // Pan/zoom handlers for nested SVG
         nestedSvg.addEventListener('mousedown', (e) => {
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             cloudState.isDragging = true;
             cloudState.dragStartX = e.clientX - cloudState.offsetX;
             cloudState.dragStartY = e.clientY - cloudState.offsetY;
@@ -2711,7 +2752,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         nestedSvg.addEventListener('wheel', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             const delta = e.deltaY > 0 ? 0.9 : 1.1;
             const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
 
@@ -2930,18 +2971,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         nestedSvg.setAttribute('overflow', 'hidden');
         nestedSvg.style.cursor = 'grab';
 
-        // Initialize cloud view state if not exists
-        if (!cloudViewStates.has(node.id)) {
-            cloudViewStates.set(node.id, {
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0,
-                isDragging: false,
-                dragStartX: 0,
-                dragStartY: 0
-            });
-        }
-        const cloudState = cloudViewStates.get(node.id)!;
+        const cloudState = ensureCloudViewState(node.id);
 
         // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2965,7 +2995,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         // Pan/zoom handlers for nested SVG
         nestedSvg.addEventListener('mousedown', (e) => {
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             cloudState.isDragging = true;
             cloudState.dragStartX = e.clientX - cloudState.offsetX;
             cloudState.dragStartY = e.clientY - cloudState.offsetY;
@@ -3001,7 +3031,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         nestedSvg.addEventListener('wheel', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             const delta = e.deltaY > 0 ? 0.9 : 1.1;
             const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
 

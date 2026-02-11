@@ -838,6 +838,29 @@ describe('IndexManager', () => {
 
             expect(indexManager.findDefinition('delete_table')).toBeUndefined();
         });
+
+        it('should ignore updates from excluded directories', async () => {
+            const watcher = __getFileSystemWatcher();
+
+            watcher?.__triggerChange(vscode.Uri.file('/workspace/node_modules/ignored.sql'));
+            watcher?.__triggerCreate(vscode.Uri.file('/workspace/dist/generated.sql'));
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+
+            expect(mockScanner.analyzeFile).not.toHaveBeenCalled();
+        });
+
+        it('should ignore deletes from excluded directories', async () => {
+            const watcher = __getFileSystemWatcher();
+            const removeSpy = jest.spyOn(indexManager, 'removeFile');
+
+            watcher?.__triggerDelete(vscode.Uri.file('/workspace/.git/ignored.sql'));
+            watcher?.__triggerDelete(vscode.Uri.file('/workspace/build/output.sql'));
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            expect(removeSpy).not.toHaveBeenCalled();
+        });
     });
 
     // =========================================================================

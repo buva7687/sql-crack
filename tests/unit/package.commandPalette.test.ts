@@ -24,4 +24,16 @@ describe('package command palette entries', () => {
             ])
         );
     });
+
+    it('includes marketplace keywords for SQL discovery', () => {
+        const keywords: string[] = packageJson?.keywords ?? [];
+        expect(keywords).toEqual(expect.arrayContaining(['sql', 'visualization', 'lineage', 'database']));
+    });
+
+    it('does not keep empty walkthrough media markdown placeholders', () => {
+        const walkthroughSteps = packageJson?.contributes?.walkthroughs?.[0]?.steps ?? [];
+        walkthroughSteps.forEach((step: { media?: { markdown?: string } }) => {
+            expect(step?.media?.markdown).not.toBe('');
+        });
+    });
 });

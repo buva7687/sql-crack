@@ -202,4 +202,17 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('lineageDepth = normalizeLineageDepth(message.depth, lineageDepth);');
         expect(script).toContain('command: \'getLineageGraph\'');
     });
+
+    it('registers wheel handlers as non-passive where preventDefault is used', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        const passiveWheelListeners = script.match(/addEventListener\('wheel'[\s\S]*?\{\s*passive:\s*false\s*}\);/g) || [];
+        expect(passiveWheelListeners.length).toBeGreaterThanOrEqual(2);
+    });
 });

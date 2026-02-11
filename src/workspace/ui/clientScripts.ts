@@ -671,7 +671,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
                 scale = Math.max(0.2, Math.min(3, scale * delta));
                 updateTransform();
-            });
+            }, { passive: false });
         }
 
         // ========== Zoom Toolbar Events ==========
@@ -2956,7 +2956,7 @@ function getLineageGraphScript(): string {
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
                 lineageScale = Math.max(0.2, Math.min(3, lineageScale * delta));
                 updateLineageTransform();
-            });
+            }, { passive: false });
 
             svg.addEventListener('mousedown', (e) => {
                 if (e.target === svg || e.target.closest('.lineage-edge')) {

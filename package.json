@@ -17,6 +17,15 @@
     "Visualization",
     "Other"
   ],
+  "keywords": [
+    "sql",
+    "visualization",
+    "diagram",
+    "flow",
+    "lineage",
+    "query",
+    "database"
+  ],
   "activationEvents": [
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
@@ -374,38 +383,22 @@
           {
             "id": "openSqlFile",
             "title": "Open a SQL file",
-            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
-            "media": {
-              "altText": "Open a SQL file in the editor",
-              "markdown": ""
-            }
+            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)"
           },
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
-            "media": {
-              "altText": "SQL flow visualization panel",
-              "markdown": ""
-            }
+            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)"
           },
           {
             "id": "exploreWorkspace",
             "title": "Explore workspace dependencies",
-            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
-            "media": {
-              "altText": "Workspace dependency graph",
-              "markdown": ""
-            }
+            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)"
           },
           {
             "id": "columnLineage",
             "title": "Try column lineage",
-            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
-            "media": {
-              "altText": "Column lineage tracing",
-              "markdown": ""
-            }
+            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query."
           }
         ]
       }
