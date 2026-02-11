@@ -1471,6 +1471,40 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     }
 }
 
+function rankDialectScores(scores: Partial<Record<SqlDialect, number>>): Array<{ dialect: SqlDialect; score: number }> {
+    return Object.entries(scores)
+        .filter((entry): entry is [SqlDialect, number] => typeof entry[1] === 'number' && entry[1] > 0)
+        .map(([dialect, score]) => ({ dialect, score }))
+        .sort((a, b) => b.score - a.score);
+}
+
+function selectRetryDialectOnParseFailure(
+    sql: string,
+    currentDialect: SqlDialect
+): { retryDialect: SqlDialect | null; detection: DialectDetectionResult } {
+    const detection = detectDialect(sql);
+
+    if (detection.dialect && detection.dialect !== currentDialect) {
+        return { retryDialect: detection.dialect, detection };
+    }
+
+    // For low-confidence detections, allow a retry when there is a clear top score.
+    // This helps recover from common dialect mismatches without forcing auto-switch in UI.
+    const ranked = rankDialectScores(detection.scores);
+    const top = ranked[0];
+    const secondScore = ranked[1]?.score ?? 0;
+
+    if (!top || top.dialect === currentDialect) {
+        return { retryDialect: null, detection };
+    }
+
+    if (top.score >= 2 && top.score > secondScore) {
+        return { retryDialect: top.dialect, detection };
+    }
+
+    return { retryDialect: null, detection };
+}
+
 /**
  * Regex-based fallback parser for when AST parsing fails.
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
@@ -1764,17 +1798,44 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
     try {
         let ast: any;
+        let effectiveDialect = dialect;
+
+        const parseWithDialect = (targetDialect: SqlDialect): any => {
+            try {
+                return parser.astify(sql, { database: targetDialect });
+            } catch (parseError) {
+                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, targetDialect);
+                if (!fallbackAst) {
+                    throw parseError;
+                }
+                return fallbackAst;
+            }
+        };
 
         // Timeout protection: measure parse duration and warn/fallback if too slow
         const parseStartTime = Date.now();
         try {
-            ast = parser.astify(sql, { database: dialect });
-        } catch (parseError) {
-            const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, dialect);
-            if (!fallbackAst) {
-                throw parseError;
+            ast = parseWithDialect(dialect);
+        } catch (primaryParseError) {
+            const { retryDialect } = selectRetryDialectOnParseFailure(sql, dialect);
+            if (!retryDialect) {
+                throw primaryParseError;
             }
-            ast = fallbackAst;
+
+            try {
+                ast = parseWithDialect(retryDialect);
+                effectiveDialect = retryDialect;
+                ctx.dialect = retryDialect;
+                ctx.hints.push({
+                    type: 'info',
+                    message: `Auto-retried parse with ${retryDialect} dialect after ${dialect} parse failure`,
+                    suggestion: 'If this dialect is expected, switch the parser dialect in the toolbar for consistent parsing.',
+                    category: 'best-practice',
+                    severity: 'low',
+                });
+            } catch {
+                throw primaryParseError;
+            }
         }
 
         const parseDurationMs = Date.now() - parseStartTime;
@@ -1817,7 +1878,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         generateHints(statements[0]);
 
         // Detect dialect-specific syntax patterns
-        detectDialectSpecificSyntax(sql, dialect);
+        detectDialectSpecificSyntax(sql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
         detectAdvancedIssues(nodes, edges, sql);
@@ -5150,6 +5211,11 @@ function detectDialectSyntaxPatterns(sql: string): {
     hasSnowflakePathOperator: boolean;
     hasSnowflakeNamedArgs: boolean;
     hasFlatten: boolean;
+    hasThreePartNames: boolean;
+    hasQualify: boolean;
+    hasIlike: boolean;
+    hasCreateOrReplaceTable: boolean;
+    hasMergeInto: boolean;
     hasBigQueryStruct: boolean;
     hasBigQueryUnnest: boolean;
     hasBigQueryArrayType: boolean;
@@ -5168,6 +5234,11 @@ function detectDialectSyntaxPatterns(sql: string): {
         hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
         hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
         hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
+        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(sql),
+        hasQualify: /\bQUALIFY\b/i.test(sql),
+        hasIlike: /\bILIKE\b/i.test(sql),
+        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(sql),
+        hasMergeInto: /\bMERGE\s+INTO\b/i.test(sql),
         hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
         hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
         hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
@@ -5204,6 +5275,11 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasSnowflakePathOperator) { addScore('Snowflake'); }
     if (syntax.hasSnowflakeNamedArgs) { addScore('Snowflake'); }
     if (syntax.hasFlatten) { addScore('Snowflake'); }
+    if (syntax.hasCreateOrReplaceTable) { addScore('Snowflake', 2); }
+    if (syntax.hasQualify) { addScore('Snowflake', 2); }
+    if (syntax.hasMergeInto) { addScore('Snowflake'); }
+    if (syntax.hasThreePartNames) { addScore('Snowflake', 3); }
+    if (syntax.hasIlike) { addScore('Snowflake'); }
 
     // BigQuery (UNNEST alone is not enough to disambiguate)
     if (syntax.hasBigQueryStruct) { addScore('BigQuery'); }
@@ -5211,11 +5287,13 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasBigQueryUnnest && (syntax.hasBigQueryStruct || syntax.hasBigQueryArrayType)) {
         addScore('BigQuery');
     }
+    if (syntax.hasQualify) { addScore('BigQuery'); }
 
     // PostgreSQL
     if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+    if (syntax.hasIlike) { addScore('PostgreSQL'); }
 
     // MySQL
     if (syntax.hasMysqlBackticks) { addScore('MySQL'); }
@@ -5226,12 +5304,14 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasTSqlApply) { addScore('TransactSQL'); }
     if (syntax.hasTSqlTop) { addScore('TransactSQL'); }
     if (syntax.hasTSqlPivot) { addScore('TransactSQL'); }
+    if (syntax.hasThreePartNames) { addScore('TransactSQL'); }
+    if (syntax.hasMergeInto) { addScore('TransactSQL'); }
 
-    const candidateDialects: SqlDialect[] = ['Snowflake', 'BigQuery', 'PostgreSQL', 'MySQL', 'TransactSQL'];
-    const matchedDialects = candidateDialects
-        .map(dialect => ({ dialect, score: scores[dialect] || 0 }))
-        .filter(entry => entry.score > 0)
-        .sort((a, b) => b.score - a.score);
+    // Redshift
+    if (syntax.hasThreePartNames) { addScore('Redshift'); }
+    if (syntax.hasIlike) { addScore('Redshift'); }
+
+    const matchedDialects = rankDialectScores(scores);
 
     if (matchedDialects.length === 0) {
         return {
@@ -5242,10 +5322,10 @@ export function detectDialect(sql: string): DialectDetectionResult {
     }
 
     const topMatch = matchedDialects[0];
-    const allOtherScoresZero = candidateDialects
-        .filter(dialect => dialect !== topMatch.dialect)
-        .every(dialect => (scores[dialect] || 0) === 0);
-    const isHighConfidence = matchedDialects.length === 1 || (topMatch.score >= 2 && allOtherScoresZero);
+    const secondMatchScore = matchedDialects[1]?.score ?? 0;
+    const isHighConfidence =
+        matchedDialects.length === 1 ||
+        (topMatch.score >= 3 && topMatch.score >= secondMatchScore + 2);
 
     if (!isHighConfidence) {
         return {

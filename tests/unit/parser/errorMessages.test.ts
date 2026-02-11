@@ -114,20 +114,19 @@ describe('Item #2: Better Error Messages for Parse Failures', () => {
     });
 
     describe('PostgreSQL Syntax Detection', () => {
-        it('should detect PostgreSQL INTERVAL syntax', () => {
+        it('should recover via retry for PostgreSQL INTERVAL syntax on MySQL', () => {
             const sql = `
                 SELECT * FROM events
                 WHERE created_at > NOW() - INTERVAL '1 day'
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            // Fallback parser produces partial result; error info is in hints
-            expect(result.partial).toBe(true);
-            const errorHint = result.hints.find((h: any) => h.type === 'error');
-            expect(errorHint).toBeDefined();
-            // Dialect-specific hints should suggest PostgreSQL
-            const pgHint = result.hints.find((h: any) => h.message?.toLowerCase().includes('postgresql'));
-            expect(pgHint).toBeDefined();
+            expect(result.error).toBeUndefined();
+            expect(result.partial).not.toBe(true);
+            const retryHint = result.hints.find((h: any) =>
+                h.message?.includes('Auto-retried parse with PostgreSQL')
+            );
+            expect(retryHint).toBeDefined();
         });
 
         it('should parse PostgreSQL syntax with PostgreSQL dialect', () => {

@@ -44,4 +44,41 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
         expect(result.scores.BigQuery).toBeGreaterThanOrEqual(2);
     });
+
+    it('detects three-part names as a Snowflake-leaning signal', () => {
+        const result = detectDialect('SELECT * FROM analytics.sales.orders');
+        expect(result.dialect).toBe('Snowflake');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Snowflake).toBeGreaterThan((result.scores.TransactSQL || 0));
+        expect(result.scores.Redshift).toBeGreaterThan(0);
+    });
+
+    it('treats QUALIFY as Snowflake/BigQuery signal with low confidence when isolated', () => {
+        const result = detectDialect('SELECT * FROM orders QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1');
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('low');
+        expect(result.scores.Snowflake).toBeGreaterThan(0);
+        expect(result.scores.BigQuery).toBeGreaterThan(0);
+    });
+
+    it('treats ILIKE as a shared PostgreSQL/Snowflake/Redshift signal', () => {
+        const result = detectDialect("SELECT * FROM users WHERE email ILIKE '%@example.com'");
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('low');
+        expect(result.scores.PostgreSQL).toBeGreaterThan(0);
+        expect(result.scores.Snowflake).toBeGreaterThan(0);
+        expect(result.scores.Redshift).toBeGreaterThan(0);
+    });
+
+    it('detects combined Snowflake signals with high confidence', () => {
+        const result = detectDialect(`
+            CREATE OR REPLACE TABLE analytics.public.top_orders AS
+            SELECT *
+            FROM analytics.public.orders
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1
+        `);
+        expect(result.dialect).toBe('Snowflake');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Snowflake).toBeGreaterThanOrEqual(5);
+    });
 });
