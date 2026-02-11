@@ -4210,83 +4210,174 @@ function extractAggregateFunctionDetails(columns: any): Array<{
     const aggregateFuncSet = new Set(getAggregateFunctions(ctx.dialect));
     const details: Array<{ name: string; expression: string; alias?: string; sourceColumn?: string; sourceTable?: string }> = [];
 
+    function getExpressionFunctionName(expr: any): string {
+        if (typeof expr?.name === 'string') {
+            return expr.name.toUpperCase();
+        }
+        const nameParts = expr?.name?.name;
+        if (Array.isArray(nameParts) && nameParts.length > 0) {
+            return String(nameParts[0]?.value || '').toUpperCase();
+        }
+        return '';
+    }
+
+    function unwrapIdentifierValue(value: any): string | undefined {
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (!value || typeof value !== 'object') {
+            return undefined;
+        }
+        if (typeof value.value === 'string') {
+            return value.value;
+        }
+        if (typeof value.expr?.value === 'string') {
+            return value.expr.value;
+        }
+        if (typeof value.expr?.expr?.value === 'string') {
+            return value.expr.expr.value;
+        }
+        if (Array.isArray(value.name) && value.name.length > 0) {
+            const namePart = value.name[0];
+            if (typeof namePart?.value === 'string') {
+                return namePart.value;
+            }
+        }
+        return undefined;
+    }
+
+    function normalizeColumnRefName(columnRef: any): string {
+        const normalized = unwrapIdentifierValue(columnRef?.column);
+        if (normalized) {
+            return normalized;
+        }
+        if (typeof columnRef?.column === 'string') {
+            return columnRef.column;
+        }
+        return '?';
+    }
+
+    function formatAggregateArg(arg: any): string {
+        if (!arg || typeof arg !== 'object') {
+            return arg === undefined ? '?' : String(arg);
+        }
+
+        if (arg.type === 'star') {
+            return '*';
+        }
+        if (arg.type === 'column_ref') {
+            return normalizeColumnRefName(arg);
+        }
+        if (arg.type === 'expr_list' && Array.isArray(arg.value)) {
+            return arg.value.map(formatAggregateArg).join(', ');
+        }
+        if (arg.type === 'number') {
+            return String(arg.value ?? '?');
+        }
+        if (arg.type && String(arg.type).includes('string')) {
+            return `'${String(arg.value ?? '')}'`;
+        }
+        if (arg.column) {
+            return String(arg.column);
+        }
+        if (arg.expr) {
+            return formatAggregateArg(arg.expr);
+        }
+        return '?';
+    }
+
     function extractAggregatesFromExpr(expr: any): void {
-        if (!expr) {return;}
+        if (!expr || typeof expr !== 'object') {
+            return;
+        }
+
+        if (Array.isArray(expr)) {
+            for (const item of expr) {
+                extractAggregatesFromExpr(item);
+            }
+            return;
+        }
 
         // Check if this is an aggregate function (dialect-aware)
-        const exprFuncName = String(expr.name || '').toUpperCase();
-        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+        const exprType = typeof expr.type === 'string' ? expr.type.toLowerCase() : '';
+        const exprFuncName = getExpressionFunctionName(expr);
+        if (exprType === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
             const funcName = exprFuncName || 'AGG';
+            const argsContainer = expr.args;
+            const argNode = argsContainer?.value ?? argsContainer?.expr ?? argsContainer;
+            const argList = Array.isArray(argNode) ? argNode : (argNode ? [argNode] : []);
+            const hasDistinct = String(argsContainer?.distinct || '').toUpperCase() === 'DISTINCT';
 
-            // Extract arguments/expression and source column info
-            let expression = funcName + '()';
             let sourceColumn: string | undefined;
             let sourceTable: string | undefined;
-
-            if (expr.args) {
-                const args = expr.args.value || expr.args.expr || expr.args;
-                if (Array.isArray(args)) {
-                    const argStrs = args.map((arg: any) => {
-                        // Extract source column from first column reference
-                        if (arg.column && !sourceColumn) {
-                            sourceColumn = arg.column;
-                            sourceTable = arg.table;
-                        }
-                        if (arg.expr?.column && !sourceColumn) {
-                            sourceColumn = arg.expr.column;
-                            sourceTable = arg.expr.table;
-                        }
-                        if (arg.column) {return arg.column;}
-                        if (arg.value) {return String(arg.value);}
-                        if (arg.expr?.column) {return arg.expr.column;}
-                        return '?';
-                    });
-                    expression = funcName + '(' + argStrs.join(', ') + ')';
-                } else if (args.column) {
-                    sourceColumn = args.column;
-                    sourceTable = args.table;
-                    expression = funcName + '(' + args.column + ')';
-                } else if (args.type === 'column_ref') {
-                    sourceColumn = args.column;
-                    sourceTable = args.table;
-                    expression = funcName + '(' + args.column + ')';
+            const argStrs = argList.map((arg: any) => {
+                if (!sourceColumn && arg?.type === 'column_ref') {
+                    sourceColumn = normalizeColumnRefName(arg);
+                    sourceTable = arg.table;
+                } else if (!sourceColumn && arg?.expr?.type === 'column_ref') {
+                    sourceColumn = normalizeColumnRefName(arg.expr);
+                    sourceTable = arg.expr.table;
                 }
-            }
+                return formatAggregateArg(arg);
+            }).filter(Boolean);
+
+            const distinctPrefix = hasDistinct ? 'DISTINCT ' : '';
+            const expression = `${funcName}(${distinctPrefix}${argStrs.join(', ')})`;
 
             details.push({
                 name: funcName,
-                expression: expression,
+                expression,
                 alias: undefined,
                 sourceColumn,
                 sourceTable
             });
-            return;
         }
 
-        // Recursively check nested expressions
-        if (expr.args) {
-            const args = expr.args.value || expr.args;
-            if (Array.isArray(args)) {
-                args.forEach(extractAggregatesFromExpr);
-            } else {
-                extractAggregatesFromExpr(args);
-            }
+        // Recursively inspect all nested expression values so we catch
+        // aggregates inside CASE conditions and function arguments.
+        for (const value of Object.values(expr)) {
+            extractAggregatesFromExpr(value);
         }
-        if (expr.left) {extractAggregatesFromExpr(expr.left);}
-        if (expr.right) {extractAggregatesFromExpr(expr.right);}
     }
 
     for (const col of columns) {
-        if (col.expr) {
-            extractAggregatesFromExpr(col.expr);
-            // Store alias if present
-            if (col.as && details.length > 0) {
-                details[details.length - 1].alias = col.as;
-            }
+        if (!col?.expr) {
+            continue;
+        }
+
+        const startIndex = details.length;
+        extractAggregatesFromExpr(col.expr);
+        const addedCount = details.length - startIndex;
+        const topExprType = typeof col.expr?.type === 'string' ? col.expr.type.toLowerCase() : '';
+        const topExprName = getExpressionFunctionName(col.expr);
+        const isTopLevelAggregate =
+            topExprType === 'aggr_func' || (topExprName && aggregateFuncSet.has(topExprName));
+
+        // Only attach alias when the SELECT expression itself is an aggregate.
+        // Derived expressions (e.g., DATE_DIFF(MAX(...)), CASE WHEN SUM(...)...) should not
+        // re-label nested aggregate internals.
+        if (col.as && addedCount === 1 && isTopLevelAggregate) {
+            details[startIndex].alias = col.as;
         }
     }
 
-    return details;
+    // De-duplicate repeated aggregate expressions while keeping the first meaningful alias.
+    const deduped: Array<{ name: string; expression: string; alias?: string; sourceColumn?: string; sourceTable?: string }> = [];
+    const indexByKey = new Map<string, number>();
+    for (const detail of details) {
+        const key = `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex === undefined) {
+            indexByKey.set(key, deduped.length);
+            deduped.push(detail);
+            continue;
+        }
+        if (!deduped[existingIndex].alias && detail.alias) {
+            deduped[existingIndex].alias = detail.alias;
+        }
+    }
+
+    return deduped;
 }
 
 // Extract CASE statements from SELECT columns
