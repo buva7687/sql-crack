@@ -3,6 +3,7 @@
 
 import { NodeType, Severity } from '../types';
 import type { ColorblindMode } from '../../shared/theme';
+import { ICONS } from '../../shared/icons';
 
 // ============================================================
 // UI Colors - General interface elements
@@ -354,9 +355,9 @@ export const COLORBLIND_WARNING_COLORS: Record<Exclude<ColorblindMode, 'off'>, R
 };
 
 export const HINT_COLORS = {
-    error: { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', icon: '⚠' },
-    warning: { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', icon: '⚡' },
-    info: { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: 'ℹ' },
+    error: { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', icon: ICONS.warning },
+    warning: { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', icon: ICONS.bolt },
+    info: { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: ICONS.info },
 } as const;
 
 export const COMPLEXITY_COLORS: Record<string, string> = {

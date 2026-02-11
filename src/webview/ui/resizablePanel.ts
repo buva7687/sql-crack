@@ -1,4 +1,5 @@
 import { getComponentUiColors } from '../constants';
+import { Z_INDEX } from '../../shared/zIndex';
 
 interface ResizablePanelOptions {
     panel: HTMLDivElement;
@@ -41,6 +42,9 @@ export function attachResizablePanel({
     collapsedWidth = 24,
     isDarkTheme,
 }: ResizablePanelOptions): () => void {
+    const panelAbortController = new AbortController();
+    const listenerOptions: AddEventListenerOptions = { signal: panelAbortController.signal };
+
     const widthKey = `${WIDTH_PREFIX}${storageKey}`;
     const collapsedKey = `${COLLAPSED_PREFIX}${storageKey}`;
     const defaultWidth = Number.parseInt(panel.style.width || `${panel.offsetWidth || minWidth}`, 10) || minWidth;
@@ -58,7 +62,7 @@ export function attachResizablePanel({
         ${side === 'right' ? 'left: -6px;' : 'right: -6px;'}
         width: 12px;
         cursor: ew-resize;
-        z-index: 230;
+        z-index: ${Z_INDEX.panelTop};
         display: flex;
         align-items: center;
         justify-content: center;
@@ -162,20 +166,20 @@ export function attachResizablePanel({
         dragging = true;
         startX = event.clientX;
         startWidth = Number.parseInt(panel.style.width || `${panel.offsetWidth || minWidth}`, 10) || minWidth;
-    });
+    }, listenerOptions);
 
     handle.addEventListener('mouseenter', () => {
         handle.style.background = isDarkTheme() ? 'rgba(148, 163, 184, 0.14)' : 'rgba(15, 23, 42, 0.08)';
-    });
+    }, listenerOptions);
     handle.addEventListener('mouseleave', () => {
         handle.style.background = 'transparent';
-    });
+    }, listenerOptions);
 
     toggleBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
         applyCollapseState(!collapsed);
-    });
+    }, listenerOptions);
 
     const onResize = (): void => {
         if (collapsed) {
@@ -189,10 +193,10 @@ export function attachResizablePanel({
         applyTheme();
     };
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    document.addEventListener('theme-change', onThemeChange as EventListener);
-    window.addEventListener('resize', onResize);
+    document.addEventListener('mousemove', onMouseMove, listenerOptions);
+    document.addEventListener('mouseup', onMouseUp, listenerOptions);
+    document.addEventListener('theme-change', onThemeChange as EventListener, listenerOptions);
+    window.addEventListener('resize', onResize, listenerOptions);
 
     // Initialize persisted state
     setWidth(expandedWidth, false);
@@ -202,10 +206,7 @@ export function attachResizablePanel({
     applyTheme();
 
     return () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        document.removeEventListener('theme-change', onThemeChange as EventListener);
-        window.removeEventListener('resize', onResize);
+        panelAbortController.abort();
         handle.remove();
     };
 }

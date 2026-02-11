@@ -87,7 +87,7 @@ import {
 } from './clustering';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
-import { escapeRegex } from '../shared';
+import { escapeRegex, ICONS, Z_INDEX } from '../shared';
 import { getHintBadgeState, getTopHints, sortHintsByImpact } from './hintsHierarchy';
 import { getWarningIndicatorState } from './warningIndicator';
 import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
@@ -370,7 +370,7 @@ export function initRenderer(container: HTMLElement): void {
         transform: translate(calc(100% + 12px), -50%);
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        z-index: 200;
+        z-index: ${Z_INDEX.panelTop};
         box-shadow: ${UI_COLORS.shadowMedium};
     `;
     container.appendChild(detailsPanel);
@@ -390,7 +390,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
         color: ${UI_COLORS.textSubtle};
-        z-index: 150;
+        z-index: ${Z_INDEX.panel};
         display: none;
         max-width: 80%;
         overflow-x: auto;
@@ -406,7 +406,7 @@ export function initRenderer(container: HTMLElement): void {
         top: 62px;
         left: 16px;
         right: auto;
-        z-index: 140;
+        z-index: ${Z_INDEX.floatingPanel};
         display: none;
         align-items: center;
         justify-content: space-between;
@@ -419,7 +419,10 @@ export function initRenderer(container: HTMLElement): void {
         pointer-events: none;
     `;
     columnLineageBanner.innerHTML = `
-        <span style="pointer-events: none;">🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        <span style="pointer-events: none; display: inline-flex; align-items: center; gap: 6px;">
+            <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.link}</span>
+            <span>${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        </span>
         <button id="column-lineage-banner-close" style="
             border: none;
             background: transparent;
@@ -450,7 +453,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
     `;
     container.appendChild(statsPanel);
 
@@ -470,7 +473,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         max-height: 200px;
         overflow-y: auto;
         opacity: 0;
@@ -556,7 +559,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: ${MONO_FONT_STACK};
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 150;
+        z-index: ${Z_INDEX.panel};
         opacity: 0;
         visibility: hidden;
         transform: translateY(16px);
@@ -579,7 +582,7 @@ export function initRenderer(container: HTMLElement): void {
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         overflow: hidden;
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         display: none;
     `;
 
@@ -614,7 +617,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.15s ease;
@@ -635,7 +638,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 2000;
+        z-index: ${Z_INDEX.commandBar};
         display: none;
         min-width: 180px;
         box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
@@ -655,7 +658,7 @@ export function initRenderer(container: HTMLElement): void {
         display: none;
         align-items: center;
         justify-content: center;
-        z-index: 500;
+        z-index: ${Z_INDEX.panel};
         pointer-events: none;
     `;
     loadingOverlay.innerHTML = `
@@ -4137,7 +4140,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
         border-radius: 12px;
         padding: 16px 20px;
         max-width: 600px;
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         box-shadow: ${panelShadow};
         font-family: ${MONO_FONT_STACK};
     `;
@@ -4188,7 +4191,8 @@ function showSqlClausePanel(edge: FlowEdge): void {
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
             <div style="color: ${mutedText}; font-size: 11px; margin-top: 8px;">
-                📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
+                <span style="display: inline-flex; width: 12px; height: 12px; vertical-align: text-bottom;">${ICONS.pin}</span>
+                Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
     `;
@@ -4373,15 +4377,25 @@ function renderError(message: string): void {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('transform', 'translate(0, -20)');
 
-    // Error icon
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    icon.setAttribute('x', '50%');
-    icon.setAttribute('y', hasSuggestion ? '45%' : '48%');
-    icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('fill', STATUS_COLORS.error);
-    icon.setAttribute('font-size', '24');
-    icon.textContent = '⚠';
-    g.appendChild(icon);
+    // Error icon (shape-based so it renders consistently across editors)
+    const iconCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    iconCircle.setAttribute('cx', '50%');
+    iconCircle.setAttribute('cy', hasSuggestion ? '45%' : '48%');
+    iconCircle.setAttribute('r', '11');
+    iconCircle.setAttribute('fill', state.isDarkTheme ? 'rgba(239, 68, 68, 0.18)' : 'rgba(239, 68, 68, 0.12)');
+    iconCircle.setAttribute('stroke', STATUS_COLORS.error);
+    iconCircle.setAttribute('stroke-width', '1.5');
+    g.appendChild(iconCircle);
+
+    const iconMark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconMark.setAttribute('x', '50%');
+    iconMark.setAttribute('y', hasSuggestion ? '45.6%' : '48.6%');
+    iconMark.setAttribute('text-anchor', 'middle');
+    iconMark.setAttribute('fill', STATUS_COLORS.error);
+    iconMark.setAttribute('font-size', '15');
+    iconMark.setAttribute('font-weight', '700');
+    iconMark.textContent = '!';
+    g.appendChild(iconMark);
 
     // Main error message
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -4403,7 +4417,7 @@ function renderError(message: string): void {
         suggestion.setAttribute('fill', UI_COLORS.textMuted);
         suggestion.setAttribute('font-size', '12');
         suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        suggestion.textContent = `💡 ${parts[1]}`;
+        suggestion.textContent = `Tip: ${parts[1]}`;
         g.appendChild(suggestion);
 
         // Hint about dialect selector
@@ -5003,7 +5017,11 @@ function updateDetailsPanel(nodeId: string | null): void {
             font-size: 11px;
             font-weight: 600;
             cursor: pointer;
-        ">🔍 Trace Column Lineage</button>
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        "><span style="display: inline-flex; width: 12px; height: 12px;">${ICONS.search}</span><span>Trace Column Lineage</span></button>
     ` : '';
 
     detailsPanel.innerHTML = `
@@ -5576,7 +5594,10 @@ function updateHintsPanel(): void {
 
     hintsPanel.innerHTML = `
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: ${textColor};">⚡ Performance Hints</span>
+            <span style="font-weight: 600; color: ${textColor}; display: inline-flex; align-items: center; gap: 6px;">
+                <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
+                <span>Performance Hints</span>
+            </span>
             <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
         </div>
         <div class="hints-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
@@ -5596,7 +5617,7 @@ function updateHintsPanel(): void {
                         user-select: text;
                     ">
                         <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
-                            <span>${style.icon}</span>
+                            <span style="display: inline-flex; width: 12px; height: 12px;">${style.icon}</span>
                             <span>${escapeHtml(hint.message)}</span>
                             <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
@@ -6695,7 +6716,7 @@ function showClipboardNotification(type: 'success' | 'error', message: string): 
         border-radius: 8px;
         font-size: 14px;
         font-weight: 500;
-        z-index: 10000;
+        z-index: ${Z_INDEX.toast};
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         ${type === 'success'
             ? 'background: rgba(34, 197, 94, 0.95); color: white;'
@@ -6770,18 +6791,18 @@ function getNodeVisualIcon(node: FlowNode): string {
 
 function getWarningIcon(warningType: string): string {
     const icons: Record<string, string> = {
-        'unused': '⚠',
-        'dead-column': '⊗',
-        'expensive': '⚠',
-        'fan-out': '📊',
-        'repeated-scan': '🔄',
-        'complex': '🧮',
-        'filter-pushdown': '⬆',
-        'non-sargable': '🚫',
-        'join-order': '⇄',
-        'index-suggestion': '📇'
+        'unused': ICONS.warning,
+        'dead-column': ICONS.noEntry,
+        'expensive': ICONS.warning,
+        'fan-out': ICONS.chart,
+        'repeated-scan': ICONS.refresh,
+        'complex': ICONS.calculator,
+        'filter-pushdown': ICONS.bolt,
+        'non-sargable': ICONS.noEntry,
+        'join-order': ICONS.focusDirection,
+        'index-suggestion': ICONS.table
     };
-    return icons[warningType] || '⚠';
+    return icons[warningType] || ICONS.warning;
 }
 
 function getWarningColor(severity: string): string {
@@ -7775,7 +7796,7 @@ export function toggleFullscreen(enable?: boolean): void {
         rootElement.style.margin = '0';
         rootElement.style.padding = '0';
         rootElement.style.overflow = 'hidden';
-        rootElement.style.zIndex = '99999';
+        rootElement.style.zIndex = String(Z_INDEX.debugTop);
         // Don't change background - let it inherit or use existing
         
         if (svgElement) {
@@ -8171,7 +8192,8 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
             // Add line number reference
             content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                📍 ${sqlSnippet.lineLabel}
+                <span style="display: inline-flex; width: 10px; height: 10px; vertical-align: text-bottom;">${ICONS.pin}</span>
+                ${sqlSnippet.lineLabel}
             </div>`;
 
             if (sqlSnippet.truncated) {
@@ -8317,7 +8339,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     // Build menu items based on node type
     let menuItems = `
         <div class="ctx-menu-item" data-action="zoom" style="${menuItemStyle}">
-            <span style="width: 16px;">🔍</span>
+            <span style="width: 16px; display: inline-flex;">${ICONS.search}</span>
             <span>Zoom to node</span>
         </div>
         <div class="ctx-menu-item" data-action="focus-upstream" style="${menuItemStyle}">
@@ -8340,7 +8362,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
         const isExpanded = node.expanded !== false;
         menuItems += `
             <div class="ctx-menu-item" data-action="toggle-expand" style="${menuItemStyle}">
-                <span style="width: 16px;">${isExpanded ? '📁' : '📂'}</span>
+                <span style="width: 16px; display: inline-flex;">${isExpanded ? ICONS.folderOpen : ICONS.folderClosed}</span>
                 <span>${isExpanded ? 'Collapse children' : 'Expand children'}</span>
             </div>
         `;
@@ -8349,7 +8371,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     // Add copy options
     menuItems += `
         <div class="ctx-menu-item" data-action="copy-label" style="${menuItemStyle}">
-            <span style="width: 16px;">📋</span>
+            <span style="width: 16px; display: inline-flex;">${ICONS.clipboard}</span>
             <span>Copy node name</span>
         </div>
     `;
@@ -8358,7 +8380,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     if (node.details && node.details.length > 0) {
         menuItems += `
             <div class="ctx-menu-item" data-action="copy-details" style="${menuItemStyle}">
-                <span style="width: 16px;">📄</span>
+                <span style="width: 16px; display: inline-flex;">${ICONS.document}</span>
                 <span>Copy details</span>
             </div>
         `;
@@ -8482,7 +8504,7 @@ function showCopyFeedback(message: string): void {
         padding: 8px 16px;
         border-radius: 6px;
         font-size: 12px;
-        z-index: 3000;
+        z-index: ${Z_INDEX.firstRunOverlay};
         animation: fadeInOut 1.5s ease forwards;
     `;
 
@@ -8678,7 +8700,7 @@ function showColumnLineagePanel(): void {
         padding: 12px;
         max-height: 70vh;
         overflow-y: auto;
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         box-shadow: ${state.isDarkTheme ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 16px rgba(0, 0, 0, 0.1)'};
         min-width: 200px;
         max-width: 260px;
@@ -8749,7 +8771,7 @@ function showColumnLineagePanel(): void {
         box-sizing: border-box;
     `;
     const searchIcon = document.createElement('span');
-    searchIcon.innerHTML = '🔍';
+    searchIcon.innerHTML = ICONS.search;
     searchIcon.style.cssText = `
         position: absolute;
         left: 8px;

@@ -42,7 +42,7 @@ export function getHintBadgeState(hints: OptimizationHint[]): HintBadgeState {
     if (total === 0) {
         return {
             status: 'ok',
-            label: '✓',
+            label: 'OK',
             total,
             warningCount: 0,
             errorCount: 0,

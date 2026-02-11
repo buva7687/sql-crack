@@ -2,10 +2,10 @@ import { getHintBadgeState, getTopHints, sortHintsByImpact } from '../../../src/
 import { OptimizationHint } from '../../../src/webview/types';
 
 describe('hintsHierarchy', () => {
-    it('returns green check badge state when no hints exist', () => {
+    it('returns OK badge state when no hints exist', () => {
         expect(getHintBadgeState([])).toEqual({
             status: 'ok',
-            label: '✓',
+            label: 'OK',
             total: 0,
             warningCount: 0,
             errorCount: 0,

@@ -1,5 +1,6 @@
 import { ParseResult } from '../types';
 import { FlowNode } from '../types/nodes';
+import { Z_INDEX } from '../../shared/zIndex';
 
 export interface ComparePaneInput {
     label: string;
@@ -453,7 +454,7 @@ export function showCompareView(options: CompareViewOptions): void {
         position: absolute;
         inset: 12px;
         top: 74px;
-        z-index: 130;
+        z-index: ${Z_INDEX.compareOverlay};
         border-radius: 12px;
         border: 1px solid ${options.isDarkTheme ? 'rgba(148, 163, 184, 0.28)' : 'rgba(148, 163, 184, 0.35)'};
         background: ${options.isDarkTheme ? 'rgba(2, 6, 23, 0.95)' : 'rgba(241, 245, 249, 0.96)'};

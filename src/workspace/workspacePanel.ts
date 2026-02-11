@@ -2262,7 +2262,7 @@ ${nodesHtml}
             <div class="header-right">
                 ${totalIssues > 0
                     ? `<span class="issue-count ${totalIssues > 5 ? 'error' : 'warning'}">${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found</span>`
-                    : `<span class="issue-count success">✓ All clear</span>`}
+                    : `<span class="issue-count success"><span class="header-icon-svg">${ICONS.check}</span> All clear</span>`}
             </div>
         </header>
 

@@ -70,6 +70,78 @@ describe('compareView', () => {
         });
     });
 
+    it('returns no node diffs for empty and identical graphs', () => {
+        const emptyLeft = makeResult([]);
+        const emptyRight = makeResult([]);
+        const emptyDiff = computeCompareDiff(emptyLeft, emptyRight);
+        expect(emptyDiff.addedNodeKeys).toEqual([]);
+        expect(emptyDiff.removedNodeKeys).toEqual([]);
+        expect(emptyDiff.changedNodeKeys).toEqual([]);
+        expect(emptyDiff.statsDelta).toEqual({
+            joins: 0,
+            subqueries: 0,
+            complexityScore: 0,
+        });
+
+        const base = makeResult(['orders', 'customers'], { joins: 1, subqueries: 2, complexityScore: 12 }, {
+            orders: ['id', 'customer_id'],
+            customers: ['id', 'name'],
+        });
+        const identical = makeResult(['orders', 'customers'], { joins: 1, subqueries: 2, complexityScore: 12 }, {
+            orders: ['id', 'customer_id'],
+            customers: ['id', 'name'],
+        });
+        const identicalDiff = computeCompareDiff(base, identical);
+        expect(identicalDiff.addedNodeKeys).toEqual([]);
+        expect(identicalDiff.removedNodeKeys).toEqual([]);
+        expect(identicalDiff.changedNodeKeys).toEqual([]);
+    });
+
+    it('handles completely disjoint node sets', () => {
+        const left = makeResult(['a', 'b', 'c']);
+        const right = makeResult(['x', 'y', 'z']);
+        const diff = computeCompareDiff(left, right);
+
+        expect(diff.addedNodeKeys.sort()).toEqual(['table:x', 'table:y', 'table:z']);
+        expect(diff.removedNodeKeys.sort()).toEqual(['table:a', 'table:b', 'table:c']);
+        expect(diff.changedNodeKeys).toEqual([]);
+    });
+
+    it('detects node detail changes while key remains stable', () => {
+        const left = makeResult(['orders'], { complexityScore: 5 }, { orders: ['order_id', 'amount'] });
+        const right = makeResult(['orders'], { complexityScore: 5 }, { orders: ['order_id', 'amount', 'status'] });
+
+        const diff = computeCompareDiff(left, right);
+        expect(diff.addedNodeKeys).toEqual([]);
+        expect(diff.removedNodeKeys).toEqual([]);
+        expect(diff.changedNodeKeys).toEqual(['table:orders']);
+    });
+
+    it('handles zero and negative stats deltas', () => {
+        const left = makeResult(['orders'], { joins: 3, subqueries: 4, complexityScore: 15 });
+        const right = makeResult(['orders'], { joins: 3, subqueries: 1, complexityScore: 6 });
+
+        const diff = computeCompareDiff(left, right);
+        expect(diff.statsDelta).toEqual({
+            joins: 0,
+            subqueries: -3,
+            complexityScore: -9,
+        });
+    });
+
+    it('processes large node sets with stable diff output', () => {
+        const total = 900;
+        const labels = Array.from({ length: total }, (_, i) => `table_${i}`);
+        const nextLabels = labels.map((label, i) => (i % 150 === 0 ? `${label}_next` : label));
+        const left = makeResult(labels, { joins: total - 1, complexityScore: total + 25 });
+        const right = makeResult(nextLabels, { joins: total - 1, complexityScore: total + 25 });
+
+        const diff = computeCompareDiff(left, right);
+        expect(diff.changedNodeKeys).toEqual([]);
+        expect(diff.addedNodeKeys).toHaveLength(6);
+        expect(diff.removedNodeKeys).toHaveLength(6);
+    });
+
     it('renders a two-pane compare layout with state highlights', () => {
         expect(source).toContain("overlay.id = 'sql-crack-compare-overlay';");
         expect(source).toContain("grid-template-columns: 1fr 1fr;");

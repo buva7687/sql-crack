@@ -33,3 +33,5 @@ export {
 export type { GridStyle, AccentPosition, NodeAccentType } from './themeTokens';
 
 export { ICONS, getNodeTypeIcon, getWorkspaceNodeIcon } from './icons';
+
+export { Z_INDEX } from './zIndex';

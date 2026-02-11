@@ -1,6 +1,7 @@
 // Pinned tabs UI module - for in-panel tab management (legacy feature)
 
 import { SqlDialect, BatchParseResult } from '../sqlParser';
+import { Z_INDEX } from '../../shared/zIndex';
 
 export interface PinnedTab {
     id: string;
@@ -21,6 +22,11 @@ export interface PinnedTabsCallbacks {
 
 let pinnedTabs: PinnedTab[] = [];
 let activeTabId: string | null = null;
+let pinnedTabsAbortController: AbortController | null = null;
+
+function getPinnedTabsListenerOptions(): AddEventListenerOptions | undefined {
+    return pinnedTabsAbortController ? { signal: pinnedTabsAbortController.signal } : undefined;
+}
 
 export function getPinnedTabs(): PinnedTab[] {
     return pinnedTabs;
@@ -83,6 +89,9 @@ export function findPinnedTab(tabId: string): PinnedTab | undefined {
 }
 
 export function updateTabsUI(callbacks: PinnedTabsCallbacks): void {
+    if (!pinnedTabsAbortController) {
+        pinnedTabsAbortController = new AbortController();
+    }
     let tabsContainer = document.getElementById('pinned-tabs-container');
 
     if (!tabsContainer) {
@@ -113,7 +122,15 @@ export function updateTabsUI(callbacks: PinnedTabsCallbacks): void {
     }
 }
 
+export function disposePinnedTabs(): void {
+    pinnedTabsAbortController?.abort();
+    pinnedTabsAbortController = null;
+}
+
 function createTabsContainer(): HTMLElement {
+    pinnedTabsAbortController?.abort();
+    pinnedTabsAbortController = new AbortController();
+
     const container = document.createElement('div');
     container.id = 'pinned-tabs-container';
     container.style.cssText = `
@@ -127,7 +144,7 @@ function createTabsContainer(): HTMLElement {
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 4px;
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         max-width: calc(100% - 350px);
         overflow-x: auto;
     `;
@@ -146,6 +163,7 @@ function createTabsContainer(): HTMLElement {
 }
 
 function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTabsCallbacks): HTMLElement {
+    const listenerOptions = getPinnedTabsListenerOptions();
     const tabEl = document.createElement('div');
     tabEl.style.cssText = `
         display: flex;
@@ -171,14 +189,14 @@ function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTa
 
     tabEl.addEventListener('click', () => {
         switchToTab(tab.id === 'current' ? null : tab.id, callbacks);
-    });
+    }, listenerOptions);
 
     tabEl.addEventListener('mouseenter', () => {
         if (!isActive) {tabEl.style.background = 'rgba(148, 163, 184, 0.1)';}
-    });
+    }, listenerOptions);
     tabEl.addEventListener('mouseleave', () => {
         if (!isActive) {tabEl.style.background = 'transparent';}
-    });
+    }, listenerOptions);
 
     if (tab.id !== 'current') {
         const closeBtn = document.createElement('span');
@@ -192,9 +210,9 @@ function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTa
         closeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             unpinTab(tab.id, callbacks);
-        });
-        closeBtn.addEventListener('mouseenter', () => closeBtn.style.opacity = '1');
-        closeBtn.addEventListener('mouseleave', () => closeBtn.style.opacity = '0.6');
+        }, listenerOptions);
+        closeBtn.addEventListener('mouseenter', () => closeBtn.style.opacity = '1', listenerOptions);
+        closeBtn.addEventListener('mouseleave', () => closeBtn.style.opacity = '0.6', listenerOptions);
         tabEl.appendChild(closeBtn);
     }
 
