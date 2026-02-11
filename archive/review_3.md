@@ -792,9 +792,9 @@ These structural changes require multi-day effort and are tracked separately. Th
 | 3.8 | Visualize command in palette | P3 Polish | 1 min | None | High | DONE |
 | 3.9 | Theme/config change listeners | P3 Polish | 1 hr | Low | Med-High | DONE |
 | 3.10 | Dialect invalidate index | P3 Polish | 20 min | Low | Med-High | DONE |
-| 3.11 | File watcher excludes | P3 Polish | 15 min | None | Medium | TODO |
-| 3.12 | Renderer polish (5 items) | P3 Polish | 30 min | Low | Low-Med | TODO |
-| 3.13 | Walkthrough media + keywords | P3 Polish | 1-2 hrs | None | Medium | TODO |
+| 3.11 | File watcher excludes | P3 Polish | 15 min | None | Medium | DONE |
+| 3.12 | Renderer polish (5 items) | P3 Polish | 30 min | Low | Low-Med | DONE |
+| 3.13 | Walkthrough media + keywords | P3 Polish | 1-2 hrs | None | Medium | DONE |
 | 4.1 | INSERT...SELECT visualization | P4 Feature | 2-4 hrs | Medium | High | TODO |
 | 4.2 | All DML write ops | P4 Feature | 1-3 days | Medium | High | TODO |
 | 4.3 | Dialect auto-detection | P4 Feature | 2-3 hrs | Low | High | TODO |
@@ -815,3 +815,4 @@ These structural changes require multi-day effort and are tracked separately. Th
 
 *Generated: Feb 10, 2026 — Reviews from: Claude (architecture/code), External Review 1 (UX/theme), External Review 2 (security/lint/DX)*
 *Updated: Feb 10, 2026 — Reorganized by priority; promoted bugs and security items from backlog; deferred architecture phase*
+*Updated: Feb 11, 2026 — Completed P3 items 3.11-3.13 with tests and validation*
