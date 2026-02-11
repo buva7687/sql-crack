@@ -146,3 +146,10 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
     - One bad file should not skip all remaining files
     - Check file existence (`fs.stat`) before processing — files may be deleted while queued
     - Call `removeFile()` to clean up index entries for deleted files
+
+13. **SQL preprocessing transforms (CTE hoisting):**
+    - `hoistNestedCtes()` rewrites `FROM ( WITH ... SELECT ... )` to top-level CTEs before parsing
+    - Uses balanced-paren tracking (not regex) for CTE body extraction — CTE bodies can contain nested subqueries
+    - Must mask string literals and comments before pattern matching to avoid false positives
+    - When merging with existing top-level CTEs, must both remove the nested WITH AND insert it at the top
+    - Iterative application (loop) handles multiple independent nested CTEs in one query

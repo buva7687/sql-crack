@@ -93,6 +93,8 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | Capability | Description |
 |------------|-------------|
 | **Partial Parse Fallback** | If AST parsing fails, SQL Crack falls back to regex extraction to still render best-effort tables/joins |
+| **Auto-Retry Dialect** | Detects dialect-specific syntax patterns and retries parsing with the correct dialect when the selected one fails |
+| **Nested CTE Hoisting** | Automatically rewrites Snowflake/Tableau-style `FROM (WITH ... SELECT ...)` subqueries to top-level CTEs for full visualization |
 | **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |

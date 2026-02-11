@@ -1810,6 +1810,19 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return sessionResult;
     }
 
+    // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
+    const hoistedSql = hoistNestedCtes(sql);
+    if (hoistedSql !== null) {
+        sql = hoistedSql;
+        ctx.hints.push({
+            type: 'info',
+            message: 'Hoisted nested CTE(s) from subquery to top level for parser compatibility',
+            suggestion: 'Nested WITH inside FROM (...) is valid in some dialects but unsupported by the parser. The query was automatically rewritten.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const parser = new Parser();
 
     try {
@@ -5215,6 +5228,411 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
             });
         }
     }
+}
+
+/**
+ * Hoist CTEs nested inside subqueries to the top level.
+ * Snowflake / Tableau generates `FROM ( WITH cte AS (...) SELECT ... ) t`
+ * which node-sql-parser cannot handle. This rewrites the SQL to move the
+ * WITH block to the top level — a semantically equivalent transformation.
+ *
+ * Returns the transformed SQL or `null` if no hoisting was needed.
+ */
+export function hoistNestedCtes(sql: string): string | null {
+    // Build a masked version of the SQL where string literals and comments
+    // are replaced with placeholder characters so we don't false-match
+    // keywords inside them.
+    const masked = maskStringsAndComments(sql);
+
+    // We may need to hoist multiple independent nested CTEs (apply iteratively)
+    let current = sql;
+    let currentMasked = masked;
+    let hoisted = false;
+
+    // Safety limit to avoid infinite loops
+    for (let iteration = 0; iteration < 20; iteration++) {
+        const result = hoistOneNestedCte(current, currentMasked);
+        if (!result) {
+            break;
+        }
+        current = result;
+        currentMasked = maskStringsAndComments(current);
+        hoisted = true;
+    }
+
+    return hoisted ? current : null;
+}
+
+/**
+ * Replace string literals and comments with spaces (preserving length/positions).
+ */
+function maskStringsAndComments(sql: string): string {
+    const chars = sql.split('');
+    let i = 0;
+    while (i < chars.length) {
+        // Block comment
+        if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
+            chars[i] = ' ';
+            chars[i + 1] = ' ';
+            i += 2;
+            while (i < chars.length) {
+                if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    i += 2;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Line comment (--)
+        if (chars[i] === '-' && i + 1 < chars.length && chars[i + 1] === '-') {
+            while (i < chars.length && chars[i] !== '\n') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Hash comment
+        if (chars[i] === '#') {
+            while (i < chars.length && chars[i] !== '\n') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // String literal (single-quoted, with '' escape)
+        if (chars[i] === "'") {
+            chars[i] = ' ';
+            i++;
+            while (i < chars.length) {
+                if (chars[i] === "'" && i + 1 < chars.length && chars[i + 1] === "'") {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    i += 2;
+                    continue;
+                }
+                if (chars[i] === "'") {
+                    chars[i] = ' ';
+                    i++;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Double-quoted identifier
+        if (chars[i] === '"') {
+            chars[i] = ' ';
+            i++;
+            while (i < chars.length) {
+                if (chars[i] === '"') {
+                    chars[i] = ' ';
+                    i++;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        i++;
+    }
+    return chars.join('');
+}
+
+/**
+ * Try to find and hoist a single `( WITH ... )` block.
+ * Returns the transformed SQL or null if nothing found.
+ */
+function hoistOneNestedCte(sql: string, masked: string): string | null {
+    // Find `( WITH` in the masked string (case-insensitive)
+    const parenWithRegex = /\(\s*WITH\b/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = parenWithRegex.exec(masked)) !== null) {
+        const openParenPos = match.index;
+
+        // Make sure this isn't a top-level WITH (no surrounding paren context
+        // that makes this a subquery). Check that there's meaningful SQL before
+        // the opening paren — i.e., it's used as FROM (...) or IN (...), etc.
+        // A top-level `( WITH ...` at the very start would have only whitespace before it.
+        const beforeParen = masked.substring(0, openParenPos).trim();
+        if (beforeParen.length === 0) {
+            // This is a top-level parenthesized WITH — skip
+            continue;
+        }
+
+        // Position right after the `(`
+        const withKeywordStart = openParenPos + 1;
+
+        // Now parse CTE definitions using balanced paren tracking on the ORIGINAL sql
+        // (but using masked for keyword detection)
+        const cteResult = extractCteDefinitions(sql, masked, withKeywordStart);
+        if (!cteResult) {
+            continue;
+        }
+
+        const { cteBlock, innerSelectStart } = cteResult;
+
+        // Find the matching closing `)` for the opening `(` at openParenPos
+        const closingParenPos = findMatchingParen(masked, openParenPos);
+        if (closingParenPos === -1) {
+            continue;
+        }
+
+        // Extract the inner SELECT (from after CTEs to before closing paren)
+        const innerSelect = sql.substring(innerSelectStart, closingParenPos).trim();
+
+        // Check if there's already a top-level WITH clause
+        const topLevelWithMatch = masked.match(/^\s*WITH\b/i);
+
+        // Replace the subquery content: remove the WITH block, keep only inner SELECT
+        // This is common to both merge and prepend paths
+        const beforeSubquery = sql.substring(0, openParenPos + 1);
+        const afterSubquery = sql.substring(closingParenPos);
+        const rewrittenSubquery = beforeSubquery + '\n' + innerSelect + '\n' + afterSubquery;
+
+        let newSql: string;
+        if (topLevelWithMatch) {
+            // Merge: find where the top-level CTEs end in the rewritten SQL
+            const rewrittenMasked = maskStringsAndComments(rewrittenSubquery);
+            const mergePoint = findTopLevelCteEnd(rewrittenMasked);
+            if (mergePoint === -1) {
+                continue;
+            }
+            // Insert the nested CTEs (comma-separated) before the main SELECT
+            const before = rewrittenSubquery.substring(0, mergePoint);
+            const after = rewrittenSubquery.substring(mergePoint);
+            // cteBlock starts with "WITH " — strip it to just get the CTE list
+            const cteList = cteBlock.replace(/^\s*WITH\s+/i, '');
+            newSql = before.trimEnd() + ',\n' + cteList + '\n' + after;
+        } else {
+            // Prepend CTE block to top
+            newSql = cteBlock + '\n' + rewrittenSubquery;
+        }
+
+        return newSql;
+    }
+
+    return null;
+}
+
+/**
+ * Extract CTE definitions starting from `withKeywordStart` in the sql.
+ * Returns the CTE block text and the position where the inner SELECT begins.
+ */
+function extractCteDefinitions(
+    sql: string,
+    masked: string,
+    withKeywordStart: number
+): { cteBlock: string; innerSelectStart: number } | null {
+    // Skip past `WITH` keyword and whitespace
+    const withMatch = masked.substring(withKeywordStart).match(/^(\s*WITH\s+)/i);
+    if (!withMatch) {
+        return null;
+    }
+
+    let pos = withKeywordStart + withMatch[0].length;
+    const cteStartPos = withKeywordStart;
+
+    // Parse each CTE: name AS (...)
+    while (pos < sql.length) {
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Read CTE name (may be quoted)
+        const nameStart = pos;
+        if (sql[pos] === '"' || sql[pos] === '`' || sql[pos] === '[') {
+            const closeChar = sql[pos] === '[' ? ']' : sql[pos];
+            pos++;
+            while (pos < sql.length && sql[pos] !== closeChar) { pos++; }
+            if (pos < sql.length) { pos++; } // skip closing quote
+        } else {
+            while (pos < sql.length && /\w/.test(sql[pos])) { pos++; }
+        }
+
+        if (pos === nameStart) {
+            return null; // no CTE name found
+        }
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Expect `AS`
+        if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
+            return null;
+        }
+        pos += 2;
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Expect `(` — find matching `)` using balanced paren tracking on original SQL
+        if (sql[pos] !== '(') {
+            return null;
+        }
+        const cteBodyClose = findMatchingParen(sql, pos);
+        if (cteBodyClose === -1) {
+            return null;
+        }
+        pos = cteBodyClose + 1;
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Check for comma (more CTEs) or SELECT (end of CTEs)
+        if (sql[pos] === ',') {
+            pos++; // skip comma, continue to next CTE
+            continue;
+        }
+
+        // Should be SELECT (or another DML keyword) — end of CTE definitions
+        break;
+    }
+
+    // The CTE block in the original SQL
+    const cteBlock = sql.substring(cteStartPos, pos).trim();
+
+    // Verify the next keyword is SELECT/INSERT/UPDATE/DELETE/MERGE
+    const remaining = masked.substring(pos).trimStart();
+    if (!/^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b/i.test(remaining)) {
+        return null;
+    }
+
+    // innerSelectStart is where the SELECT begins (in original sql)
+    const innerSelectStart = pos + (masked.substring(pos).length - masked.substring(pos).trimStart().length);
+
+    return { cteBlock, innerSelectStart };
+}
+
+/**
+ * Find the position of the matching closing parenthesis for an opening `(`.
+ * Handles nested parens. Operates on the raw string (not masked) to handle
+ * all paren types, but skips string literals and comments.
+ */
+function findMatchingParen(sql: string, openPos: number): number {
+    if (sql[openPos] !== '(') {
+        return -1;
+    }
+    let depth = 1;
+    let i = openPos + 1;
+    while (i < sql.length && depth > 0) {
+        const ch = sql[i];
+        // Skip string literals
+        if (ch === "'") {
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === "'" && i + 1 < sql.length && sql[i + 1] === "'") {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === "'") {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (ch === '"') {
+            i++;
+            while (i < sql.length && sql[i] !== '"') { i++; }
+            if (i < sql.length) { i++; }
+            continue;
+        }
+        // Skip block comments
+        if (ch === '/' && i + 1 < sql.length && sql[i + 1] === '*') {
+            i += 2;
+            while (i < sql.length) {
+                if (sql[i] === '*' && i + 1 < sql.length && sql[i + 1] === '/') {
+                    i += 2;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        // Skip line comments
+        if (ch === '-' && i + 1 < sql.length && sql[i + 1] === '-') {
+            while (i < sql.length && sql[i] !== '\n') { i++; }
+            continue;
+        }
+        if (ch === '(') {
+            depth++;
+        } else if (ch === ')') {
+            depth--;
+            if (depth === 0) {
+                return i;
+            }
+        }
+        i++;
+    }
+    return -1;
+}
+
+/**
+ * Find where the top-level CTE list ends (i.e., the position of the main
+ * SELECT/INSERT/UPDATE/DELETE/MERGE after `WITH ... AS (...), ...`).
+ */
+function findTopLevelCteEnd(masked: string): number {
+    // Start after WITH keyword
+    const withMatch = masked.match(/^\s*WITH\s+/i);
+    if (!withMatch) {
+        return -1;
+    }
+
+    let pos = withMatch[0].length;
+
+    // Walk through CTE definitions
+    while (pos < masked.length) {
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Skip CTE name
+        while (pos < masked.length && /\w/.test(masked[pos])) { pos++; }
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Expect AS
+        if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
+            return -1;
+        }
+        pos += 2;
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Skip CTE body (balanced parens) — in masked string, parens are preserved
+        if (masked[pos] !== '(') {
+            return -1;
+        }
+        let depth = 1;
+        pos++;
+        while (pos < masked.length && depth > 0) {
+            if (masked[pos] === '(') { depth++; }
+            else if (masked[pos] === ')') { depth--; }
+            pos++;
+        }
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Comma means more CTEs
+        if (masked[pos] === ',') {
+            pos++;
+            continue;
+        }
+
+        // Otherwise we should be at the main statement
+        break;
+    }
+
+    return pos;
 }
 
 function stripSqlComments(sql: string): string {
