@@ -5357,8 +5357,8 @@ function updateStatsPanel(): void {
                             copyBtn.innerHTML = originalText;
                             copyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
                         }, 2000);
-                    } catch {
-                        // Fallback copy failed silently
+                    } catch (e) {
+                        console.debug('[renderer] Fallback copy failed:', e);
                     }
                     document.body.removeChild(textarea);
                 }
@@ -6323,8 +6323,8 @@ function embedInlineStyles(element: Element): void {
                 const escapedClass = firstClass.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
                 originalElement = svgElement?.querySelector(`.${escapedClass}`) || 
                                 document.querySelector(`.${escapedClass}`);
-            } catch {
-                // Invalid selector, skip
+            } catch (e) {
+                console.debug('[renderer] Invalid CSS selector, skipping:', e);
             }
         }
     }
@@ -6395,8 +6395,8 @@ export function exportToPng(): void {
                         filename: `sql-flow-${Date.now()}.png`
                     });
                 }
-            } catch {
-                // PNG export failed silently
+            } catch (e) {
+                console.debug('[renderer] PNG export canvas draw failed:', e);
                 URL.revokeObjectURL(svgUrl);
             }
         };
@@ -6406,8 +6406,8 @@ export function exportToPng(): void {
         };
 
         img.src = svgUrl;
-    } catch {
-        // PNG export failed silently
+    } catch (e) {
+        console.debug('[renderer] PNG export failed:', e);
     }
 }
 
@@ -6430,8 +6430,8 @@ export function exportToSvg(): void {
         a.href = url;
         a.click();
         URL.revokeObjectURL(url);
-    } catch {
-        // SVG export failed silently
+    } catch (e) {
+        console.debug('[renderer] SVG export failed:', e);
     }
 }
 
@@ -6743,8 +6743,8 @@ export function copyToClipboard(): void {
             img2.src = url;
         };
         img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-    } catch {
-        // Copy failed silently
+    } catch (e) {
+        console.debug('[renderer] Clipboard copy failed:', e);
     }
 }
 

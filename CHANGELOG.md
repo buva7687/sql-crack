@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collapsible Performance Hints panel**: Added a minimize/expand toggle to the Performance Hints header. Collapsed state persists across query switches.
 - **Collapsible Query Stats panel**: Added the same minimize/expand toggle to the Query Stats header, with independent persistent state.
 - **Minimap drag-to-pan in SQL Flow**: Clicking or dragging inside the minimap now pans the main viewport to that position, matching the existing Workspace Dependencies minimap behavior.
+- **Debug logging in catch blocks**: Added `console.debug()` to all previously-empty `catch {}` blocks across 11 files for easier troubleshooting.
+- **Contributor DX**: Updated `CONTRIBUTING.md` with `npm install`, `tsc --noEmit`, and `jest` requirements before committing.
 
 ## [0.3.1] - 2026-02-11
 

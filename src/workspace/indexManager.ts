@@ -597,7 +597,8 @@ export class IndexManager {
                 // Guard: skip if file was deleted while queued
                 try {
                     await vscode.workspace.fs.stat(uri);
-                } catch {
+                } catch (e) {
+                    console.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath}`, e);
                     this.removeFile(uri);
                     continue;
                 }

@@ -479,8 +479,8 @@ export class TransformExtractor {
         try {
             const sql = this.parser.sqlify(expr);
             return sql || '';
-        } catch {
-            // Fallback to type name
+        } catch (e) {
+            console.debug('[transformExtractor] sqlify failed, using type fallback:', e);
             return expr.type || 'expression';
         }
     }

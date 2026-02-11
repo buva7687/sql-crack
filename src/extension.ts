@@ -144,7 +144,8 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             );
             diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
-        } catch {
+        } catch (e) {
+            console.debug('[extension] Diagnostics parse failed, clearing:', e);
             diagnosticsCollection.delete(document.uri);
         }
     };

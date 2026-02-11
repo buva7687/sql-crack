@@ -33,9 +33,11 @@ Thank you for your interest in contributing. Here’s how to get started.
    ```
 
 2. **Make your changes** and ensure:
+   - `npm install` has been run (required before any build/test commands).
+   - `npx tsc --noEmit` passes with zero errors.
+   - `npx jest --silent` passes — all tests green.
    - `npm run compile` succeeds.
    - `npm run lint` passes.
-   - `npm run typecheck` passes (optional but recommended).
 
 3. **Commit** with a clear message (e.g. `feat: Add X`, `fix: Y`).
 
