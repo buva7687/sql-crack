@@ -3,6 +3,7 @@ import dagre from 'dagre';
 import { analyzePerformance } from './performanceAnalyzer';
 import { getAggregateFunctions, getWindowFunctions } from '../dialects';
 import { getTableValuedFunctionName } from './parser/extractors/tables';
+import { unwrapIdentifierValue } from './parser/astUtils';
 import { escapeRegex, safeString } from '../shared';
 
 // Import types from centralized type definitions
@@ -4219,31 +4220,6 @@ function extractAggregateFunctionDetails(columns: any): Array<{
             return String(nameParts[0]?.value || '').toUpperCase();
         }
         return '';
-    }
-
-    function unwrapIdentifierValue(value: any): string | undefined {
-        if (typeof value === 'string') {
-            return value;
-        }
-        if (!value || typeof value !== 'object') {
-            return undefined;
-        }
-        if (typeof value.value === 'string') {
-            return value.value;
-        }
-        if (typeof value.expr?.value === 'string') {
-            return value.expr.value;
-        }
-        if (typeof value.expr?.expr?.value === 'string') {
-            return value.expr.expr.value;
-        }
-        if (Array.isArray(value.name) && value.name.length > 0) {
-            const namePart = value.name[0];
-            if (typeof namePart?.value === 'string') {
-                return namePart.value;
-            }
-        }
-        return undefined;
     }
 
     function normalizeColumnRefName(columnRef: any): string {

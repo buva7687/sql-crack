@@ -1,4 +1,5 @@
 import { FlowNode, FlowEdge, OptimizationHint } from './types';
+import { unwrapIdentifierValue } from './parser/astUtils';
 
 export interface IndexSuggestion {
     columns: string[];
@@ -18,31 +19,6 @@ export interface PerformanceAnalysisResult {
     hints: OptimizationHint[];
     indexSuggestions: IndexSuggestion[];
     refactoringOpportunities: RefactoringHint[];
-}
-
-function unwrapIdentifierValue(value: any): string | null {
-    if (typeof value === 'string') {
-        return value;
-    }
-    if (!value || typeof value !== 'object') {
-        return null;
-    }
-    if (typeof value.value === 'string') {
-        return value.value;
-    }
-    if (typeof value.expr?.value === 'string') {
-        return value.expr.value;
-    }
-    if (typeof value.expr?.expr?.value === 'string') {
-        return value.expr.expr.value;
-    }
-    if (Array.isArray(value.name) && value.name.length > 0) {
-        const first = value.name[0];
-        if (typeof first?.value === 'string') {
-            return first.value;
-        }
-    }
-    return null;
 }
 
 function normalizeColumnReference(columnRef: any): string | null {
