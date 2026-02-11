@@ -287,6 +287,46 @@ describe('Edge Cases', () => {
 
             expect(result.error).toBeUndefined();
         });
+
+        it('strips MySQL-style # line comments', () => {
+            const sql = `
+                # This is a MySQL comment
+                SELECT id, name # inline comment
+                FROM users
+                WHERE active = 1
+            `;
+
+            const result = parseSql(sql, 'MySQL');
+
+            expect(result.error).toBeUndefined();
+            const tableNode = result.nodes.find((n: any) => n.type === 'table' && n.label?.toLowerCase() === 'users');
+            expect(tableNode).toBeDefined();
+        });
+
+        it('does not extract table names from # comments', () => {
+            const sql = `
+                # SELECT * FROM fake_table
+                SELECT id FROM real_table
+            `;
+
+            const result = parseSql(sql, 'MySQL');
+
+            expect(result.error).toBeUndefined();
+            const fakeNode = result.nodes.find((n: any) => n.label?.toLowerCase() === 'fake_table');
+            expect(fakeNode).toBeUndefined();
+            const realNode = result.nodes.find((n: any) => n.label?.toLowerCase() === 'real_table');
+            expect(realNode).toBeDefined();
+        });
+
+        it('handles unclosed block comments gracefully', () => {
+            const sql = `/* This block comment is never closed
+                SELECT id FROM users`;
+
+            const result = parseSql(sql, 'MySQL');
+
+            // Should not crash — either parses partially or returns empty/error
+            expect(result).toBeDefined();
+        });
     });
 
     describe('Very Large Queries', () => {

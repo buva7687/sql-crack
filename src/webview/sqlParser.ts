@@ -112,6 +112,7 @@ function countStatements(sql: string): number {
 
     // Remove line comments
     cleaned = cleaned.replace(/--[^\n]*/g, '');
+    cleaned = cleaned.replace(/#[^\n]*/g, '');
 
     // Count semicolons
     const semicolons = (cleaned.match(/;/g) || []).length;
@@ -426,10 +427,21 @@ function stripLeadingComments(sql: string): string {
         // Strip leading block comments (/* ... */)
         if (result.startsWith('/*')) {
             const endIdx = result.indexOf('*/');
-            if (endIdx !== -1) {
-                result = result.substring(endIdx + 2).trim();
-                changed = true;
+            if (endIdx === -1) {
+                // Unclosed block comment — treat remaining text as comment
+                return '';
             }
+            result = result.substring(endIdx + 2).trim();
+            changed = true;
+        }
+        // Strip leading MySQL-style # comments
+        while (result.startsWith('#')) {
+            const newlineIdx = result.indexOf('\n');
+            if (newlineIdx === -1) {
+                return '';
+            }
+            result = result.substring(newlineIdx + 1).trim();
+            changed = true;
         }
     }
 
@@ -1524,7 +1536,8 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     // table-like words from comment text (e.g. "-- JOIN Patterns")
     const commentStripped = sql
         .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
-        .replace(/--[^\n]*/g, '');            // line comments
+        .replace(/--[^\n]*/g, '')            // line comments
+        .replace(/#[^\n]*/g, '');            // MySQL-style # comments
 
     // Check for CTEs FIRST (before extracting regular tables)
     // This ensures CTEs are marked with the correct category
@@ -1766,9 +1779,12 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         severity: 'medium',
     });
 
+    // Filter out broken edges with empty source or target IDs
+    const validEdges = edges.filter(e => e.source && e.target);
+
     return {
         nodes,
-        edges,
+        edges: validEdges,
         stats,
         hints,
         sql,
@@ -2441,7 +2457,7 @@ function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string
         }
 
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const normalizedSql = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+        const normalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#[^\n]*/g, '').replace(/\s+/g, ' ').trim();
         const sqlLower = normalizedSql.toLowerCase();
 
         // Extract column names directly from SQL SELECT clause as fallback
@@ -5204,7 +5220,8 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
 function stripSqlComments(sql: string): string {
     return sql
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ');
+        .replace(/--[^\n\r]*/g, ' ')
+        .replace(/#[^\n\r]*/g, ' ');
 }
 
 function detectDialectSyntaxPatterns(sql: string): {
