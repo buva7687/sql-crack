@@ -69,6 +69,7 @@ import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
+import { MONO_FONT_STACK } from '../shared/themeTokens';
 import {
     getViewportBounds,
     getVisibleElements,
@@ -86,7 +87,7 @@ import {
 } from './clustering';
 import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGraphRadial } from './parser/forceLayout';
 import { layoutGraph } from './parser/layout';
-import { escapeRegex } from '../shared';
+import { escapeRegex, ICONS, Z_INDEX } from '../shared';
 import { getHintBadgeState, getTopHints, sortHintsByImpact } from './hintsHierarchy';
 import { getWarningIndicatorState } from './warningIndicator';
 import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
@@ -153,6 +154,8 @@ let loadingOverlay: HTMLDivElement | null = null;
 let panelResizerCleanup: Array<() => void> = [];
 let legendResizeObserver: ResizeObserver | null = null;
 let legendResizeHandler: (() => void) | null = null;
+let rendererResizeObserver: ResizeObserver | null = null;
+let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
 let currentNodes: FlowNode[] = [];
@@ -200,6 +203,43 @@ let cloudElements: Map<string, { cloud: SVGRectElement; title: SVGTextElement; a
 let cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
+let spinnerStyleElement: HTMLStyleElement | null = null;
+let reducedMotionStyleElement: HTMLStyleElement | null = null;
+
+function getDefaultCloudOffset(cloudWidth: number, cloudHeight: number, nodeHeight: number, cloudGap: number): { offsetX: number; offsetY: number } {
+    return {
+        offsetX: -cloudWidth - cloudGap,
+        offsetY: -(cloudHeight - nodeHeight) / 2,
+    };
+}
+
+function ensureCloudOffset(nodeId: string, cloudWidth: number, cloudHeight: number, nodeHeight: number, cloudGap: number): { offsetX: number; offsetY: number } {
+    const existing = cloudOffsets.get(nodeId);
+    if (existing) {
+        return existing;
+    }
+    const fallback = getDefaultCloudOffset(cloudWidth, cloudHeight, nodeHeight, cloudGap);
+    cloudOffsets.set(nodeId, fallback);
+    return fallback;
+}
+
+function ensureCloudViewState(nodeId: string): CloudViewState {
+    const existing = cloudViewStates.get(nodeId);
+    if (existing) {
+        return existing;
+    }
+
+    const initialState: CloudViewState = {
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        isDragging: false,
+        dragStartX: 0,
+        dragStartY: 0
+    };
+    cloudViewStates.set(nodeId, initialState);
+    return initialState;
+}
 
 function ensureNodeFocusLiveRegion(container: HTMLElement): void {
     if (nodeFocusLiveRegion?.isConnected) {
@@ -343,7 +383,7 @@ export function initRenderer(container: HTMLElement): void {
     // Use extracted canvas setup module
     const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
-    const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+    const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
@@ -369,7 +409,7 @@ export function initRenderer(container: HTMLElement): void {
         transform: translate(calc(100% + 12px), -50%);
         transition: transform 0.2s ease;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        z-index: 200;
+        z-index: ${Z_INDEX.panelTop};
         box-shadow: ${UI_COLORS.shadowMedium};
     `;
     container.appendChild(detailsPanel);
@@ -389,7 +429,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
         color: ${UI_COLORS.textSubtle};
-        z-index: 150;
+        z-index: ${Z_INDEX.panel};
         display: none;
         max-width: 80%;
         overflow-x: auto;
@@ -405,7 +445,7 @@ export function initRenderer(container: HTMLElement): void {
         top: 62px;
         left: 16px;
         right: auto;
-        z-index: 140;
+        z-index: ${Z_INDEX.floatingPanel};
         display: none;
         align-items: center;
         justify-content: space-between;
@@ -418,7 +458,10 @@ export function initRenderer(container: HTMLElement): void {
         pointer-events: none;
     `;
     columnLineageBanner.innerHTML = `
-        <span style="pointer-events: none;">🔗 ${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        <span style="pointer-events: none; display: inline-flex; align-items: center; gap: 6px;">
+            <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.link}</span>
+            <span>${COLUMN_LINEAGE_BANNER_TEXT}</span>
+        </span>
         <button id="column-lineage-banner-close" style="
             border: none;
             background: transparent;
@@ -449,7 +492,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
     `;
     container.appendChild(statsPanel);
 
@@ -469,7 +512,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textMuted};
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         max-height: 200px;
         overflow-y: auto;
         opacity: 0;
@@ -552,10 +595,10 @@ export function initRenderer(container: HTMLElement): void {
         border-top: 1px solid ${UI_COLORS.border};
         padding: 12px 16px;
         box-sizing: border-box;
-        font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+        font-family: ${MONO_FONT_STACK};
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 150;
+        z-index: ${Z_INDEX.panel};
         opacity: 0;
         visibility: hidden;
         transform: translateY(16px);
@@ -578,7 +621,7 @@ export function initRenderer(container: HTMLElement): void {
         border: 1px solid ${UI_COLORS.border};
         border-radius: 8px;
         overflow: hidden;
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         display: none;
     `;
 
@@ -613,7 +656,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.15s ease;
@@ -634,7 +677,7 @@ export function initRenderer(container: HTMLElement): void {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         color: ${UI_COLORS.textBright};
-        z-index: 2000;
+        z-index: ${Z_INDEX.commandBar};
         display: none;
         min-width: 180px;
         box-shadow: 0 4px 12px ${UI_COLORS.shadowDark};
@@ -650,11 +693,11 @@ export function initRenderer(container: HTMLElement): void {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(15, 23, 42, 0.6);
+        background: rgba(0, 0, 0, 0.6);
         display: none;
         align-items: center;
         justify-content: center;
-        z-index: 500;
+        z-index: ${Z_INDEX.panel};
         pointer-events: none;
     `;
     loadingOverlay.innerHTML = `
@@ -682,13 +725,14 @@ export function initRenderer(container: HTMLElement): void {
     `;
 
     // Add spinner animation
-    const spinnerStyle = document.createElement('style');
-    spinnerStyle.textContent = `
+    spinnerStyleElement?.remove();
+    spinnerStyleElement = document.createElement('style');
+    spinnerStyleElement.textContent = `
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
     `;
-    document.head.appendChild(spinnerStyle);
+    document.head.appendChild(spinnerStyleElement);
     container.appendChild(loadingOverlay);
 
     // Create command bar (Ctrl+Shift+P palette)
@@ -742,8 +786,9 @@ export function initRenderer(container: HTMLElement): void {
     containerElement = container;
 
     // Accessibility: reduced motion and high contrast support
-    const reducedMotionStyle = document.createElement('style');
-    reducedMotionStyle.textContent = `
+    reducedMotionStyleElement?.remove();
+    reducedMotionStyleElement = document.createElement('style');
+    reducedMotionStyleElement.textContent = `
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -778,7 +823,7 @@ export function initRenderer(container: HTMLElement): void {
             }
         }
     `;
-    document.head.appendChild(reducedMotionStyle);
+    document.head.appendChild(reducedMotionStyleElement);
 
     // Apply initial theme
     applyTheme(state.isDarkTheme);
@@ -787,19 +832,23 @@ export function initRenderer(container: HTMLElement): void {
     setupEventListeners();
 
     // Setup ResizeObserver for auto-resize when panel changes
-    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
+    rendererResizeObserver?.disconnect();
+    if (resizeObserverDebounceTimer) {
+        clearTimeout(resizeObserverDebounceTimer);
+        resizeObserverDebounceTimer = null;
+    }
+    rendererResizeObserver = new ResizeObserver(() => {
         // Debounce resize events
-        if (resizeTimeout) {
-            clearTimeout(resizeTimeout);
+        if (resizeObserverDebounceTimer) {
+            clearTimeout(resizeObserverDebounceTimer);
         }
-        resizeTimeout = setTimeout(() => {
+        resizeObserverDebounceTimer = setTimeout(() => {
             if (currentNodes.length > 0) {
                 fitView();
             }
         }, 150);
     });
-    resizeObserver.observe(container);
+    rendererResizeObserver.observe(container);
 }
 
 function setupEventListeners(): void {
@@ -1217,6 +1266,16 @@ export function cleanupRenderer(): void {
     }
     legendResizeObserver?.disconnect();
     legendResizeObserver = null;
+    rendererResizeObserver?.disconnect();
+    rendererResizeObserver = null;
+    if (resizeObserverDebounceTimer) {
+        clearTimeout(resizeObserverDebounceTimer);
+        resizeObserverDebounceTimer = null;
+    }
+    spinnerStyleElement?.remove();
+    spinnerStyleElement = null;
+    reducedMotionStyleElement?.remove();
+    reducedMotionStyleElement = null;
     layoutHistory.clear();
     nodeFocusLiveRegion?.remove();
     nodeFocusLiveRegion = null;
@@ -1503,10 +1562,7 @@ function updateCloudAndArrow(node: FlowNode): void {
 
     // Get custom offset or use default (to the left)
     // If no offset exists, initialize it with default position
-    if (!cloudOffsets.has(node.id)) {
-        cloudOffsets.set(node.id, { offsetX: -cloudWidth - cloudGap, offsetY: -(cloudHeight - nodeHeight) / 2 });
-    }
-    const offset = cloudOffsets.get(node.id)!;
+    const offset = ensureCloudOffset(node.id, cloudWidth, cloudHeight, nodeHeight, cloudGap);
     const cloudX = node.x + offset.offsetX;
     const cloudY = node.y + offset.offsetY;
 
@@ -2636,18 +2692,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         nestedSvg.setAttribute('overflow', 'hidden');
         nestedSvg.style.cursor = 'grab';
 
-        // Initialize cloud view state if not exists
-        if (!cloudViewStates.has(node.id)) {
-            cloudViewStates.set(node.id, {
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0,
-                isDragging: false,
-                dragStartX: 0,
-                dragStartY: 0
-            });
-        }
-        const cloudState = cloudViewStates.get(node.id)!;
+        const cloudState = ensureCloudViewState(node.id);
 
         // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2671,7 +2716,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         // Pan/zoom handlers for nested SVG
         nestedSvg.addEventListener('mousedown', (e) => {
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             cloudState.isDragging = true;
             cloudState.dragStartX = e.clientX - cloudState.offsetX;
             cloudState.dragStartY = e.clientY - cloudState.offsetY;
@@ -2707,7 +2752,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
         nestedSvg.addEventListener('wheel', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             const delta = e.deltaY > 0 ? 0.9 : 1.1;
             const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
 
@@ -2926,18 +2971,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         nestedSvg.setAttribute('overflow', 'hidden');
         nestedSvg.style.cursor = 'grab';
 
-        // Initialize cloud view state if not exists
-        if (!cloudViewStates.has(node.id)) {
-            cloudViewStates.set(node.id, {
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0,
-                isDragging: false,
-                dragStartX: 0,
-                dragStartY: 0
-            });
-        }
-        const cloudState = cloudViewStates.get(node.id)!;
+        const cloudState = ensureCloudViewState(node.id);
 
         // Create content group with transform for pan/zoom
         const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2961,7 +2995,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         // Pan/zoom handlers for nested SVG
         nestedSvg.addEventListener('mousedown', (e) => {
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             cloudState.isDragging = true;
             cloudState.dragStartX = e.clientX - cloudState.offsetX;
             cloudState.dragStartY = e.clientY - cloudState.offsetY;
@@ -2997,7 +3031,7 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
         nestedSvg.addEventListener('wheel', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cloudState = cloudViewStates.get(node.id)!;
+            const cloudState = ensureCloudViewState(node.id);
             const delta = e.deltaY > 0 ? 0.9 : 1.1;
             const newScale = Math.min(Math.max(cloudState.scale * delta, 0.5), 2);
 
@@ -4136,9 +4170,9 @@ function showSqlClausePanel(edge: FlowEdge): void {
         border-radius: 12px;
         padding: 16px 20px;
         max-width: 600px;
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         box-shadow: ${panelShadow};
-        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-family: ${MONO_FONT_STACK};
     `;
 
     // Build content
@@ -4187,7 +4221,8 @@ function showSqlClausePanel(edge: FlowEdge): void {
         ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
         ${edge.startLine ? `
             <div style="color: ${mutedText}; font-size: 11px; margin-top: 8px;">
-                📍 Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
+                <span style="display: inline-flex; width: 12px; height: 12px; vertical-align: text-bottom;">${ICONS.pin}</span>
+                Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
             </div>
         ` : ''}
     `;
@@ -4372,15 +4407,25 @@ function renderError(message: string): void {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('transform', 'translate(0, -20)');
 
-    // Error icon
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    icon.setAttribute('x', '50%');
-    icon.setAttribute('y', hasSuggestion ? '45%' : '48%');
-    icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('fill', STATUS_COLORS.error);
-    icon.setAttribute('font-size', '24');
-    icon.textContent = '⚠';
-    g.appendChild(icon);
+    // Error icon (shape-based so it renders consistently across editors)
+    const iconCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    iconCircle.setAttribute('cx', '50%');
+    iconCircle.setAttribute('cy', hasSuggestion ? '45%' : '48%');
+    iconCircle.setAttribute('r', '11');
+    iconCircle.setAttribute('fill', state.isDarkTheme ? 'rgba(239, 68, 68, 0.18)' : 'rgba(239, 68, 68, 0.12)');
+    iconCircle.setAttribute('stroke', STATUS_COLORS.error);
+    iconCircle.setAttribute('stroke-width', '1.5');
+    g.appendChild(iconCircle);
+
+    const iconMark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    iconMark.setAttribute('x', '50%');
+    iconMark.setAttribute('y', hasSuggestion ? '45.6%' : '48.6%');
+    iconMark.setAttribute('text-anchor', 'middle');
+    iconMark.setAttribute('fill', STATUS_COLORS.error);
+    iconMark.setAttribute('font-size', '15');
+    iconMark.setAttribute('font-weight', '700');
+    iconMark.textContent = '!';
+    g.appendChild(iconMark);
 
     // Main error message
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -4402,7 +4447,7 @@ function renderError(message: string): void {
         suggestion.setAttribute('fill', UI_COLORS.textMuted);
         suggestion.setAttribute('font-size', '12');
         suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        suggestion.textContent = `💡 ${parts[1]}`;
+        suggestion.textContent = `Tip: ${parts[1]}`;
         g.appendChild(suggestion);
 
         // Hint about dialect selector
@@ -5002,7 +5047,11 @@ function updateDetailsPanel(nodeId: string | null): void {
             font-size: 11px;
             font-weight: 600;
             cursor: pointer;
-        ">🔍 Trace Column Lineage</button>
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        "><span style="display: inline-flex; width: 12px; height: 12px;">${ICONS.search}</span><span>Trace Column Lineage</span></button>
     ` : '';
 
     detailsPanel.innerHTML = `
@@ -5165,6 +5214,28 @@ function updateStatsPanel(): void {
         `;
     }
 
+    const summaryMetrics: Array<{ value: number; label: string }> = [
+        { value: currentStats.tables, label: currentStats.tables === 1 ? 'Table' : 'Tables' },
+        { value: currentStats.joins, label: currentStats.joins === 1 ? 'Join' : 'Joins' },
+        { value: currentStats.conditions, label: currentStats.conditions === 1 ? 'Filter' : 'Filters' },
+        { value: currentStats.ctes, label: currentStats.ctes === 1 ? 'CTE' : 'CTEs' },
+    ];
+    if (currentStats.subqueries > 0) {
+        summaryMetrics.push({
+            value: currentStats.subqueries,
+            label: currentStats.subqueries === 1 ? 'Subquery' : 'Subqueries',
+        });
+    }
+    const summaryRowHtml = summaryMetrics
+        .map((metric, index) => `
+            <span style="display: inline-flex; align-items: baseline; gap: 4px;">
+                <span style="color: ${textColor}; font-weight: 700; font-size: 12px;">${metric.value}</span>
+                <span style="color: ${textColorMuted}; font-size: 10px; font-weight: 500;">${metric.label}</span>
+            </span>
+            ${index < summaryMetrics.length - 1 ? `<span aria-hidden="true" style="color: ${textColorDim}; font-size: 11px;">&middot;</span>` : ''}
+        `)
+        .join('');
+
     statsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
@@ -5177,36 +5248,9 @@ function updateStatsPanel(): void {
                 font-weight: 600;
             ">${currentStats.complexity}</span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px;">
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.tables}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Tables</div>
-            </div>
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.joins}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Joins</div>
-            </div>
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.conditions}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Filters</div>
-            </div>
+        <div id="query-stats-summary-row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px;">
+            ${summaryRowHtml}
         </div>
-        ${(currentStats.ctes > 0 || currentStats.subqueries > 0) ? `
-            <div style="display: flex; gap: 12px; margin-bottom: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; justify-content: center;">
-                ${currentStats.ctes > 0 ? `
-                    <div style="text-align: center;">
-                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.ctes}</div>
-                        <div style="font-size: 9px; color: ${textColorMuted};">CTE${currentStats.ctes !== 1 ? 's' : ''}</div>
-                    </div>
-                ` : ''}
-                ${currentStats.subqueries > 0 ? `
-                    <div style="text-align: center;">
-                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.subqueries}</div>
-                        <div style="font-size: 9px; color: ${textColorMuted};">Subquer${currentStats.subqueries !== 1 ? 'ies' : 'y'}</div>
-                    </div>
-                ` : ''}
-            </div>
-        ` : ''}
         ${currentStats.functionsUsed && currentStats.functionsUsed.length > 0 ? (() => {
             const funcs = currentStats.functionsUsed!;
             const categoryOrder = ['aggregate', 'window', 'tvf', 'scalar', 'unknown'] as const;
@@ -5225,7 +5269,7 @@ function updateStatsPanel(): void {
             const grouped = new Map<string, string[]>();
             for (const f of funcs) {
                 const cat = f.category || 'unknown';
-                if (!grouped.has(cat)) grouped.set(cat, []);
+                if (!grouped.has(cat)) {grouped.set(cat, []);}
                 grouped.get(cat)!.push(f.name);
             }
             return `
@@ -5575,7 +5619,10 @@ function updateHintsPanel(): void {
 
     hintsPanel.innerHTML = `
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
-            <span style="font-weight: 600; color: ${textColor};">⚡ Performance Hints</span>
+            <span style="font-weight: 600; color: ${textColor}; display: inline-flex; align-items: center; gap: 6px;">
+                <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
+                <span>Performance Hints</span>
+            </span>
             <span style="font-size: 10px; color: ${textColorMuted};">${currentHints.length} total</span>
         </div>
         <div class="hints-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
@@ -5595,7 +5642,7 @@ function updateHintsPanel(): void {
                         user-select: text;
                     ">
                         <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
-                            <span>${style.icon}</span>
+                            <span style="display: inline-flex; width: 12px; height: 12px;">${style.icon}</span>
                             <span>${escapeHtml(hint.message)}</span>
                             <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
@@ -6694,7 +6741,7 @@ function showClipboardNotification(type: 'success' | 'error', message: string): 
         border-radius: 8px;
         font-size: 14px;
         font-weight: 500;
-        z-index: 10000;
+        z-index: ${Z_INDEX.toast};
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         ${type === 'success'
             ? 'background: rgba(34, 197, 94, 0.95); color: white;'
@@ -6769,18 +6816,18 @@ function getNodeVisualIcon(node: FlowNode): string {
 
 function getWarningIcon(warningType: string): string {
     const icons: Record<string, string> = {
-        'unused': '⚠',
-        'dead-column': '⊗',
-        'expensive': '⚠',
-        'fan-out': '📊',
-        'repeated-scan': '🔄',
-        'complex': '🧮',
-        'filter-pushdown': '⬆',
-        'non-sargable': '🚫',
-        'join-order': '⇄',
-        'index-suggestion': '📇'
+        'unused': ICONS.warning,
+        'dead-column': ICONS.noEntry,
+        'expensive': ICONS.warning,
+        'fan-out': ICONS.chart,
+        'repeated-scan': ICONS.refresh,
+        'complex': ICONS.calculator,
+        'filter-pushdown': ICONS.bolt,
+        'non-sargable': ICONS.noEntry,
+        'join-order': ICONS.focusDirection,
+        'index-suggestion': ICONS.table
     };
-    return icons[warningType] || '⚠';
+    return icons[warningType] || ICONS.warning;
 }
 
 function getWarningColor(severity: string): string {
@@ -7774,7 +7821,7 @@ export function toggleFullscreen(enable?: boolean): void {
         rootElement.style.margin = '0';
         rootElement.style.padding = '0';
         rootElement.style.overflow = 'hidden';
-        rootElement.style.zIndex = '99999';
+        rootElement.style.zIndex = String(Z_INDEX.debugTop);
         // Don't change background - let it inherit or use existing
         
         if (svgElement) {
@@ -8074,7 +8121,7 @@ function applyTheme(dark: boolean): void {
 
     // Apply canvas theme using extracted module
     if (svg && backgroundRect) {
-        const gridStyle = ((window as any).gridStyle || 'dots') as GridStyle;
+        const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
         updateCanvasTheme(svg, backgroundRect, dark, gridStyle);
     }
 
@@ -8158,7 +8205,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
                     background: rgba(30, 41, 59, 0.6);
                     border: 1px solid rgba(148, 163, 184, 0.2);
                     border-radius: 4px;
-                    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+                    font-family: ${MONO_FONT_STACK};
                     font-size: 10px;
                     color: ${UI_COLORS.textBright};
                     line-height: 1.4;
@@ -8170,7 +8217,8 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
             // Add line number reference
             content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                📍 ${sqlSnippet.lineLabel}
+                <span style="display: inline-flex; width: 10px; height: 10px; vertical-align: text-bottom;">${ICONS.pin}</span>
+                ${sqlSnippet.lineLabel}
             </div>`;
 
             if (sqlSnippet.truncated) {
@@ -8316,7 +8364,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     // Build menu items based on node type
     let menuItems = `
         <div class="ctx-menu-item" data-action="zoom" style="${menuItemStyle}">
-            <span style="width: 16px;">🔍</span>
+            <span style="width: 16px; display: inline-flex;">${ICONS.search}</span>
             <span>Zoom to node</span>
         </div>
         <div class="ctx-menu-item" data-action="focus-upstream" style="${menuItemStyle}">
@@ -8339,7 +8387,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
         const isExpanded = node.expanded !== false;
         menuItems += `
             <div class="ctx-menu-item" data-action="toggle-expand" style="${menuItemStyle}">
-                <span style="width: 16px;">${isExpanded ? '📁' : '📂'}</span>
+                <span style="width: 16px; display: inline-flex;">${isExpanded ? ICONS.folderOpen : ICONS.folderClosed}</span>
                 <span>${isExpanded ? 'Collapse children' : 'Expand children'}</span>
             </div>
         `;
@@ -8348,7 +8396,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     // Add copy options
     menuItems += `
         <div class="ctx-menu-item" data-action="copy-label" style="${menuItemStyle}">
-            <span style="width: 16px;">📋</span>
+            <span style="width: 16px; display: inline-flex;">${ICONS.clipboard}</span>
             <span>Copy node name</span>
         </div>
     `;
@@ -8357,7 +8405,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
     if (node.details && node.details.length > 0) {
         menuItems += `
             <div class="ctx-menu-item" data-action="copy-details" style="${menuItemStyle}">
-                <span style="width: 16px;">📄</span>
+                <span style="width: 16px; display: inline-flex;">${ICONS.document}</span>
                 <span>Copy details</span>
             </div>
         `;
@@ -8481,7 +8529,7 @@ function showCopyFeedback(message: string): void {
         padding: 8px 16px;
         border-radius: 6px;
         font-size: 12px;
-        z-index: 3000;
+        z-index: ${Z_INDEX.firstRunOverlay};
         animation: fadeInOut 1.5s ease forwards;
     `;
 
@@ -8677,7 +8725,7 @@ function showColumnLineagePanel(): void {
         padding: 12px;
         max-height: 70vh;
         overflow-y: auto;
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         box-shadow: ${state.isDarkTheme ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 4px 16px rgba(0, 0, 0, 0.1)'};
         min-width: 200px;
         max-width: 260px;
@@ -8748,7 +8796,7 @@ function showColumnLineagePanel(): void {
         box-sizing: border-box;
     `;
     const searchIcon = document.createElement('span');
-    searchIcon.innerHTML = '🔍';
+    searchIcon.innerHTML = ICONS.search;
     searchIcon.style.cssText = `
         position: absolute;
         left: 8px;

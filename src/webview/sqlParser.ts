@@ -112,6 +112,7 @@ function countStatements(sql: string): number {
 
     // Remove line comments
     cleaned = cleaned.replace(/--[^\n]*/g, '');
+    cleaned = cleaned.replace(/#[^\n]*/g, '');
 
     // Count semicolons
     const semicolons = (cleaned.match(/;/g) || []).length;
@@ -225,7 +226,7 @@ function trackTableUsage(tableName: string): void {
 
 // Track function usage
 function trackFunctionUsage(functionName: unknown, category: 'aggregate' | 'window' | 'tvf' | 'scalar'): void {
-    if (typeof functionName !== 'string' || !functionName) return;
+    if (typeof functionName !== 'string' || !functionName) {return;}
     const normalizedName = functionName.toUpperCase();
     ctx.functionsUsed.add(`${normalizedName}:${category}`);
 }
@@ -426,10 +427,21 @@ function stripLeadingComments(sql: string): string {
         // Strip leading block comments (/* ... */)
         if (result.startsWith('/*')) {
             const endIdx = result.indexOf('*/');
-            if (endIdx !== -1) {
-                result = result.substring(endIdx + 2).trim();
-                changed = true;
+            if (endIdx === -1) {
+                // Unclosed block comment — treat remaining text as comment
+                return '';
             }
+            result = result.substring(endIdx + 2).trim();
+            changed = true;
+        }
+        // Strip leading MySQL-style # comments
+        while (result.startsWith('#')) {
+            const newlineIdx = result.indexOf('\n');
+            if (newlineIdx === -1) {
+                return '';
+            }
+            result = result.substring(newlineIdx + 1).trim();
+            changed = true;
         }
     }
 
@@ -529,13 +541,13 @@ export function splitSqlStatements(sql: string): string[] {
 
     // Helper to check if we're at a word boundary and match a keyword
     const matchKeyword = (idx: number, keyword: string): boolean => {
-        if (idx + keyword.length > sql.length) return false;
-        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) return false;
+        if (idx + keyword.length > sql.length) {return false;}
+        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) {return false;}
         // Check word boundary before
-        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) return false;
+        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {return false;}
         // Check word boundary after
         const afterIdx = idx + keyword.length;
-        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) return false;
+        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) {return false;}
         return true;
     };
 
@@ -543,16 +555,16 @@ export function splitSqlStatements(sql: string): string[] {
     const isProceduralBegin = (idx: number): boolean => {
         // Check what follows BEGIN — skip non-block BEGINs
         const after = sql.substring(idx + 5, idx + 25).trim().toUpperCase();
-        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) return false;
+        if (/^(TRANSACTION|WORK|TRAN|TRY|CATCH)\b/.test(after)) {return false;}
 
         // Look backwards to see what precedes BEGIN (up to 200 chars for long signatures)
         const before = sql.substring(Math.max(0, idx - 200), idx).toUpperCase();
 
         // Procedural BEGIN is preceded by: AS, THEN, ELSE, LOOP, IS
-        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) return true;
+        if (/\b(AS|THEN|ELSE|LOOP|IS)\s*$/.test(before)) {return true;}
 
         // Or preceded by CREATE FUNCTION/PROCEDURE/TRIGGER with arbitrary signature (no semicolons between)
-        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) return true;
+        if (/\bCREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER)\b[^;]*$/.test(before)) {return true;}
 
         return false;
     };
@@ -1471,6 +1483,40 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     }
 }
 
+function rankDialectScores(scores: Partial<Record<SqlDialect, number>>): Array<{ dialect: SqlDialect; score: number }> {
+    return Object.entries(scores)
+        .filter((entry): entry is [SqlDialect, number] => typeof entry[1] === 'number' && entry[1] > 0)
+        .map(([dialect, score]) => ({ dialect, score }))
+        .sort((a, b) => b.score - a.score);
+}
+
+function selectRetryDialectOnParseFailure(
+    sql: string,
+    currentDialect: SqlDialect
+): { retryDialect: SqlDialect | null; detection: DialectDetectionResult } {
+    const detection = detectDialect(sql);
+
+    if (detection.dialect && detection.dialect !== currentDialect) {
+        return { retryDialect: detection.dialect, detection };
+    }
+
+    // For low-confidence detections, allow a retry when there is a clear top score.
+    // This helps recover from common dialect mismatches without forcing auto-switch in UI.
+    const ranked = rankDialectScores(detection.scores);
+    const top = ranked[0];
+    const secondScore = ranked[1]?.score ?? 0;
+
+    if (!top || top.dialect === currentDialect) {
+        return { retryDialect: null, detection };
+    }
+
+    if (top.score >= 2 && top.score > secondScore) {
+        return { retryDialect: top.dialect, detection };
+    }
+
+    return { retryDialect: null, detection };
+}
+
 /**
  * Regex-based fallback parser for when AST parsing fails.
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
@@ -1490,7 +1536,8 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     // table-like words from comment text (e.g. "-- JOIN Patterns")
     const commentStripped = sql
         .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
-        .replace(/--[^\n]*/g, '');            // line comments
+        .replace(/--[^\n]*/g, '')            // line comments
+        .replace(/#[^\n]*/g, '');            // MySQL-style # comments
 
     // Check for CTEs FIRST (before extracting regular tables)
     // This ensures CTEs are marked with the correct category
@@ -1581,10 +1628,10 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     // Detect statement type for hints
     const upperSql = commentStripped.toUpperCase().trim();
     let statementType = 'UNKNOWN';
-    if (upperSql.startsWith('SELECT')) statementType = 'SELECT';
-    else if (upperSql.startsWith('INSERT')) statementType = 'INSERT';
-    else if (upperSql.startsWith('UPDATE')) statementType = 'UPDATE';
-    else if (upperSql.startsWith('DELETE')) statementType = 'DELETE';
+    if (upperSql.startsWith('SELECT')) {statementType = 'SELECT';}
+    else if (upperSql.startsWith('INSERT')) {statementType = 'INSERT';}
+    else if (upperSql.startsWith('UPDATE')) {statementType = 'UPDATE';}
+    else if (upperSql.startsWith('DELETE')) {statementType = 'DELETE';}
     else if (upperSql.startsWith('MERGE')) {
         statementType = 'MERGE';
         
@@ -1700,9 +1747,9 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
             });
         }
     }
-    else if (upperSql.startsWith('CREATE')) statementType = 'CREATE';
-    else if (upperSql.startsWith('ALTER')) statementType = 'ALTER';
-    else if (upperSql.startsWith('DROP')) statementType = 'DROP';
+    else if (upperSql.startsWith('CREATE')) {statementType = 'CREATE';}
+    else if (upperSql.startsWith('ALTER')) {statementType = 'ALTER';}
+    else if (upperSql.startsWith('DROP')) {statementType = 'DROP';}
 
     // Build stats
     const stats: QueryStats = {
@@ -1719,9 +1766,9 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     };
 
     // Update complexity based on score
-    if (stats.complexityScore >= 30) stats.complexity = 'Very Complex';
-    else if (stats.complexityScore >= 15) stats.complexity = 'Complex';
-    else if (stats.complexityScore >= 5) stats.complexity = 'Moderate';
+    if (stats.complexityScore >= 30) {stats.complexity = 'Very Complex';}
+    else if (stats.complexityScore >= 15) {stats.complexity = 'Complex';}
+    else if (stats.complexityScore >= 5) {stats.complexity = 'Moderate';}
 
     // Add the partial visualization warning hint
     hints.push({
@@ -1732,9 +1779,12 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         severity: 'medium',
     });
 
+    // Filter out broken edges with empty source or target IDs
+    const validEdges = edges.filter(e => e.source && e.target);
+
     return {
         nodes,
-        edges,
+        edges: validEdges,
         stats,
         hints,
         sql,
@@ -1760,21 +1810,61 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return sessionResult;
     }
 
+    // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
+    const hoistedSql = hoistNestedCtes(sql);
+    if (hoistedSql !== null) {
+        sql = hoistedSql;
+        ctx.hints.push({
+            type: 'info',
+            message: 'Hoisted nested CTE(s) from subquery to top level for parser compatibility',
+            suggestion: 'Nested WITH inside FROM (...) is valid in some dialects but unsupported by the parser. The query was automatically rewritten.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const parser = new Parser();
 
     try {
         let ast: any;
+        let effectiveDialect = dialect;
+
+        const parseWithDialect = (targetDialect: SqlDialect): any => {
+            try {
+                return parser.astify(sql, { database: targetDialect });
+            } catch (parseError) {
+                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, targetDialect);
+                if (!fallbackAst) {
+                    throw parseError;
+                }
+                return fallbackAst;
+            }
+        };
 
         // Timeout protection: measure parse duration and warn/fallback if too slow
         const parseStartTime = Date.now();
         try {
-            ast = parser.astify(sql, { database: dialect });
-        } catch (parseError) {
-            const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, dialect);
-            if (!fallbackAst) {
-                throw parseError;
+            ast = parseWithDialect(dialect);
+        } catch (primaryParseError) {
+            const { retryDialect } = selectRetryDialectOnParseFailure(sql, dialect);
+            if (!retryDialect) {
+                throw primaryParseError;
             }
-            ast = fallbackAst;
+
+            try {
+                ast = parseWithDialect(retryDialect);
+                effectiveDialect = retryDialect;
+                ctx.dialect = retryDialect;
+                ctx.hints.push({
+                    type: 'info',
+                    message: `Auto-retried parse with ${retryDialect} dialect after ${dialect} parse failure`,
+                    suggestion: 'If this dialect is expected, switch the parser dialect in the toolbar for consistent parsing.',
+                    category: 'best-practice',
+                    severity: 'low',
+                });
+            } catch {
+                throw primaryParseError;
+            }
         }
 
         const parseDurationMs = Date.now() - parseStartTime;
@@ -1817,7 +1907,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         generateHints(statements[0]);
 
         // Detect dialect-specific syntax patterns
-        detectDialectSpecificSyntax(sql, dialect);
+        detectDialectSpecificSyntax(sql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
         detectAdvancedIssues(nodes, edges, sql);
@@ -2380,7 +2470,7 @@ function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string
         }
 
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const normalizedSql = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+        const normalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#[^\n]*/g, '').replace(/\s+/g, ' ').trim();
         const sqlLower = normalizedSql.toLowerCase();
 
         // Extract column names directly from SQL SELECT clause as fallback
@@ -2751,6 +2841,185 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
         }
     }
 
+    // INSERT ... SELECT: render inner SELECT flow, then wire it to write target(s).
+    if (ctx.statementType === 'insert') {
+        const insertSourceSelect = getInsertSelectAst(stmt);
+        if (insertSourceSelect) {
+            const selectRootId = processSelect(insertSourceSelect, nodes, edges);
+            const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: 'INSERT',
+                description: 'Insert statement',
+                x: 0, y: 0, width: 160, height: 60
+            });
+
+            if (targetTables.length === 0) {
+                if (selectRootId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: selectRootId,
+                        target: rootId
+                    });
+                }
+                return rootId;
+            }
+
+            for (const tableRef of targetTables) {
+                const tableName = getTableName(tableRef);
+                if (!tableName) { continue; }
+
+                ctx.stats.tables++;
+                const targetId = genId('table');
+                nodes.push({
+                    id: targetId,
+                    type: 'table',
+                    label: tableName,
+                    description: 'Insert target table',
+                    accessMode: 'write',
+                    operationType: 'INSERT',
+                    x: 0, y: 0, width: 140, height: 60
+                });
+
+                if (selectRootId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: selectRootId,
+                        target: targetId
+                    });
+                }
+
+                edges.push({
+                    id: genId('e'),
+                    source: targetId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+    }
+
+    // UPDATE/DELETE with source queries:
+    // - UPDATE ... FROM ...
+    // - UPDATE/DELETE ... WHERE ... IN (SELECT ...)
+    // - UPDATE/DELETE ... WHERE EXISTS (SELECT ...)
+    if (ctx.statementType === 'update' || ctx.statementType === 'delete') {
+        const sourceRootIds: string[] = [];
+
+        if (ctx.statementType === 'update') {
+            const fromItems = getUpdateSourceFromItems(stmt);
+            if (fromItems.length > 0) {
+                const updateSourceRootId = processSelect(
+                    buildSyntheticSelectFromFromItems(fromItems),
+                    nodes,
+                    edges
+                );
+                if (updateSourceRootId) {
+                    sourceRootIds.push(updateSourceRootId);
+                }
+            }
+        }
+
+        const whereSelects = extractSelectSubqueriesFromExpression(stmt.where);
+        for (const whereSelect of whereSelects) {
+            const whereSourceRootId = processSelect(whereSelect, nodes, edges);
+            if (whereSourceRootId) {
+                sourceRootIds.push(whereSourceRootId);
+            }
+        }
+
+        const uniqueSourceRootIds = Array.from(new Set(sourceRootIds));
+        if (uniqueSourceRootIds.length > 0) {
+            const labelWidth = Math.max(160, label.length * 10 + 40);
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: label,
+                description: description,
+                x: 0, y: 0, width: labelWidth, height: 60
+            });
+
+            const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+            const opType = ctx.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+            const targetIds: string[] = [];
+
+            for (const t of targetTables) {
+                const tableName = getTableName(t);
+                if (!tableName) {
+                    continue;
+                }
+                ctx.stats.tables++;
+                const targetId = genId('table');
+                nodes.push({
+                    id: targetId,
+                    type: 'table',
+                    label: tableName,
+                    description: 'Target table',
+                    accessMode: 'write',
+                    operationType: opType,
+                    x: 0, y: 0, width: 140, height: 60
+                });
+                targetIds.push(targetId);
+            }
+
+            if (targetIds.length === 0) {
+                for (const sourceId of uniqueSourceRootIds) {
+                    edges.push({
+                        id: genId('e'),
+                        source: sourceId,
+                        target: rootId
+                    });
+                }
+                return rootId;
+            }
+
+            let inboundToTargets = uniqueSourceRootIds;
+            if (stmt.where) {
+                const conditionDetails = extractConditions(stmt.where);
+                const filterId = genId('filter');
+                nodes.push({
+                    id: filterId,
+                    type: 'filter',
+                    label: 'WHERE',
+                    description: 'DML filter condition',
+                    details: conditionDetails.length > 0 ? [conditionDetails.join(' AND ')] : undefined,
+                    x: 0, y: 0, width: 140, height: 60
+                });
+                for (const sourceId of uniqueSourceRootIds) {
+                    edges.push({
+                        id: genId('e'),
+                        source: sourceId,
+                        target: filterId
+                    });
+                }
+                inboundToTargets = [filterId];
+            }
+
+            for (const inboundId of inboundToTargets) {
+                for (const targetId of targetIds) {
+                    edges.push({
+                        id: genId('e'),
+                        source: inboundId,
+                        target: targetId
+                    });
+                }
+            }
+
+            for (const targetId of targetIds) {
+                edges.push({
+                    id: genId('e'),
+                    source: targetId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+    }
+
     // Calculate width based on label length
     const labelWidth = Math.max(160, label.length * 10 + 40);
 
@@ -2793,6 +3062,100 @@ function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): stri
     }
 
     return rootId;
+}
+
+function getInsertSelectAst(stmt: any): any | null {
+    if (!stmt || stmt.type?.toLowerCase() !== 'insert') { return null; }
+    const values = stmt.values;
+    if (!values || typeof values !== 'object') { return null; }
+    if (values.type?.toLowerCase() !== 'select') { return null; }
+    return values;
+}
+
+function getUpdateSourceFromItems(stmt: any): any[] {
+    if (!stmt || stmt.type?.toLowerCase() !== 'update' || !Array.isArray(stmt.from)) {
+        return [];
+    }
+
+    const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+    if (targetTables.length === 0) {
+        return stmt.from;
+    }
+
+    // Compare (tableName, alias) fingerprints so self-joins aren't filtered out.
+    // e.g. UPDATE employees e ... FROM employees e2 should keep the FROM item.
+    const targetFingerprints = new Set<string>();
+    for (const target of targetTables) {
+        const name = getTableName(target)?.toLowerCase() || '';
+        const alias = (typeof target?.as === 'string' ? target.as : '').toLowerCase();
+        targetFingerprints.add(`${name}::${alias}`);
+    }
+
+    return stmt.from.filter((fromItem: any) => {
+        const name = getTableName(fromItem)?.toLowerCase() || '';
+        const alias = (typeof fromItem?.as === 'string' ? fromItem.as : '').toLowerCase();
+        const fingerprint = `${name}::${alias}`;
+        return !targetFingerprints.has(fingerprint);
+    });
+}
+
+function buildSyntheticSelectFromFromItems(fromItems: any[]): any {
+    return {
+        type: 'select',
+        with: null,
+        columns: [{ type: 'expr', expr: { type: 'star', value: '*' }, as: null }],
+        from: fromItems,
+        where: null,
+        groupby: null,
+        having: null,
+        orderby: null,
+        limit: null,
+        window: null
+    };
+}
+
+
+
+function extractSelectSubqueriesFromExpression(expression: any): any[] {
+    const selects: any[] = [];
+    const seen = new Set<any>();
+    collectSelectSubqueriesFromExpression(expression, selects, seen);
+    return selects;
+}
+
+function collectSelectSubqueriesFromExpression(expression: any, selects: any[], seen: Set<any>): void {
+    if (!expression || typeof expression !== 'object') {
+        return;
+    }
+    if (seen.has(expression)) {
+        return;
+    }
+    seen.add(expression);
+
+    if (Array.isArray(expression)) {
+        for (const item of expression) {
+            collectSelectSubqueriesFromExpression(item, selects, seen);
+        }
+        return;
+    }
+
+    const exprType = typeof expression.type === 'string' ? expression.type.toLowerCase() : '';
+    if (exprType === 'select') {
+        selects.push(expression);
+    }
+
+    const ast = (expression as any).ast;
+    if (ast && typeof ast === 'object' && !seen.has(ast)) {
+        const astType = typeof ast.type === 'string' ? ast.type.toLowerCase() : '';
+        if (astType === 'select') {
+            seen.add(ast);
+            selects.push(ast);
+        }
+    }
+
+    for (const value of Object.values(expression)) {
+        collectSelectSubqueriesFromExpression(value, selects, seen);
+    }
 }
 
 function processSelect(stmt: any, nodes: FlowNode[], edges: FlowEdge[], cteNames: Set<string> = new Set()): string {
@@ -4867,16 +5230,427 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
     }
 }
 
+/**
+ * Hoist CTEs nested inside subqueries to the top level.
+ * Snowflake / Tableau generates `FROM ( WITH cte AS (...) SELECT ... ) t`
+ * which node-sql-parser cannot handle. This rewrites the SQL to move the
+ * WITH block to the top level — a semantically equivalent transformation.
+ *
+ * Returns the transformed SQL or `null` if no hoisting was needed.
+ */
+export function hoistNestedCtes(sql: string): string | null {
+    // Build a masked version of the SQL where string literals and comments
+    // are replaced with placeholder characters so we don't false-match
+    // keywords inside them.
+    const masked = maskStringsAndComments(sql);
+
+    // We may need to hoist multiple independent nested CTEs (apply iteratively)
+    let current = sql;
+    let currentMasked = masked;
+    let hoisted = false;
+
+    // Safety limit to avoid infinite loops
+    for (let iteration = 0; iteration < 20; iteration++) {
+        const result = hoistOneNestedCte(current, currentMasked);
+        if (!result) {
+            break;
+        }
+        current = result;
+        currentMasked = maskStringsAndComments(current);
+        hoisted = true;
+    }
+
+    return hoisted ? current : null;
+}
+
+/**
+ * Replace string literals and comments with spaces (preserving length/positions).
+ */
+function maskStringsAndComments(sql: string): string {
+    const chars = sql.split('');
+    let i = 0;
+    while (i < chars.length) {
+        // Block comment
+        if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
+            chars[i] = ' ';
+            chars[i + 1] = ' ';
+            i += 2;
+            while (i < chars.length) {
+                if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    i += 2;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Line comment (--)
+        if (chars[i] === '-' && i + 1 < chars.length && chars[i + 1] === '-') {
+            while (i < chars.length && chars[i] !== '\n') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Hash comment
+        if (chars[i] === '#') {
+            while (i < chars.length && chars[i] !== '\n') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // String literal (single-quoted, with '' escape)
+        if (chars[i] === "'") {
+            chars[i] = ' ';
+            i++;
+            while (i < chars.length) {
+                if (chars[i] === "'" && i + 1 < chars.length && chars[i + 1] === "'") {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    i += 2;
+                    continue;
+                }
+                if (chars[i] === "'") {
+                    chars[i] = ' ';
+                    i++;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        // Double-quoted identifier
+        if (chars[i] === '"') {
+            chars[i] = ' ';
+            i++;
+            while (i < chars.length) {
+                if (chars[i] === '"') {
+                    chars[i] = ' ';
+                    i++;
+                    break;
+                }
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        i++;
+    }
+    return chars.join('');
+}
+
+/**
+ * Try to find and hoist a single `( WITH ... )` block.
+ * Returns the transformed SQL or null if nothing found.
+ */
+function hoistOneNestedCte(sql: string, masked: string): string | null {
+    // Find `( WITH` in the masked string (case-insensitive)
+    const parenWithRegex = /\(\s*WITH\b/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = parenWithRegex.exec(masked)) !== null) {
+        const openParenPos = match.index;
+
+        // Make sure this isn't a top-level WITH (no surrounding paren context
+        // that makes this a subquery). Check that there's meaningful SQL before
+        // the opening paren — i.e., it's used as FROM (...) or IN (...), etc.
+        // A top-level `( WITH ...` at the very start would have only whitespace before it.
+        const beforeParen = masked.substring(0, openParenPos).trim();
+        if (beforeParen.length === 0) {
+            // This is a top-level parenthesized WITH — skip
+            continue;
+        }
+
+        // Position right after the `(`
+        const withKeywordStart = openParenPos + 1;
+
+        // Now parse CTE definitions using balanced paren tracking on the ORIGINAL sql
+        // (but using masked for keyword detection)
+        const cteResult = extractCteDefinitions(sql, masked, withKeywordStart);
+        if (!cteResult) {
+            continue;
+        }
+
+        const { cteBlock, innerSelectStart } = cteResult;
+
+        // Find the matching closing `)` for the opening `(` at openParenPos
+        const closingParenPos = findMatchingParen(masked, openParenPos);
+        if (closingParenPos === -1) {
+            continue;
+        }
+
+        // Extract the inner SELECT (from after CTEs to before closing paren)
+        const innerSelect = sql.substring(innerSelectStart, closingParenPos).trim();
+
+        // Check if there's already a top-level WITH clause
+        const topLevelWithMatch = masked.match(/^\s*WITH\b/i);
+
+        // Replace the subquery content: remove the WITH block, keep only inner SELECT
+        // This is common to both merge and prepend paths
+        const beforeSubquery = sql.substring(0, openParenPos + 1);
+        const afterSubquery = sql.substring(closingParenPos);
+        const rewrittenSubquery = beforeSubquery + '\n' + innerSelect + '\n' + afterSubquery;
+
+        let newSql: string;
+        if (topLevelWithMatch) {
+            // Merge: find where the top-level CTEs end in the rewritten SQL
+            const rewrittenMasked = maskStringsAndComments(rewrittenSubquery);
+            const mergePoint = findTopLevelCteEnd(rewrittenMasked);
+            if (mergePoint === -1) {
+                continue;
+            }
+            // Insert the nested CTEs (comma-separated) before the main SELECT
+            const before = rewrittenSubquery.substring(0, mergePoint);
+            const after = rewrittenSubquery.substring(mergePoint);
+            // cteBlock starts with "WITH " — strip it to just get the CTE list
+            const cteList = cteBlock.replace(/^\s*WITH\s+/i, '');
+            newSql = before.trimEnd() + ',\n' + cteList + '\n' + after;
+        } else {
+            // Prepend CTE block to top
+            newSql = cteBlock + '\n' + rewrittenSubquery;
+        }
+
+        return newSql;
+    }
+
+    return null;
+}
+
+/**
+ * Extract CTE definitions starting from `withKeywordStart` in the sql.
+ * Returns the CTE block text and the position where the inner SELECT begins.
+ */
+function extractCteDefinitions(
+    sql: string,
+    masked: string,
+    withKeywordStart: number
+): { cteBlock: string; innerSelectStart: number } | null {
+    // Skip past `WITH` keyword and whitespace
+    const withMatch = masked.substring(withKeywordStart).match(/^(\s*WITH\s+)/i);
+    if (!withMatch) {
+        return null;
+    }
+
+    let pos = withKeywordStart + withMatch[0].length;
+    const cteStartPos = withKeywordStart;
+
+    // Parse each CTE: name AS (...)
+    while (pos < sql.length) {
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Read CTE name (may be quoted)
+        const nameStart = pos;
+        if (sql[pos] === '"' || sql[pos] === '`' || sql[pos] === '[') {
+            const closeChar = sql[pos] === '[' ? ']' : sql[pos];
+            pos++;
+            while (pos < sql.length && sql[pos] !== closeChar) { pos++; }
+            if (pos < sql.length) { pos++; } // skip closing quote
+        } else {
+            while (pos < sql.length && /\w/.test(sql[pos])) { pos++; }
+        }
+
+        if (pos === nameStart) {
+            return null; // no CTE name found
+        }
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Expect `AS`
+        if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
+            return null;
+        }
+        pos += 2;
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Expect `(` — find matching `)` using balanced paren tracking on original SQL
+        if (sql[pos] !== '(') {
+            return null;
+        }
+        const cteBodyClose = findMatchingParen(sql, pos);
+        if (cteBodyClose === -1) {
+            return null;
+        }
+        pos = cteBodyClose + 1;
+
+        // Skip whitespace
+        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+
+        // Check for comma (more CTEs) or SELECT (end of CTEs)
+        if (sql[pos] === ',') {
+            pos++; // skip comma, continue to next CTE
+            continue;
+        }
+
+        // Should be SELECT (or another DML keyword) — end of CTE definitions
+        break;
+    }
+
+    // The CTE block in the original SQL
+    const cteBlock = sql.substring(cteStartPos, pos).trim();
+
+    // Verify the next keyword is SELECT/INSERT/UPDATE/DELETE/MERGE
+    const remaining = masked.substring(pos).trimStart();
+    if (!/^(SELECT|INSERT|UPDATE|DELETE|MERGE)\b/i.test(remaining)) {
+        return null;
+    }
+
+    // innerSelectStart is where the SELECT begins (in original sql)
+    const innerSelectStart = pos + (masked.substring(pos).length - masked.substring(pos).trimStart().length);
+
+    return { cteBlock, innerSelectStart };
+}
+
+/**
+ * Find the position of the matching closing parenthesis for an opening `(`.
+ * Handles nested parens. Operates on the raw string (not masked) to handle
+ * all paren types, but skips string literals and comments.
+ */
+function findMatchingParen(sql: string, openPos: number): number {
+    if (sql[openPos] !== '(') {
+        return -1;
+    }
+    let depth = 1;
+    let i = openPos + 1;
+    while (i < sql.length && depth > 0) {
+        const ch = sql[i];
+        // Skip string literals
+        if (ch === "'") {
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === "'" && i + 1 < sql.length && sql[i + 1] === "'") {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === "'") {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (ch === '"') {
+            i++;
+            while (i < sql.length && sql[i] !== '"') { i++; }
+            if (i < sql.length) { i++; }
+            continue;
+        }
+        // Skip block comments
+        if (ch === '/' && i + 1 < sql.length && sql[i + 1] === '*') {
+            i += 2;
+            while (i < sql.length) {
+                if (sql[i] === '*' && i + 1 < sql.length && sql[i + 1] === '/') {
+                    i += 2;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        // Skip line comments
+        if (ch === '-' && i + 1 < sql.length && sql[i + 1] === '-') {
+            while (i < sql.length && sql[i] !== '\n') { i++; }
+            continue;
+        }
+        if (ch === '(') {
+            depth++;
+        } else if (ch === ')') {
+            depth--;
+            if (depth === 0) {
+                return i;
+            }
+        }
+        i++;
+    }
+    return -1;
+}
+
+/**
+ * Find where the top-level CTE list ends (i.e., the position of the main
+ * SELECT/INSERT/UPDATE/DELETE/MERGE after `WITH ... AS (...), ...`).
+ */
+function findTopLevelCteEnd(masked: string): number {
+    // Start after WITH keyword
+    const withMatch = masked.match(/^\s*WITH\s+/i);
+    if (!withMatch) {
+        return -1;
+    }
+
+    let pos = withMatch[0].length;
+
+    // Walk through CTE definitions
+    while (pos < masked.length) {
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Skip CTE name
+        while (pos < masked.length && /\w/.test(masked[pos])) { pos++; }
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Expect AS
+        if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
+            return -1;
+        }
+        pos += 2;
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Skip CTE body (balanced parens) — in masked string, parens are preserved
+        if (masked[pos] !== '(') {
+            return -1;
+        }
+        let depth = 1;
+        pos++;
+        while (pos < masked.length && depth > 0) {
+            if (masked[pos] === '(') { depth++; }
+            else if (masked[pos] === ')') { depth--; }
+            pos++;
+        }
+
+        // Skip whitespace
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+
+        // Comma means more CTEs
+        if (masked[pos] === ',') {
+            pos++;
+            continue;
+        }
+
+        // Otherwise we should be at the main statement
+        break;
+    }
+
+    return pos;
+}
+
 function stripSqlComments(sql: string): string {
     return sql
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ');
+        .replace(/--[^\n\r]*/g, ' ')
+        .replace(/#[^\n\r]*/g, ' ');
 }
 
 function detectDialectSyntaxPatterns(sql: string): {
     hasSnowflakePathOperator: boolean;
     hasSnowflakeNamedArgs: boolean;
     hasFlatten: boolean;
+    hasThreePartNames: boolean;
+    hasQualify: boolean;
+    hasIlike: boolean;
+    hasCreateOrReplaceTable: boolean;
+    hasMergeInto: boolean;
     hasBigQueryStruct: boolean;
     hasBigQueryUnnest: boolean;
     hasBigQueryArrayType: boolean;
@@ -4895,6 +5669,11 @@ function detectDialectSyntaxPatterns(sql: string): {
         hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
         hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
         hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
+        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(sql),
+        hasQualify: /\bQUALIFY\b/i.test(sql),
+        hasIlike: /\bILIKE\b/i.test(sql),
+        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(sql),
+        hasMergeInto: /\bMERGE\s+INTO\b/i.test(sql),
         hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
         hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
         hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
@@ -4931,6 +5710,11 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasSnowflakePathOperator) { addScore('Snowflake'); }
     if (syntax.hasSnowflakeNamedArgs) { addScore('Snowflake'); }
     if (syntax.hasFlatten) { addScore('Snowflake'); }
+    if (syntax.hasCreateOrReplaceTable) { addScore('Snowflake', 2); }
+    if (syntax.hasQualify) { addScore('Snowflake', 2); }
+    if (syntax.hasMergeInto) { addScore('Snowflake'); }
+    if (syntax.hasThreePartNames) { addScore('Snowflake', 3); }
+    if (syntax.hasIlike) { addScore('Snowflake'); }
 
     // BigQuery (UNNEST alone is not enough to disambiguate)
     if (syntax.hasBigQueryStruct) { addScore('BigQuery'); }
@@ -4938,11 +5722,13 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasBigQueryUnnest && (syntax.hasBigQueryStruct || syntax.hasBigQueryArrayType)) {
         addScore('BigQuery');
     }
+    if (syntax.hasQualify) { addScore('BigQuery'); }
 
     // PostgreSQL
     if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+    if (syntax.hasIlike) { addScore('PostgreSQL'); }
 
     // MySQL
     if (syntax.hasMysqlBackticks) { addScore('MySQL'); }
@@ -4953,12 +5739,14 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasTSqlApply) { addScore('TransactSQL'); }
     if (syntax.hasTSqlTop) { addScore('TransactSQL'); }
     if (syntax.hasTSqlPivot) { addScore('TransactSQL'); }
+    if (syntax.hasThreePartNames) { addScore('TransactSQL'); }
+    if (syntax.hasMergeInto) { addScore('TransactSQL'); }
 
-    const candidateDialects: SqlDialect[] = ['Snowflake', 'BigQuery', 'PostgreSQL', 'MySQL', 'TransactSQL'];
-    const matchedDialects = candidateDialects
-        .map(dialect => ({ dialect, score: scores[dialect] || 0 }))
-        .filter(entry => entry.score > 0)
-        .sort((a, b) => b.score - a.score);
+    // Redshift
+    if (syntax.hasThreePartNames) { addScore('Redshift'); }
+    if (syntax.hasIlike) { addScore('Redshift'); }
+
+    const matchedDialects = rankDialectScores(scores);
 
     if (matchedDialects.length === 0) {
         return {
@@ -4969,10 +5757,10 @@ export function detectDialect(sql: string): DialectDetectionResult {
     }
 
     const topMatch = matchedDialects[0];
-    const allOtherScoresZero = candidateDialects
-        .filter(dialect => dialect !== topMatch.dialect)
-        .every(dialect => (scores[dialect] || 0) === 0);
-    const isHighConfidence = matchedDialects.length === 1 || (topMatch.score >= 2 && allOtherScoresZero);
+    const secondMatchScore = matchedDialects[1]?.score ?? 0;
+    const isHighConfidence =
+        matchedDialects.length === 1 ||
+        (topMatch.score >= 3 && topMatch.score >= secondMatchScore + 2);
 
     if (!isHighConfidence) {
         return {

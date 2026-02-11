@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -16,6 +16,15 @@
   "categories": [
     "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "sql",
+    "visualization",
+    "diagram",
+    "flow",
+    "lineage",
+    "query",
+    "database"
   ],
   "activationEvents": [
     "onLanguage:sql",
@@ -67,6 +76,11 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "sql-crack.visualize",
+          "when": "editorLangId == sql || sqlCrack.isAdditionalSqlFile",
+          "group": "navigation"
+        },
         {
           "command": "sql-crack.analyzeWorkspace",
           "when": "workspaceFolderCount > 0"
@@ -122,14 +136,14 @@
         },
         "sqlCrack.viewLocation": {
           "type": "string",
-          "default": "beside",
+          "default": "tab",
           "enum": [
             "beside",
             "tab"
           ],
           "enumDescriptions": [
             "Opens beside the SQL file (like Markdown preview)",
-            "Opens as a new tab in the editor area"
+            "Opens as a new tab in the editor area (default)"
           ],
           "description": "Where to display the SQL visualization panel"
         },
@@ -220,15 +234,15 @@
         },
         "sqlCrack.gridStyle": {
           "type": "string",
-          "default": "dots",
+          "default": "lines",
           "enum": [
             "dots",
             "lines",
             "none"
           ],
           "enumDescriptions": [
-            "Dot grid pattern (default, subtle dots at intersections)",
-            "Line grid pattern (subtle grid lines)",
+            "Dot grid pattern (subtle dots at intersections)",
+            "Line grid pattern (default, subtle grid lines)",
             "No grid pattern (plain background)"
           ],
           "description": "Background grid pattern style for visualizations"
@@ -280,16 +294,16 @@
         },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
-          "default": "auto",
+          "default": "light",
           "enum": [
             "auto",
             "dark",
             "light"
           ],
           "enumDescriptions": [
-            "Automatically match VS Code theme (default)",
+            "Automatically match VS Code theme",
             "Always use dark theme",
-            "Always use light theme"
+            "Always use light theme (default)"
           ],
           "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },
@@ -369,38 +383,22 @@
           {
             "id": "openSqlFile",
             "title": "Open a SQL file",
-            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
-            "media": {
-              "altText": "Open a SQL file in the editor",
-              "markdown": ""
-            }
+            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)"
           },
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
-            "media": {
-              "altText": "SQL flow visualization panel",
-              "markdown": ""
-            }
+            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)"
           },
           {
             "id": "exploreWorkspace",
             "title": "Explore workspace dependencies",
-            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
-            "media": {
-              "altText": "Workspace dependency graph",
-              "markdown": ""
-            }
+            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)"
           },
           {
             "id": "columnLineage",
             "title": "Try column lineage",
-            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
-            "media": {
-              "altText": "Column lineage tracing",
-              "markdown": ""
-            }
+            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query."
           }
         ]
       }

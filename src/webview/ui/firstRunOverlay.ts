@@ -1,6 +1,9 @@
 // First Run Overlay — Semi-transparent onboarding overlay
 // Shows on first visualization open with callout hotspots
 
+import { ICONS } from '../../shared/icons';
+import { Z_INDEX } from '../../shared/zIndex';
+
 export interface FirstRunOverlayCallbacks {
     isDarkTheme: () => boolean;
     onDismiss: () => void;
@@ -27,7 +30,7 @@ export function showFirstRunOverlay(
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 3000;
+        z-index: ${Z_INDEX.firstRunOverlay};
         display: flex;
         align-items: center;
         justify-content: center;
@@ -53,15 +56,15 @@ export function showFirstRunOverlay(
     const accentBg = isDark ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.08)';
 
     const tips = [
-        { icon: '\u2328', title: 'Keyboard shortcuts', desc: 'Press ? to see all shortcuts. Use 1-5 for quick layouts.' },
-        { icon: '\u2502', title: 'Column lineage', desc: 'Press C to trace how columns flow through your query.' },
-        { icon: '\u2318P', title: 'Command palette', desc: 'Ctrl+Shift+P opens the command palette for quick actions.' },
-        { icon: 'L', title: 'Legend bar', desc: 'Press L to toggle the color legend at the bottom.' },
+        { icon: ICONS.help, title: 'Keyboard shortcuts', desc: 'Press ? to see all shortcuts. Use 1-5 for quick layouts.' },
+        { icon: ICONS.columnLineage, title: 'Column lineage', desc: 'Press C to trace how columns flow through your query.' },
+        { icon: ICONS.search, title: 'Command palette', desc: 'Ctrl+Shift+P opens the command palette for quick actions.' },
+        { icon: ICONS.layout, title: 'Legend bar', desc: 'Press L to toggle the color legend at the bottom.' },
     ];
 
     card.innerHTML = `
         <div style="padding: 24px 24px 16px; text-align: center;">
-            <div style="font-size: 28px; margin-bottom: 8px;">\u26A1</div>
+            <div style="font-size: 28px; margin-bottom: 8px; color: ${accentColor}; display: inline-flex;">${ICONS.bolt}</div>
             <h2 style="margin: 0 0 4px; font-size: 18px; font-weight: 600; color: ${textColor};">
                 Welcome to SQL Crack
             </h2>
@@ -89,7 +92,6 @@ export function showFirstRunOverlay(
                         font-size: 12px;
                         font-weight: 600;
                         color: ${accentColor};
-                        font-family: monospace;
                     ">${tip.icon}</div>
                     <div>
                         <div style="font-size: 13px; font-weight: 500; color: ${textColor};">${tip.title}</div>

@@ -53,7 +53,7 @@ export class VisualizationPanel {
 
     private static getViewColumn(): vscode.ViewColumn {
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const location = config.get<ViewLocation>('viewLocation') || 'beside';
+        const location = config.get<ViewLocation>('viewLocation') || 'tab';
 
         switch (location) {
             case 'tab':
@@ -233,7 +233,7 @@ export class VisualizationPanel {
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');
-            const location = config.get<ViewLocation>('viewLocation') || 'beside';
+            const location = config.get<ViewLocation>('viewLocation') || 'tab';
             VisualizationPanel.currentPanel._postMessage({
                 command: 'viewLocationOptions',
                 currentLocation: location,
@@ -262,6 +262,19 @@ export class VisualizationPanel {
 
         // Listen for when the panel is disposed
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        // Refresh the webview when VS Code theme changes so the panel reflects the active theme immediately.
+        vscode.window.onDidChangeActiveColorTheme(() => {
+            this._update(this._currentSql, this._currentOptions);
+        }, null, this._disposables);
+
+        // Refresh when SQL Crack settings change so runtime config updates apply without reopening the panel.
+        vscode.workspace.onDidChangeConfiguration((event) => {
+            if (!event.affectsConfiguration('sqlCrack')) {
+                return;
+            }
+            this._update(this._currentSql, this._currentOptions);
+        }, null, this._disposables);
 
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
@@ -301,6 +314,8 @@ export class VisualizationPanel {
                                 pinId: pinId
                             });
                             vscode.window.showInformationMessage(`Pinned: ${message.name || this._currentOptions.fileName}`);
+                        } else {
+                            vscode.window.showErrorMessage('Cannot pin: extension context not available');
                         }
                         return;
                     case 'changeViewLocation':
@@ -448,12 +463,12 @@ export class VisualizationPanel {
         const vscodeTheme = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
 
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const viewLocation = config.get<ViewLocation>('viewLocation') || 'beside';
+        const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
         const flowDirection = config.get<string>('flowDirection') || 'top-down';
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
-        const gridStyle = config.get<string>('gridStyle') || 'dots';
+        const gridStyle = config.get<string>('gridStyle') || 'lines';
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
         const showMinimap = config.get<string>('showMinimap') || 'auto';
         const colorblindMode = config.get<string>('colorblindMode') || 'off';

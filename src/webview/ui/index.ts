@@ -2,6 +2,7 @@
 
 export {
     createToolbar,
+    disposeToolbar,
     updateToolbarTheme,
     updateAutoDetectIndicator,
     updateHintsSummaryBadge,
@@ -18,6 +19,7 @@ export {
 export {
     createBatchTabs,
     updateBatchTabs,
+    disposeBatchTabs,
     BatchTabsCallbacks
 } from './batchTabs';
 
@@ -30,6 +32,7 @@ export {
     getPinnedTabs,
     getActiveTabId,
     setActiveTabId,
+    disposePinnedTabs,
     PinnedTab,
     PinnedTabsCallbacks
 } from './pinnedTabs';
@@ -61,6 +64,7 @@ export {
     removeBreadcrumbSegment,
     clearBreadcrumbBar,
     isBreadcrumbBarVisible,
+    disposeBreadcrumbBar,
 } from './breadcrumbBar';
 export type { BreadcrumbSegment, BreadcrumbBarCallbacks } from './breadcrumbBar';
 

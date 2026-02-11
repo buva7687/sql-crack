@@ -1,5 +1,6 @@
 import { ParseResult } from '../types';
 import { FlowNode } from '../types/nodes';
+import { Z_INDEX } from '../../shared/zIndex';
 
 export interface ComparePaneInput {
     label: string;
@@ -216,7 +217,7 @@ function renderGraphPane(
         border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.32)'};
         border-radius: 10px;
         overflow: hidden;
-        background: ${dark ? 'linear-gradient(180deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96))' : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))'};
+        background: ${dark ? 'linear-gradient(180deg, rgba(17,17,17,0.96), rgba(10,10,10,0.96))' : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))'};
         cursor: grab;
     `;
     pane.appendChild(viewport);
@@ -453,7 +454,7 @@ export function showCompareView(options: CompareViewOptions): void {
         position: absolute;
         inset: 12px;
         top: 74px;
-        z-index: 130;
+        z-index: ${Z_INDEX.compareOverlay};
         border-radius: 12px;
         border: 1px solid ${options.isDarkTheme ? 'rgba(148, 163, 184, 0.28)' : 'rgba(148, 163, 184, 0.35)'};
         background: ${options.isDarkTheme ? 'rgba(2, 6, 23, 0.95)' : 'rgba(241, 245, 249, 0.96)'};
@@ -506,7 +507,7 @@ export function showCompareView(options: CompareViewOptions): void {
     closeButton.textContent = 'Close';
     closeButton.style.cssText = `
         border: 1px solid ${options.isDarkTheme ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.35)'};
-        background: ${options.isDarkTheme ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.92)'};
+        background: ${options.isDarkTheme ? 'rgba(17, 17, 17, 0.9)' : 'rgba(255, 255, 255, 0.92)'};
         color: ${options.isDarkTheme ? '#f8fafc' : '#0f172a'};
         border-radius: 8px;
         font-size: 11px;

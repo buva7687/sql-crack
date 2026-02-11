@@ -5,6 +5,7 @@ import { FocusMode, LayoutType } from '../types';
 import { createExportDropdown } from './exportDropdown';
 import { createLayoutPicker } from './layoutPicker';
 import { ICONS } from '../../shared/icons';
+import { Z_INDEX } from '../../shared/zIndex';
 import { getComponentUiColors } from '../constants';
 import { repositionBreadcrumbBar } from './breadcrumbBar';
 import { prefersReducedMotion } from './motion';
@@ -55,9 +56,21 @@ export interface ToolbarCallbacks {
 }
 
 let hintsSummaryBtn: HTMLButtonElement | null = null;
+let toolbarAbortController: AbortController | null = null;
 const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
 const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
 let lineagePulseApplied = false;
+
+function getToolbarListenerOptions(): AddEventListenerOptions | undefined {
+    return toolbarAbortController ? { signal: toolbarAbortController.signal } : undefined;
+}
+
+function createHintsBadgeMarkup(label: string): string {
+    return `
+        <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
+        <span>${label}</span>
+    `;
+}
 
 /**
  * Format a timestamp as a relative time string like "5m ago", "2h ago", "3d ago".
@@ -85,7 +98,7 @@ function getOverflowPalette(dark: boolean): {
     shadow: string;
 } {
     return dark ? {
-        background: 'rgba(15, 23, 42, 0.95)',
+        background: 'rgba(17, 17, 17, 0.95)',
         border: 'rgba(148, 163, 184, 0.2)',
         text: '#e2e8f0',
         hover: 'rgba(148, 163, 184, 0.2)',
@@ -152,7 +165,7 @@ function applyOverflowMenuTheme(dark: boolean): void {
     }
 
     if (overflowDropdown) {
-        overflowDropdown.style.background = dark ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+        overflowDropdown.style.background = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
         overflowDropdown.style.borderColor = palette.border;
         overflowDropdown.style.boxShadow = palette.shadow;
         overflowDropdown.querySelectorAll('[data-overflow-row="true"]').forEach((row) => {
@@ -192,6 +205,11 @@ export function createToolbar(
         isFirstRun: boolean;
     }
 ): { toolbar: HTMLElement; actions: HTMLElement; searchContainer: HTMLElement; cleanup: ToolbarCleanup } {
+    // Abort stale listeners before rebuilding toolbar (e.g. re-init/theme rebuild)
+    toolbarAbortController?.abort();
+    toolbarAbortController = new AbortController();
+    const listenerOptions = getToolbarListenerOptions();
+
     // Store event listeners for cleanup
     const documentListeners: Array<{ type: string; handler: EventListener }> = [];
 
@@ -206,7 +224,7 @@ export function createToolbar(
         display: flex;
         align-items: center;
         gap: 8px;
-        z-index: 100;
+        z-index: ${Z_INDEX.toolbar};
         overflow: hidden;
         padding-bottom: 4px;
         scrollbar-width: thin;
@@ -244,7 +262,7 @@ export function createToolbar(
     const isDark = callbacks.isDarkTheme();
     const title = document.createElement('div');
     title.style.cssText = `
-        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 8px 12px;
@@ -319,7 +337,7 @@ export function createToolbar(
         dialectSelect.value = options.currentDialect;
         dialectSelect.addEventListener('change', (e) => {
             callbacks.onDialectChange((e.target as HTMLSelectElement).value as SqlDialect);
-        });
+        }, listenerOptions);
     }
 
     // Listen for theme change events
@@ -328,11 +346,13 @@ export function createToolbar(
         updateToolbarTheme(dark, toolbar, actions, searchContainer);
         applyOverflowMenuTheme(dark);
     }) as EventListener;
-    document.addEventListener('theme-change', themeChangeHandler);
+    document.addEventListener('theme-change', themeChangeHandler, listenerOptions);
     documentListeners.push({ type: 'theme-change', handler: themeChangeHandler });
 
     // Cleanup function to remove all document event listeners
     const cleanup: ToolbarCleanup = () => {
+        toolbarAbortController?.abort();
+        toolbarAbortController = null;
         documentListeners.forEach(({ type, handler }) => {
             document.removeEventListener(type, handler);
             window.removeEventListener(type, handler);
@@ -354,12 +374,18 @@ export function createToolbar(
     return { toolbar, actions, searchContainer, cleanup };
 }
 
+export function disposeToolbar(): void {
+    toolbarAbortController?.abort();
+    toolbarAbortController = null;
+}
+
 function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     const dark = callbacks.isDarkTheme();
+    const listenerOptions = getToolbarListenerOptions();
     const searchContainer = document.createElement('div');
     searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
-        background: ${dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         padding: 4px 12px;
@@ -369,8 +395,8 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
     `;
 
     const searchIcon = document.createElement('span');
-    searchIcon.textContent = '🔍';
-    searchIcon.style.cssText = 'font-size: 12px;';
+    searchIcon.innerHTML = ICONS.search;
+    searchIcon.style.cssText = 'display: inline-flex; width: 14px; height: 14px;';
     searchContainer.appendChild(searchIcon);
 
     const searchInput = document.createElement('input');
@@ -414,13 +440,13 @@ function createSearchBox(callbacks: ToolbarCallbacks): HTMLElement {
         padding: 2px 6px;
         font-size: 12px;
     `;
-    prevBtn.addEventListener('click', callbacks.onPrevSearchResult);
+    prevBtn.addEventListener('click', callbacks.onPrevSearchResult, listenerOptions);
     searchNav.appendChild(prevBtn);
 
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '↓';
     nextBtn.style.cssText = prevBtn.style.cssText;
-    nextBtn.addEventListener('click', callbacks.onNextSearchResult);
+    nextBtn.addEventListener('click', callbacks.onNextSearchResult, listenerOptions);
     searchNav.appendChild(nextBtn);
 
     searchContainer.appendChild(searchNav);
@@ -442,6 +468,7 @@ function createActionButtons(
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const actions = document.createElement('div');
     actions.id = 'sql-crack-actions';
     actions.style.cssText = `
@@ -487,10 +514,10 @@ function createActionButtons(
     `;
     overflowBtn.addEventListener('mouseenter', () => {
         overflowBtn.style.background = getOverflowPalette(callbacks.isDarkTheme()).hover;
-    });
+    }, listenerOptions);
     overflowBtn.addEventListener('mouseleave', () => {
         applyOverflowMenuTheme(callbacks.isDarkTheme());
-    });
+    }, listenerOptions);
 
     const overflowDropdown = document.createElement('div');
     overflowDropdown.id = 'sql-crack-overflow-dropdown';
@@ -502,7 +529,7 @@ function createActionButtons(
         border-radius: 8px;
         padding: 8px 0;
         min-width: 200px;
-        z-index: 1000;
+        z-index: ${Z_INDEX.dropdown};
         box-shadow: none;
     `;
 
@@ -523,12 +550,12 @@ function createActionButtons(
         if (isHidden) {
             positionDropdown();
         }
-    });
+    }, listenerOptions);
 
     const overflowClickHandler = () => {
         overflowDropdown.style.display = 'none';
     };
-    document.addEventListener('click', overflowClickHandler);
+    document.addEventListener('click', overflowClickHandler, listenerOptions);
     documentListeners.push({ type: 'click', handler: overflowClickHandler });
 
     overflowContainer.appendChild(overflowBtn);
@@ -578,6 +605,12 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
 
     // Extract icon and label from any toolbar element (button or div container)
     const extractMeta = (el: HTMLElement): { icon: string; label: string } => {
+        const explicitIcon = (el.dataset.overflowIcon || '').trim();
+        if (explicitIcon) {
+            const label = cleanOverflowLabel(el.title || '') || 'Action';
+            return { icon: explicitIcon, label };
+        }
+
         // Try direct text nodes first (avoids grabbing dropdown/child content)
         let icon = getDirectText(el);
         let title = el.title || '';
@@ -587,10 +620,10 @@ function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElem
             const innerBtn = el.querySelector('button');
             const select = el.querySelector('select');
             if (innerBtn) {
-                icon = getDirectText(innerBtn) || innerBtn.innerHTML.trim().slice(0, 3);
+                icon = innerBtn.dataset.overflowIcon || getDirectText(innerBtn) || innerBtn.innerHTML.trim().slice(0, 3);
                 title = title || innerBtn.title || '';
             } else if (select) {
-                icon = '📐';
+                icon = ICONS.layout;
                 title = title || 'Layout';
             } else {
                 icon = el.textContent?.trim().slice(0, 2) || '';
@@ -704,8 +737,12 @@ function setupOverflowObserver(
             `;
 
             const iconSpan = document.createElement('span');
-            iconSpan.style.cssText = 'font-size: 14px; min-width: 20px; text-align: center;';
-            iconSpan.textContent = icon;
+            iconSpan.style.cssText = 'display: inline-flex; min-width: 20px; align-items: center; justify-content: center;';
+            if (icon.includes('<svg')) {
+                iconSpan.innerHTML = icon;
+            } else {
+                iconSpan.textContent = icon;
+            }
             row.appendChild(iconSpan);
 
             const labelSpan = document.createElement('span');
@@ -760,7 +797,7 @@ function createZoomGroup(
         display: flex;
         flex-shrink: 0;
         align-items: center;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(17, 17, 17, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
@@ -847,7 +884,7 @@ function createExportGroup(
     exportGroup.style.cssText = `
         display: flex;
         flex-shrink: 0;
-        background: ${isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
+        background: ${isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
         border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
         border-radius: 8px;
         overflow: visible;
@@ -879,41 +916,47 @@ function createFeatureGroup(
     },
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const featureGroup = document.createElement('div');
     featureGroup.style.cssText = `
         display: flex;
         flex-shrink: 0;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(17, 17, 17, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         overflow: hidden;
     `;
 
     // Refresh button
-    const refreshBtn = createButton('↻', callbacks.onRefresh, 'Refresh visualization');
+    const refreshBtn = createButton(ICONS.refresh, callbacks.onRefresh, 'Refresh visualization');
     refreshBtn.id = 'refresh-btn';
     refreshBtn.title = 'Refresh visualization';
-    refreshBtn.style.fontSize = '16px';
+    refreshBtn.dataset.overflowIcon = ICONS.refresh;
     featureGroup.appendChild(refreshBtn);
 
     // Optimization hints summary badge
-    hintsSummaryBtn = createButton('⚡ ✓', callbacks.onToggleHints, 'Show optimization hints');
+    hintsSummaryBtn = createButton(createHintsBadgeMarkup('OK'), callbacks.onToggleHints, 'Show optimization hints');
     hintsSummaryBtn.id = 'hints-summary-btn';
     hintsSummaryBtn.title = 'Optimization hints';
     hintsSummaryBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
-    hintsSummaryBtn.style.fontSize = '12px';
+    hintsSummaryBtn.style.fontSize = '11px';
     hintsSummaryBtn.style.fontWeight = '700';
+    hintsSummaryBtn.style.display = 'inline-flex';
+    hintsSummaryBtn.style.alignItems = 'center';
+    hintsSummaryBtn.style.gap = '6px';
+    hintsSummaryBtn.dataset.overflowIcon = ICONS.bolt;
     featureGroup.appendChild(hintsSummaryBtn);
 
     // Pin/View location buttons for non-pinned views
     if (!options.isPinnedView) {
         // Pin button
-        const pinBtn = createButton('📌', () => {
+        const pinBtn = createButton(ICONS.pin, () => {
             const { sql, name } = callbacks.getCurrentQuerySql();
             callbacks.onPinVisualization(sql, 'MySQL' as SqlDialect, name);
         }, 'Pin visualization as new tab');
         pinBtn.title = 'Pin visualization as new tab';
         pinBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+        pinBtn.dataset.overflowIcon = ICONS.pin;
         featureGroup.appendChild(pinBtn);
 
         // View location button with dropdown
@@ -935,11 +978,14 @@ function createFeatureGroup(
         `;
 
         const pinnedIndicator = document.createElement('span');
-        pinnedIndicator.innerHTML = '📌 Pinned';
+        pinnedIndicator.innerHTML = `<span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.pin}</span><span>Pinned</span>`;
         pinnedIndicator.style.cssText = `
             color: #94a3b8;
             font-size: 11px;
             padding: 4px 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         `;
         pinnedContainer.appendChild(pinnedIndicator);
 
@@ -958,8 +1004,8 @@ function createFeatureGroup(
                 font-size: 16px;
                 transition: color 0.2s;
             `;
-            unpinBtn.addEventListener('mouseenter', () => unpinBtn.style.color = '#ef4444');
-            unpinBtn.addEventListener('mouseleave', () => unpinBtn.style.color = '#94a3b8');
+            unpinBtn.addEventListener('mouseenter', () => unpinBtn.style.color = '#ef4444', listenerOptions);
+            unpinBtn.addEventListener('mouseleave', () => unpinBtn.style.color = '#94a3b8', listenerOptions);
             pinnedContainer.appendChild(unpinBtn);
         }
 
@@ -977,7 +1023,8 @@ function createFeatureGroup(
             : 'Compare with Baseline Query (Pin another query or use multi-query file)';
     };
     updateCompareButtonTitle();
-    compareBtn.addEventListener('mouseenter', updateCompareButtonTitle);
+    compareBtn.addEventListener('mouseenter', updateCompareButtonTitle, listenerOptions);
+    compareBtn.dataset.overflowIcon = ICONS.compareMode;
     compareBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     const setCompareButtonState = (active: boolean) => {
         compareBtn.dataset.active = active ? 'true' : 'false';
@@ -990,18 +1037,19 @@ function createFeatureGroup(
     const compareStateHandler = ((event: CustomEvent) => {
         setCompareButtonState(Boolean(event.detail?.active));
     }) as EventListener;
-    document.addEventListener('compare-mode-state', compareStateHandler);
+    document.addEventListener('compare-mode-state', compareStateHandler, listenerOptions);
     documentListeners.push({ type: 'compare-mode-state', handler: compareStateHandler });
 
     // Focus Mode button
     let focusModeActive = false;
-    const focusBtn = createButton('👁', () => {
+    const focusBtn = createButton(ICONS.eye, () => {
         focusModeActive = !focusModeActive;
         callbacks.onToggleFocusMode(focusModeActive);
         focusBtn.style.background = focusModeActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
     }, 'Toggle focus mode');
     focusBtn.title = 'Focus mode - highlight connected nodes';
     focusBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    focusBtn.dataset.overflowIcon = ICONS.eye;
     featureGroup.appendChild(focusBtn);
 
     // Focus Mode Direction selector
@@ -1014,6 +1062,7 @@ function createFeatureGroup(
     sqlBtn.style.fontSize = '11px';
     sqlBtn.style.fontWeight = '700';
     sqlBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    sqlBtn.dataset.overflowIcon = '{ }';
     featureGroup.appendChild(sqlBtn);
 
     // Column Lineage toggle button (SVG icon, one-time pulse on first activation)
@@ -1044,6 +1093,7 @@ function createFeatureGroup(
     columnFlowBtn.title = 'Toggle column lineage (C)';
     columnFlowBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     columnFlowBtn.style.color = '#94a3b8'; // muted gray when inactive
+    columnFlowBtn.dataset.overflowIcon = ICONS.columnLineage;
     featureGroup.appendChild(columnFlowBtn);
 
     // Theme Toggle button
@@ -1053,6 +1103,7 @@ function createFeatureGroup(
     }, 'Toggle dark or light theme');
     themeBtn.title = 'Toggle dark/light theme (T)';
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    themeBtn.dataset.overflowIcon = callbacks.isDarkTheme() ? '◐' : '◑';
     featureGroup.appendChild(themeBtn);
 
     // Layout picker popover (replaces old <select>)
@@ -1072,12 +1123,13 @@ function createFeatureGroup(
     }, 'Toggle fullscreen');
     fullscreenBtn.title = 'Toggle fullscreen (F)';
     fullscreenBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    fullscreenBtn.dataset.overflowIcon = '⛶';
     featureGroup.appendChild(fullscreenBtn);
 
     const fullscreenHandler = () => {
         fullscreenBtn.style.background = callbacks.isFullscreen() ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
     };
-    document.addEventListener('fullscreenchange', fullscreenHandler);
+    document.addEventListener('fullscreenchange', fullscreenHandler, listenerOptions);
     documentListeners.push({ type: 'fullscreenchange', handler: fullscreenHandler });
 
     // Help button
@@ -1087,6 +1139,7 @@ function createFeatureGroup(
     helpBtn.title = 'Keyboard shortcuts';
     helpBtn.style.fontWeight = '700';
     helpBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
+    helpBtn.dataset.overflowIcon = '?';
     featureGroup.appendChild(helpBtn);
     applyFirstRunHelpPulse(helpBtn, options.isFirstRun);
 
@@ -1094,16 +1147,17 @@ function createFeatureGroup(
 }
 
 function createButton(label: string, onClick: () => void, ariaLabel?: string, isDark = true): HTMLButtonElement {
+    const listenerOptions = getToolbarListenerOptions();
     const btn = document.createElement('button');
     btn.innerHTML = label;
     btn.style.cssText = getBtnStyle(isDark);
-    btn.addEventListener('click', onClick);
-    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
+    btn.addEventListener('click', onClick, listenerOptions);
+    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)', listenerOptions);
     btn.addEventListener('mouseleave', () => {
         if (!btn.style.background.includes('102, 241')) {
             btn.style.background = 'transparent';
         }
-    });
+    }, listenerOptions);
 
     // Accessibility: add aria-label for screen readers
     if (ariaLabel) {
@@ -1118,6 +1172,7 @@ function createFocusModeSelector(
     callbacks: ToolbarCallbacks,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const container = document.createElement('div');
     container.id = 'focus-mode-selector';
     container.dataset.overflowKeepVisible = 'true';
@@ -1135,12 +1190,12 @@ function createFocusModeSelector(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 11000;
+        z-index: ${Z_INDEX.dropdownTop};
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1188,7 +1243,7 @@ function createFocusModeSelector(
                 font-size: 10px;
                 color: #a5b4fc;
             ">${mode.shortcut}</kbd>
-            ${isActive ? '<span style="color: #818cf8;">✓</span>' : ''}
+            ${isActive ? `<span class="sql-crack-check-icon" style="color: #818cf8; display: inline-flex; width: 14px; height: 14px;">${ICONS.check}</span>` : ''}
         `;
 
         item.addEventListener('click', (e) => {
@@ -1197,18 +1252,18 @@ function createFocusModeSelector(
             dropdown.style.display = 'none';
             btn.innerHTML = mode.icon;
             updateFocusModeDropdown(dropdown, mode.id, callbacks.isDarkTheme());
-        });
+        }, listenerOptions);
 
         item.addEventListener('mouseenter', () => {
             if (callbacks.getFocusMode() !== mode.id) {
                 item.style.background = 'rgba(148, 163, 184, 0.1)';
             }
-        });
+        }, listenerOptions);
         item.addEventListener('mouseleave', () => {
             if (callbacks.getFocusMode() !== mode.id) {
                 item.style.background = 'transparent';
             }
-        });
+        }, listenerOptions);
 
         dropdown.appendChild(item);
     });
@@ -1225,19 +1280,19 @@ function createFocusModeSelector(
         } else {
             dropdown.style.display = 'none';
         }
-    });
+    }, listenerOptions);
 
-    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)');
+    btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(148, 163, 184, 0.1)', listenerOptions);
     btn.addEventListener('mouseleave', () => {
         if (dropdown.style.display !== 'block') {
             btn.style.background = 'transparent';
         }
-    });
+    }, listenerOptions);
 
     const focusModeClickHandler = () => {
         dropdown.style.display = 'none';
     };
-    document.addEventListener('click', focusModeClickHandler);
+    document.addEventListener('click', focusModeClickHandler, listenerOptions);
     documentListeners.push({ type: 'click', handler: focusModeClickHandler });
 
     const focusModeResizeHandler = () => {
@@ -1247,7 +1302,7 @@ function createFocusModeSelector(
             dropdown.style.right = `${window.innerWidth - rect.right}px`;
         }
     };
-    window.addEventListener('resize', focusModeResizeHandler);
+    window.addEventListener('resize', focusModeResizeHandler, listenerOptions);
     documentListeners.push({ type: 'resize', handler: focusModeResizeHandler as EventListener });
 
     container.appendChild(btn);
@@ -1262,15 +1317,16 @@ function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode, i
         (item as HTMLElement).style.color = isActive ? '#818cf8' : (isDark ? '#e2e8f0' : '#1e293b');
         (item as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
 
-        // Update checkmark
-        const existingCheck = item.querySelector('span:last-child');
-        if (existingCheck && existingCheck.textContent === '✓') {
-            existingCheck.remove();
-        }
+        // Update check icon
+        item.querySelector('.sql-crack-check-icon')?.remove();
         if (isActive) {
             const check = document.createElement('span');
+            check.className = 'sql-crack-check-icon';
             check.style.color = '#818cf8';
-            check.textContent = '✓';
+            check.style.display = 'inline-flex';
+            check.style.width = '14px';
+            check.style.height = '14px';
+            check.innerHTML = ICONS.check;
             item.appendChild(check);
         }
     });
@@ -1281,6 +1337,7 @@ function createViewLocationButton(
     currentLocation: string,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const viewLocBtn = document.createElement('button');
     viewLocBtn.id = 'view-location-btn';
     viewLocBtn.dataset.overflowKeepVisible = 'true';
@@ -1303,12 +1360,12 @@ function createViewLocationButton(
         } else {
             dropdown.style.display = 'none';
         }
-    });
+    }, listenerOptions);
 
     const viewLocClickHandler = () => {
         dropdown.style.display = 'none';
     };
-    document.addEventListener('click', viewLocClickHandler);
+    document.addEventListener('click', viewLocClickHandler, listenerOptions);
     documentListeners.push({ type: 'click', handler: viewLocClickHandler });
 
     const viewLocResizeHandler = () => {
@@ -1318,32 +1375,33 @@ function createViewLocationButton(
             dropdown.style.right = `${window.innerWidth - rect.right}px`;
         }
     };
-    window.addEventListener('resize', viewLocResizeHandler);
+    window.addEventListener('resize', viewLocResizeHandler, listenerOptions);
     documentListeners.push({ type: 'resize', handler: viewLocResizeHandler as EventListener });
 
-    viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    viewLocBtn.addEventListener('mouseenter', () => viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)', listenerOptions);
     viewLocBtn.addEventListener('mouseleave', () => {
         if (dropdown.style.display !== 'block') {
             viewLocBtn.style.background = 'transparent';
         }
-    });
+    }, listenerOptions);
 
     return viewLocBtn;
 }
 
 function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation: string): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const dropdown = document.createElement('div');
     dropdown.id = 'view-location-dropdown';
     dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
-        z-index: 11000;
+        z-index: ${Z_INDEX.dropdownTop};
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1383,21 +1441,21 @@ function createViewLocationDropdown(callbacks: ToolbarCallbacks, currentLocation
                 <div style="font-size: 12px; font-weight: 500;">${loc.label}</div>
                 <div style="font-size: 10px; color: #64748b;">${loc.desc}</div>
             </div>
-            ${isActive ? '<span style="margin-left: auto; color: #818cf8;">✓</span>' : ''}
+            ${isActive ? `<span style="margin-left: auto; color: #818cf8; display: inline-flex; width: 14px; height: 14px;">${ICONS.check}</span>` : ''}
         `;
 
         item.addEventListener('mouseenter', () => {
             if (!isActive) {item.style.background = 'rgba(148, 163, 184, 0.1)';}
-        });
+        }, listenerOptions);
         item.addEventListener('mouseleave', () => {
             if (!isActive) {item.style.background = 'transparent';}
-        });
+        }, listenerOptions);
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             callbacks.onChangeViewLocation(loc.id);
             dropdown.style.display = 'none';
-        });
+        }, listenerOptions);
 
         dropdown.appendChild(item);
     });
@@ -1410,11 +1468,13 @@ function createPinnedTabsButton(
     pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>,
     documentListeners: Array<{ type: string; handler: EventListener }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const pinsBtn = document.createElement('button');
     pinsBtn.id = 'pinned-tabs-btn';
     pinsBtn.dataset.overflowKeepVisible = 'true';
-    pinsBtn.innerHTML = '📋';
+    pinsBtn.innerHTML = ICONS.clipboard;
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
+    pinsBtn.dataset.overflowIcon = ICONS.clipboard;
     pinsBtn.style.cssText = getBtnStyle(callbacks.isDarkTheme()) + 'border-left: 1px solid rgba(148, 163, 184, 0.2);';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins);
@@ -1432,12 +1492,12 @@ function createPinnedTabsButton(
         } else {
             dropdown.style.display = 'none';
         }
-    });
+    }, listenerOptions);
 
     const pinnedTabsClickHandler = () => {
         dropdown.style.display = 'none';
     };
-    document.addEventListener('click', pinnedTabsClickHandler);
+    document.addEventListener('click', pinnedTabsClickHandler, listenerOptions);
     documentListeners.push({ type: 'click', handler: pinnedTabsClickHandler });
 
     const pinnedTabsResizeHandler = () => {
@@ -1447,15 +1507,15 @@ function createPinnedTabsButton(
             dropdown.style.right = `${window.innerWidth - rect.right}px`;
         }
     };
-    window.addEventListener('resize', pinnedTabsResizeHandler);
+    window.addEventListener('resize', pinnedTabsResizeHandler, listenerOptions);
     documentListeners.push({ type: 'resize', handler: pinnedTabsResizeHandler as EventListener });
 
-    pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)');
+    pinsBtn.addEventListener('mouseenter', () => pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)', listenerOptions);
     pinsBtn.addEventListener('mouseleave', () => {
         if (dropdown.style.display !== 'block') {
             pinsBtn.style.background = 'transparent';
         }
-    });
+    }, listenerOptions);
 
     return pinsBtn;
 }
@@ -1464,20 +1524,21 @@ function createPinnedTabsDropdown(
     callbacks: ToolbarCallbacks,
     pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>
 ): HTMLElement {
+    const listenerOptions = getToolbarListenerOptions();
     const dropdown = document.createElement('div');
     dropdown.id = 'pinned-tabs-dropdown';
     dropdown.className = 'sql-crack-floating-toolbar-menu';
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: rgba(15, 23, 42, 0.98);
+        background: rgba(17, 17, 17, 0.98);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 8px;
         padding: 8px 0;
         min-width: 220px;
         max-height: 300px;
         overflow-y: auto;
-        z-index: 11000;
+        z-index: ${Z_INDEX.dropdownTop};
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     `;
 
@@ -1509,7 +1570,7 @@ function createPinnedTabsDropdown(
         const relativeTimeStr = formatRelativeTime(pin.timestamp);
 
         item.innerHTML = `
-            <span style="font-size: 12px;">📌</span>
+            <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.pin}</span>
             <div style="flex: 1; overflow: hidden;">
                 <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
                 <div style="font-size: 10px; color: #64748b;">${pin.dialect} • <span title="${absoluteTimeStr}">${relativeTimeStr}</span></div>
@@ -1523,19 +1584,19 @@ function createPinnedTabsDropdown(
             e.stopPropagation();
             callbacks.onUnpinTab(pin.id);
             item.remove();
-        });
-        deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444');
-        deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = '#64748b');
+        }, listenerOptions);
+        deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444', listenerOptions);
+        deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = '#64748b', listenerOptions);
         item.appendChild(deleteBtn);
 
-        item.addEventListener('mouseenter', () => item.style.background = 'rgba(148, 163, 184, 0.1)');
-        item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+        item.addEventListener('mouseenter', () => item.style.background = 'rgba(148, 163, 184, 0.1)', listenerOptions);
+        item.addEventListener('mouseleave', () => item.style.background = 'transparent', listenerOptions);
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             callbacks.onOpenPinnedTab(pin.id);
             dropdown.style.display = 'none';
-        });
+        }, listenerOptions);
 
         dropdown.appendChild(item);
     });
@@ -1576,7 +1637,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 10000;
+        z-index: ${Z_INDEX.dropdown};
     `;
 
     const modal = document.createElement('div');
@@ -1697,12 +1758,12 @@ export function updateToolbarTheme(
     actions: HTMLElement,
     searchContainer: HTMLElement
 ): void {
-    const bgColor = dark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+    const bgColor = dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const textColor = dark ? '#f1f5f9' : '#1e293b';
     const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
 
     toolbar.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+        if (el.style.background?.includes('rgba(17, 17, 17') || el.style.background?.includes('rgba(255, 255, 255')) {
             el.style.background = bgColor;
             el.style.borderColor = borderColor;
         }
@@ -1732,7 +1793,7 @@ export function updateToolbarTheme(
     searchContainer.style.borderColor = borderColor;
 
     actions.querySelectorAll('div').forEach(el => {
-        if (el.style.background?.includes('rgba(15, 23, 42') || el.style.background?.includes('rgba(255, 255, 255')) {
+        if (el.style.background?.includes('rgba(17, 17, 17') || el.style.background?.includes('rgba(255, 255, 255')) {
             el.style.background = bgColor;
             el.style.borderColor = borderColor;
         }
@@ -1795,7 +1856,7 @@ export function updateHintsSummaryBadge(
         error: { text: '#ef4444', bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.35)' },
     };
     const palette = colors[state.status];
-    hintsSummaryBtn.textContent = `⚡ ${state.label}`;
+    hintsSummaryBtn.innerHTML = createHintsBadgeMarkup(state.label);
     hintsSummaryBtn.style.color = palette.text;
     hintsSummaryBtn.style.background = palette.bg;
     hintsSummaryBtn.style.boxShadow = `inset 0 0 0 1px ${palette.border}`;
@@ -1869,7 +1930,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
             border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
             padding: 6px 12px;
-            z-index: 101;
+            z-index: ${Z_INDEX.badge};
             cursor: pointer;
             transition: background 0.2s;
         `;
@@ -1903,7 +1964,7 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 
     badge.innerHTML = `
-        <span style="color: #f87171; font-size: 14px;">⚠</span>
+        <span style="color: #f87171; font-size: 14px; display: inline-flex; width: 14px; height: 14px;">${ICONS.warning}</span>
         <span style="color: #fca5a5; font-size: 12px; font-weight: 500;">
             ${errorCount} parse error${errorCount > 1 ? 's' : ''}
         </span>

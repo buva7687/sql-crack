@@ -17,7 +17,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --border-subtle: rgba(255, 255, 255, 0.08);
                 --text-primary: #f1f5f9;
                 --text-secondary: #e2e8f0;
-                --text-muted: #94a3b8;
+                --text-muted: #71717a;
                 --text-dim: #64748b;
                 --accent: #6366f1;
                 --accent-hover: #818cf8;
@@ -77,7 +77,7 @@ export function getCssVariables(dark: boolean = true): string {
                 --overlay-scrim: rgba(17, 17, 17, 0.7);
                 --scrollbar-thumb: rgba(148, 163, 184, 0.42);
                 --scrollbar-thumb-hover: rgba(148, 163, 184, 0.58);
-                --scrollbar-track: rgba(15, 23, 42, 0.35);
+                --scrollbar-track: rgba(0, 0, 0, 0.35);
             }
         `;
     } else {
@@ -4492,7 +4492,7 @@ export function getStateStyles(dark: boolean = true): string {
     const colors = dark ? {
         bg: '#0f172a',
         text: '#e2e8f0',
-        textMuted: '#94a3b8',
+        textMuted: '#71717a',
         border: '#334155',
         accent: '#6366f1',
         accentHover: '#818cf8',

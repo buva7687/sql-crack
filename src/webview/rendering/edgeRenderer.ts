@@ -3,7 +3,8 @@
 
 import { FlowEdge, FlowNode, LayoutType } from '../types';
 import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
-import { EDGE_THEME } from '../../shared/themeTokens';
+import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';
+import { Z_INDEX } from '../../shared/zIndex';
 
 /**
  * Return a legible text color for a badge given its background color.
@@ -258,9 +259,9 @@ export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement
             border-radius: 12px;
             padding: 16px 20px;
             max-width: 600px;
-            z-index: 1000;
+            z-index: ${Z_INDEX.dropdown};
             box-shadow: ${UI_COLORS.shadowMedium};
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-family: ${MONO_FONT_STACK};
         `;
         containerElement?.appendChild(clausePanel);
     }

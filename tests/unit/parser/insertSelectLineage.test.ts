@@ -9,6 +9,79 @@ import { parseSql } from '../../../src/webview/sqlParser';
 import type { SqlDialect } from '../../../src/webview/types/parser';
 
 describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
+    const assertInsertWriteFlow = (
+        result: any,
+        targetPredicate?: (label: string) => boolean
+    ) => {
+        expect(result.error).toBeUndefined();
+
+        const insertResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'INSERT');
+        expect(insertResult).toBeDefined();
+
+        const targetTable = result.nodes.find((n: any) => {
+            if (n.type !== 'table' || n.accessMode !== 'write' || n.operationType !== 'INSERT') {
+                return false;
+            }
+            return targetPredicate ? targetPredicate(String(n.label || '')) : true;
+        });
+        expect(targetTable).toBeDefined();
+
+        expect(result.edges.some((e: any) => e.source === targetTable?.id && e.target === insertResult?.id)).toBe(true);
+        expect(result.edges.some((e: any) => e.target === targetTable?.id && e.source !== targetTable?.id)).toBe(true);
+
+        return { insertResult, targetTable };
+    };
+
+    describe('Flow wiring', () => {
+        it('should preserve inner SELECT flow and connect it to insert target and insert result', () => {
+            const sql = `
+                INSERT INTO daily_sales_summary (report_date, total_orders, total_revenue)
+                SELECT DATE(order_date), COUNT(*), SUM(amount)
+                FROM orders
+                GROUP BY DATE(order_date)
+            `;
+            const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+
+            const insertResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'INSERT');
+            const selectResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'Result');
+            const sourceTable = result.nodes.find((n: any) => n.type === 'table' && n.label?.toLowerCase() === 'orders' && n.accessMode !== 'write');
+            const targetTable = result.nodes.find((n: any) => n.type === 'table' && n.label?.toLowerCase().includes('daily_sales_summary') && n.accessMode === 'write');
+
+            expect(insertResult).toBeDefined();
+            expect(selectResult).toBeDefined();
+            expect(sourceTable).toBeDefined();
+            expect(targetTable).toBeDefined();
+            expect(targetTable?.operationType).toBe('INSERT');
+            expect(result.nodes.some((n: any) => n.type === 'aggregate')).toBe(true);
+
+            expect(result.edges.some((e: any) => e.source === sourceTable?.id)).toBe(true);
+            expect(result.edges.some((e: any) => e.source === selectResult?.id && e.target === targetTable?.id)).toBe(true);
+            expect(result.edges.some((e: any) => e.source === targetTable?.id && e.target === insertResult?.id)).toBe(true);
+        });
+
+        it('should keep plain INSERT ... VALUES on the simple write path', () => {
+            const sql = `
+                INSERT INTO audit_log (id, message)
+                VALUES (1, 'ok')
+            `;
+            const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+
+            const tables = result.nodes.filter((n: any) => n.type === 'table');
+            const insertResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'INSERT');
+            const selectResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'Result');
+
+            expect(tables).toHaveLength(1);
+            expect(tables[0].accessMode).toBe('write');
+            expect(tables[0].operationType).toBe('INSERT');
+            expect(insertResult).toBeDefined();
+            expect(selectResult).toBeUndefined();
+        });
+    });
+
     describe('Basic INSERT...SELECT', () => {
         it('should render target table with write access mode', () => {
             const sql = `
@@ -19,11 +92,11 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
-            
-            // Should parse successfully and have nodes
-            expect(result.nodes.length).toBeGreaterThan(0);
+            const { targetTable } = assertInsertWriteFlow(
+                result,
+                label => label.toLowerCase().includes('daily_sales_summary')
+            );
+            expect(targetTable?.operationType).toBe('INSERT');
         });
 
         it('should handle simple INSERT...SELECT', () => {
@@ -35,8 +108,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('customer_summary'));
         });
     });
 
@@ -50,10 +122,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('customer_feedback'));
         });
 
         it('should handle CASE transformations in SELECT', () => {
@@ -71,10 +140,8 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            const { targetTable } = assertInsertWriteFlow(result, label => label.toLowerCase().includes('customer_feedback'));
+            expect(targetTable?.operationType).toBe('INSERT');
         });
 
         it('should handle functions in column expressions', () => {
@@ -85,10 +152,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('daily_sales'));
         });
     });
 
@@ -102,10 +166,8 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            const { targetTable } = assertInsertWriteFlow(result, label => label.toLowerCase().includes('metrics'));
+            expect(targetTable?.accessMode).toBe('write');
         });
 
         it('should handle JOINs in INSERT...SELECT', () => {
@@ -118,10 +180,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('customer_orders'));
         });
 
         it('should handle subqueries in WHERE clause', () => {
@@ -135,16 +194,14 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('high_value_orders'));
         });
     });
 
     describe('INSERT...SELECT with CTEs', () => {
-        it('should handle simple CTE', () => {
+        it('should render CTEs when using INSERT ... WITH ... SELECT', () => {
             const sql = `
+                INSERT INTO vip_customers (customer_id, total_spent)
                 WITH customer_totals AS (
                     SELECT customer_id, SUM(amount) AS total_spent
                     FROM orders
@@ -157,8 +214,13 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
+            const { targetTable } = assertInsertWriteFlow(result, label => label.toLowerCase().includes('vip_customers'));
+            const cteNode = result.nodes.find((n: any) => n.type === 'cte' && n.label?.toLowerCase().includes('customer_totals'));
+            const selectResult = result.nodes.find((n: any) => n.type === 'result' && n.label === 'Result');
+
+            expect(cteNode).toBeDefined();
+            expect(selectResult).toBeDefined();
+            expect(result.edges.some((e: any) => e.source === selectResult?.id && e.target === targetTable?.id)).toBe(true);
         });
     });
 
@@ -172,9 +234,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('summary_table'));
         });
 
         it('should handle BigQuery INSERT...SELECT', () => {
@@ -185,9 +245,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'BigQuery' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('summary'));
         });
 
         it('should handle TransactSQL INSERT...SELECT', () => {
@@ -200,9 +258,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'TransactSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('customersummary'));
         });
     });
 
@@ -214,9 +270,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('orders_archive'));
         });
 
         it('should handle INSERT...SELECT DISTINCT', () => {
@@ -226,9 +280,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('unique_customers'));
         });
 
         it('should handle INSERT...SELECT with LIMIT', () => {
@@ -241,9 +293,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            const targetTable = result.nodes.find((n: any) => n.accessMode === 'write');
-            expect(targetTable).toBeDefined();
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('top_orders'));
         });
     });
 
@@ -255,12 +305,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            
-            // Write target should have accessMode: 'write'
-            const targetTable = result.nodes.find((n: any) => 
-                n.label?.toLowerCase().includes('target')
-            );
+            const { targetTable } = assertInsertWriteFlow(result, label => label.toLowerCase().includes('target'));
             expect(targetTable?.accessMode).toBe('write');
             expect(targetTable?.operationType).toBe('INSERT');
         });
@@ -274,8 +319,7 @@ describe('Item #6: INSERT INTO ... SELECT Lineage', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            expect(result.error).toBeUndefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
+            assertInsertWriteFlow(result, label => label.toLowerCase().includes('archive'));
         });
     });
 });

@@ -93,6 +93,8 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | Capability | Description |
 |------------|-------------|
 | **Partial Parse Fallback** | If AST parsing fails, SQL Crack falls back to regex extraction to still render best-effort tables/joins |
+| **Auto-Retry Dialect** | Detects dialect-specific syntax patterns and retries parsing with the correct dialect when the selected one fails |
+| **Nested CTE Hoisting** | Automatically rewrites Snowflake/Tableau-style `FROM (WITH ... SELECT ...)` subqueries to top-level CTEs for full visualization |
 | **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
@@ -244,12 +246,12 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 |---------|---------|-------------|
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
-| `sqlCrack.viewLocation` | `beside` | Panel location: `beside`, `tab` |
+| `sqlCrack.viewLocation` | `tab` | Panel location: `beside`, `tab` |
 | `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
 | `sqlCrack.flowDirection` | `top-down` | Flow direction: `top-down`, `bottom-up` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
-| `sqlCrack.gridStyle` | `dots` | Canvas background style: `dots`, `lines`, `none` |
+| `sqlCrack.gridStyle` | `lines` | Canvas background style: `dots`, `lines`, `none` |
 | `sqlCrack.nodeAccentPosition` | `left` | Node accent strip position: `left`, `bottom` |
 | `sqlCrack.showMinimap` | `auto` | Minimap visibility: `auto`, `always`, `never` |
 | `sqlCrack.colorblindMode` | `off` | Color accessibility mode: `off`, `deuteranopia`, `protanopia`, `tritanopia` |
@@ -268,7 +270,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 |---------|---------|-------------|
 | `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). Include the leading dot; with or without dot is accepted and normalized. |
 
-Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes.
+Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes. Workspace indexing intentionally skips dependency/build folders (`node_modules`, `.git`, `dist`, `build`).
 
 ### Custom Functions
 
@@ -281,7 +283,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
+| `sqlCrack.advanced.defaultTheme` | `light` | Theme: `auto`, `dark`, `light` |
 | `sqlCrack.advanced.showDiagnosticsInProblems` | `false` | Show SQL Crack hints/errors in VS Code Problems panel |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |

@@ -677,16 +677,14 @@ SELECT * FROM t3;`;
       expect(result.nodes.some(n => n.label === 'DELETE')).toBe(true);
     });
 
-    it('provides dialect suggestion in error hints', () => {
+    it('retries parsing with detected dialect when primary dialect fails', () => {
       const sql = `SELECT * FROM users WHERE created > INTERVAL '30 days'`;
       const result = parseSql(sql, 'MySQL');
 
-      // Fallback parser kicks in; dialect hints are in hints array
-      expect(result.partial).toBe(true);
-      const errorHint = result.hints.find(h => h.type === 'error');
-      expect(errorHint).toBeDefined();
-      // Should suggest trying PostgreSQL for INTERVAL syntax
-      expect(errorHint!.message).toMatch(/PostgreSQL|dialect|parse/i);
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      const retryHint = result.hints.find(h => h.message.includes('Auto-retried parse with PostgreSQL'));
+      expect(retryHint).toBeDefined();
     });
 
     it('includes parser error details in hints for syntax errors', () => {

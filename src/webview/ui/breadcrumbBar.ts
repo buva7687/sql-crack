@@ -2,6 +2,7 @@
 // Shows active focus mode, search term, column trace, CTE context
 // Each segment is clickable to clear that filter. "x" clears all.
 import { getComponentUiColors } from '../constants';
+import { Z_INDEX } from '../../shared/zIndex';
 import { prefersReducedMotion } from './motion';
 
 export interface BreadcrumbSegment {
@@ -19,6 +20,11 @@ export interface BreadcrumbBarCallbacks {
 let barElement: HTMLDivElement | null = null;
 let currentSegments: BreadcrumbSegment[] = [];
 let callbacks: BreadcrumbBarCallbacks | null = null;
+let breadcrumbAbortController: AbortController | null = null;
+
+function getBreadcrumbListenerOptions(): AddEventListenerOptions | undefined {
+    return breadcrumbAbortController ? { signal: breadcrumbAbortController.signal } : undefined;
+}
 
 /**
  * Create the breadcrumb bar element.
@@ -28,6 +34,10 @@ export function createBreadcrumbBar(
     container: HTMLElement,
     cb: BreadcrumbBarCallbacks
 ): HTMLDivElement {
+    breadcrumbAbortController?.abort();
+    breadcrumbAbortController = new AbortController();
+    const listenerOptions = getBreadcrumbListenerOptions();
+
     callbacks = cb;
     const isDark = cb.isDarkTheme();
     const theme = getComponentUiColors(isDark);
@@ -49,7 +59,7 @@ export function createBreadcrumbBar(
         background: ${theme.surface};
         border: 1px solid ${theme.border};
         backdrop-filter: blur(8px);
-        z-index: 99;
+        z-index: ${Z_INDEX.breadcrumb};
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
         flex-wrap: wrap;
@@ -65,9 +75,14 @@ export function createBreadcrumbBar(
         barElement.style.background = nextTheme.surface;
         barElement.style.borderColor = nextTheme.border;
         renderSegments();
-    }) as EventListener);
+    }) as EventListener, listenerOptions);
 
     return barElement;
+}
+
+export function disposeBreadcrumbBar(): void {
+    breadcrumbAbortController?.abort();
+    breadcrumbAbortController = null;
 }
 
 /**
@@ -132,6 +147,7 @@ function repositionBar(): void {
 
 function renderSegments(): void {
     if (!barElement || !callbacks) { return; }
+    const listenerOptions = getBreadcrumbListenerOptions();
 
     if (currentSegments.length === 0) {
         barElement.style.display = 'none';
@@ -184,7 +200,14 @@ function renderSegments(): void {
 
         if (segment.icon) {
             const icon = document.createElement('span');
-            icon.textContent = segment.icon;
+            if (segment.icon.includes('<svg')) {
+                icon.innerHTML = segment.icon;
+                icon.style.display = 'inline-flex';
+                icon.style.width = '12px';
+                icon.style.height = '12px';
+            } else {
+                icon.textContent = segment.icon;
+            }
             icon.style.fontSize = '10px';
             chip.appendChild(icon);
         }
@@ -205,16 +228,16 @@ function renderSegments(): void {
 
         chip.addEventListener('mouseenter', () => {
             chip.style.background = chipHoverBg;
-        });
+        }, listenerOptions);
         chip.addEventListener('mouseleave', () => {
             chip.style.background = chipBg;
-        });
+        }, listenerOptions);
 
         chip.addEventListener('click', (e) => {
             e.stopPropagation();
             segment.onClear();
             removeBreadcrumbSegment(segment.id);
-        });
+        }, listenerOptions);
 
         barElement!.appendChild(chip);
     });
@@ -242,17 +265,17 @@ function renderSegments(): void {
         clearAll.addEventListener('mouseenter', () => {
             clearAll.style.color = textColor;
             clearAll.style.background = theme.hover;
-        });
+        }, listenerOptions);
         clearAll.addEventListener('mouseleave', () => {
             clearAll.style.color = mutedColor;
             clearAll.style.background = 'none';
-        });
+        }, listenerOptions);
 
         clearAll.addEventListener('click', (e) => {
             e.stopPropagation();
             callbacks!.onClearAll();
             clearBreadcrumbBar();
-        });
+        }, listenerOptions);
 
         barElement.appendChild(clearAll);
     }

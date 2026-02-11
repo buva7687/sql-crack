@@ -113,11 +113,17 @@ let compareModeActive = false;
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+// Initialize when DOM is ready (guard against cached webview where DOMContentLoaded already fired)
+function setup(): void {
     init();
     setupVSCodeMessageListener();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+} else {
+    setup();
+}
 
 // ============================================================
 // VS Code Message Handling
@@ -138,6 +144,14 @@ function setupVSCodeMessageListener(): void {
                 break;
             case 'markStale':
                 markAsStale();
+                break;
+            case 'viewLocationOptions':
+                // Response from extension with current view location and pinned tabs
+                // Currently informational — the toolbar reads initial location from options
+                break;
+            case 'pinCreated':
+                // Confirmation that a pinned panel was created
+                // The extension already shows a toast via showInformationMessage
                 break;
         }
     });
@@ -219,7 +233,7 @@ function init(): void {
         currentDialect,
         isPinnedView: window.isPinnedView || false,
         pinId: window.pinId || null,
-        viewLocation: window.viewLocation || 'beside',
+        viewLocation: window.viewLocation || 'tab',
         persistedPinnedTabs: window.persistedPinnedTabs || [],
         isFirstRun: window.isFirstRun || false
     });

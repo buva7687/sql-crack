@@ -36,12 +36,10 @@ describe('attachResizablePanel source behavior', () => {
     });
 
     it('registers and cleans up global drag and resize listeners', () => {
-        expect(source).toContain("document.addEventListener('mousemove', onMouseMove);");
-        expect(source).toContain("document.addEventListener('mouseup', onMouseUp);");
-        expect(source).toContain("window.addEventListener('resize', onResize);");
-        expect(source).toContain("document.removeEventListener('mousemove', onMouseMove);");
-        expect(source).toContain("document.removeEventListener('mouseup', onMouseUp);");
-        expect(source).toContain("window.removeEventListener('resize', onResize);");
+        expect(source).toContain("document.addEventListener('mousemove', onMouseMove, listenerOptions);");
+        expect(source).toContain("document.addEventListener('mouseup', onMouseUp, listenerOptions);");
+        expect(source).toContain("window.addEventListener('resize', onResize, listenerOptions);");
+        expect(source).toContain('panelAbortController.abort();');
         expect(source).toContain('handle.remove();');
     });
 });

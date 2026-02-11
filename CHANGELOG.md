@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-11
+
+### Added
+
+- **Auto-hoist nested CTEs**: Snowflake/Tableau-style `FROM ( WITH cte AS (...) SELECT ... )` subqueries are automatically rewritten to top-level CTEs before parsing, enabling full AST-based visualization instead of regex fallback.
+- **Auto-retry dialect on parse failure**: When the selected dialect fails to parse, the parser now detects syntax patterns and retries with a more appropriate dialect (e.g., Snowflake syntax auto-retries with Snowflake parser).
+- **INSERT...SELECT and DML write ops visualization**: Inner queries in INSERT...SELECT, UPDATE...FROM, DELETE...USING, and MERGE statements now generate full flow nodes with write-operation badges.
+- **`#` comment support**: MySQL-style hash line comments are now stripped during parsing and dialect detection.
+- **Marketplace keywords**: Added SQL/discovery keywords in `package.json` to improve extension discoverability in VS Code Marketplace search.
+
+### Changed
+
+- **Walkthrough metadata cleanup**: Removed empty walkthrough `media.markdown` placeholders from onboarding steps to avoid blank media blocks.
+- **New default preferences**: Default settings now open SQL Flow in `tab` view, use `lines` grid style, and use `light` theme preference.
+
+### Fixed
+
+- **Unclosed block comments**: Block comments missing `*/` no longer cause the comment stripper to consume the rest of the SQL.
+- **Broken edge recovery**: Edge rendering gracefully handles missing source/target nodes instead of failing silently.
+- **Workspace watcher exclusion parity**: Incremental workspace watcher now skips `node_modules`, `.git`, `dist`, and `build`, matching scanner exclusion behavior.
+- **Renderer null-guard hardening**: Replaced unsafe cloud map non-null assertions with safe state/offset initialization helpers.
+- **Renderer lifecycle cleanup**: Cleanup now disconnects renderer resize observers/timers and removes injected style elements.
+- **SVG accessibility metadata**: Main query canvas SVG now has `role="img"` and an `aria-label`.
+- **Wheel event listener options**: Workspace graph and lineage wheel handlers now use `{ passive: false }` where `preventDefault()` is required.
+
+### Tests
+
+- Added unit tests for CTE hoisting (basic, multiple CTEs, merge with existing top-level WITH, string/comment masking, nested subqueries in CTE bodies, end-to-end parsing).
+- Added regression tests for watcher exclude behavior, renderer polish guards, canvas accessibility metadata, wheel listener passive options, and package metadata checks.
+
 ## [0.3.0] - 2026-02-10
 
 ### Added
@@ -463,6 +493,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.1]: https://github.com/buva7687/sql-crack/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/buva7687/sql-crack/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/buva7687/sql-crack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/buva7687/sql-crack/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/buva7687/sql-crack/compare/v0.1.3...v0.1.4
