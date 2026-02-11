@@ -263,6 +263,19 @@ export class VisualizationPanel {
         // Listen for when the panel is disposed
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
+        // Refresh the webview when VS Code theme changes so the panel reflects the active theme immediately.
+        vscode.window.onDidChangeActiveColorTheme(() => {
+            this._update(this._currentSql, this._currentOptions);
+        }, null, this._disposables);
+
+        // Refresh when SQL Crack settings change so runtime config updates apply without reopening the panel.
+        vscode.workspace.onDidChangeConfiguration((event) => {
+            if (!event.affectsConfiguration('sqlCrack')) {
+                return;
+            }
+            this._update(this._currentSql, this._currentOptions);
+        }, null, this._disposables);
+
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
             (message: SqlFlowWebviewMessage) => {

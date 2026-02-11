@@ -788,10 +788,10 @@ These structural changes require multi-day effort and are tracked separately. Th
 | 3.4 | AbortController coverage | P3 Polish | 2-3 hrs | Low | Medium | DONE |
 | 3.5 | Compare mode tests | P3 Polish | 2-3 hrs | None | Medium | DONE |
 | 3.6 | SC icon for Cursor | P3 Polish | 30 min | None | Medium | DONE |
-| 3.7 | Compact stats layout | P3 Polish | 15-30 min | None | Low-Med | TODO |
-| 3.8 | Visualize command in palette | P3 Polish | 1 min | None | High | TODO |
-| 3.9 | Theme/config change listeners | P3 Polish | 1 hr | Low | Med-High | TODO |
-| 3.10 | Dialect invalidate index | P3 Polish | 20 min | Low | Med-High | TODO |
+| 3.7 | Compact stats layout | P3 Polish | 15-30 min | None | Low-Med | DONE |
+| 3.8 | Visualize command in palette | P3 Polish | 1 min | None | High | DONE |
+| 3.9 | Theme/config change listeners | P3 Polish | 1 hr | Low | Med-High | DONE |
+| 3.10 | Dialect invalidate index | P3 Polish | 20 min | Low | Med-High | DONE |
 | 3.11 | File watcher excludes | P3 Polish | 15 min | None | Medium | TODO |
 | 3.12 | Renderer polish (5 items) | P3 Polish | 30 min | Low | Low-Med | TODO |
 | 3.13 | Walkthrough media + keywords | P3 Polish | 1-2 hrs | None | Medium | TODO |

@@ -5184,6 +5184,28 @@ function updateStatsPanel(): void {
         `;
     }
 
+    const summaryMetrics: Array<{ value: number; label: string }> = [
+        { value: currentStats.tables, label: currentStats.tables === 1 ? 'Table' : 'Tables' },
+        { value: currentStats.joins, label: currentStats.joins === 1 ? 'Join' : 'Joins' },
+        { value: currentStats.conditions, label: currentStats.conditions === 1 ? 'Filter' : 'Filters' },
+        { value: currentStats.ctes, label: currentStats.ctes === 1 ? 'CTE' : 'CTEs' },
+    ];
+    if (currentStats.subqueries > 0) {
+        summaryMetrics.push({
+            value: currentStats.subqueries,
+            label: currentStats.subqueries === 1 ? 'Subquery' : 'Subqueries',
+        });
+    }
+    const summaryRowHtml = summaryMetrics
+        .map((metric, index) => `
+            <span style="display: inline-flex; align-items: baseline; gap: 4px;">
+                <span style="color: ${textColor}; font-weight: 700; font-size: 12px;">${metric.value}</span>
+                <span style="color: ${textColorMuted}; font-size: 10px; font-weight: 500;">${metric.label}</span>
+            </span>
+            ${index < summaryMetrics.length - 1 ? `<span aria-hidden="true" style="color: ${textColorDim}; font-size: 11px;">&middot;</span>` : ''}
+        `)
+        .join('');
+
     statsPanel.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
@@ -5196,36 +5218,9 @@ function updateStatsPanel(): void {
                 font-weight: 600;
             ">${currentStats.complexity}</span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px;">
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.tables}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Tables</div>
-            </div>
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.joins}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Joins</div>
-            </div>
-            <div style="text-align: center;">
-                <div style="color: ${textColor}; font-weight: 600;">${currentStats.conditions}</div>
-                <div style="font-size: 10px; color: ${textColorMuted};">Filters</div>
-            </div>
+        <div id="query-stats-summary-row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px;">
+            ${summaryRowHtml}
         </div>
-        ${(currentStats.ctes > 0 || currentStats.subqueries > 0) ? `
-            <div style="display: flex; gap: 12px; margin-bottom: 8px; padding-top: 8px; border-top: 1px solid ${borderColor}; justify-content: center;">
-                ${currentStats.ctes > 0 ? `
-                    <div style="text-align: center;">
-                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.ctes}</div>
-                        <div style="font-size: 9px; color: ${textColorMuted};">CTE${currentStats.ctes !== 1 ? 's' : ''}</div>
-                    </div>
-                ` : ''}
-                ${currentStats.subqueries > 0 ? `
-                    <div style="text-align: center;">
-                        <div style="color: ${textColor}; font-weight: 600; font-size: 12px;">${currentStats.subqueries}</div>
-                        <div style="font-size: 9px; color: ${textColorMuted};">Subquer${currentStats.subqueries !== 1 ? 'ies' : 'y'}</div>
-                    </div>
-                ` : ''}
-            </div>
-        ` : ''}
         ${currentStats.functionsUsed && currentStats.functionsUsed.length > 0 ? (() => {
             const funcs = currentStats.functionsUsed!;
             const categoryOrder = ['aggregate', 'window', 'tvf', 'scalar', 'unknown'] as const;

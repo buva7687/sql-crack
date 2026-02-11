@@ -26,6 +26,7 @@ const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspa
 export class IndexManager {
     private context: vscode.ExtensionContext;
     private scanner: WorkspaceScanner;
+    private dialect: SqlDialect;
     private index: WorkspaceIndex | null = null;
     private fileWatcher: vscode.FileSystemWatcher | null = null;
     private updateQueue: Set<string> = new Set();
@@ -37,6 +38,7 @@ export class IndexManager {
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL') {
         this.context = context;
+        this.dialect = dialect;
         this.scanner = new WorkspaceScanner(dialect);
     }
 
@@ -391,7 +393,27 @@ export class IndexManager {
      * Set the SQL dialect
      */
     setDialect(dialect: SqlDialect): void {
+        if (this.dialect === dialect) {
+            return;
+        }
+        this.dialect = dialect;
         this.scanner.setDialect(dialect);
+
+        const rebuildForDialect = async () => {
+            await this.clearCache();
+            await this.buildIndex();
+        };
+
+        if (this._buildPromise) {
+            void this._buildPromise
+                .finally(() => rebuildForDialect())
+                .catch(error => logger.warn(`[IndexManager] Failed to rebuild index after dialect change: ${error instanceof Error ? error.message : String(error)}`));
+            return;
+        }
+
+        void rebuildForDialect().catch(error =>
+            logger.warn(`[IndexManager] Failed to rebuild index after dialect change: ${error instanceof Error ? error.message : String(error)}`)
+        );
     }
 
     /**

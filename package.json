@@ -68,6 +68,11 @@
       ],
       "commandPalette": [
         {
+          "command": "sql-crack.visualize",
+          "when": "editorLangId == sql || sqlCrack.isAdditionalSqlFile",
+          "group": "navigation"
+        },
+        {
           "command": "sql-crack.analyzeWorkspace",
           "when": "workspaceFolderCount > 0"
         }

@@ -845,10 +845,45 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('setDialect', () => {
+        it('should no-op when dialect is unchanged', async () => {
+            const buildSpy = jest.spyOn(indexManager, 'buildIndex');
+
+            indexManager.setDialect('MySQL');
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            expect(mockScanner.setDialect).not.toHaveBeenCalled();
+            expect(buildSpy).not.toHaveBeenCalled();
+        });
+
         it('should update scanner dialect', () => {
             indexManager.setDialect('PostgreSQL');
 
             expect(mockScanner.setDialect).toHaveBeenCalledWith('PostgreSQL');
+        });
+
+        it('should clear and rebuild index when dialect changes', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/users.sql', [{ name: 'users' }]),
+            ]);
+            await indexManager.buildIndex();
+            expect(indexManager.findDefinition('users')).toBeDefined();
+
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/orders.sql', [{ name: 'orders' }]),
+            ]);
+
+            const clearSpy = jest.spyOn(indexManager, 'clearCache');
+            const buildSpy = jest.spyOn(indexManager, 'buildIndex');
+
+            indexManager.setDialect('PostgreSQL');
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            expect(mockScanner.setDialect).toHaveBeenCalledWith('PostgreSQL');
+            expect(clearSpy).toHaveBeenCalled();
+            expect(buildSpy).toHaveBeenCalled();
+            expect(indexManager.findDefinition('users')).toBeUndefined();
+            expect(indexManager.findDefinition('orders')).toBeDefined();
         });
     });
 
