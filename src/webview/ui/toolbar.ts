@@ -65,10 +65,14 @@ function getToolbarListenerOptions(): AddEventListenerOptions | undefined {
     return toolbarAbortController ? { signal: toolbarAbortController.signal } : undefined;
 }
 
+function escapeHtmlInline(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function createHintsBadgeMarkup(label: string): string {
     return `
         <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
-        <span>${label}</span>
+        <span>${escapeHtmlInline(label)}</span>
     `;
 }
 

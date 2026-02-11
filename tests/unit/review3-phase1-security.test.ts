@@ -67,9 +67,11 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
         expect(source).toMatch(/div\|ul\|li\|strong\|span/);
     });
 
-    it('should only restore class and style attributes, not event handlers', () => {
-        // The allowlist regex should permit class and style but nothing else (no onclick, onerror, etc.)
-        expect(source).toContain('class|style');
+    it('should only restore class attribute, not style or event handlers', () => {
+        // The allowlist regex should permit class only (style removed — tooltips use CSS classes)
+        expect(source).toMatch(/class=&quot;/);
+        // style should NOT be in the attribute whitelist
+        expect(source).not.toMatch(/(?:class\|style|style\|class)/);
         // Should NOT contain any pattern that passes through on* attributes
         expect(source).not.toMatch(/sanitizeTooltipHtml[^}]*onclick/);
     });
