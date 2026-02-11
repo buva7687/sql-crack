@@ -548,7 +548,19 @@ export class IndexManager {
         this.updateQueue.clear();
 
         for (const filePath of files) {
-            await this.updateFile(vscode.Uri.file(filePath));
+            const uri = vscode.Uri.file(filePath);
+            try {
+                // Guard: skip if file was deleted while queued
+                try {
+                    await vscode.workspace.fs.stat(uri);
+                } catch {
+                    this.removeFile(uri);
+                    continue;
+                }
+                await this.updateFile(uri);
+            } catch (err) {
+                logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
+            }
         }
     }
 

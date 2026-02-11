@@ -123,3 +123,26 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
    - New settings flow: `package.json` → `visualizationPanel.ts` (read config + inject into HTML) → `Window` interface in `index.ts` → consumed at init
    - Always add the `window.*` property to the `Window` interface declaration in `index.ts`
    - For refresh-time settings, also thread through the `refresh()` message options
+
+9. **Security — no inline event handlers in generated HTML:**
+   - Never use `onclick="..."` in dynamically generated HTML (especially with user-derived data like file paths)
+   - Use `data-*` attributes + `addEventListener` with event delegation instead
+   - Example: `<div data-filepath="${escapeHtmlSafe(path)}" class="clickable">` + delegated click listener
+   - Any text injected via `innerHTML` from user-derived content must go through `escapeHtml()` first
+   - For tooltips using `innerHTML`, strip `<script>` tags and `on*` event attributes at minimum
+
+10. **Cross-platform path handling:**
+    - Never use `fileName.split('/').pop()` — it breaks on Windows (backslash paths)
+    - Always use `path.basename(fileName)` from Node's `path` module
+    - The `workspace/ui/` files (clientScripts, impactView, tableExplorer) also use `split('/').pop()` but in client-side contexts where paths come from the extension host (already normalized)
+
+11. **Webview initialization guard:**
+    - Always check `document.readyState` before adding a `DOMContentLoaded` listener
+    - In cached webviews (e.g., `retainContextWhenHidden`), the DOM may already be loaded when the script runs
+    - Pattern: `if (document.readyState === 'loading') { addEventListener('DOMContentLoaded', setup); } else { setup(); }`
+
+12. **Async queue processing resilience:**
+    - When processing a queue of file updates, wrap each iteration in try/catch
+    - One bad file should not skip all remaining files
+    - Check file existence (`fs.stat`) before processing — files may be deleted while queued
+    - Call `removeFile()` to clean up index entries for deleted files

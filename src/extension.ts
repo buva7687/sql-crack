@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { VisualizationPanel } from './visualizationPanel';
 import { WorkspacePanel } from './workspace';
 import { setCustomFunctions } from './dialects';
@@ -35,11 +36,11 @@ function loadCustomFunctions(): void {
 function loadAdditionalExtensions(): void {
     const config = vscode.workspace.getConfiguration('sqlCrack');
     additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
-    // Normalize extensions to lowercase and ensure they start with a dot
-    additionalExtensions = additionalExtensions.map(ext => {
-        ext = ext.toLowerCase().trim();
-        return ext.startsWith('.') ? ext : '.' + ext;
-    });
+    // Normalize extensions to lowercase, filter empty strings, and ensure they start with a dot
+    additionalExtensions = additionalExtensions
+        .map(ext => ext.toLowerCase().trim())
+        .filter(ext => ext.length > 0)
+        .map(ext => ext.startsWith('.') ? ext : '.' + ext);
 }
 
 /**
@@ -210,7 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
         // Create or show visualization panel
         VisualizationPanel.createOrShow(context.extensionUri, sqlCode, {
             dialect: defaultDialect,
-            fileName: document.fileName.split('/').pop() || 'Query',
+            fileName: path.basename(document.fileName) || 'Query',
             documentUri: document.uri
         });
     });
@@ -226,7 +227,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
-                fileName: document.fileName.split('/').pop() || 'Query',
+                fileName: path.basename(document.fileName) || 'Query',
                 documentUri: document.uri
             });
         } else {
@@ -266,7 +267,7 @@ export function activate(context: vscode.ExtensionContext) {
         const config = getConfig();
         const syncEnabled = config.get<boolean>('syncEditorToFlow');
 
-        if (syncEnabled && isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel) {
+        if (syncEnabled && isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel && e.selections.length > 0) {
             const line = e.selections[0].active.line + 1; // 1-indexed
             const sql = e.textEditor.document.getText();
             
@@ -411,7 +412,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                         VisualizationPanel.refresh(sqlCode, {
                             dialect: defaultDialect,
-                            fileName: document.fileName.split('/').pop() || 'Query',
+                            fileName: path.basename(document.fileName) || 'Query',
                             documentUri: document.uri
                         });
                     }

@@ -2,6 +2,10 @@
 
 import { BatchParseResult } from '../sqlParser';
 
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export interface BatchTabsCallbacks {
     onQuerySelect: (index: number) => void;
     isDarkTheme: () => boolean;
@@ -156,7 +160,7 @@ export function updateBatchTabs(
         const idleBg = hasError ? errorBgTint : isPartial ? warningBgTint : successBgTint;
         const hoverBg = hasError ? errorBgTintHover : isPartial ? warningBgTintHover : successBgTintHover;
 
-        tab.innerHTML = `<span style="color: ${isActive ? activeColor : stateIconColor};">${stateIcon}</span> ${extractQueryLabel(query.sql, i)}`;
+        tab.innerHTML = `<span style="color: ${isActive ? activeColor : stateIconColor};">${stateIcon}</span> ${escapeHtml(extractQueryLabel(query.sql, i))}`;
         tab.title = hasError
             ? `Q${i + 1}: ${query.error}`
             : isPartial

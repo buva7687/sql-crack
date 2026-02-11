@@ -301,6 +301,8 @@ export class VisualizationPanel {
                                 pinId: pinId
                             });
                             vscode.window.showInformationMessage(`Pinned: ${message.name || this._currentOptions.fileName}`);
+                        } else {
+                            vscode.window.showErrorMessage('Cannot pin: extension context not available');
                         }
                         return;
                     case 'changeViewLocation':
