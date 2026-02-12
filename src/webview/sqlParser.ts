@@ -1503,7 +1503,7 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     try {
         return parser.astify(sql, { database: 'PostgreSQL' });
     } catch (e) {
-        console.debug('[sqlParser] AST parse failed:', e);
+        window.debugLogging && console.debug('[sqlParser] AST parse failed:', e);
         return null;
     }
 }
@@ -1941,7 +1941,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                     severity: 'low',
                 });
             } catch (retryErr) {
-                console.debug(`[sqlParser] Dialect retry with ${retryDialect} also failed:`, retryErr);
+                window.debugLogging && console.debug(`[sqlParser] Dialect retry with ${retryDialect} also failed:`, retryErr);
                 throw primaryParseError;
             }
         }
@@ -4236,7 +4236,7 @@ function extractWindowFunctionDetails(columns: any): Array<{
                         }
                     }
                 } catch (e) {
-                    console.debug('[sqlParser] JSON.stringify failed for window function detection:', e);
+                    window.debugLogging && console.debug('[sqlParser] JSON.stringify failed for window function detection:', e);
                 }
             }
 

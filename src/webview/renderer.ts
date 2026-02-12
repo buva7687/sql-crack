@@ -5390,7 +5390,7 @@ function updateStatsPanel(): void {
                             copyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
                         }, 2000);
                     } catch (e) {
-                        console.debug('[renderer] Fallback copy failed:', e);
+                        window.debugLogging && console.debug('[renderer] Fallback copy failed:', e);
                     }
                     document.body.removeChild(textarea);
                 }
@@ -6356,7 +6356,7 @@ function embedInlineStyles(element: Element): void {
                 originalElement = svgElement?.querySelector(`.${escapedClass}`) || 
                                 document.querySelector(`.${escapedClass}`);
             } catch (e) {
-                console.debug('[renderer] Invalid CSS selector, skipping:', e);
+                window.debugLogging && console.debug('[renderer] Invalid CSS selector, skipping:', e);
             }
         }
     }
@@ -6428,7 +6428,7 @@ export function exportToPng(): void {
                     });
                 }
             } catch (e) {
-                console.debug('[renderer] PNG export canvas draw failed:', e);
+                window.debugLogging && console.debug('[renderer] PNG export canvas draw failed:', e);
                 URL.revokeObjectURL(svgUrl);
             }
         };
@@ -6439,7 +6439,7 @@ export function exportToPng(): void {
 
         img.src = svgUrl;
     } catch (e) {
-        console.debug('[renderer] PNG export failed:', e);
+        window.debugLogging && console.debug('[renderer] PNG export failed:', e);
     }
 }
 
@@ -6463,7 +6463,7 @@ export function exportToSvg(): void {
         a.click();
         URL.revokeObjectURL(url);
     } catch (e) {
-        console.debug('[renderer] SVG export failed:', e);
+        window.debugLogging && console.debug('[renderer] SVG export failed:', e);
     }
 }
 
@@ -6777,7 +6777,7 @@ export function copyToClipboard(): void {
         };
         img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
     } catch (e) {
-        console.debug('[renderer] Clipboard copy failed:', e);
+        window.debugLogging && console.debug('[renderer] Clipboard copy failed:', e);
     }
 }
 

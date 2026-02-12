@@ -20,7 +20,7 @@ function getStoredNumber(key: string): number | null {
         if (!raw) { return null; }
         const parsed = Number.parseInt(raw, 10);
         return Number.isFinite(parsed) ? parsed : null;
-    } catch (e) { console.debug('[resizablePanel] localStorage read failed:', e); return null; }
+    } catch (e) { window.debugLogging && console.debug('[resizablePanel] localStorage read failed:', e); return null; }
 }
 
 export function computeClampedPanelWidth(
@@ -111,13 +111,13 @@ export function attachResizablePanel({
         expandedWidth = width;
         if (persist) {
             preferredWidth = nextWidth;
-            try { window.localStorage.setItem(widthKey, String(nextWidth)); } catch (e) { console.debug('[resizablePanel] localStorage write failed:', e); }
+            try { window.localStorage.setItem(widthKey, String(nextWidth)); } catch (e) { window.debugLogging && console.debug('[resizablePanel] localStorage write failed:', e); }
         }
     };
 
     const applyCollapseState = (nextCollapsed: boolean): void => {
         collapsed = nextCollapsed;
-        try { window.localStorage.setItem(collapsedKey, String(collapsed)); } catch (e) { console.debug('[resizablePanel] localStorage write failed:', e); }
+        try { window.localStorage.setItem(collapsedKey, String(collapsed)); } catch (e) { window.debugLogging && console.debug('[resizablePanel] localStorage write failed:', e); }
 
         if (collapsed) {
             setWidth(expandedWidth, false);
@@ -201,7 +201,7 @@ export function attachResizablePanel({
     // Initialize persisted state
     setWidth(expandedWidth, false);
     let storedCollapsed = false;
-    try { storedCollapsed = window.localStorage.getItem(collapsedKey) === 'true'; } catch (e) { console.debug('[resizablePanel] localStorage read failed:', e); }
+    try { storedCollapsed = window.localStorage.getItem(collapsedKey) === 'true'; } catch (e) { window.debugLogging && console.debug('[resizablePanel] localStorage read failed:', e); }
     applyCollapseState(storedCollapsed);
     applyTheme();
 

@@ -6,6 +6,7 @@ import {
     ColumnReference,
     ColumnUsageContext
 } from './types';
+import { logger } from '../../logger';
 
 /**
  * Extracts column-level information from SQL queries
@@ -285,7 +286,7 @@ export class ColumnExtractor {
             const sql = this.parser.sqlify(expr);
             return sql || '';
         } catch (e) {
-            console.debug('[columnExtractor] sqlify failed, using type fallback:', e);
+            logger.debug('[columnExtractor] sqlify failed, using type fallback: ' + String(e));
             return expr.type || 'expression';
         }
     }

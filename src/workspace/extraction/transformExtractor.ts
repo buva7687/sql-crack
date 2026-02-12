@@ -6,6 +6,18 @@ import {
     TransformationType,
     ColumnReference
 } from './types';
+import { logger } from '../../logger';
+import type {
+    AstSelectStatement,
+    AstColumn,
+    AstExpression,
+    AstFunctionExpr,
+    AstAggrFuncExpr,
+    AstCaseExpr,
+    AstWindowFuncExpr,
+    AstColumnRef,
+    AstTableIdentifier
+} from './astTypes';
 
 /**
  * Extracts transformation information from SQL queries
@@ -21,16 +33,16 @@ export class TransformExtractor {
      * Identify how output columns are derived from input columns
      */
     extractTransformations(
-        ast: any,
+        ast: AstSelectStatement,
         tableAliases: Map<string, string>
     ): Transformation[] {
-        if (!ast || !ast.columns) {
+        if (!ast || !ast.columns || !Array.isArray(ast.columns)) {
             return [];
         }
 
         const transformations: Transformation[] = [];
 
-        for (const col of ast.columns) {
+        for (const col of ast.columns as AstColumn[]) {
             if (col.type === 'star') {
                 // SELECT * - no transformation info
                 continue;
@@ -49,7 +61,7 @@ export class TransformExtractor {
      * Extract transformation for a single column
      */
     private extractColumnTransformation(
-        col: any,
+        col: AstColumn,
         tableAliases: Map<string, string>
     ): Transformation | null {
         if (!col || !col.expr) {return null;}
@@ -65,7 +77,7 @@ export class TransformExtractor {
         if (alias) {
             outputColumn = alias;
         } else if (expr.type === 'column_ref') {
-            outputColumn = this.extractColumnName(expr);
+            outputColumn = this.extractColumnName(expr as AstColumnRef);
         } else {
             outputColumn = this.generateOutputName(expr);
         }
@@ -84,7 +96,7 @@ export class TransformExtractor {
      * Parse expression to identify source columns
      */
     parseExpression(
-        expr: any,
+        expr: AstExpression,
         tableAliases: Map<string, string>
     ): ColumnReference[] {
         if (!expr) {return [];}
@@ -100,7 +112,7 @@ export class TransformExtractor {
      * Recursively extract columns from expression
      */
     private extractColumnsFromExpression(
-        expr: any,
+        expr: AstExpression,
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
@@ -108,12 +120,13 @@ export class TransformExtractor {
 
         // Direct column reference
         if (expr.type === 'column_ref') {
-            const columnName = this.extractColumnName(expr);
+            const colRef = expr as AstColumnRef;
+            const columnName = this.extractColumnName(colRef);
             if (columnName) {
                 columns.push({
                     columnName,
-                    tableName: this.resolveTableName(expr.table, tableAliases),
-                    tableAlias: expr.table?.alias || expr.table,
+                    tableName: this.resolveTableName(colRef.table, tableAliases),
+                    tableAlias: colRef.table || undefined,
                     usedIn: 'select',
                     lineNumber: 0
                 });
@@ -123,44 +136,44 @@ export class TransformExtractor {
 
         // Binary expression (a + b, a = b, etc.)
         if (expr.type === 'binary_expr') {
-            this.extractColumnsFromExpression(expr.left, columns, tableAliases);
-            this.extractColumnsFromExpression(expr.right, columns, tableAliases);
+            this.extractColumnsFromExpression(expr.left as AstExpression, columns, tableAliases);
+            this.extractColumnsFromExpression(expr.right as AstExpression, columns, tableAliases);
             return;
         }
 
         // Unary expression (-a, +a, NOT a)
         if (expr.type === 'unary_expr') {
-            this.extractColumnsFromExpression(expr.expr, columns, tableAliases);
+            this.extractColumnsFromExpression(expr.expr as AstExpression, columns, tableAliases);
             return;
         }
 
         // Function call
         if (expr.type === 'function') {
-            this.extractColumnsFromFunction(expr, columns, tableAliases);
+            this.extractColumnsFromFunction(expr as AstFunctionExpr, columns, tableAliases);
             return;
         }
 
         // Aggregate function
         if (expr.type === 'aggr_func') {
-            this.extractColumnsFromAggregate(expr, columns, tableAliases);
+            this.extractColumnsFromAggregate(expr as AstAggrFuncExpr, columns, tableAliases);
             return;
         }
 
         // CASE expression
         if (expr.type === 'case') {
-            this.extractColumnsFromCase(expr, columns, tableAliases);
+            this.extractColumnsFromCase(expr as AstCaseExpr, columns, tableAliases);
             return;
         }
 
         // CAST expression
         if (expr.type === 'cast') {
-            this.extractColumnsFromExpression(expr.expr, columns, tableAliases);
+            this.extractColumnsFromExpression(expr.expr as AstExpression, columns, tableAliases);
             return;
         }
 
         // Window function
         if (expr.type === 'window_func') {
-            this.extractColumnsFromWindowFunction(expr, columns, tableAliases);
+            this.extractColumnsFromWindowFunction(expr as AstWindowFuncExpr, columns, tableAliases);
             return;
         }
 
@@ -176,7 +189,7 @@ export class TransformExtractor {
      * Extract columns from function call
      */
     private extractColumnsFromFunction(
-        func: any,
+        func: AstFunctionExpr,
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
@@ -195,7 +208,7 @@ export class TransformExtractor {
      * Extract columns from aggregate function
      */
     private extractColumnsFromAggregate(
-        aggr: any,
+        aggr: AstAggrFuncExpr,
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
@@ -225,7 +238,7 @@ export class TransformExtractor {
      * Extract columns from CASE expression
      */
     private extractColumnsFromCase(
-        caseExpr: any,
+        caseExpr: AstCaseExpr,
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
@@ -251,7 +264,7 @@ export class TransformExtractor {
      * Extract columns from window function
      */
     private extractColumnsFromWindowFunction(
-        window: any,
+        window: AstWindowFuncExpr,
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
@@ -292,7 +305,7 @@ export class TransformExtractor {
     /**
      * Classify transformation type
      */
-    classifyTransformation(expr: any): TransformationType {
+    classifyTransformation(expr: AstExpression): TransformationType {
         if (!expr || !expr.type) {
             return 'complex';
         }
@@ -309,7 +322,7 @@ export class TransformExtractor {
                 return 'aggregate';
 
             case 'function':
-                return this.classifyFunction(expr);
+                return this.classifyFunction(expr as AstFunctionExpr);
 
             case 'case':
                 return 'case';
@@ -334,7 +347,7 @@ export class TransformExtractor {
     /**
      * Classify binary expression
      */
-    private classifyBinaryExpression(expr: any): TransformationType {
+    private classifyBinaryExpression(expr: AstExpression): TransformationType {
         const operator = expr.operator;
 
         // Arithmetic operations
@@ -363,7 +376,7 @@ export class TransformExtractor {
     /**
      * Classify function
      */
-    private classifyFunction(func: any): TransformationType {
+    private classifyFunction(func: AstFunctionExpr): TransformationType {
         if (!func.name) {return 'scalar';}
 
         const name = func.name.toUpperCase();
@@ -407,15 +420,15 @@ export class TransformExtractor {
     /**
      * Extract column name from column reference
      */
-    private extractColumnName(column: any): string {
+    private extractColumnName(column: AstColumnRef): string {
         if (!column) {return '';}
 
         if (column.column) {
-            return column.column;
+            return typeof column.column === 'string' ? column.column : column.column.expr.value;
         }
 
         if (column.value) {
-            return column.value;
+            return String(column.value);
         }
 
         return '';
@@ -425,20 +438,24 @@ export class TransformExtractor {
      * Resolve table name from reference using aliases
      */
     private resolveTableName(
-        tableRef: any,
+        tableRef: AstTableIdentifier | null | undefined,
         tableAliases: Map<string, string>
     ): string | undefined {
         if (!tableRef) {return undefined;}
+        if (typeof tableRef === 'string') {
+            const resolved = tableAliases.get(tableRef);
+            return resolved || tableRef;
+        }
 
-        const alias = tableRef.alias || tableRef;
+        const alias = tableRef.alias || (typeof tableRef === 'string' ? tableRef : undefined);
 
-        if (typeof alias === 'string') {
+        if (alias && typeof alias === 'string') {
             const resolved = tableAliases.get(alias);
             return resolved || alias;
         }
 
         if (tableRef.table) {
-            return this.resolveTableName(tableRef.table, tableAliases);
+            return this.resolveTableName(tableRef.table as AstTableIdentifier, tableAliases);
         }
 
         return undefined;
@@ -447,7 +464,7 @@ export class TransformExtractor {
     /**
      * Generate output column name for expressions
      */
-    private generateOutputName(expr: any): string {
+    private generateOutputName(expr: AstExpression): string {
         if (!expr) {return 'expr';}
 
         const type = expr.type || '';
@@ -473,14 +490,14 @@ export class TransformExtractor {
     /**
      * Convert expression to string representation
      */
-    private expressionToString(expr: any): string {
+    private expressionToString(expr: AstExpression): string {
         if (!expr) {return '';}
 
         try {
-            const sql = this.parser.sqlify(expr);
+            const sql = this.parser.exprToSQL(expr);
             return sql || '';
         } catch (e) {
-            console.debug('[transformExtractor] sqlify failed, using type fallback:', e);
+            logger.debug('[transformExtractor] sqlify failed, using type fallback: ' + String(e));
             return expr.type || 'expression';
         }
     }

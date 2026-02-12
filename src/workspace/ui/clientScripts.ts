@@ -2598,7 +2598,7 @@ function getImpactSummaryScript(): string {
                     try {
                         items = JSON.parse(decodeURIComponent(listRaw));
                     } catch (e) {
-                        console.debug('[clientScripts] JSON parse failed for summary list:', e);
+                        window.debugLogging && console.debug('[clientScripts] JSON parse failed for summary list:', e);
                         items = [];
                     }
 
@@ -2910,7 +2910,7 @@ function getLineageGraphScript(): string {
         const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
         let pendingColumnTraceHintNodeId = null;
         let columnTraceHintDismissed = false;
-        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch (e) { console.debug('[clientScripts] localStorage read failed:', e); }
+        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch (e) { window.debugLogging && console.debug('[clientScripts] localStorage read failed:', e); }
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -3310,7 +3310,7 @@ function getLineageGraphScript(): string {
         function dismissColumnTraceHint() {
             columnTraceHintDismissed = true;
             pendingColumnTraceHintNodeId = null;
-            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch (e) { console.debug('[clientScripts] localStorage write failed:', e); }
+            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch (e) { window.debugLogging && console.debug('[clientScripts] localStorage write failed:', e); }
             const hint = document.getElementById('column-trace-onboarding');
             if (hint) hint.remove();
         }
