@@ -4924,6 +4924,7 @@ function updateDetailsPanel(nodeId: string | null): void {
 
     const node = currentNodes.find(n => n.id === nodeId);
     if (!node) { return; }
+    ensureDetailsPanelExpanded();
     const isDark = state.isDarkTheme;
     const sectionLabelColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
     const detailTextColor = isDark ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
@@ -9063,8 +9064,17 @@ function hideColumnLineagePanel(): void {
 /**
  * Show the lineage path in the details panel
  */
+function ensureDetailsPanelExpanded(): void {
+    if (!detailsPanel) { return; }
+    if (detailsPanel.getAttribute('aria-expanded') === 'false') {
+        const toggle = detailsPanel.querySelector<HTMLButtonElement>('.sql-crack-resize-toggle[data-panel-key="details"]');
+        toggle?.click();
+    }
+}
+
 function showLineagePath(flow: ColumnFlow): void {
     if (!detailsPanel) {return;}
+    ensureDetailsPanelExpanded();
 
     // Use centralized transformation colors from constants
     const transformationLabels: Record<string, string> = {
