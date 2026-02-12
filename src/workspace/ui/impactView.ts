@@ -1,5 +1,6 @@
 // Impact View - Display impact analysis reports
 
+import * as path from 'path';
 import { ImpactReport, ImpactItem } from '../lineage/impactAnalyzer';
 import { LineageGraph, LineageNode } from '../lineage/types';
 import { ICONS } from '../../shared';
@@ -244,7 +245,7 @@ export class ImpactView {
             title: 'View'
         }));
         const files = unique(impacts.map(i => i.filePath).filter(Boolean) as string[]).map(filePath => {
-            const fileName = filePath.split('/').pop() || filePath;
+            const fileName = this.getFileName(filePath);
             return {
                 label: fileName,
                 title: filePath
@@ -304,7 +305,7 @@ export class ImpactView {
                 ? item.node.metadata.definitionFiles as string[]
                 : [];
             const filePath = item.filePath && item.filePath !== 'Unknown' ? item.filePath : '';
-            const fileName = filePath ? filePath.split('/').pop() || filePath : '';
+            const fileName = filePath ? this.getFileName(filePath) : '';
             const location = item.lineNumber > 0 ? `${fileName} • Line ${item.lineNumber}` : fileName;
             const typeLabel = item.node.type === 'view' ? 'view'
                 : item.node.type === 'table' ? 'table'
@@ -312,7 +313,7 @@ export class ImpactView {
             const hasMultipleDefinitions = !filePath && definitionFiles.length > 1;
             const displayFile = hasMultipleDefinitions
                 ? `${definitionFiles.length} definition files`
-                : (location || (definitionFiles[0]?.split('/').pop() || 'Unknown file'));
+                : (location || (definitionFiles[0] ? this.getFileName(definitionFiles[0]) : 'Unknown file'));
             const tooltip = hasMultipleDefinitions
                 ? definitionFiles.join('\n')
                 : (filePath || definitionFiles[0] || 'File location not available');
@@ -412,7 +413,7 @@ export class ImpactView {
 
             for (const item of group.items) {
                 const fileName = item.filePath && item.filePath !== 'Unknown'
-                    ? item.filePath.split('/').pop() || item.filePath
+                    ? this.getFileName(item.filePath)
                     : '';
                 const location = item.lineNumber > 0 ? `${fileName} • Line ${item.lineNumber}` : fileName;
 
@@ -478,6 +479,10 @@ export class ImpactView {
         `;
 
         return html;
+    }
+
+    private getFileName(filePath: string): string {
+        return path.basename(filePath);
     }
 
     /**

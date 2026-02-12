@@ -10,9 +10,9 @@ import {
     SearchFilter,
     DetailedWorkspaceStats,
     DefinitionDetail,
-    MissingDefinitionDetail
+    MissingDefinitionDetail,
+    SqlDialect,
 } from './types';
-import { SqlDialect } from '../webview/types/parser';
 import { logger } from '../logger';
 import { getDisplayName } from './identifiers';
 
@@ -101,6 +101,7 @@ export class WorkspacePanel {
 
     // Theme state
     private _isDarkTheme: boolean = true;
+    private _isHighContrast: boolean = false;
 
     private _postMessage(msg: WorkspaceHostMessage): void {
         this._panel.webview.postMessage(msg);
@@ -184,7 +185,7 @@ export class WorkspacePanel {
         vscode.window.onDidChangeActiveColorTheme(
             () => {
                 this._isDarkTheme = this.getThemeFromSettings();
-                const css = getWebviewStyles(this._isDarkTheme);
+                const css = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
                 this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
@@ -196,7 +197,7 @@ export class WorkspacePanel {
             (e) => {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
-                    const css = getWebviewStyles(this._isDarkTheme);
+                    const css = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
                     this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
                 if (e.affectsConfiguration('sqlCrack.workspaceLineageDepth')) {
@@ -414,7 +415,7 @@ export class WorkspacePanel {
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
-            getThemeCss: (isDark) => getWebviewStyles(isDark),
+            getThemeCss: (isDark) => getWebviewStyles(isDark, this._isHighContrast),
             buildIndexWithProgress: () => this.buildIndexWithProgress(),
             rebuildAndRenderGraph: () => this.rebuildAndRenderGraph(),
             buildLineageGraph: () => this.buildLineageGraph(),
@@ -990,7 +991,7 @@ export class WorkspacePanel {
         });
 
         // Get styles and scripts from extracted modules
-        const styles = getWebviewStyles(this._isDarkTheme);
+        const styles = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
         const scriptParams: WebviewScriptParams = {
             nonce,
             graphData,
@@ -2233,7 +2234,7 @@ ${nodesHtml}
         const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
         const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
 
-        const styles = getIssuesStyles(this._isDarkTheme);
+        const styles = getIssuesStyles(this._isDarkTheme, this._isHighContrast);
         const script = getIssuesScript(nonce);
 
         return `<!DOCTYPE html>
@@ -2382,9 +2383,11 @@ ${nodesHtml}
      */
     private getLoadingHtml(): string {
         const styles = getStateStyles(this._isDarkTheme);
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2406,6 +2409,7 @@ ${nodesHtml}
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2419,11 +2423,16 @@ ${nodesHtml}
         <div class="file-count">${fileCount}</div>
         <div class="title">SQL Files Found</div>
         <div class="subtitle">Large workspace detected. This may take a moment to analyze all dependencies.</div>
-        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+        <button class="btn" id="manual-refresh-btn">
             Start Analysis
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('manual-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
@@ -2451,11 +2460,16 @@ ${nodesHtml}
         </div>
         <div class="title">No SQL Files Found</div>
         <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
-        <button class="btn" onclick="vscode.postMessage({command:'refresh'})">
+        <button class="btn" id="empty-refresh-btn">
             Refresh
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('empty-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
@@ -2470,9 +2484,13 @@ ${nodesHtml}
         const statusLine = indexStatus.level === 'missing'
             ? 'Index: not yet built'
             : indexStatus.title;
+        const safeMessage = this.escapeHtml(message);
+        const safeDetail = detail ? this.escapeHtml(detail) : '';
+        const safeStatusLine = this.escapeHtml(statusLine);
         return `<!DOCTYPE html>
 <html>
 <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <style>${styles}</style>
 </head>
 <body>
@@ -2485,14 +2503,19 @@ ${nodesHtml}
             </svg>
         </div>
         <div class="title error">Something went wrong</div>
-        <div class="message">${message}</div>
-        ${detail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${detail}</div>` : ''}
-        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${statusLine}</div>
-        <button class="btn secondary" onclick="vscode.postMessage({command:'refresh'})">
+        <div class="message">${safeMessage}</div>
+        ${safeDetail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${safeDetail}</div>` : ''}
+        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${safeStatusLine}</div>
+        <button class="btn secondary" id="error-refresh-btn">
             Refresh Index
         </button>
     </div>
-    <script nonce="${nonce}">const vscode = acquireVsCodeApi();</script>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('error-refresh-btn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'refresh' });
+        });
+    </script>
 </body>
 </html>`;
     }
@@ -2503,6 +2526,8 @@ ${nodesHtml}
     private getThemeFromSettings(): boolean {
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+        const themeKind = vscode.window.activeColorTheme.kind;
+        this._isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
 
         if (themePreference === 'light') {
             return false;
@@ -2510,7 +2535,7 @@ ${nodesHtml}
             return true;
         } else {
             // 'auto' - match VS Code theme
-            return vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light;
+            return themeKind !== vscode.ColorThemeKind.Light && themeKind !== vscode.ColorThemeKind.HighContrastLight;
         }
     }
 

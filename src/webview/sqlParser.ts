@@ -69,6 +69,19 @@ export function validateSql(
     sql: string,
     limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
 ): ValidationError | null {
+    // Reject empty or whitespace-only input
+    if (!sql || !sql.trim()) {
+        return {
+            type: 'empty_input',
+            message: 'No SQL provided',
+            details: {
+                actual: 0,
+                limit: 1,
+                unit: 'characters',
+            },
+        };
+    }
+
     // Check SQL size
     const sizeBytes = new Blob([sql]).size;
     if (sizeBytes > limits.maxSqlSizeBytes) {
@@ -892,6 +905,16 @@ export function parseSqlBatch(
     // Validate SQL before parsing
     const validationError = validateSql(sql, limits);
     if (validationError) {
+        // Empty input: return empty result
+        if (validationError.type === 'empty_input') {
+            const emptyStats: QueryStats = {
+                tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0,
+                windowFunctions: 0, unions: 0, conditions: 0,
+                complexity: 'Simple', complexityScore: 0,
+            };
+            return { queries: [], totalStats: emptyStats, validationError };
+        }
+
         // For size limits, parse partial result instead of rejecting
         if (validationError.type === 'size_limit') {
             const truncatedSql = sql.substring(0, limits.maxSqlSizeBytes);
@@ -1479,7 +1502,8 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
 
     try {
         return parser.astify(sql, { database: 'PostgreSQL' });
-    } catch {
+    } catch (e) {
+        console.debug('[sqlParser] AST parse failed:', e);
         return null;
     }
 }
@@ -1542,13 +1566,39 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
 
     // Check for CTEs FIRST (before extracting regular tables)
     // This ensures CTEs are marked with the correct category
-    const ctePattern = /WITH\s+(\w+)\s+AS/i;
-    const cteMatch = ctePattern.exec(commentStripped);
+    // Detect ALL CTEs: first match WITH name AS (, then loop with , name AS (
     const cteNames = new Set<string>();
-    
+    const cteBodies = new Map<string, string>(); // CTE name -> body text
+
+    const firstCtePattern = /\bWITH\s+(\w+)\s+AS\s*\(/gi;
+    let cteMatch = firstCtePattern.exec(commentStripped);
     if (cteMatch) {
-        const cteName = cteMatch[1];
-        cteNames.add(cteName);
+        // Found the WITH keyword — extract first CTE name
+        cteNames.add(cteMatch[1]);
+        // Extract body: find matching paren from the opening '('
+        const openParenIdx = cteMatch.index + cteMatch[0].length - 1;
+        const bodyClose = findMatchingParen(commentStripped, openParenIdx);
+        if (bodyClose !== -1) {
+            cteBodies.set(cteMatch[1], commentStripped.substring(openParenIdx + 1, bodyClose));
+        }
+
+        // Now look for subsequent CTEs separated by commas: , name AS (
+        const subsequentCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
+        subsequentCtePattern.lastIndex = bodyClose !== -1 ? bodyClose + 1 : firstCtePattern.lastIndex;
+        let subMatch;
+        while ((subMatch = subsequentCtePattern.exec(commentStripped)) !== null) {
+            cteNames.add(subMatch[1]);
+            const subOpenParen = subMatch.index + subMatch[0].length - 1;
+            const subBodyClose = findMatchingParen(commentStripped, subOpenParen);
+            if (subBodyClose !== -1) {
+                cteBodies.set(subMatch[1], commentStripped.substring(subOpenParen + 1, subBodyClose));
+                subsequentCtePattern.lastIndex = subBodyClose + 1;
+            }
+        }
+    }
+
+    // Create nodes for each CTE
+    for (const cteName of cteNames) {
         tableNames.add(cteName);
         nodes.push({
             id: genId('cte'),
@@ -1600,30 +1650,57 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         }
     }
 
-    // Extract JOIN relationships
-    const joinPattern = /\bJOIN\s+([`"']?[\w.]+[`"']?)\s+(?:ON|USING)/gi;
-    let joinMatch;
-    let previousTable: string | null = null;
+    // Extract JOIN relationships using a two-pass approach:
+    // Pass 1: Collect all FROM/JOIN table references with positions
+    // Pass 2: Build chains — within each FROM...JOIN sequence, link FROM→JOIN1→JOIN2→...
+    const tableRefPattern = /\b(FROM|JOIN)\s+([`"']?[\w.]+[`"']?)/gi;
+    let refMatch;
+    const tableRefs: { keyword: string; table: string; pos: number }[] = [];
 
-    while ((joinMatch = joinPattern.exec(commentStripped)) !== null) {
-        const joinTable = joinMatch[1].replace(/[`"']/g, '').split('.').pop() || joinMatch[1];
+    while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
+        const keyword = refMatch[1].toUpperCase();
+        const table = refMatch[2].replace(/[`"']/g, '').split('.').pop() || refMatch[2];
+        tableRefs.push({ keyword, table, pos: refMatch.index });
+    }
 
-        // Find the table before this JOIN
-        const beforeMatch = commentStripped.substring(0, joinMatch.index).match(/FROM\s+([`"']?[\w.]+[`"']?)\s*$/i);
-        if (beforeMatch) {
-            previousTable = beforeMatch[1].replace(/[`"']/g, '').split('.').pop() || beforeMatch[1];
-        }
-        
-        if (previousTable && tableNames.has(previousTable) && tableNames.has(joinTable)) {
+    // Build chains: FROM starts a new chain, JOINs extend it
+    let chainPrev: string | null = null;
+    for (const ref of tableRefs) {
+        if (ref.keyword === 'FROM') {
+            chainPrev = ref.table;
+        } else if (ref.keyword === 'JOIN' && chainPrev && tableNames.has(chainPrev) && tableNames.has(ref.table)) {
             edges.push({
                 id: genId('edge'),
-                source: nodes.find(n => n.label === previousTable)?.id || '',
-                target: nodes.find(n => n.label === joinTable)?.id || '',
+                source: nodes.find(n => n.label === chainPrev)?.id || '',
+                target: nodes.find(n => n.label === ref.table)?.id || '',
                 sqlClause: 'JOIN',
                 clauseType: 'join',
             });
+            chainPrev = ref.table;
         }
-        previousTable = joinTable;
+    }
+
+    // Add CTE-to-source reference edges
+    // For each CTE, find FROM/JOIN references inside its body and create edges
+    for (const [cteName, body] of cteBodies) {
+        const bodyRefPattern = /\b(?:FROM|JOIN)\s+([`"']?[\w.]+[`"']?)/gi;
+        let bodyRef;
+        while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
+            const srcTable = bodyRef[1].replace(/[`"']/g, '').split('.').pop() || bodyRef[1];
+            if (srcTable && tableNames.has(srcTable) && srcTable !== cteName) {
+                const srcNode = nodes.find(n => n.label === srcTable);
+                const cteNode = nodes.find(n => n.label === cteName);
+                if (srcNode && cteNode) {
+                    edges.push({
+                        id: genId('edge'),
+                        source: srcNode.id,
+                        target: cteNode.id,
+                        sqlClause: 'CTE reference',
+                        clauseType: 'flow',
+                    });
+                }
+            }
+        }
     }
 
     // Detect statement type for hints
@@ -1757,7 +1834,7 @@ function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
         tables: tableNames.size,
         joins: edges.length,
         subqueries: (commentStripped.match(/\bsubquery\b/gi) || []).length,
-        ctes: cteMatch ? 1 : 0,
+        ctes: cteNames.size,
         aggregations: (commentStripped.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
         windowFunctions: (commentStripped.match(/\bOVER\s*\(/gi) || []).length,
         unions: (commentStripped.match(/\bUNION\b/gi) || []).length,
@@ -1863,7 +1940,8 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
                     category: 'best-practice',
                     severity: 'low',
                 });
-            } catch {
+            } catch (retryErr) {
+                console.debug(`[sqlParser] Dialect retry with ${retryDialect} also failed:`, retryErr);
                 throw primaryParseError;
             }
         }
@@ -2748,7 +2826,7 @@ function calculateEnhancedMetrics(nodes: FlowNode[], edges: FlowEdge[]): void {
 }
 
 function processStatement(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
-    if (!stmt || !stmt.type) { return null; }
+    if (!stmt || !stmt.type || typeof stmt.type !== 'string') { return null; }
 
     ctx.statementType = stmt.type.toLowerCase();
 
@@ -4157,8 +4235,8 @@ function extractWindowFunctionDetails(columns: any): Array<{
                             break;
                         }
                     }
-                } catch {
-                    // Ignore JSON errors
+                } catch (e) {
+                    console.debug('[sqlParser] JSON.stringify failed for window function detection:', e);
                 }
             }
 
@@ -5507,9 +5585,11 @@ function extractCteDefinitions(
     const cteStartPos = withKeywordStart;
 
     // Parse each CTE: name AS (...)
-    while (pos < sql.length) {
-        // Skip whitespace
-        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+    // Use masked[] for whitespace skipping so block comments (replaced with spaces
+    // in masked but still /* ... */ in sql) are transparent to the skip.
+    while (pos < masked.length) {
+        // Skip whitespace (use masked to see through block comments)
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
         // Read CTE name (may be quoted)
         const nameStart = pos;
@@ -5526,8 +5606,8 @@ function extractCteDefinitions(
             return null; // no CTE name found
         }
 
-        // Skip whitespace
-        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+        // Skip whitespace (use masked to see through block comments)
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
         // Expect `AS`
         if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
@@ -5535,8 +5615,8 @@ function extractCteDefinitions(
         }
         pos += 2;
 
-        // Skip whitespace
-        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+        // Skip whitespace (use masked to see through block comments)
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
         // Expect `(` — find matching `)` using balanced paren tracking on original SQL
         if (sql[pos] !== '(') {
@@ -5548,8 +5628,8 @@ function extractCteDefinitions(
         }
         pos = cteBodyClose + 1;
 
-        // Skip whitespace
-        while (pos < sql.length && /\s/.test(sql[pos])) { pos++; }
+        // Skip whitespace (use masked to see through block comments)
+        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
         // Check for comma (more CTEs) or SELECT (end of CTEs)
         if (sql[pos] === ',') {

@@ -67,9 +67,11 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
         expect(source).toMatch(/div\|ul\|li\|strong\|span/);
     });
 
-    it('should only restore class and style attributes, not event handlers', () => {
-        // The allowlist regex should permit class and style but nothing else (no onclick, onerror, etc.)
-        expect(source).toContain('class|style');
+    it('should only restore class attribute, not style or event handlers', () => {
+        // The allowlist regex should permit class only (style removed — tooltips use CSS classes)
+        expect(source).toMatch(/class=&quot;/);
+        // style should NOT be in the attribute whitelist
+        expect(source).not.toMatch(/(?:class\|style|style\|class)/);
         // Should NOT contain any pattern that passes through on* attributes
         expect(source).not.toMatch(/sanitizeTooltipHtml[^}]*onclick/);
     });
@@ -202,5 +204,25 @@ describe('defensive guards in visualizationPanel.ts', () => {
 
     it('should show error message when pin context is unavailable', () => {
         expect(source).toContain("'Cannot pin: extension context not available'");
+    });
+});
+
+// =========================================================================
+// 9. Additional escaping regressions
+// =========================================================================
+
+describe('XSS: renderer tooltip escaping', () => {
+    const source = readFileSync(join(__dirname, '../../src/webview/renderer.ts'), 'utf8');
+
+    it('should escape window function PARTITION BY values in tooltip markup', () => {
+        expect(source).toContain('escapeHtml(fn.partitionBy.join(\', \'))');
+    });
+});
+
+describe('XSS: lineageGraphRenderer column datatype escaping', () => {
+    const source = readFileSync(join(__dirname, '../../src/workspace/ui/lineageGraphRenderer.ts'), 'utf8');
+
+    it('should escape column dataType before injecting into SVG text', () => {
+        expect(source).toContain("this.escapeHtml(column.dataType)");
     });
 });

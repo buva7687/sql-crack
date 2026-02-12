@@ -800,6 +800,10 @@ These structural changes require multi-day effort and are tracked separately. Th
 | 4.3 | Dialect auto-detection | P4 Feature | 2-3 hrs | Low | High | DONE |
 | 4.4 | Auto-hoist nested CTEs | P4 Feature | 3-4 hrs | Medium | High | DONE |
 | 4.5 | Parser: # comments + edge cases | P4 Feature | 1 hr | Low | Medium | DONE |
+| 5.1 | Empty catch block logging | P5 Nice-to-Have | 30 min | None | Low | DONE |
+| 5.2 | Export dropdown format support | P5 Nice-to-Have | N/A | None | Low | DONE (already existed) |
+| 5.3 | `#1E293B` audit | P5 Nice-to-Have | 10 min | None | Low | DONE (no issues found) |
+| 5.4 | Contributor DX: npm install docs | P5 Nice-to-Have | 5 min | None | Low | DONE |
 
 **Totals by phase:**
 | Phase | Items | Est. Time |
@@ -817,3 +821,4 @@ These structural changes require multi-day effort and are tracked separately. Th
 *Updated: Feb 10, 2026 — Reorganized by priority; promoted bugs and security items from backlog; deferred architecture phase*
 *Updated: Feb 11, 2026 — Completed P3 items 3.11-3.13 with tests and validation*
 *Updated: Feb 11, 2026 — Completed P4 items 4.3-4.5 (dialect auto-retry, CTE hoisting, # comments/edge cases). All P1-P4 complete; only P5 nice-to-haves remain.*
+*Updated: Feb 11, 2026 — Completed all P5 items (5.1-5.4). All phases P1-P5 complete; only Architecture (Deferred) remains.*

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-02-11
+
+### Added
+
+- **High-contrast mode**: Detect `ColorThemeKind.HighContrast` and apply HC CSS overrides for both SQL Flow and workspace webviews.
+- **Workspace lineage test suite**: 92 unit tests covering FlowAnalyzer, ColumnLineageTracker, ImpactAnalyzer, and LineageBuilder (lineage coverage 9% to 70%).
+
+### Changed
+
+- **Monospace font consistency**: Migrated all 35 bare monospace declarations to `MONO_FONT_STACK` / `var(--font-mono)`.
+- **Emoji arrow replacement**: Replaced emoji arrows with inline SVG in workspace clientScripts.
+- **SqlDialect imports**: Workspace modules now use local re-exports instead of reaching into webview types.
+- **Dead code removal**: Removed unused `handlePinnedTabSwitch` code path.
+
+### Fixed
+
+- **Cursor command visibility**: Hardened cursor command enablement and icon fallbacks.
+- **Unhandled rejection in visualize command**: Wrapped async handler in extension.ts.
+- **Panel disposal order**: Dispose listeners before panel to prevent post-disposal message throws; added disposed guard to `_postMessage`.
+- **Pinned tab error feedback**: Show error when `openPinnedTab` context is missing instead of silently failing.
+- **Parser type guard**: Added `typeof` string check before `stmt.type.toUpperCase()` to prevent crashes on non-string AST values.
+- **CTE extraction**: Fixed `extractCteDefinitions` whitespace skipping to use masked array for block comment transparency.
+- **Regex fallback parser rewrite**: Detect all CTEs, two-pass JOIN chain extraction, CTE-to-source edges, and correct stats counting.
+- **SQL validation**: Reject empty/whitespace-only input in `validateSql`.
+- **Webview rendering hardening**: Hardened workspace webview rendering, path handling, message handler, and file security.
+
+### Security
+
+- **Tooltip sanitizer**: Removed `style` from attribute whitelist (class-only) and added `on*` event handler stripping safety net.
+- **Hints badge XSS**: Escaped innerHTML in hints badge label.
+
+### Tests
+
+- Added sqlFormatter comment edge-case tests.
+- Added 92 workspace lineage unit tests (FlowAnalyzer, ColumnLineageTracker, ImpactAnalyzer, LineageBuilder).
+
 ## [0.3.2] - 2026-02-11
 
 ### Added
@@ -12,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collapsible Performance Hints panel**: Added a minimize/expand toggle to the Performance Hints header. Collapsed state persists across query switches.
 - **Collapsible Query Stats panel**: Added the same minimize/expand toggle to the Query Stats header, with independent persistent state.
 - **Minimap drag-to-pan in SQL Flow**: Clicking or dragging inside the minimap now pans the main viewport to that position, matching the existing Workspace Dependencies minimap behavior.
+- **Debug logging in catch blocks**: Added `console.debug()` to all previously-empty `catch {}` blocks across 11 files for easier troubleshooting.
+- **Contributor DX**: Updated `CONTRIBUTING.md` with `npm install`, `tsc --noEmit`, and `jest` requirements before committing.
 
 ## [0.3.1] - 2026-02-11
 
@@ -501,6 +539,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.3]: https://github.com/buva7687/sql-crack/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/buva7687/sql-crack/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/buva7687/sql-crack/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/buva7687/sql-crack/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/buva7687/sql-crack/compare/v0.2.0...v0.2.1

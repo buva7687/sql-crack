@@ -125,6 +125,7 @@ const state: ViewState = {
     highlightedColumnSources: [],
     isFullscreen: false,
     isDarkTheme: true,
+    isHighContrast: false,
     breadcrumbPath: [],
     showColumnLineage: false,
     showColumnFlows: false,
@@ -790,9 +791,28 @@ export function initRenderer(container: HTMLElement): void {
     // Store container reference
     containerElement = container;
 
+    // Set high-contrast state from VS Code theme kind
+    state.isHighContrast = !!(window as any).isHighContrast;
+
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
     reducedMotionStyleElement = document.createElement('style');
+    const hcStyles = state.isHighContrast ? `
+        /* VS Code High Contrast mode overrides */
+        .node-rect { stroke-width: 2px !important; }
+        .node-accent { width: 6px !important; }
+        .edge,
+        .column-lineage-edge { stroke-width: 2.5px !important; }
+        .details-panel,
+        .stats-panel,
+        .hints-panel,
+        .legend-panel,
+        .sql-preview-panel,
+        #sql-crack-breadcrumb-bar {
+            border-width: 2px !important;
+        }
+        text { font-weight: 600 !important; }
+    ` : '';
     reducedMotionStyleElement.textContent = `
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
@@ -827,6 +847,7 @@ export function initRenderer(container: HTMLElement): void {
                 border-width: 2px !important;
             }
         }
+        ${hcStyles}
     `;
     document.head.appendChild(reducedMotionStyleElement);
 
@@ -2594,7 +2615,7 @@ function renderJoinNode(node: FlowNode, group: SVGGElement): void {
         condition.setAttribute('y', String(node.y + 38));
         condition.setAttribute('fill', textColorMuted);
         condition.setAttribute('font-size', '9');
-        condition.setAttribute('font-family', 'monospace');
+        condition.setAttribute('font-family', MONO_FONT_STACK);
         condition.textContent = truncate(node.details[0], 18);
         group.appendChild(condition);
 
@@ -2883,7 +2904,7 @@ function renderSubqueryNode(node: FlowNode, group: SVGGElement, isExpanded: bool
     label.setAttribute('fill', sqSurface.text);
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
-    label.setAttribute('font-family', 'monospace');
+    label.setAttribute('font-family', MONO_FONT_STACK);
     label.textContent = truncate(node.label, 14);
     group.appendChild(label);
 
@@ -3712,7 +3733,7 @@ function renderWindowNode(node: FlowNode, group: SVGGElement): void {
         funcName.setAttribute('fill', accentColor);
         funcName.setAttribute('font-size', '10');
         funcName.setAttribute('font-weight', '600');
-        funcName.setAttribute('font-family', 'monospace');
+        funcName.setAttribute('font-family', MONO_FONT_STACK);
         funcName.textContent = func.name;
         group.appendChild(funcName);
 
@@ -3869,7 +3890,7 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
         funcText.setAttribute('fill', accentColor);
         funcText.setAttribute('font-size', '10');
         funcText.setAttribute('font-weight', '600');
-        funcText.setAttribute('font-family', 'monospace');
+        funcText.setAttribute('font-family', MONO_FONT_STACK);
         const truncatedExpr = func.expression.length > 25 ? func.expression.substring(0, 22) + '...' : func.expression;
         funcText.textContent = truncatedExpr;
         group.appendChild(funcText);
@@ -3982,7 +4003,7 @@ function renderCaseNode(node: FlowNode, group: SVGGElement): void {
         caseText.setAttribute('fill', accentColor);
         caseText.setAttribute('font-size', '10');
         caseText.setAttribute('font-weight', '600');
-        caseText.setAttribute('font-family', 'monospace');
+        caseText.setAttribute('font-family', MONO_FONT_STACK);
         caseText.textContent = `${caseStmt.conditions.length} WHEN condition${caseStmt.conditions.length > 1 ? 's' : ''}`;
         group.appendChild(caseText);
 
@@ -4196,7 +4217,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
-        " onclick="this.parentElement.style.display='none'">✕</button>
+        " class="clause-panel-close-btn">✕</button>
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             <div style="
                 background: ${clauseColor};
@@ -4208,7 +4229,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
                 letter-spacing: 0.5px;
             ">${clauseTypeLabel}</div>
             <div style="color: ${headingText}; font-size: 13px; font-weight: 600;">
-                ${edge.label || 'Data Flow'}
+                ${escapeHtml(edge.label || 'Data Flow')}
             </div>
         </div>
         <div style="
@@ -4231,6 +4252,13 @@ function showSqlClausePanel(edge: FlowEdge): void {
             </div>
         ` : ''}
     `;
+
+    const closeBtn = clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn');
+    closeBtn?.addEventListener('click', () => {
+        if (clausePanel) {
+            clausePanel.style.display = 'none';
+        }
+    });
 
     clausePanel.style.display = 'block';
 }
@@ -4905,6 +4933,9 @@ function updateDetailsPanel(nodeId: string | null): void {
     const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;
     const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
     const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
+    const badgeTextColor = isDark ? '#ffffff' : UI_COLORS.textLight;
+    const nodeBadgeTitleColor = isDark ? '#ffffff' : UI_COLORS.textLight;
+    const nodeBadgeSubtitleColor = isDark ? UI_COLORS.whiteMuted : UI_COLORS.textLightMuted;
 
     detailsPanel.style.transform = 'translate(0, -50%)';
 
@@ -4918,25 +4949,25 @@ function updateDetailsPanel(nodeId: string | null): void {
                 <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map(func => `
                     <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 4px;">
+                        <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
-                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.partitionBy.join(', '))}</span>
+                                <span style="background: ${BADGE_COLORS.partitionBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">PARTITION BY</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(func.partitionBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.orderBy && func.orderBy.length > 0 ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
-                                <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
-                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.orderBy.join(', '))}</span>
+                                <span style="background: ${BADGE_COLORS.orderBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ORDER BY</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(func.orderBy.join(', '))}</span>
                             </div>
                         ` : ''}
                         ${func.frame ? `
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
-                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(func.frame)}</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">FRAME</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(func.frame)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -4952,11 +4983,11 @@ function updateDetailsPanel(nodeId: string | null): void {
                 <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map(func => `
                     <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: monospace; margin-bottom: 2px;">
+                        <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
-                            <div style="color: ${sectionLabelColor}; font-size: 10px; font-family: monospace;">
+                            <div style="color: ${sectionLabelColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">
                                 Alias: ${escapeHtml(func.alias)}
                             </div>
                         ` : ''}
@@ -4965,7 +4996,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                 ${node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0 ? `
                     <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${sectionBorderColor};">
                         <div style="color: ${sectionLabelColor}; font-size: 10px; margin-bottom: 2px;">GROUP BY:</div>
-                        <div style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
+                        <div style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(node.aggregateDetails.groupBy.join(', '))}</div>
                     </div>
                 ` : ''}
             </div>
@@ -4987,19 +5018,19 @@ function updateDetailsPanel(nodeId: string | null): void {
                         ${caseStmt.conditions.map((cond) => `
                             <div style="margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 1px;">
-                                    <span style="background: ${BADGE_COLORS.partitionBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
-                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.when)}</span>
+                                    <span style="background: ${BADGE_COLORS.partitionBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">WHEN</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(cond.when)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px; margin-left: 28px;">
-                                    <span style="background: ${BADGE_COLORS.orderBy}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
-                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(cond.then)}</span>
+                                    <span style="background: ${BADGE_COLORS.orderBy}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">THEN</span>
+                                    <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(cond.then)}</span>
                                 </div>
                             </div>
                         `).join('')}
                         ${caseStmt.elseValue ? `
                             <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
-                                <span style="background: ${BADGE_COLORS.frame}; color: white; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
-                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: monospace;">${escapeHtml(caseStmt.elseValue)}</span>
+                                <span style="background: ${BADGE_COLORS.frame}; color: ${badgeTextColor}; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: 600;">ELSE</span>
+                                <span style="color: ${detailTextColor}; font-size: 10px; font-family: ${MONO_FONT_STACK};">${escapeHtml(caseStmt.elseValue)}</span>
                             </div>
                         ` : ''}
                     </div>
@@ -5015,7 +5046,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                 <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px;">
                     ${node.children.map(child => `
                         <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid ${detailDividerColor};">
-                            <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: white; font-size: 9px; font-weight: 500;">
+                            <span style="background: ${getNodeColor(child.type)}; padding: 2px 6px; border-radius: 3px; color: ${badgeTextColor}; font-size: 9px; font-weight: 500;">
                                 ${getNodeVisualIcon(child)} ${escapeHtml(child.label)}
                             </span>
                         </div>
@@ -5031,7 +5062,7 @@ function updateDetailsPanel(nodeId: string | null): void {
                 <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Details</div>
                 <div style="background: ${detailCardBg}; border-radius: 4px; padding: 8px;">
                     ${node.details.map(d => `
-                        <div style="color: ${detailTextColor}; font-size: 11px; padding: 2px 0; font-family: monospace;">
+                        <div style="color: ${detailTextColor}; font-size: 11px; padding: 2px 0; font-family: ${MONO_FONT_STACK};">
                             ${escapeHtml(d)}
                         </div>
                     `).join('')}
@@ -5065,10 +5096,10 @@ function updateDetailsPanel(nodeId: string | null): void {
             <button id="close-details" style="background: none; border: none; color: ${closeButtonColor}; cursor: pointer; font-size: 18px; padding: 0; line-height: 1;">&times;</button>
         </div>
         <div style="background: ${getNodeColor(node.type)}; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;">
-            <div style="color: white; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
+            <div style="color: ${nodeBadgeTitleColor}; font-weight: 600; font-size: 12px; margin-bottom: 2px;">
                 ${getNodeVisualIcon(node)} ${escapeHtml(node.label)}
             </div>
-            <div style="color: ${UI_COLORS.whiteMuted}; font-size: 11px;">
+            <div style="color: ${nodeBadgeSubtitleColor}; font-size: 11px;">
                 ${escapeHtml(node.description || '')}
             </div>
         </div>
@@ -5197,7 +5228,7 @@ function updateStatsPanel(): void {
                                 transition: background 0.15s;
                              "
                              title="Click to find ${escapeHtml(tableName)} in graph">
-                            <span style="color: ${tableTextColor}; font-family: monospace;">${escapeHtml(tableName)}</span>
+                            <span style="color: ${tableTextColor}; font-family: ${MONO_FONT_STACK};">${escapeHtml(tableName)}</span>
                             <span style="
                                 background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
                                 color: ${count > 1 ? '#f59e0b' : textColorMuted};
@@ -5295,7 +5326,7 @@ function updateStatsPanel(): void {
                                     padding: 1px 6px;
                                     border-radius: 3px;
                                     font-size: 9px;
-                                    font-family: monospace;
+                                    font-family: ${MONO_FONT_STACK};
                                     font-weight: 500;
                                 ">${escapeHtml(name)}</span>
                             `).join('')}
@@ -5357,8 +5388,8 @@ function updateStatsPanel(): void {
                             copyBtn.innerHTML = originalText;
                             copyBtn.style.color = isDark ? '#a5b4fc' : '#6366f1';
                         }, 2000);
-                    } catch {
-                        // Fallback copy failed silently
+                    } catch (e) {
+                        console.debug('[renderer] Fallback copy failed:', e);
                     }
                     document.body.removeChild(textarea);
                 }
@@ -6323,8 +6354,8 @@ function embedInlineStyles(element: Element): void {
                 const escapedClass = firstClass.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
                 originalElement = svgElement?.querySelector(`.${escapedClass}`) || 
                                 document.querySelector(`.${escapedClass}`);
-            } catch {
-                // Invalid selector, skip
+            } catch (e) {
+                console.debug('[renderer] Invalid CSS selector, skipping:', e);
             }
         }
     }
@@ -6395,8 +6426,8 @@ export function exportToPng(): void {
                         filename: `sql-flow-${Date.now()}.png`
                     });
                 }
-            } catch {
-                // PNG export failed silently
+            } catch (e) {
+                console.debug('[renderer] PNG export canvas draw failed:', e);
                 URL.revokeObjectURL(svgUrl);
             }
         };
@@ -6406,8 +6437,8 @@ export function exportToPng(): void {
         };
 
         img.src = svgUrl;
-    } catch {
-        // PNG export failed silently
+    } catch (e) {
+        console.debug('[renderer] PNG export failed:', e);
     }
 }
 
@@ -6430,8 +6461,8 @@ export function exportToSvg(): void {
         a.href = url;
         a.click();
         URL.revokeObjectURL(url);
-    } catch {
-        // SVG export failed silently
+    } catch (e) {
+        console.debug('[renderer] SVG export failed:', e);
     }
 }
 
@@ -6539,17 +6570,18 @@ function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
     });
 
     // Add styling section
+    const mermaidTextColor = state.isDarkTheme ? '#fff' : '#111827';
     lines.push('');
     lines.push('    %% Node styling');
-    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
-    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
-    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
-    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
-    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
-    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
-    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
-    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
-    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
+    lines.push(`    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:${mermaidTextColor}`);
+    lines.push(`    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:${mermaidTextColor}`);
+    lines.push(`    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:${mermaidTextColor}`);
+    lines.push(`    classDef aggregateStyle fill:#10b981,stroke:#047857,color:${mermaidTextColor}`);
+    lines.push(`    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:${mermaidTextColor}`);
+    lines.push(`    classDef resultStyle fill:#22c55e,stroke:#15803d,color:${mermaidTextColor}`);
+    lines.push(`    classDef cteStyle fill:#ec4899,stroke:#be185d,color:${mermaidTextColor}`);
+    lines.push(`    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:${mermaidTextColor}`);
+    lines.push(`    classDef defaultStyle fill:#64748b,stroke:#475569,color:${mermaidTextColor}`);
 
     // Apply classes to nodes
     const styleAssignments = generateStyleAssignments(nodes);
@@ -6743,8 +6775,8 @@ export function copyToClipboard(): void {
             img2.src = url;
         };
         img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-    } catch {
-        // Copy failed silently
+    } catch (e) {
+        console.debug('[renderer] Clipboard copy failed:', e);
     }
 }
 
@@ -8316,13 +8348,13 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
 
     // Add details based on node type
     if (node.type === 'join' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">
+        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${MONO_FONT_STACK};">
             <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
         </div>`;
     }
 
     if (node.type === 'filter' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: monospace;">
+        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${MONO_FONT_STACK};">
             <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
         </div>`;
     }
@@ -8345,7 +8377,7 @@ function showTooltip(node: FlowNode, e: MouseEvent): void {
         node.windowDetails.functions.forEach((fn, idx) => {
             if (idx < 3) { // Show first 3
                 content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
-                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${fn.partitionBy.join(', ')})` : ''}
+                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${escapeHtml(fn.partitionBy.join(', '))})` : ''}
                 </div>`;
             }
         });

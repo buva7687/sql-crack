@@ -86,7 +86,7 @@ export type WorkspaceHostMessage =
     | { command: 'lineageOverviewResult'; data: { html: string } }
     | { command: 'lineageResult'; data: { nodeId: string; direction: string; result: { nodes: LineageNodeResult[]; depth: number; pathCount: number } | null } }
     | { command: 'impactFormResult'; data: { html: string } }
-    | { command: 'impactResult'; data: { report: ImpactReportResult; html: string } }
+    | { command: 'impactResult'; data: { report: ImpactReportResult; html: string } | { error: string } }
     | { command: 'tableDetailResult'; data: { table?: LineageNodeResult; html?: string; error?: string } }
     | { command: 'columnLineageResult'; data: { tableName?: string; tableId?: string; columnName: string; upstream: unknown[]; downstream: unknown[]; html?: string } }
     | { command: 'upstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number } }

@@ -1,5 +1,6 @@
 // Table Explorer - Table-centric exploration view
 
+import * as path from 'path';
 import { LineageGraph, LineageNode } from '../lineage/types';
 import { ColumnLineageTracker } from '../lineage/columnLineage';
 import { FlowAnalyzer } from '../lineage/flowAnalyzer';
@@ -170,7 +171,7 @@ export class TableExplorer {
 
         for (const { table, upstreamCount, downstreamCount, totalConnections } of tablesWithCounts) {
             const typeIcon = this.getTypeIcon(table.type);
-            const fileName = table.filePath ? table.filePath.split('/').pop() || '' : '';
+            const fileName = table.filePath ? path.basename(table.filePath) : '';
             const hasConnections = totalConnections > 0;
 
             // Determine connection strength for visual indicator
@@ -432,9 +433,9 @@ export class TableExplorer {
                     filePaths.add(node.filePath);
                 }
                 const filePathList = Array.from(filePaths);
-                const filePathDisplay = filePathList.length > 0 ? filePathList[0].split('/').pop() || '' : '';
+                const filePathDisplay = filePathList.length > 0 ? path.basename(filePathList[0]) : '';
                 const filePathTooltip = filePathList.length > 1 
-                    ? `Used in: ${filePathList.map(f => f.split('/').pop()).join(', ')}`
+                    ? `Used in: ${filePathList.map(f => path.basename(f)).join(', ')}`
                     : filePathList.length === 1 
                         ? `Relationship defined in: ${filePathList[0]}`
                         : '';
@@ -482,9 +483,9 @@ export class TableExplorer {
                     }
                 }
                 const filePathList = Array.from(filePaths);
-                const filePathDisplay = filePathList.length > 0 ? filePathList[0].split('/').pop() || '' : '';
+                const filePathDisplay = filePathList.length > 0 ? path.basename(filePathList[0]) : '';
                 const filePathTooltip = filePathList.length > 1 
-                    ? `Referenced in: ${filePathList.map(f => f.split('/').pop()).join(', ')}`
+                    ? `Referenced in: ${filePathList.map(f => path.basename(f)).join(', ')}`
                     : filePathList.length === 1 
                         ? `Referenced in: ${filePathList[0]}`
                         : 'Referenced in your SQL queries';

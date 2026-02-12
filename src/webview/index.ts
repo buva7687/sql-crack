@@ -59,10 +59,8 @@ import {
     setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
-    findPinnedTab,
     switchToTab,
     getActiveTabId,
-    setActiveTabId,
     showFirstRunOverlay,
     showCompareView,
     hideCompareView,
@@ -76,6 +74,7 @@ declare global {
     interface Window {
         initialSqlCode: string;
         vscodeTheme?: string;
+        isHighContrast?: boolean;
         defaultDialect?: string;
         fileName?: string;
         isPinnedView?: boolean;
@@ -656,30 +655,3 @@ function getCurrentQuerySql(): { sql: string; name: string } {
     return { sql: sqlToPin, name: queryName };
 }
 
-// ============================================================
-// Legacy Pinned Tabs (in-panel)
-// ============================================================
-
-function handlePinnedTabSwitch(tabId: string | null): void {
-    setActiveTabId(tabId);
-
-    if (tabId === null) {
-        const sql = window.initialSqlCode || '';
-        if (sql) {
-            void visualize(sql);
-        }
-    } else {
-        const tab = findPinnedTab(tabId);
-        if (tab && tab.result) {
-            currentDialect = tab.dialect;
-            batchResult = tab.result;
-            currentQueryIndex = 0;
-            renderCurrentQuery();
-
-            const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;
-            if (dialectSelect) {
-                dialectSelect.value = currentDialect;
-            }
-        }
-    }
-}

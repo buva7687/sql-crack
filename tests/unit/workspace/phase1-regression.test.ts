@@ -143,6 +143,28 @@ describe('HTML escaping in clientScripts.ts', () => {
         expect(lineageSection).not.toMatch(/\+ n\.name \+ '</);
         expect(lineageSection).not.toMatch(/\+ n\.type \+ /);
     });
+
+    it('should use CSS.escape when restoring selected graph node selector', () => {
+        const script = getWebviewScript({
+            nonce: 'test-nonce',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: ''
+        });
+
+        expect(script).toContain("typeof CSS !== 'undefined' && typeof CSS.escape === 'function'");
+        expect(script).toContain('CSS.escape(graphState.selectedNodeId)');
+    });
+
+    it('should compute search match count with string type filters', () => {
+        const script = getWebviewScript({
+            nonce: 'test-nonce',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: ''
+        });
+
+        expect(script).toContain('const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;');
+        expect(script).toContain('const matched = getSearchMatchCount(query, typeFilter);');
+    });
 });
 
 // =========================================================================
