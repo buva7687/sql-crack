@@ -10,9 +10,9 @@ import {
     SearchFilter,
     DetailedWorkspaceStats,
     DefinitionDetail,
-    MissingDefinitionDetail
+    MissingDefinitionDetail,
+    SqlDialect,
 } from './types';
-import { SqlDialect } from '../webview/types/parser';
 import { logger } from '../logger';
 import { getDisplayName } from './identifiers';
 
@@ -101,6 +101,7 @@ export class WorkspacePanel {
 
     // Theme state
     private _isDarkTheme: boolean = true;
+    private _isHighContrast: boolean = false;
 
     private _postMessage(msg: WorkspaceHostMessage): void {
         this._panel.webview.postMessage(msg);
@@ -184,7 +185,7 @@ export class WorkspacePanel {
         vscode.window.onDidChangeActiveColorTheme(
             () => {
                 this._isDarkTheme = this.getThemeFromSettings();
-                const css = getWebviewStyles(this._isDarkTheme);
+                const css = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
                 this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
             },
             null,
@@ -196,7 +197,7 @@ export class WorkspacePanel {
             (e) => {
                 if (e.affectsConfiguration('sqlCrack.advanced.defaultTheme')) {
                     this._isDarkTheme = this.getThemeFromSettings();
-                    const css = getWebviewStyles(this._isDarkTheme);
+                    const css = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
                     this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
                 if (e.affectsConfiguration('sqlCrack.workspaceLineageDepth')) {
@@ -414,7 +415,7 @@ export class WorkspacePanel {
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
             getWebviewHtml: (graph, filter) => this.getWebviewHtml(graph, filter),
-            getThemeCss: (isDark) => getWebviewStyles(isDark),
+            getThemeCss: (isDark) => getWebviewStyles(isDark, this._isHighContrast),
             buildIndexWithProgress: () => this.buildIndexWithProgress(),
             rebuildAndRenderGraph: () => this.rebuildAndRenderGraph(),
             buildLineageGraph: () => this.buildLineageGraph(),
@@ -990,7 +991,7 @@ export class WorkspacePanel {
         });
 
         // Get styles and scripts from extracted modules
-        const styles = getWebviewStyles(this._isDarkTheme);
+        const styles = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
         const scriptParams: WebviewScriptParams = {
             nonce,
             graphData,
@@ -2233,7 +2234,7 @@ ${nodesHtml}
         const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
         const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
 
-        const styles = getIssuesStyles(this._isDarkTheme);
+        const styles = getIssuesStyles(this._isDarkTheme, this._isHighContrast);
         const script = getIssuesScript(nonce);
 
         return `<!DOCTYPE html>
@@ -2525,6 +2526,8 @@ ${nodesHtml}
     private getThemeFromSettings(): boolean {
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+        const themeKind = vscode.window.activeColorTheme.kind;
+        this._isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
 
         if (themePreference === 'light') {
             return false;
@@ -2532,7 +2535,7 @@ ${nodesHtml}
             return true;
         } else {
             // 'auto' - match VS Code theme
-            return vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light;
+            return themeKind !== vscode.ColorThemeKind.Light && themeKind !== vscode.ColorThemeKind.HighContrastLight;
         }
     }
 

@@ -1832,15 +1832,25 @@ function getMessageHandlingScript(): string {
                     }
                     break;
                 case 'impactResult':
-                    if (lineageContent && message.data?.html) {
+                    if (lineageContent) {
                         const resultsDiv = document.getElementById('impact-results');
-                        if (resultsDiv) {
-                            resultsDiv.style.display = 'block';
-                            setSafeHtml(resultsDiv, message.data.html);
-                        } else {
-                            setSafeHtml(lineageContent, message.data.html);
+                        if (message.data?.error) {
+                            const errorHtml = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
+                            if (resultsDiv) {
+                                resultsDiv.style.display = 'block';
+                                resultsDiv.innerHTML = errorHtml;
+                            } else {
+                                lineageContent.innerHTML = errorHtml;
+                            }
+                        } else if (message.data?.html) {
+                            if (resultsDiv) {
+                                resultsDiv.style.display = 'block';
+                                setSafeHtml(resultsDiv, message.data.html);
+                            } else {
+                                setSafeHtml(lineageContent, message.data.html);
+                            }
+                            setupImpactSummaryDetails();
                         }
-                        setupImpactSummaryDetails();
                     }
                     break;
                 case 'tableDetailResult':
@@ -4065,8 +4075,8 @@ function getColumnLineageScript(): string {
                 '</div>' +
                 '<div class="info-source">Source table: ' + escapeHtml(tableName) + '</div>' +
                 '<div class="info-stats">' +
-                    '<span class="stat upstream" title="Upstream sources">⬆ ' + upstreamCount + ' sources</span>' +
-                    '<span class="stat downstream" title="Downstream consumers">⬇ ' + downstreamCount + ' consumers</span>' +
+                    '<span class="stat upstream" title="Upstream sources"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 1L2 7h8z" fill="currentColor"/></svg> ' + upstreamCount + ' sources</span>' +
+                    '<span class="stat downstream" title="Downstream consumers"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 11L2 5h8z" fill="currentColor"/></svg> ' + downstreamCount + ' consumers</span>' +
                 '</div>' +
                 '<div class="info-flow-summary" title="' + escapeHtml(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
                 '<div class="info-actions"><button class="info-clear-btn" type="button">Clear trace</button></div>' +

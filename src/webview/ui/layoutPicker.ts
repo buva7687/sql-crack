@@ -5,6 +5,7 @@
 import type { LayoutType } from '../types';
 import { getComponentUiColors } from '../constants';
 import { ICONS } from '../../shared/icons';
+import { MONO_FONT_STACK } from '../../shared/themeTokens';
 
 export interface LayoutPickerCallbacks {
     onLayoutChange: (layout: LayoutType) => void;
@@ -198,7 +199,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
                 padding: 2px 6px;
                 font-size: 10px;
                 color: ${theme.accentSoft};
-                font-family: monospace;
+                font-family: ${MONO_FONT_STACK};
             ">${layout.key}</kbd>
             ${isActive ? `<span style="color: ${activeColor};">&#x2713;</span>` : ''}
         `;

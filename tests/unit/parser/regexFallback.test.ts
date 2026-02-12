@@ -154,7 +154,7 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
             expect(result.partial).toBe(true);
-            expect(result.stats.ctes).toBe(1); // At least 1 CTE detected
+            expect(result.stats.ctes).toBe(2); // Both CTEs detected
         });
 
         it('should calculate complexity score', () => {

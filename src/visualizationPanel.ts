@@ -34,6 +34,7 @@ export class VisualizationPanel {
     private _isPinned: boolean = false;
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
+    private _disposed: boolean = false;
 
     public static setContext(context: vscode.ExtensionContext) {
         VisualizationPanel._context = context;
@@ -327,6 +328,8 @@ export class VisualizationPanel {
                     case 'openPinnedTab':
                         if (VisualizationPanel._context) {
                             VisualizationPanel.openPinnedTab(message.pinId, this._extensionUri);
+                        } else {
+                            vscode.window.showErrorMessage('Cannot open pinned tab: extension context not available');
                         }
                         return;
                     case 'unpinTab':
@@ -395,6 +398,7 @@ export class VisualizationPanel {
     }
 
     private _postMessage(message: SqlFlowHostMessage) {
+        if (this._disposed) { return; }
         this._panel.webview.postMessage(message);
     }
 
@@ -460,7 +464,8 @@ export class VisualizationPanel {
         const nonce = getNonce();
 
         const themeKind = vscode.window.activeColorTheme.kind;
-        const vscodeTheme = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
+        const vscodeTheme = themeKind === vscode.ColorThemeKind.Light || themeKind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
+        const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
 
         const config = vscode.workspace.getConfiguration('sqlCrack');
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
@@ -507,6 +512,7 @@ export class VisualizationPanel {
 
         window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
         window.vscodeTheme = ${this._escapeForInlineScript(vscodeTheme)};
+        window.isHighContrast = ${this._escapeForInlineScript(isHighContrast)};
         window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
         window.fileName = ${this._escapeForInlineScript(options.fileName)};
         window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
@@ -536,20 +542,24 @@ export class VisualizationPanel {
     }
 
     public dispose() {
+        this._disposed = true;
+
         if (this._isPinned && this._pinId) {
             VisualizationPanel.pinnedPanels.delete(this._pinId);
         } else {
             VisualizationPanel.currentPanel = undefined;
         }
 
-        this._panel.dispose();
-
+        // Dispose listeners before the panel to prevent callbacks
+        // firing on an already-disposed panel
         while (this._disposables.length) {
             const x = this._disposables.pop();
             if (x) {
                 x.dispose();
             }
         }
+
+        this._panel.dispose();
     }
 }
 

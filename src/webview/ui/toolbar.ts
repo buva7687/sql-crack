@@ -5,6 +5,7 @@ import { FocusMode, LayoutType } from '../types';
 import { createExportDropdown } from './exportDropdown';
 import { createLayoutPicker } from './layoutPicker';
 import { ICONS } from '../../shared/icons';
+import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { getComponentUiColors } from '../constants';
 import { repositionBreadcrumbBar } from './breadcrumbBar';
@@ -1673,7 +1674,7 @@ export function showKeyboardShortcutsHelp(shortcuts: Array<{ key: string; descri
                 padding: 3px 6px;
                 color: ${kbdColor};
                 font-size: 10px;
-                font-family: monospace;
+                font-family: ${MONO_FONT_STACK};
                 margin-left: 8px;
                 white-space: nowrap;
             ">${s.key}</kbd>

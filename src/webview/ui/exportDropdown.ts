@@ -2,6 +2,7 @@
 // Replaces separate PNG, SVG, MMD, clipboard buttons
 // Uses position: fixed and appends to body to escape overflow:hidden clipping
 import { getComponentUiColors } from '../constants';
+import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
 
 export interface ExportDropdownCallbacks {
@@ -127,7 +128,7 @@ export function createExportDropdown(
                 padding: 2px 6px;
                 font-size: 10px;
                 color: ${theme.accentSoft};
-                font-family: monospace;
+                font-family: ${MONO_FONT_STACK};
             `;
             row.appendChild(kbd);
         }

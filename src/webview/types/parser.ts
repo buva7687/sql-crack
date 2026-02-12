@@ -99,7 +99,7 @@ export interface BatchParseResult {
 }
 
 export interface ValidationError {
-    type: 'size_limit' | 'query_count_limit' | 'timeout';
+    type: 'size_limit' | 'query_count_limit' | 'timeout' | 'empty_input';
     message: string;
     details: {
         actual: number;

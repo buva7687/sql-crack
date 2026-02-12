@@ -8,9 +8,9 @@ import {
     SchemaDefinition,
     TableReference,
     ProgressCallback,
-    CancellationToken
+    CancellationToken,
+    SqlDialect,
 } from './types';
-import { SqlDialect } from '../webview/types/parser';
 import { WorkspaceScanner } from './scanner';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';

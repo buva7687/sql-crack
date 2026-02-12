@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
+import { realpath } from 'fs/promises';
 import { MessageHandler } from '../../../../src/workspace/handlers/messageHandler';
+
+jest.mock('fs/promises', () => ({
+    realpath: jest.fn(async (input: string) => input)
+}));
 
 function createContext() {
     const postMessage = jest.fn();
@@ -54,6 +59,7 @@ function createContext() {
 describe('MessageHandler file path safety', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        (realpath as jest.Mock).mockImplementation(async (input: string) => input);
         (vscode.workspace as any).workspaceFolders = [
             { uri: vscode.Uri.file('/repo'), name: 'repo', index: 0 }
         ];
@@ -86,5 +92,25 @@ describe('MessageHandler file path safety', () => {
         } as any);
 
         expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(vscode.Uri.file('/repo/queries/orders.sql'));
+    });
+
+    it('blocks symlink paths that resolve outside workspace', async () => {
+        (realpath as jest.Mock).mockImplementation(async (input: string) => {
+            if (input === '/repo/symlink/outside.sql') {
+                return '/outside/outside.sql';
+            }
+            return input;
+        });
+
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'openFile',
+            filePath: '/repo/symlink/outside.sql'
+        } as any);
+
+        expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('Blocked opening file outside workspace.');
     });
 });
