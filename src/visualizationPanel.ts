@@ -463,11 +463,21 @@ export class VisualizationPanel {
 
         const nonce = getNonce();
 
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+
         const themeKind = vscode.window.activeColorTheme.kind;
-        const vscodeTheme = themeKind === vscode.ColorThemeKind.Light || themeKind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
         const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
 
-        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+        let vscodeTheme: string;
+        if (themePreference === 'light') {
+            vscodeTheme = 'light';
+        } else if (themePreference === 'dark') {
+            vscodeTheme = 'dark';
+        } else {
+            // 'auto' - match VS Code theme
+            vscodeTheme = themeKind === vscode.ColorThemeKind.Light || themeKind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
+        }
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
         const flowDirection = config.get<string>('flowDirection') || 'top-down';

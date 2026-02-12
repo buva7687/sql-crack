@@ -124,7 +124,7 @@ const state: ViewState = {
     legendVisible: true,
     highlightedColumnSources: [],
     isFullscreen: false,
-    isDarkTheme: true,
+    isDarkTheme: window.vscodeTheme !== 'light',
     isHighContrast: false,
     breadcrumbPath: [],
     showColumnLineage: false,
