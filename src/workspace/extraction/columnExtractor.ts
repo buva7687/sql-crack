@@ -284,7 +284,8 @@ export class ColumnExtractor {
         try {
             const sql = this.parser.sqlify(expr);
             return sql || '';
-        } catch {
+        } catch (e) {
+            console.debug('[columnExtractor] sqlify failed, using type fallback:', e);
             return expr.type || 'expression';
         }
     }

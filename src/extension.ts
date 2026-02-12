@@ -144,7 +144,8 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             );
             diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
-        } catch {
+        } catch (e) {
+            console.debug('[extension] Diagnostics parse failed, clearing:', e);
             diagnosticsCollection.delete(document.uri);
         }
     };
@@ -173,7 +174,12 @@ export function activate(context: vscode.ExtensionContext) {
 
         // If URI is provided (from explorer context menu), open the file
         if (uri) {
-            document = await vscode.workspace.openTextDocument(uri);
+            try {
+                document = await vscode.workspace.openTextDocument(uri);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+                return;
+            }
             sqlCode = document.getText();
         } else {
             // Otherwise use active editor

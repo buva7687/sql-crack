@@ -2,10 +2,13 @@
 // Extracted from workspacePanel.ts for modularity
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import { realpath } from 'fs/promises';
 import { SearchFilter, GraphMode } from '../types';
 import {
     LineageGraph,
     LineageNode,
+    LineagePath,
     FlowAnalyzer,
     FlowResult,
     ImpactAnalyzer,
@@ -174,6 +177,45 @@ export class MessageHandler {
         return tableId;
     }
 
+    private normalizePathForComparison(filePath: string): string {
+        const normalized = path.resolve(filePath);
+        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    }
+
+    private async resolveCanonicalPath(filePath: string): Promise<string | null> {
+        try {
+            const resolvedPath = await realpath(filePath);
+            return this.normalizePathForComparison(resolvedPath);
+        } catch {
+            return null;
+        }
+    }
+
+    private async isFilePathAllowed(filePath: string): Promise<boolean> {
+        if (!filePath || filePath.trim().length === 0) {
+            return false;
+        }
+
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            // Workspace panel is only available with workspace folders,
+            // but keep behavior safe if state is unexpectedly unavailable.
+            return false;
+        }
+
+        const candidate = await this.resolveCanonicalPath(filePath);
+        if (!candidate) {
+            return false;
+        }
+
+        const rootCandidates = await Promise.all(workspaceFolders.map(async (folder) => {
+            const canonicalRoot = await this.resolveCanonicalPath(folder.uri.fsPath);
+            return canonicalRoot || this.normalizePathForComparison(folder.uri.fsPath);
+        }));
+
+        return rootCandidates.some((root) => candidate === root || candidate.startsWith(root + path.sep));
+    }
+
     /**
      * Main message router - dispatches messages to appropriate handlers
      */
@@ -182,148 +224,153 @@ export class MessageHandler {
     }
 
     public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
-        switch (message.command) {
-            case 'switchView':
-                this.handleSwitchView(message.view);
-                break;
+        try {
+            switch (message.command) {
+                case 'switchView':
+                    this.handleSwitchView(message.view);
+                    break;
 
-            case 'refresh':
-                await this.handleRefresh();
-                break;
+                case 'refresh':
+                    await this.handleRefresh();
+                    break;
 
-            case 'switchGraphMode':
-                await this.handleSwitchGraphMode(message.mode);
-                break;
+                case 'switchGraphMode':
+                    await this.handleSwitchGraphMode(message.mode);
+                    break;
 
-            case 'search':
-                this.handleSearch(message.filter);
-                break;
+                case 'search':
+                    this.handleSearch(message.filter);
+                    break;
 
-            case 'clearSearch':
-                this.handleClearSearch();
-                break;
+                case 'clearSearch':
+                    this.handleClearSearch();
+                    break;
 
-            case 'toggleHelp':
-                this.handleToggleHelp();
-                break;
+                case 'toggleHelp':
+                    this.handleToggleHelp();
+                    break;
 
-            case 'toggleTheme':
-                this.handleToggleTheme();
-                break;
+                case 'toggleTheme':
+                    this.handleToggleTheme();
+                    break;
 
-            case 'export':
-                await this._context.handleExport(message.format);
-                break;
+                case 'export':
+                    await this._context.handleExport(message.format);
+                    break;
 
-            case 'openFile':
-                await this.handleOpenFile(message.filePath);
-                break;
+                case 'openFile':
+                    await this.handleOpenFile(message.filePath);
+                    break;
 
-            case 'openFileAtLine':
-                await this.handleOpenFileAtLine(message.filePath, message.line);
-                break;
+                case 'openFileAtLine':
+                    await this.handleOpenFileAtLine(message.filePath, message.line);
+                    break;
 
-            case 'visualizeFile':
-                await this.handleVisualizeFile(message.filePath);
-                break;
+                case 'visualizeFile':
+                    await this.handleVisualizeFile(message.filePath);
+                    break;
 
-            // ========== Lineage Commands ==========
-            case 'switchToLineageView':
-                await this.handleSwitchToLineageView();
-                break;
+                // ========== Lineage Commands ==========
+                case 'switchToLineageView':
+                    await this.handleSwitchToLineageView();
+                    break;
 
-            case 'switchToImpactView':
-                await this.handleSwitchToImpactView();
-                break;
+                case 'switchToImpactView':
+                    await this.handleSwitchToImpactView();
+                    break;
 
-            case 'getLineage':
-                await this.handleGetLineage(
-                    message.nodeId,
-                    message.direction,
-                    this.resolveRequestedDepth(message.depth)
-                );
-                break;
+                case 'getLineage':
+                    await this.handleGetLineage(
+                        message.nodeId,
+                        message.direction,
+                        this.resolveRequestedDepth(message.depth)
+                    );
+                    break;
 
-            case 'analyzeImpact':
-                await this.handleAnalyzeImpact(
-                    message.type,
-                    message.name,
-                    message.tableName,
-                    message.changeType
-                );
-                break;
+                case 'analyzeImpact':
+                    await this.handleAnalyzeImpact(
+                        message.type,
+                        message.name,
+                        message.tableName,
+                        message.changeType
+                    );
+                    break;
 
-            case 'exploreTable':
-                await this.handleExploreTable(message.tableName, message.nodeId);
-                break;
+                case 'exploreTable':
+                    await this.handleExploreTable(message.tableName, message.nodeId);
+                    break;
 
-            case 'getColumnLineage':
-                {
-                    const tableName = this.resolveColumnLineageTableName(message.tableName, message.tableId);
-                    if (tableName && message.columnName) {
-                        await this.handleGetColumnLineage(tableName, message.columnName);
+                case 'getColumnLineage':
+                    {
+                        const tableName = this.resolveColumnLineageTableName(message.tableName, message.tableId);
+                        if (tableName && message.columnName) {
+                            await this.handleGetColumnLineage(tableName, message.columnName);
+                        }
                     }
-                }
-                break;
+                    break;
 
-            case 'selectLineageNode':
-                this.handleSelectLineageNode(message.nodeId);
-                break;
+                case 'selectLineageNode':
+                    this.handleSelectLineageNode(message.nodeId);
+                    break;
 
-            case 'getUpstream':
-                await this.handleGetUpstream(
-                    message.nodeId,
-                    this.resolveRequestedDepth(message.depth),
-                    message.nodeType,
-                    message.filePath
-                );
-                break;
+                case 'getUpstream':
+                    await this.handleGetUpstream(
+                        message.nodeId,
+                        this.resolveRequestedDepth(message.depth),
+                        message.nodeType,
+                        message.filePath
+                    );
+                    break;
 
-            case 'getDownstream':
-                await this.handleGetDownstream(
-                    message.nodeId,
-                    this.resolveRequestedDepth(message.depth),
-                    message.nodeType,
-                    message.filePath
-                );
-                break;
+                case 'getDownstream':
+                    await this.handleGetDownstream(
+                        message.nodeId,
+                        this.resolveRequestedDepth(message.depth),
+                        message.nodeType,
+                        message.filePath
+                    );
+                    break;
 
-            // ========== Visual Lineage Graph Commands ==========
-            case 'searchLineageTables':
-                await this.handleSearchLineageTables(message.query, message.typeFilter);
-                break;
+                // ========== Visual Lineage Graph Commands ==========
+                case 'searchLineageTables':
+                    await this.handleSearchLineageTables(message.query, message.typeFilter);
+                    break;
 
-            case 'getLineageGraph':
-                await this.handleGetLineageGraph(
-                    message.nodeId,
-                    this.resolveRequestedDepth(message.depth),
-                    message.direction || 'both',
-                    message.expandedNodes
-                );
-                break;
+                case 'getLineageGraph':
+                    await this.handleGetLineageGraph(
+                        message.nodeId,
+                        this.resolveRequestedDepth(message.depth),
+                        message.direction || 'both',
+                        message.expandedNodes
+                    );
+                    break;
 
-            case 'expandNodeColumns':
-                await this.handleExpandNodeColumns(message.nodeId);
-                break;
+                case 'expandNodeColumns':
+                    await this.handleExpandNodeColumns(message.nodeId);
+                    break;
 
-            case 'setLineageDirection':
-                await this.handleSetLineageDirection(message.nodeId, message.direction);
-                break;
+                case 'setLineageDirection':
+                    await this.handleSetLineageDirection(message.nodeId, message.direction);
+                    break;
 
-            case 'collapseNodeColumns':
-                this.handleCollapseNodeColumns(message.nodeId);
-                break;
+                case 'collapseNodeColumns':
+                    this.handleCollapseNodeColumns(message.nodeId);
+                    break;
 
-            case 'selectColumn':
-                await this.handleSelectColumn(message.tableId, message.columnName);
-                break;
+                case 'selectColumn':
+                    await this.handleSelectColumn(message.tableId, message.columnName);
+                    break;
 
-            case 'clearColumnSelection':
-                await this.handleClearColumnSelection();
-                break;
+                case 'clearColumnSelection':
+                    await this.handleClearColumnSelection();
+                    break;
 
-            default:
-                logger.warn(`Unknown message command: ${(message as { command: string }).command}`);
+                default:
+                    logger.warn(`Unknown message command: ${(message as { command: string }).command}`);
+            }
+        } catch (error) {
+            const command = (message as { command?: string })?.command || 'unknown';
+            logger.error(`[Workspace] Failed to handle message command "${command}"`, error);
         }
     }
 
@@ -395,6 +442,11 @@ export class MessageHandler {
 
     private async handleOpenFile(filePath: string): Promise<void> {
         try {
+            if (!(await this.isFilePathAllowed(filePath))) {
+                logger.warn(`Blocked openFile outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const uri = vscode.Uri.file(filePath);
             const doc = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
@@ -405,10 +457,16 @@ export class MessageHandler {
 
     private async handleOpenFileAtLine(filePath: string, line: number): Promise<void> {
         try {
+            if (!(await this.isFilePathAllowed(filePath))) {
+                logger.warn(`Blocked openFileAtLine outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const fileUri = vscode.Uri.file(filePath);
             const document = await vscode.workspace.openTextDocument(fileUri);
             const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-            const position = new vscode.Position(Math.max(0, line - 1), 0);
+            const safeLine = Number.isFinite(line) ? Math.max(0, Math.floor(line) - 1) : 0;
+            const position = new vscode.Position(safeLine, 0);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(
                 new vscode.Range(position, position),
@@ -421,6 +479,11 @@ export class MessageHandler {
 
     private async handleVisualizeFile(filePath: string): Promise<void> {
         try {
+            if (!(await this.isFilePathAllowed(filePath))) {
+                logger.warn(`Blocked visualizeFile outside workspace: ${filePath}`);
+                vscode.window.showWarningMessage('Blocked opening file outside workspace.');
+                return;
+            }
             const uri = vscode.Uri.file(filePath);
             const doc = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
@@ -481,17 +544,19 @@ export class MessageHandler {
 
         let result: FlowResult | null = null;
 
-        if (direction === 'upstream' || direction === 'both') {
-            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
-        }
-        if (direction === 'downstream' || direction === 'both') {
+        if (direction === 'both') {
+            const upstream = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
             const downstream = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
-            if (result) {
-                result.nodes = [...result.nodes, ...downstream.nodes];
-                result.edges = [...result.edges, ...downstream.edges];
-            } else {
-                result = downstream;
-            }
+            result = {
+                nodes: this.dedupeLineageNodes([...upstream.nodes, ...downstream.nodes]),
+                edges: this.dedupeLineageEdges([...upstream.edges, ...downstream.edges]),
+                paths: this.dedupeLineagePaths([...upstream.paths, ...downstream.paths]),
+                depth: Math.max(upstream.depth, downstream.depth)
+            };
+        } else if (direction === 'upstream') {
+            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
+        } else {
+            result = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
         }
 
         this._context.setCurrentFlowResult(result);
@@ -523,6 +588,23 @@ export class MessageHandler {
         tableName?: string,
         changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
     ): Promise<void> {
+        const trimmedName = name?.trim() || '';
+        if (!trimmedName) {
+            this.postMessage({
+                command: 'impactResult',
+                data: { error: 'Impact target name is required.' }
+            });
+            return;
+        }
+
+        if (type === 'column' && (!tableName || tableName.trim().length === 0)) {
+            this.postMessage({
+                command: 'impactResult',
+                data: { error: 'Table name is required for column impact analysis.' }
+            });
+            return;
+        }
+
         await this._context.buildLineageGraph();
         const impactAnalyzer = this._context.getImpactAnalyzer();
 
@@ -530,9 +612,9 @@ export class MessageHandler {
 
         let report: ImpactReport;
         if (type === 'table') {
-            report = impactAnalyzer.analyzeTableChange(name, changeType);
+            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
         } else {
-            report = impactAnalyzer.analyzeColumnChange(tableName!, name, changeType);
+            report = impactAnalyzer.analyzeColumnChange(tableName!.trim(), trimmedName, changeType);
         }
 
         this._context.setCurrentImpactReport(report);
@@ -681,10 +763,10 @@ export class MessageHandler {
         // For file nodes, aggregate upstream for all displayable nodes defined in the file.
         const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            const normalizedPath = filePath.toLowerCase();
+            const normalizedPath = this.normalizePathForComparison(filePath);
             for (const [id, node] of lineageGraph.nodes) {
                 const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
-                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                if (isDisplayable && node.filePath && this.normalizePathForComparison(node.filePath) === normalizedPath) {
                     nodeIds.add(id);
                 }
             }
@@ -739,10 +821,10 @@ export class MessageHandler {
         // For file nodes, aggregate downstream for all displayable nodes defined in the file.
         const nodeIds = new Set<string>();
         if (nodeType === 'file' && filePath) {
-            const normalizedPath = filePath.toLowerCase();
+            const normalizedPath = this.normalizePathForComparison(filePath);
             for (const [id, node] of lineageGraph.nodes) {
                 const isDisplayable = node.type === 'table' || node.type === 'view' || node.type === 'cte';
-                if (isDisplayable && node.filePath && node.filePath.toLowerCase() === normalizedPath) {
+                if (isDisplayable && node.filePath && this.normalizePathForComparison(node.filePath) === normalizedPath) {
                     nodeIds.add(id);
                 }
             }
@@ -931,5 +1013,50 @@ export class MessageHandler {
         this.postMessage({
             command: 'columnSelectionCleared'
         });
+    }
+
+    private dedupeLineageNodes(nodes: LineageNode[]): LineageNode[] {
+        const uniqueNodes = new Map<string, LineageNode>();
+        for (const node of nodes) {
+            if (!uniqueNodes.has(node.id)) {
+                uniqueNodes.set(node.id, node);
+            }
+        }
+        return Array.from(uniqueNodes.values());
+    }
+
+    private dedupeLineageEdges(edges: FlowResult['edges']): FlowResult['edges'] {
+        type EdgeLike = { id?: string; sourceId?: string; targetId?: string; type?: string };
+        const uniqueEdges = new Map<string, FlowResult['edges'][number]>();
+        for (const edge of edges) {
+            const record = edge as unknown as EdgeLike;
+            const edgeId = typeof record.id === 'string'
+                ? `id:${record.id}`
+                : `${String(record.sourceId ?? '')}->${String(record.targetId ?? '')}:${String(record.type ?? '')}`;
+            if (!uniqueEdges.has(edgeId)) {
+                uniqueEdges.set(edgeId, edge);
+            }
+        }
+        return Array.from(uniqueEdges.values());
+    }
+
+    private dedupeLineagePaths(paths: LineagePath[]): LineagePath[] {
+        type EdgeLike = { id?: string; sourceId?: string; targetId?: string; type?: string };
+        const uniquePaths = new Map<string, LineagePath>();
+        for (const path of paths) {
+            const nodeSig = path.nodes.map(node => node.id).join('>');
+            const edgeSig = path.edges.map((edge) => {
+                const record = edge as unknown as EdgeLike;
+                if (typeof record.id === 'string') {
+                    return record.id;
+                }
+                return `${String(record.sourceId ?? '')}->${String(record.targetId ?? '')}:${String(record.type ?? '')}`;
+            }).join('|');
+            const signature = `${nodeSig}::${edgeSig}`;
+            if (!uniquePaths.has(signature)) {
+                uniquePaths.set(signature, path);
+            }
+        }
+        return Array.from(uniquePaths.values());
     }
 }

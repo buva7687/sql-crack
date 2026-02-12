@@ -514,7 +514,7 @@ export class LineageGraphRenderer {
                         <circle cx="20" cy="${columnY - 4}" r="4" class="column-dot ${dotClass}"/>
                         <text x="20" y="${columnY}" text-anchor="middle" class="column-state">${dotChar}</text>
                         <text x="32" y="${columnY}" class="column-name">${this.escapeHtml(column.name)}</text>
-                        ${column.dataType ? `<text x="${node.width - 10}" y="${columnY}" text-anchor="end" class="column-type">${column.dataType}</text>` : ''}
+                        ${column.dataType ? `<text x="${node.width - 10}" y="${columnY}" text-anchor="end" class="column-type">${this.escapeHtml(column.dataType)}</text>` : ''}
                     </g>
                 `;
                 columnY += this.NODE_HEIGHT_PER_COLUMN;

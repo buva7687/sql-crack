@@ -99,6 +99,11 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const traceDownBtn = document.getElementById('btn-trace-down');
         const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
 
+        function basenameFromPath(filePath) {
+            const normalized = (filePath || '').replace(/\\\\/g, '/');
+            return normalized.split('/').pop() || filePath || '';
+        }
+
         function setGraphLegendVisible(visible) {
             if (!graphLegendBar) return;
             graphLegendBar.classList.toggle('is-hidden', !visible);
@@ -550,11 +555,12 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             const trimmedQuery = (query || '').trim();
             const hasQuery = trimmedQuery.length > 0;
             const queryLower = trimmedQuery.toLowerCase();
+            const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;
             let count = 0;
 
             for (const node of graphData.nodes) {
                 if (!node) continue;
-                if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) continue;
+                if (normalizedTypeFilter && normalizedTypeFilter !== 'all' && node.type !== normalizedTypeFilter) continue;
                 if (!hasQuery) {
                     count += 1;
                     continue;
@@ -762,7 +768,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
             applySearchHighlight();
             if (searchCount) {
                 const total = graphData?.nodes?.length || 0;
-                const matched = getSearchMatchCount(query, typeFilter === 'all' ? undefined : [typeFilter]);
+                const matched = getSearchMatchCount(query, typeFilter);
                 searchCount.textContent = matched + ' / ' + total;
                 searchCount.style.display = '';
             }
@@ -1133,7 +1139,10 @@ function getViewModeScript(): string {
                 offsetY = typeof graphState.offsetY === 'number' ? graphState.offsetY : offsetY;
                 updateTransform();
                 if (graphState.selectedNodeId) {
-                    const selectedNode = document.querySelector('.node[data-id="' + graphState.selectedNodeId.replace(/"/g, '\\"') + '"]');
+                    const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                        ? CSS.escape(graphState.selectedNodeId)
+                        : graphState.selectedNodeId.replace(/"/g, '\\"');
+                    const selectedNode = document.querySelector('.node[data-id="' + escapedNodeId + '"]');
                     if (selectedNode) {
                         updateSelectionPanel(selectedNode);
                     }
@@ -1750,6 +1759,47 @@ function getContextMenuScript(): string {
 function getMessageHandlingScript(): string {
     return `
         // ========== Message Handling from Extension ==========
+        function sanitizeExtensionHtml(html) {
+            const template = document.createElement('template');
+            template.innerHTML = typeof html === 'string' ? html : '';
+
+            // Remove high-risk elements entirely.
+            template.content.querySelectorAll('script, iframe, object, embed, link, meta, base, form').forEach((el) => {
+                el.remove();
+            });
+
+            // Strip event handlers and javascript: URLs from remaining elements.
+            template.content.querySelectorAll('*').forEach((el) => {
+                Array.from(el.attributes).forEach((attr) => {
+                    const name = attr.name.toLowerCase();
+                    const value = attr.value || '';
+
+                    if (name.startsWith('on')) {
+                        el.removeAttribute(attr.name);
+                        return;
+                    }
+
+                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                        el.removeAttribute(attr.name);
+                        return;
+                    }
+
+                    if (name === 'style' && /(expression\\s*\\(|javascript:)/i.test(value)) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+            });
+
+            return template.innerHTML;
+        }
+
+        function setSafeHtml(target, html) {
+            if (!target) {
+                return;
+            }
+            target.innerHTML = sanitizeExtensionHtml(html);
+        }
+
         window.addEventListener('message', event => {
             const message = event.data;
             switch (message.command) {
@@ -1764,7 +1814,7 @@ function getMessageHandlingScript(): string {
                         nodes.forEach(n => {
                             html += '<div class="lineage-clickable" data-filepath="' + escapeHtmlSafe(n.filePath || '') + '" data-line="' + (n.lineNumber || 0) + '" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; cursor: pointer;">';
                             html += '<div style="font-weight: 600; color: var(--text-primary);">' + escapeHtmlSafe(n.name) + '</div>';
-                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(n.filePath.split('/').pop()) : '') + '</div>';
+                            html += '<div style="font-size: 11px; color: var(--text-muted);">' + escapeHtmlSafe(n.type) + (n.filePath ? ' • ' + escapeHtmlSafe(basenameFromPath(n.filePath)) : '') + '</div>';
                             html += '</div>';
                         });
                         html += '</div>';
@@ -1782,15 +1832,25 @@ function getMessageHandlingScript(): string {
                     }
                     break;
                 case 'impactResult':
-                    if (lineageContent && message.data?.html) {
+                    if (lineageContent) {
                         const resultsDiv = document.getElementById('impact-results');
-                        if (resultsDiv) {
-                            resultsDiv.style.display = 'block';
-                            resultsDiv.innerHTML = message.data.html;
-                        } else {
-                            lineageContent.innerHTML = message.data.html;
+                        if (message.data?.error) {
+                            const errorHtml = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
+                            if (resultsDiv) {
+                                resultsDiv.style.display = 'block';
+                                resultsDiv.innerHTML = errorHtml;
+                            } else {
+                                lineageContent.innerHTML = errorHtml;
+                            }
+                        } else if (message.data?.html) {
+                            if (resultsDiv) {
+                                resultsDiv.style.display = 'block';
+                                setSafeHtml(resultsDiv, message.data.html);
+                            } else {
+                                setSafeHtml(lineageContent, message.data.html);
+                            }
+                            setupImpactSummaryDetails();
                         }
-                        setupImpactSummaryDetails();
                     }
                     break;
                 case 'tableDetailResult':
@@ -1798,7 +1858,7 @@ function getMessageHandlingScript(): string {
                         if (message.data?.error) {
                             lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                         } else if (message.data?.html) {
-                            lineageContent.innerHTML = message.data.html;
+                            setSafeHtml(lineageContent, message.data.html);
                         }
                     }
                     break;
@@ -1810,13 +1870,13 @@ function getMessageHandlingScript(): string {
                     break;
                 case 'impactFormResult':
                     if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
+                        setSafeHtml(lineageContent, message.data.html);
                         setupImpactForm();
                     }
                     break;
                 case 'lineageOverviewResult':
                     if (lineageContent && message.data?.html) {
-                        lineageContent.innerHTML = message.data.html;
+                        setSafeHtml(lineageContent, message.data.html);
                         setupVisualLineageSearch();
                     }
                     break;
@@ -2270,14 +2330,16 @@ function getTooltipScript(): string {
             var safe = div.innerHTML;
             // Restore only the structural tags used by tooltip content:
             // <div class="tooltip-*">, <ul class="tooltip-list">, <li>, <strong>, <span>
-            // Opening tags with optional class/style attributes (no event handlers)
-            safe = safe.replace(/&lt;(div|ul|li|strong|span)(\\s+(?:class|style)=&quot;[^&]*?&quot;)*\\s*&gt;/gi, function(m, tag, attrs) {
+            // Opening tags with optional class attribute only (no style — tooltips use CSS classes)
+            safe = safe.replace(/&lt;(div|ul|li|strong|span)(\\s+class=&quot;[^&]*?&quot;)*\\s*&gt;/gi, function(m, tag, attrs) {
                 var restored = '<' + tag;
                 if (attrs) restored += attrs.replace(/&quot;/g, '"');
                 return restored + '>';
             });
             // Closing tags
             safe = safe.replace(/&lt;\\/(div|ul|li|strong|span)&gt;/gi, '</$1>');
+            // Safety net: strip any remaining on* event handler attributes
+            safe = safe.replace(/\\s+on\\w+\\s*=\\s*(?:&quot;[^&]*&quot;|'[^']*'|[^\\s>]+)/gi, '');
             return safe;
         }
         function showTooltip(e, content) {
@@ -2535,7 +2597,8 @@ function getImpactSummaryScript(): string {
                     let items = [];
                     try {
                         items = JSON.parse(decodeURIComponent(listRaw));
-                    } catch {
+                    } catch (e) {
+                        console.debug('[clientScripts] JSON parse failed for summary list:', e);
                         items = [];
                     }
 
@@ -2816,7 +2879,7 @@ function getLineageGraphScript(): string {
         function processLineageGraphResult(message) {
             if (lineageContent && message.data?.html) {
                 lineageSetupInProgress = true;
-                lineageContent.innerHTML = message.data.html;
+                setSafeHtml(lineageContent, message.data.html);
                 lineageDetailView = true;
                 if (message.data.nodeId) {
                     lineageCurrentNodeId = message.data.nodeId;
@@ -2847,7 +2910,7 @@ function getLineageGraphScript(): string {
         const columnTraceHintStorageKey = 'sqlCrack.workspace.columnTraceHintDismissed';
         let pendingColumnTraceHintNodeId = null;
         let columnTraceHintDismissed = false;
-        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch {}
+        try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch (e) { console.debug('[clientScripts] localStorage read failed:', e); }
 
         function setupLineageGraphInteractions() {
             const container = document.getElementById('lineage-graph-container');
@@ -3247,7 +3310,7 @@ function getLineageGraphScript(): string {
         function dismissColumnTraceHint() {
             columnTraceHintDismissed = true;
             pendingColumnTraceHintNodeId = null;
-            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch {}
+            try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch (e) { console.debug('[clientScripts] localStorage write failed:', e); }
             const hint = document.getElementById('column-trace-onboarding');
             if (hint) hint.remove();
         }
@@ -3313,7 +3376,7 @@ function getLineageGraphScript(): string {
             const typeEl = tooltip.querySelector('.type-value');
             if (typeEl) typeEl.textContent = type;
             const fileEl = tooltip.querySelector('.file-value');
-            if (fileEl) fileEl.textContent = filePath ? filePath.split('/').pop() : 'N/A';
+            if (fileEl) fileEl.textContent = filePath ? basenameFromPath(filePath) : 'N/A';
             const lineEl = tooltip.querySelector('.line-value');
             if (lineEl) lineEl.textContent = lineNumber || 'N/A';
             const columnsEl = tooltip.querySelector('.columns-value');
@@ -4012,8 +4075,8 @@ function getColumnLineageScript(): string {
                 '</div>' +
                 '<div class="info-source">Source table: ' + escapeHtml(tableName) + '</div>' +
                 '<div class="info-stats">' +
-                    '<span class="stat upstream" title="Upstream sources">⬆ ' + upstreamCount + ' sources</span>' +
-                    '<span class="stat downstream" title="Downstream consumers">⬇ ' + downstreamCount + ' consumers</span>' +
+                    '<span class="stat upstream" title="Upstream sources"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 1L2 7h8z" fill="currentColor"/></svg> ' + upstreamCount + ' sources</span>' +
+                    '<span class="stat downstream" title="Downstream consumers"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 11L2 5h8z" fill="currentColor"/></svg> ' + downstreamCount + ' consumers</span>' +
                 '</div>' +
                 '<div class="info-flow-summary" title="' + escapeHtml(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
                 '<div class="info-actions"><button class="info-clear-btn" type="button">Clear trace</button></div>' +

@@ -57,17 +57,20 @@ describe('phase 2.4 localStorage wrappers', () => {
     const resizablePanel = readSource('src/webview/ui/resizablePanel.ts');
     const clientScripts = readSource('src/workspace/ui/clientScripts.ts');
 
-    it('wraps resizable panel localStorage access in try/catch', () => {
+    it('wraps resizable panel localStorage access in try/catch with debug logging', () => {
         expect(resizablePanel).toContain('try {');
         expect(resizablePanel).toContain('window.localStorage.getItem(key)');
-        expect(resizablePanel).toContain('try { window.localStorage.setItem(widthKey, String(nextWidth)); } catch {}');
-        expect(resizablePanel).toContain('try { window.localStorage.setItem(collapsedKey, String(collapsed)); } catch {}');
-        expect(resizablePanel).toContain("try { storedCollapsed = window.localStorage.getItem(collapsedKey) === 'true'; } catch {}");
+        expect(resizablePanel).toContain('window.localStorage.setItem(widthKey, String(nextWidth));');
+        expect(resizablePanel).toContain('window.localStorage.setItem(collapsedKey, String(collapsed));');
+        expect(resizablePanel).toContain("window.localStorage.getItem(collapsedKey) === 'true';");
+        // All catches now log with console.debug
+        expect(resizablePanel).toContain("console.debug('[resizablePanel] localStorage");
     });
 
-    it('wraps column trace hint localStorage access in try/catch', () => {
-        expect(clientScripts).toContain("try { columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1'; } catch {}");
-        expect(clientScripts).toContain("try { localStorage.setItem(columnTraceHintStorageKey, '1'); } catch {}");
+    it('wraps column trace hint localStorage access in try/catch with debug logging', () => {
+        expect(clientScripts).toContain("columnTraceHintDismissed = localStorage.getItem(columnTraceHintStorageKey) === '1';");
+        expect(clientScripts).toContain("localStorage.setItem(columnTraceHintStorageKey, '1');");
+        expect(clientScripts).toContain("console.debug('[clientScripts] localStorage");
     });
 });
 

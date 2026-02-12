@@ -3,11 +3,12 @@
 
 /**
  * CSS Variables - Design tokens shared across all views
- * Supports both dark and light themes
+ * Supports both dark and light themes, with high-contrast overrides
  */
-export function getCssVariables(dark: boolean = true): string {
+export function getCssVariables(dark: boolean = true, isHighContrast: boolean = false): string {
+    let result: string;
     if (dark) {
-        return `
+        result = `
             :root {
                 --bg-primary: #111111;
                 --bg-secondary: #1a1a1a;
@@ -78,11 +79,12 @@ export function getCssVariables(dark: boolean = true): string {
                 --scrollbar-thumb: rgba(148, 163, 184, 0.42);
                 --scrollbar-thumb-hover: rgba(148, 163, 184, 0.58);
                 --scrollbar-track: rgba(0, 0, 0, 0.35);
+                --font-mono: 'SF Mono', Monaco, 'Cascadia Code', Menlo, Consolas, monospace;
             }
         `;
     } else {
         // Light theme
-        return `
+        result = `
             :root {
                 --bg-primary: #fafafa;
                 --bg-secondary: #ffffff;
@@ -153,9 +155,24 @@ export function getCssVariables(dark: boolean = true): string {
                 --scrollbar-thumb: rgba(100, 116, 139, 0.32);
                 --scrollbar-thumb-hover: rgba(71, 85, 105, 0.42);
                 --scrollbar-track: rgba(148, 163, 184, 0.12);
+                --font-mono: 'SF Mono', Monaco, 'Cascadia Code', Menlo, Consolas, monospace;
             }
         `;
     }
+
+    if (isHighContrast) {
+        return result + `
+            :root {
+                --border-color: ${dark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'};
+                --border-subtle: ${dark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.25)'};
+            }
+            * { border-width: 2px; }
+            .node { stroke-width: 2px; }
+            .edge { stroke-width: 2px; }
+            text, .node-label, .info-title { font-weight: 600; }
+        `;
+    }
+    return result;
 }
 
 /**
@@ -1469,7 +1486,7 @@ export function getTableListStyles(): string {
         .controls-hint kbd {
             background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
             border-radius: 3px; padding: 2px 6px;
-            font-family: monospace; font-size: 11px;
+            font-family: var(--font-mono); font-size: 11px;
             color: var(--text-secondary);
         }
         .filter-group {
@@ -2427,7 +2444,7 @@ export function getLineageVisualStyles(): string {
             font-weight: 500; color: var(--text-primary); font-size: 13px;
         }
         .column-type {
-            font-size: 11px; color: var(--text-muted); font-family: monospace;
+            font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
         }
         .badge-primary, .badge-not-null {
             font-size: 9px; font-weight: 600; padding: 2px 4px;
@@ -2949,7 +2966,7 @@ export function getLineageGraphStyles(): string {
         }
         .lineage-zoom-controls .zoom-level {
             font-size: 11px;
-            font-family: monospace;
+            font-family: var(--font-mono);
             color: var(--text-muted);
             min-width: 40px;
             text-align: center;
@@ -3073,7 +3090,7 @@ export function getLineageNodeStyles(): string {
         .lineage-node .column-type {
             font-size: 10px;
             fill: var(--text-muted);
-            font-family: monospace;
+            font-family: var(--font-mono);
         }
         .lineage-node .expand-btn rect {
             cursor: pointer;
@@ -3192,7 +3209,7 @@ export function getLineageNodeStyles(): string {
             font-weight: 600;
             color: var(--text-primary);
             flex: 1;
-            font-family: monospace;
+            font-family: var(--font-mono);
             font-size: 13px;
         }
         .column-lineage-info .info-source {
@@ -4142,7 +4159,7 @@ export function getGraphStyles(): string {
         .issue-info { flex: 1; min-width: 0; }
         .issue-name { font-size: 12px; font-weight: 500; color: var(--text-primary); }
         .issue-path { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .issue-line { font-size: 10px; color: var(--text-dim); font-family: monospace; }
+        .issue-line { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
         .issue-more {
             text-align: center; padding: 8px; font-size: 11px; color: var(--text-dim);
         }
@@ -4201,7 +4218,7 @@ export function getGraphStyles(): string {
         .zoom-divider { width: 1px; height: 20px; background: var(--border-subtle); margin: 0 4px; }
         .zoom-level {
             font-size: 11px; color: var(--text-muted); min-width: 40px;
-            text-align: center; font-family: monospace;
+            text-align: center; font-family: var(--font-mono);
         }
 
         /* ========== Graph Container ========== */
@@ -4295,7 +4312,7 @@ export function getGraphStyles(): string {
         /* ========== Keyboard Hints ========== */
         .kbd {
             background: var(--bg-primary); border: 1px solid var(--border-subtle);
-            border-radius: 3px; padding: 2px 6px; font-family: monospace;
+            border-radius: 3px; padding: 2px 6px; font-family: var(--font-mono);
             font-size: 10px; color: var(--text-muted);
         }
         .shortcuts { padding: 8px 16px; }
@@ -4426,13 +4443,13 @@ export function getIssuesPanelStyles(): string {
         .item-info { flex: 1; min-width: 0; }
         .item-name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
         .item-path {
-            font-size: 12px; color: var(--text-muted); font-family: monospace;
+            font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
 
         .item-line {
             padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
-            font-family: monospace; background: var(--bg-primary); color: var(--text-dim);
+            font-family: var(--font-mono); background: var(--bg-primary); color: var(--text-dim);
         }
 
         /* Missing Item Card */
@@ -4462,8 +4479,8 @@ export function getIssuesPanelStyles(): string {
             border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
         }
         .missing-ref-item:hover { background: var(--bg-tertiary); }
-        .missing-ref-path { flex: 1; font-size: 12px; color: var(--text-muted); font-family: monospace; }
-        .missing-ref-line { font-size: 11px; color: var(--text-dim); font-family: monospace; }
+        .missing-ref-path { flex: 1; font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+        .missing-ref-line { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
         .missing-more { text-align: center; padding: 10px; font-size: 12px; color: var(--text-dim); }
 
         /* Empty State */
@@ -4575,9 +4592,9 @@ export function getStateStyles(dark: boolean = true): string {
  * Combined styles for main webview
  * @param dark - Whether to use dark theme (default: true)
  */
-export function getWebviewStyles(dark: boolean = true): string {
+export function getWebviewStyles(dark: boolean = true, isHighContrast: boolean = false): string {
     return [
-        getCssVariables(dark),
+        getCssVariables(dark, isHighContrast),
         getBaseStyles(),
         getContextMenuStyles(),
         getLineagePanelStyles(),
@@ -4595,9 +4612,9 @@ export function getWebviewStyles(dark: boolean = true): string {
  * Combined styles for issues webview (with CSS variables)
  * @param dark - Whether to use dark theme (default: true)
  */
-export function getIssuesStyles(dark: boolean = true): string {
+export function getIssuesStyles(dark: boolean = true, isHighContrast: boolean = false): string {
     return [
-        getCssVariables(dark),
+        getCssVariables(dark, isHighContrast),
         getIssuesPanelStyles()
     ].join('\n');
 }

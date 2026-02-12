@@ -79,8 +79,8 @@ export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect =
                             break;
                         }
                     }
-                } catch {
-                    // Ignore JSON errors
+                } catch (e) {
+                    console.debug('[functions] JSON.stringify failed for window function detection:', e);
                 }
             }
 

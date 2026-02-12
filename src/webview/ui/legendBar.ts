@@ -50,7 +50,7 @@ export function createLegendBar(container: HTMLElement, callbacks: LegendBarCall
         const stored = localStorage.getItem(STORAGE_KEY);
         // Default visible for first-time users; only explicit "false" hides it.
         legendVisible = stored !== 'false';
-    } catch { /* localStorage may not be available */ }
+    } catch (e) { console.debug('[legendBar] localStorage read failed:', e); }
 
     if (!legendVisible) {
         legendBarElement.style.transform = 'translateY(100%)';
@@ -156,7 +156,7 @@ export function toggleLegendBar(show?: boolean): void {
 
     try {
         localStorage.setItem(STORAGE_KEY, String(legendVisible));
-    } catch { /* ignore */ }
+    } catch (e) { console.debug('[legendBar] localStorage write failed:', e); }
 
     if (!legendBarElement) { return; }
 

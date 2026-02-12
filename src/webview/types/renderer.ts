@@ -38,6 +38,7 @@ export interface ViewState {
     highlightedColumnSources: string[];
     isFullscreen: boolean;
     isDarkTheme: boolean;
+    isHighContrast: boolean;
     breadcrumbPath: FlowNode[];
     showColumnLineage: boolean;
     showColumnFlows: boolean;

@@ -1,6 +1,7 @@
 // Command Bar — Floating command palette for quick actions
 // Triggered by Ctrl+Shift+P (inside webview) or / key
 import { prefersReducedMotion } from './motion';
+import { MONO_FONT_STACK } from '../../shared/themeTokens';
 
 export interface CommandBarAction {
     id: string;
@@ -208,7 +209,7 @@ function renderResults(
                 padding: 2px 6px;
                 font-size: 10px;
                 color: ${isDark ? '#A5B4FC' : '#6366F1'};
-                font-family: monospace;
+                font-family: ${MONO_FONT_STACK};
             `;
             row.appendChild(kbd);
         }
