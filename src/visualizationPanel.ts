@@ -103,7 +103,7 @@ export class VisualizationPanel {
         // Create panel as a new tab
         const panel = vscode.window.createWebviewPanel(
             VisualizationPanel.viewType + '.pinned',
-            `📌 ${name}`,
+            `[Pinned] ${name}`,
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,

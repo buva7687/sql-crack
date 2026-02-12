@@ -168,6 +168,8 @@ Install the generated `.vsix` file via **Extensions → ••• → Install fr
    - Press `Cmd+Shift+L` (Mac) / `Ctrl+Shift+L` (Windows/Linux)
    - Right-click → **"SQL Crack: Visualize SQL Query"**
 
+> Cursor note: Some Cursor builds do not render custom editor-title icons consistently. If the title icon is not visible, run **SQL Crack: Visualize SQL Query** from the Command Palette (`Cmd/Ctrl+Shift+P`) or use the context menu.
+
 ### Workspace Analysis
 
 Analyze cross-file dependencies:

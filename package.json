@@ -45,21 +45,23 @@
       {
         "command": "sql-crack.analyzeWorkspace",
         "title": "SQL Crack: Analyze Workspace Dependencies",
-        "icon": "$(type-hierarchy)"
+        "icon": "$(references)"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
+          "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile",
+          "icon": "$(database)",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
+          "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile",
+          "icon": "$(database)",
           "group": "navigation"
         }
       ],
@@ -67,11 +69,13 @@
         {
           "command": "sql-crack.visualize",
           "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
+          "icon": "$(database)",
           "group": "navigation"
         },
         {
           "command": "sql-crack.analyzeWorkspace",
           "when": "explorerResourceIsFolder",
+          "icon": "$(references)",
           "group": "navigation"
         }
       ],
@@ -92,7 +96,7 @@
         "command": "sql-crack.visualize",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
-        "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile"
+        "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile"
       }
     ],
     "configuration": {
