@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-02-12
+
+### Fixed
+
+- **Column lineage trace panel clipped when details panel collapsed**: Clicking a column to trace lineage wrote content into a collapsed 24px-wide details panel, rendering the lineage path as an unreadable narrow sliver. Both `showLineagePath()` and `updateDetailsPanel()` now auto-expand the panel before displaying content.
+- **Demo video not rendering on GitHub/marketplace**: Replaced `<video>` embed with a 1200px GIF that renders on GitHub READMEs and the VS Code marketplace.
+
+### Tests
+
+- Added regression tests verifying the details panel expand guard is called before writing lineage and node details content.
+
 ## [0.3.4] - 2026-02-11
 
 ### Fixed
@@ -549,6 +560,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.5]: https://github.com/buva7687/sql-crack/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/buva7687/sql-crack/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/buva7687/sql-crack/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/buva7687/sql-crack/compare/v0.3.1...v0.3.2
