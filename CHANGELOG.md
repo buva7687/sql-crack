@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-02-12
+
+### Fixed
+
+- **PostgreSQL `AT TIME ZONE` and type-prefixed literals**: Queries using `AT TIME ZONE 'America/Chicago'`, `timestamptz '...'`, `timestamp '...'`, `date '...'`, `time '...'`, or `interval '...'` literals now parse via the full AST instead of falling back to regex. A new `preprocessPostgresSyntax()` transform rewrites these constructs before parsing, preserving column lineage and precise relationships.
+
+### Tests
+
+- Added unit tests for PostgreSQL syntax preprocessing (`AT TIME ZONE` removal, type-prefix stripping, string-literal masking) and an integration test with a 3-CTE query using `date_bin()`, `AT TIME ZONE`, and `timestamptz` literals.
+
 ## [0.3.5] - 2026-02-12
 
 ### Fixed
@@ -560,6 +570,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.6]: https://github.com/buva7687/sql-crack/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/buva7687/sql-crack/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/buva7687/sql-crack/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/buva7687/sql-crack/compare/v0.3.2...v0.3.3

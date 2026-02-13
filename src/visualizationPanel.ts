@@ -490,6 +490,7 @@ export class VisualizationPanel {
         const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
         const maxStatements = config.get<number>('advanced.maxStatements', 50);
         const parseTimeoutSeconds = config.get<number>('advanced.parseTimeoutSeconds', 5);
+        const debugLogging = config.get<boolean>('advanced.debugLogging', false);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
 
         return `<!DOCTYPE html>
@@ -541,6 +542,7 @@ export class VisualizationPanel {
         window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
         window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
         window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
+        window.debugLogging = ${this._escapeForInlineScript(debugLogging)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();

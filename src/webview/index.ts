@@ -93,9 +93,17 @@ declare global {
         parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        debugLogging?: boolean;
         vscodeApi?: {
             postMessage: (message: any) => void;
         };
+    }
+}
+
+/** Debug log helper - only outputs when debugLogging is enabled */
+function debugLog(...args: unknown[]): void {
+    if (window.debugLogging) {
+        debugLog(...args);
     }
 }
 
@@ -525,7 +533,7 @@ async function visualize(sql: string): Promise<void> {
             }
         );
         const t1 = performance.now();
-        console.debug(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${currentDialect})`);
+        debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${currentDialect})`);
         if (requestId !== parseRequestId) {
             return;
         }

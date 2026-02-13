@@ -598,7 +598,7 @@ export class IndexManager {
                 try {
                     await vscode.workspace.fs.stat(uri);
                 } catch (e) {
-                    console.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath}`, e);
+                    logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
                     this.removeFile(uri);
                     continue;
                 }

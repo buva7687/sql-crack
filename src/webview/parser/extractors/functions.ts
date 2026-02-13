@@ -80,7 +80,7 @@ export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect =
                         }
                     }
                 } catch (e) {
-                    console.debug('[functions] JSON.stringify failed for window function detection:', e);
+                    window.debugLogging && console.debug('[functions] JSON.stringify failed for window function detection:', e);
                 }
             }
 

@@ -4,7 +4,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { realpath } from 'fs/promises';
-import { SearchFilter, GraphMode } from '../types';
+import { SearchFilter, GraphMode, WorkspaceDependencyGraph } from '../types';
+import { LineageBuilder } from '../lineage/lineageBuilder';
 import {
     LineageGraph,
     LineageNode,
@@ -31,8 +32,8 @@ export interface MessageHandlerContext {
     panel: vscode.WebviewPanel;
 
     // State accessors
-    getCurrentGraph: () => any | null;
-    setCurrentGraph: (graph: any | null) => void;
+    getCurrentGraph: () => WorkspaceDependencyGraph | null;
+    setCurrentGraph: (graph: WorkspaceDependencyGraph | null) => void;
     getCurrentView: () => ViewMode | 'graph' | 'issues';
     setCurrentView: (view: ViewMode | 'graph' | 'issues') => void;
     getCurrentSearchFilter: () => SearchFilter;
@@ -45,8 +46,8 @@ export interface MessageHandlerContext {
     // Lineage state accessors
     getLineageGraph: () => LineageGraph | null;
     setLineageGraph: (graph: LineageGraph | null) => void;
-    getLineageBuilder: () => any | null;
-    setLineageBuilder: (builder: any | null) => void;
+    getLineageBuilder: () => LineageBuilder | null;
+    setLineageBuilder: (builder: LineageBuilder | null) => void;
     getFlowAnalyzer: () => FlowAnalyzer | null;
     setFlowAnalyzer: (analyzer: FlowAnalyzer | null) => void;
     getImpactAnalyzer: () => ImpactAnalyzer | null;
@@ -75,7 +76,7 @@ export interface MessageHandlerContext {
 
     // Callbacks
     renderCurrentView: () => void;
-    getWebviewHtml: (graph: any, searchFilter: SearchFilter) => string;
+    getWebviewHtml: (graph: WorkspaceDependencyGraph, searchFilter: SearchFilter) => string;
     getThemeCss: (isDark: boolean) => string;
     buildIndexWithProgress: () => Promise<void>;
     rebuildAndRenderGraph: () => Promise<void>;

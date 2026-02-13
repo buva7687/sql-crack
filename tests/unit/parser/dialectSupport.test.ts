@@ -9,7 +9,7 @@
  * - SQL Server (TransactSQL) specific features
  */
 
-import { parseSql } from '../../../src/webview/sqlParser';
+import { parseSql, preprocessPostgresSyntax } from '../../../src/webview/sqlParser';
 
 describe('Dialect Support', () => {
   describe('MySQL', () => {
@@ -125,6 +125,122 @@ describe('Dialect Support', () => {
     it('parses window function with FILTER', () => {
       const result = parseSql('SELECT COUNT(*) FILTER (WHERE active = true) FROM users', dialect);
       // May or may not parse depending on node-sql-parser version
+    });
+
+    describe('preprocessPostgresSyntax', () => {
+      it('removes AT TIME ZONE with string literal', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT created_at AT TIME ZONE 'America/Chicago' FROM events",
+          'PostgreSQL'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('AT TIME ZONE');
+        expect(result).not.toContain('America/Chicago');
+        expect(result).toContain('created_at');
+        expect(result).toContain('FROM events');
+      });
+
+      it('removes AT TIME ZONE with identifier', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT created_at AT TIME ZONE tz_col FROM events",
+          'PostgreSQL'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('AT TIME ZONE');
+        expect(result).not.toContain('tz_col');
+      });
+
+      it('removes multiple AT TIME ZONE occurrences', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT a AT TIME ZONE 'UTC', b AT TIME ZONE 'EST' FROM t",
+          'PostgreSQL'
+        );
+        expect(result).not.toBeNull();
+        expect(result!.match(/AT TIME ZONE/gi)).toBeNull();
+      });
+
+      it('strips timestamptz type prefix', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT date_bin('15 minutes'::interval, created_at, timestamptz '1970-01-01 00:00:00+00') FROM events",
+          'PostgreSQL'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toMatch(/\btimestamptz\s+'/i);
+        expect(result).toContain("'1970-01-01 00:00:00+00'");
+      });
+
+      it('strips multiple type-prefixed literals', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT timestamp '2024-01-01', date '2024-01-01', interval '1 day' FROM t",
+          'PostgreSQL'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toMatch(/\btimestamp\s+'/i);
+        expect(result).not.toMatch(/\bdate\s+'/i);
+        expect(result).not.toMatch(/\binterval\s+'/i);
+        expect(result).toContain("'2024-01-01'");
+      });
+
+      it('returns null for non-PostgreSQL dialect', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT created_at AT TIME ZONE 'UTC' FROM events",
+          'MySQL'
+        );
+        expect(result).toBeNull();
+      });
+
+      it('returns null when no rewrites needed', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT id, name FROM users WHERE active = true",
+          'PostgreSQL'
+        );
+        expect(result).toBeNull();
+      });
+
+      it('does not rewrite AT TIME ZONE inside string literals', () => {
+        const result = preprocessPostgresSyntax(
+          "SELECT 'AT TIME ZONE test' FROM t",
+          'PostgreSQL'
+        );
+        expect(result).toBeNull();
+      });
+    });
+
+    it('parses query with AT TIME ZONE and timestamptz literals', () => {
+      const sql = `
+        WITH time_buckets AS (
+          SELECT
+            date_bin('15 minutes'::interval, created_at, timestamptz '1970-01-01 00:00:00+00') AS bucket,
+            count(*) AS event_count
+          FROM events
+          GROUP BY 1
+        ),
+        recent AS (
+          SELECT
+            created_at AT TIME ZONE 'America/Chicago' AS local_time,
+            event_type
+          FROM events
+          WHERE created_at > now() - interval '24 hours'
+        ),
+        summary AS (
+          SELECT
+            tb.bucket,
+            tb.event_count,
+            r.event_type
+          FROM time_buckets tb
+          JOIN recent r ON r.local_time >= tb.bucket
+        )
+        SELECT * FROM summary
+      `;
+      const result = parseSql(sql, dialect);
+      expect(result.error).toBeUndefined();
+      // Should find CTE nodes
+      const nodeLabels = result.nodes.map(n => n.label?.toLowerCase() || '');
+      expect(nodeLabels).toEqual(expect.arrayContaining([
+        expect.stringContaining('time_buckets'),
+        expect.stringContaining('recent'),
+        expect.stringContaining('summary'),
+      ]));
     });
   });
 

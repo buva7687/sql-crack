@@ -153,3 +153,10 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
     - Must mask string literals and comments before pattern matching to avoid false positives
     - When merging with existing top-level CTEs, must both remove the nested WITH AND insert it at the top
     - Iterative application (loop) handles multiple independent nested CTEs in one query
+
+14. **SQL preprocessing transforms (PostgreSQL syntax):**
+    - `preprocessPostgresSyntax()` strips `AT TIME ZONE` and type-prefixed literals (`timestamptz '...'`, etc.) before parsing
+    - **Masked vs original SQL pitfall:** `maskStringsAndComments()` replaces string contents AND quotes with spaces — so `\s+` in a regex on the masked string will eat through where a string literal was, consuming tokens on the other side (e.g., `FROM` keyword after `'America/Chicago'`)
+    - **Fix:** Match keywords in the masked string, but skip whitespace and find arguments in the **original** SQL
+    - **Lookahead on masked strings doesn't work:** `(?=')` fails because quotes are masked to spaces — instead, match the keyword with `\b` boundary, then manually check the original SQL at that position for a quote
+    - Same pattern as `hoistNestedCtes`: preprocess before `parser.astify()`, preserve original SQL for display, add info hint when rewriting occurs

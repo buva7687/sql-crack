@@ -7,10 +7,20 @@ import {
     SqlDialect,
     AliasMap,
     ExtractionOptions,
-    DEFAULT_EXTRACTION_OPTIONS
+    DEFAULT_EXTRACTION_OPTIONS,
+    ColumnReference,
+    ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { escapeRegex } from '../../shared';
+import type {
+    AstStatement,
+    AstTableRef,
+    AstColumn,
+    AstExpression,
+    AstTableIdentifier,
+    AstCTE
+} from './astTypes';
 
 // SQL reserved words that should never be treated as table names
 const SQL_RESERVED_WORDS = new Set([
@@ -58,6 +68,13 @@ export class ReferenceExtractor {
         this.parser = new Parser();
         this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
         this.columnExtractor = new ColumnExtractor();
+    }
+
+    /** Extract CTE name string from AST CTE name node (may be string or { value: string }) */
+    private getCTENameString(name: AstCTE['name']): string | undefined {
+        if (typeof name === 'string') {return name;}
+        if (typeof name === 'object' && name !== null) {return name.value;}
+        return undefined;
     }
 
     /**
@@ -138,7 +155,7 @@ export class ReferenceExtractor {
             // Also collect CTE names from AST (may find names regex missed)
             for (const stmt of statements) {
                 if (!stmt) {continue;}
-                this.collectCTENames(stmt, globalCteNames);
+                this.collectCTENames(stmt as AstStatement, globalCteNames);
             }
 
             // Second pass: extract references with CTE names available
@@ -150,7 +167,7 @@ export class ReferenceExtractor {
                 for (const cteName of globalCteNames) {
                     aliasMap.cteNames.add(cteName);
                 }
-                this.extractFromStatement(stmt, filePath, sql, references, aliasMap, 0, stmtIndex);
+                this.extractFromStatement(stmt as AstStatement, filePath, sql, references, aliasMap, 0, stmtIndex);
             }
         } catch (error) {
             // Fallback to regex extraction — CTE names are already in this.globalCteNames
@@ -185,14 +202,14 @@ export class ReferenceExtractor {
     /**
      * Recursively collect all CTE names from a statement tree
      */
-    private collectCTENames(stmt: any, cteNames: Set<string>): void {
+    private collectCTENames(stmt: AstStatement, cteNames: Set<string>): void {
         if (!stmt || typeof stmt !== 'object') {return;}
 
         // Check for WITH clause
         if (stmt.with) {
             const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
             for (const cte of withClause) {
-                const cteName = cte.name?.value || cte.name;
+                const cteName = this.getCTENameString(cte.name);
                 if (cteName && typeof cteName === 'string') {
                     cteNames.add(cteName.toLowerCase());
                 }
@@ -204,7 +221,7 @@ export class ReferenceExtractor {
             if (stmt.ctes) {
                 const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
                 for (const cte of ctes) {
-                    const cteName = cte.name?.value || cte.name;
+                    const cteName = this.getCTENameString(cte.name);
                     if (cteName && typeof cteName === 'string') {
                         cteNames.add(cteName.toLowerCase());
                     }
@@ -288,7 +305,7 @@ export class ReferenceExtractor {
      * Extract references from a single statement
      */
     private extractFromStatement(
-        stmt: any,
+        stmt: AstStatement,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -303,7 +320,7 @@ export class ReferenceExtractor {
         // Some parsers structure WITH clauses separately from the main statement
         if (stmt.with) {
             for (const cte of stmt.with) {
-                const cteName = cte.name?.value || cte.name;
+                const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
                 }
@@ -334,7 +351,7 @@ export class ReferenceExtractor {
             if (stmt.ctes) {
                 const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
                 for (const cte of ctes) {
-                    const cteName = cte.name?.value || cte.name;
+                    const cteName = this.getCTENameString(cte.name);
                     if (cteName) {
                         aliasMap.cteNames.add(cteName.toLowerCase());
                     }
@@ -410,7 +427,7 @@ export class ReferenceExtractor {
      * Extract references from SELECT statement
      */
     private extractFromSelect(
-        stmt: any,
+        stmt: AstStatement,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -421,7 +438,7 @@ export class ReferenceExtractor {
         // Process CTEs first - add to alias map to exclude from references
         if (stmt.with) {
             for (const cte of stmt.with) {
-                const cteName = cte.name?.value || cte.name;
+                const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
                 }
@@ -465,18 +482,18 @@ export class ReferenceExtractor {
         }
 
         // Subqueries in SELECT columns
-        if (stmt.columns) {
-            this.extractFromColumns(stmt.columns, filePath, sql, references, aliasMap, depth, statementIndex);
+        if (stmt.columns && Array.isArray(stmt.columns) && stmt.columns.length > 0 && typeof stmt.columns[0] !== 'string') {
+            this.extractFromColumns(stmt.columns as AstColumn[], filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
         // WHERE clause (may contain subqueries)
         if (stmt.where) {
-            this.extractFromExpression(stmt.where, filePath, sql, references, aliasMap, depth, statementIndex);
+            this.extractFromExpression(stmt.where as AstExpression, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
         // HAVING clause
         if (stmt.having) {
-            this.extractFromExpression(stmt.having, filePath, sql, references, aliasMap, depth, statementIndex);
+            this.extractFromExpression(stmt.having as AstExpression, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
         // UNION/INTERSECT/EXCEPT
@@ -494,7 +511,7 @@ export class ReferenceExtractor {
      * Extract references from INSERT statement
      */
     private extractFromInsert(
-        stmt: any,
+        stmt: AstStatement,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -506,7 +523,8 @@ export class ReferenceExtractor {
         if (stmt.table) {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
-                const ref = this.createTableReference(t, filePath, sql, 'insert', 'INSERT INTO', statementIndex);
+                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t;
+                const ref = this.createTableReference(tableRef, filePath, sql, 'insert', 'INSERT INTO', statementIndex);
                 const tableNameLower = ref?.tableName?.toLowerCase();
                 if (ref && tableNameLower) {
                     const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
@@ -519,9 +537,10 @@ export class ReferenceExtractor {
 
         // SELECT subquery for INSERT...SELECT
         if (stmt.values) {
-            if (stmt.values.type === 'select' || stmt.values.ast) {
+            const values = stmt.values as AstStatement;
+            if (values.type === 'select' || values.ast) {
                 this.extractFromStatement(
-                    stmt.values.ast || stmt.values,
+                    (values.ast || values) as AstStatement,
                     filePath,
                     sql,
                     references,
@@ -537,7 +556,7 @@ export class ReferenceExtractor {
      * Extract references from UPDATE statement
      */
     private extractFromUpdate(
-        stmt: any,
+        stmt: AstStatement,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -548,7 +567,7 @@ export class ReferenceExtractor {
         // Process WITH clause first if present (for UPDATE ... WITH ... UPDATE)
         if (stmt.with) {
             for (const cte of stmt.with) {
-                const cteName = cte.name?.value || cte.name;
+                const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
                 }
@@ -577,15 +596,16 @@ export class ReferenceExtractor {
         if (stmt.table) {
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
-                const ref = this.createTableReference(t, filePath, sql, 'update', 'UPDATE', statementIndex);
+                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+                const ref = this.createTableReference(tableRef, filePath, sql, 'update', 'UPDATE', statementIndex);
                 const tableNameLower = ref?.tableName?.toLowerCase();
                 if (ref && tableNameLower) {
                     const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
                     if (!isCTE) {
                         references.push(ref);
                         // Track alias if present
-                        if (t.as) {
-                            aliasMap.tables.set(t.as.toLowerCase(), { tableName: ref.tableName });
+                        if (tableRef.as) {
+                            aliasMap.tables.set((tableRef.as as string).toLowerCase(), { tableName: ref.tableName });
                         }
                     }
                 }
@@ -610,7 +630,7 @@ export class ReferenceExtractor {
                         } else if (item.as.name) {
                             aliasName = item.as.name;
                         } else if (typeof item.as === 'object' && 'alias' in item.as) {
-                            aliasName = item.as.alias;
+                            aliasName = item.as.alias ?? null;
                         }
                     }
 
@@ -647,7 +667,7 @@ export class ReferenceExtractor {
      * Extract references from DELETE statement
      */
     private extractFromDelete(
-        stmt: any,
+        stmt: AstStatement,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -658,7 +678,7 @@ export class ReferenceExtractor {
         // Process WITH clause first if present (for DELETE ... WITH ... DELETE FROM)
         if (stmt.with) {
             for (const cte of stmt.with) {
-                const cteName = cte.name?.value || cte.name;
+                const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
                 }
@@ -688,7 +708,8 @@ export class ReferenceExtractor {
         if (tableSource) {
             const tables = Array.isArray(tableSource) ? tableSource : [tableSource];
             for (const t of tables) {
-                const ref = this.createTableReference(t, filePath, sql, 'delete', 'DELETE FROM', statementIndex);
+                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+                const ref = this.createTableReference(tableRef, filePath, sql, 'delete', 'DELETE FROM', statementIndex);
                 const tableNameLower = ref?.tableName?.toLowerCase();
                 if (ref && tableNameLower) {
                     const isCTE = aliasMap.cteNames.has(tableNameLower) || this.globalCteNames.has(tableNameLower);
@@ -726,7 +747,7 @@ export class ReferenceExtractor {
      * Extract references from a FROM clause item
      */
     private extractFromItem(
-        item: any,
+        item: AstTableRef,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -734,7 +755,7 @@ export class ReferenceExtractor {
         defaultType: ReferenceType,
         depth: number,
         statementIndex: number = 0,
-        parentStmt?: any
+        parentStmt?: AstStatement
     ): void {
         if (!item) {return;}
 
@@ -760,7 +781,7 @@ export class ReferenceExtractor {
             // If it's a CTE, skip adding as a table reference
 
             // Track alias
-            if (item.as) {
+            if (item.as && typeof item.as === 'string') {
                 aliasMap.tables.set(item.as.toLowerCase(), { tableName: ref.tableName });
             }
         }
@@ -808,7 +829,7 @@ export class ReferenceExtractor {
      * Create a TableReference from AST item
      */
     private createTableReference(
-        item: any,
+        item: AstTableRef,
         filePath: string,
         sql: string,
         refType: ReferenceType,
@@ -820,7 +841,7 @@ export class ReferenceExtractor {
 
         return {
             tableName,
-            alias: item.as || undefined,
+            alias: typeof item.as === 'string' ? item.as : undefined,
             schema: item.db || item.schema || undefined,
             referenceType: refType,
             filePath,
@@ -834,7 +855,7 @@ export class ReferenceExtractor {
      * Extract references from SELECT columns (may contain subqueries)
      */
     private extractFromColumns(
-        columns: any[],
+        columns: AstColumn[],
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -871,7 +892,7 @@ export class ReferenceExtractor {
      * Extract references from expressions (WHERE, HAVING, etc.)
      */
     private extractFromExpression(
-        expr: any,
+        expr: AstExpression,
         filePath: string,
         sql: string,
         references: TableReference[],
@@ -942,7 +963,7 @@ export class ReferenceExtractor {
     /**
      * Get table name from AST item
      */
-    private getTableName(item: any): string | null {
+    private getTableName(item: AstTableRef | string): string | null {
         if (!item) {return null;}
         if (typeof item === 'string') {return item;}
 
@@ -1292,17 +1313,17 @@ export class ReferenceExtractor {
      * Extract columns used from a specific table in a statement
      */
     private extractColumnsFromTable(
-        tableItem: any,
-        stmt: any,
+        tableItem: AstTableRef,
+        stmt: AstStatement,
         _aliasMap: AliasMap
-    ): any[] {
+    ): ColumnReference[] {
         if (!stmt || !this.options.extractColumns) {
             return [];
         }
 
         const tableName = this.getTableNameFromItem(tableItem);
-        const tableAlias = tableItem.as;
-        const columns: any[] = [];
+        const tableAlias = typeof tableItem.as === 'string' ? tableItem.as : undefined;
+        const columns: ColumnReference[] = [];
 
         // Build alias map from the statement
         const tableAliases = this.columnExtractor.buildAliasMap(stmt);
@@ -1313,11 +1334,12 @@ export class ReferenceExtractor {
         }
 
         // Extract columns from SELECT clause
-        if (stmt.columns) {
+        if (stmt.columns && Array.isArray(stmt.columns)) {
             for (const col of stmt.columns) {
-                const usedCols = this.extractColumnsFromExpression(col.expr, tableAliases, 'select');
+                if (typeof col === 'string' || !col.expr) {continue;}
+                const usedCols = this.extractColumnsFromExpression(col.expr as AstExpression, tableAliases, 'select');
                 for (const usedCol of usedCols) {
-                    if (this.isColumnFromTable(usedCol, tableName, tableAlias, tableAliases)) {
+                    if (this.isColumnFromTable(usedCol, tableName || undefined, tableAlias || undefined, tableAliases)) {
                         columns.push(usedCol);
                     }
                 }
@@ -1386,13 +1408,13 @@ export class ReferenceExtractor {
      * Extract columns from an expression
      */
     private extractColumnsFromExpression(
-        expr: any,
+        expr: AstExpression,
         tableAliases: Map<string, string>,
-        context: string
-    ): any[] {
+        context: ColumnUsageContext
+    ): ColumnReference[] {
         if (!expr) {return [];}
 
-        const columns: any[] = [];
+        const columns: ColumnReference[] = [];
 
         if (expr.type === 'column_ref') {
             const columnName = expr.column || expr.value;
@@ -1424,7 +1446,7 @@ export class ReferenceExtractor {
      * Check if a column reference belongs to a specific table
      */
     private isColumnFromTable(
-        col: any,
+        col: ColumnReference,
         tableName: string | undefined,
         tableAlias: string | undefined,
         tableAliases: Map<string, string>
@@ -1460,19 +1482,16 @@ export class ReferenceExtractor {
     /**
      * Get table name from AST item
      */
-    private getTableNameFromItem(item: any): string | undefined {
+    private getTableNameFromItem(item: AstTableIdentifier): string | undefined {
         if (!item) {return undefined;}
+        if (typeof item === 'string') {return item;}
 
         if (item.table) {
-            return this.getTableNameFromItem(item.table);
+            return this.getTableNameFromItem(item.table as AstTableIdentifier);
         }
 
         if (item.value) {
             return item.value;
-        }
-
-        if (typeof item === 'string') {
-            return item;
         }
 
         return undefined;
@@ -1481,7 +1500,7 @@ export class ReferenceExtractor {
     /**
      * Deduplicate columns by name and context
      */
-    private deduplicateColumns(columns: any[]): any[] {
+    private deduplicateColumns(columns: ColumnReference[]): ColumnReference[] {
         const seen = new Set<string>();
         return columns.filter(col => {
             const key = `${col.columnName}|${col.usedIn}`;

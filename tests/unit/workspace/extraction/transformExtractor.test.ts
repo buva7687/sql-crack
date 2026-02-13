@@ -5,6 +5,7 @@
  */
 
 import { TransformExtractor } from '../../../../src/workspace/extraction/transformExtractor';
+import type { AstSelectStatement, AstExpression } from '../../../../src/workspace/extraction/astTypes';
 
 describe('TransformExtractor', () => {
     let extractor: TransformExtractor;
@@ -15,17 +16,17 @@ describe('TransformExtractor', () => {
 
     describe('extractTransformations', () => {
         it('returns empty array for null AST', () => {
-            const result = extractor.extractTransformations(null, new Map());
+            const result = extractor.extractTransformations(null as unknown as AstSelectStatement, new Map());
             expect(result).toEqual([]);
         });
 
         it('returns empty array for AST without columns', () => {
-            const result = extractor.extractTransformations({}, new Map());
+            const result = extractor.extractTransformations({} as AstSelectStatement, new Map());
             expect(result).toEqual([]);
         });
 
         it('returns empty array for empty columns', () => {
-            const result = extractor.extractTransformations({ columns: [] }, new Map());
+            const result = extractor.extractTransformations({ columns: [] } as unknown as AstSelectStatement, new Map());
             expect(result).toEqual([]);
         });
 
@@ -33,7 +34,7 @@ describe('TransformExtractor', () => {
             const ast = {
                 columns: [{ type: 'star' }]
             };
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
             expect(result).toEqual([]);
         });
 
@@ -48,7 +49,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(1);
             expect(result[0].outputColumn).toBe('name');
@@ -68,7 +69,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(1);
             expect(result[0].outputColumn).toBe('name');
@@ -88,7 +89,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(1);
             expect(result[0].outputColumn).toBe('sum');
@@ -109,7 +110,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(1);
             expect(result[0].outputColumn).toBe('user_count');
@@ -128,7 +129,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, tableAliases);
+            const result = extractor.extractTransformations(ast as AstSelectStatement, tableAliases);
 
             expect(result).toHaveLength(1);
             expect(result[0].inputColumns[0].tableName).toBe('users');
@@ -137,7 +138,7 @@ describe('TransformExtractor', () => {
 
     describe('parseExpression', () => {
         it('returns empty array for null expression', () => {
-            const result = extractor.parseExpression(null, new Map());
+            const result = extractor.parseExpression(null as unknown as AstExpression, new Map());
             expect(result).toEqual([]);
         });
 
@@ -332,9 +333,9 @@ describe('TransformExtractor', () => {
         });
 
         it('returns complex for null/undefined', () => {
-            expect(extractor.classifyTransformation(null)).toBe('complex');
-            expect(extractor.classifyTransformation(undefined)).toBe('complex');
-            expect(extractor.classifyTransformation({})).toBe('complex');
+            expect(extractor.classifyTransformation(null as unknown as AstExpression)).toBe('complex');
+            expect(extractor.classifyTransformation(undefined as unknown as AstExpression)).toBe('complex');
+            expect(extractor.classifyTransformation({} as AstExpression)).toBe('complex');
         });
 
         it('returns complex for unknown type', () => {
@@ -555,7 +556,7 @@ describe('TransformExtractor', () => {
                 }]
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(1);
             expect(result[0].outputColumn).toBeDefined();
@@ -566,7 +567,7 @@ describe('TransformExtractor', () => {
                 columns: [{ as: 'test' }]  // No expr
             };
 
-            const result = extractor.extractTransformations(ast, new Map());
+            const result = extractor.extractTransformations(ast as AstSelectStatement, new Map());
 
             expect(result).toHaveLength(0);
         });
