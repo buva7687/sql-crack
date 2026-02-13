@@ -3988,7 +3988,7 @@ function formatExpressionFromAst(expr: any): string {
 
     // Aggregate function
     if (expr.type === 'aggr_func') {
-        const funcName = expr.name || 'AGG';
+        const funcName = getAstString(expr.name) || 'AGG';
         trackFunctionUsage(funcName, 'aggregate');
         const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
         let argsStr = '';
@@ -4007,7 +4007,7 @@ function formatExpressionFromAst(expr: any): string {
 
     // Function call
     if (expr.type === 'function') {
-        const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        const funcName = getAstString(expr.name) || 'FUNC';
         trackFunctionUsage(funcName, expr.over ? 'window' : 'scalar');
         const args = expr.args?.value || expr.args || [];
         const argsStr = Array.isArray(args)
