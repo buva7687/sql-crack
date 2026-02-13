@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         try {
             const config = getConfig();
-            const defaultDialect = normalizeDialect(normalizeDialect(config.get<string>('defaultDialect') || 'MySQL'));
+            const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
             const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
             const maxStatements = config.get<number>('advanced.maxStatements', 50);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);

@@ -1,5 +1,6 @@
 node_modules
 out
+out-cjs
 dist
 *.vsix
 .vscode-test/
@@ -37,6 +38,9 @@ archive/
 
 # Local docs/notes
 docs/
+
+# YouTube video scripts
+youtube/
 
 # Test coverage reports (generated)
 coverage/
