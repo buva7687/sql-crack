@@ -95,11 +95,13 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **Partial Parse Fallback** | If AST parsing fails, SQL Crack falls back to regex extraction to still render best-effort tables/joins |
 | **Auto-Retry Dialect** | Detects dialect-specific syntax patterns and retries parsing with the correct dialect when the selected one fails |
 | **Nested CTE Hoisting** | Automatically rewrites Snowflake/Tableau-style `FROM (WITH ... SELECT ...)` subqueries to top-level CTEs for full visualization |
-| **PostgreSQL Syntax Preprocessing** | Automatically rewrites `AT TIME ZONE`, `timestamptz '...'`, and other type-prefixed literals for full AST parsing |
+| **PostgreSQL Syntax Preprocessing** | Automatically rewrites `AT TIME ZONE`, `timestamptz '...'`, and other type-prefixed literals for full AST parsing, including during dialect auto-retry |
+| **Safer Dialect Detection** | Reduces false positives in dialect pattern matching (for example time literals like `00:00:00`) so valid queries are less likely to fall back unnecessarily |
 | **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
 | **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
+| **Actionable Parse Errors** | Parse diagnostics include source line context in the badge and canvas overlay, not just line/column numbers |
 
 **Performance Icons**: Filter Pushdown (⬆) • Non-Sargable (🚫) • Join Order (⇄) • Index Suggestion (📇) • Repeated Scan (🔄) • Complex (🧮)
 
@@ -306,7 +308,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | Problem | Solution |
 |---------|----------|
 | **Icon not showing for custom extensions** | In Settings → **SQL Crack** → **Additional File Extensions**, add one item per extension (e.g. .hql, .tpt). With or without a leading dot is fine; the extension normalizes automatically. Reload the window if the icon still doesn’t appear. |
-| **Parse error on valid SQL** | Try a different dialect from the dropdown. PostgreSQL is most permissive. Some vendor-specific syntax may not be supported. |
+| **Parse error on valid SQL** | Try a different dialect from the dropdown. SQL Crack auto-retries when it detects a stronger dialect match, but some vendor-specific syntax may still require manually switching (PostgreSQL is usually the most permissive fallback). |
 | **Graph is slow with large files** | SQL files over 100KB or 50+ statements may be slow. Try visualizing smaller sections by selecting text first. |
 | **CTE/Subquery not expanding** | Double-click the node. If it has no children, it may be a simple reference. |
 | **Workspace indexing stuck** | Click Cancel in the notification, then try again. For very large workspaces, increase `workspaceAutoIndexThreshold`. |

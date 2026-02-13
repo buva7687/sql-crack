@@ -76,6 +76,7 @@ export interface ParseResult {
     columnFlows?: ColumnFlow[];
     tableUsage: Map<string, number>;
     error?: string;
+    errorSourceLine?: string; // The actual SQL source line that caused a parse error
     partial?: boolean; // True when using regex fallback parser
 }
 

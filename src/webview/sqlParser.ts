@@ -1202,7 +1202,7 @@ export function parseSqlBatch(
                 line: lineMatch ? parseInt(lineMatch[1], 10) : queryLineRanges[index]?.startLine,
                 column: columnMatch ? parseInt(columnMatch[1], 10) : undefined,
                 message: query.error,
-                sql: query.sql.substring(0, 200) + (query.sql.length > 200 ? '...' : '')
+                sql: query.sql.substring(0, 500) + (query.sql.length > 500 ? '...' : '')
             });
         } else {
             successCount++;
@@ -1920,11 +1920,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         let ast: any;
         let effectiveDialect = dialect;
 
-        const parseWithDialect = (targetDialect: SqlDialect): any => {
+        const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
             try {
-                return parser.astify(sql, { database: targetDialect });
+                return parser.astify(sqlText, { database: targetDialect });
             } catch (parseError) {
-                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, targetDialect);
+                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;
                 }
@@ -1943,7 +1943,20 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             }
 
             try {
-                ast = parseWithDialect(retryDialect);
+                let retrySql = sql;
+                const retryPreprocessedSql = preprocessPostgresSyntax(sql, retryDialect);
+                if (retryPreprocessedSql !== null) {
+                    retrySql = retryPreprocessedSql;
+                    ctx.hints.push({
+                        type: 'info',
+                        message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
+                        suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+                        category: 'best-practice',
+                        severity: 'low',
+                    });
+                }
+
+                ast = parseWithDialect(retryDialect, retrySql);
                 effectiveDialect = retryDialect;
                 ctx.dialect = retryDialect;
                 ctx.hints.push({
@@ -5904,6 +5917,8 @@ function detectDialectSyntaxPatterns(sql: string): {
     hasBigQueryUnnest: boolean;
     hasBigQueryArrayType: boolean;
     hasPostgresInterval: boolean;
+    hasPostgresTypeCast: boolean;
+    hasPostgresAtTimeZone: boolean;
     hasPostgresDollarQuotes: boolean;
     hasPostgresArrayAccess: boolean;
     hasPostgresJsonOperators: boolean;
@@ -5914,28 +5929,35 @@ function detectDialectSyntaxPatterns(sql: string): {
     hasTSqlTop: boolean;
     hasTSqlPivot: boolean;
 } {
+    // Dialect detection should ignore contents inside string literals/comments.
+    // Use a masked representation for token matching, but keep original SQL for
+    // patterns that intentionally depend on quoted literals (e.g., INTERVAL '...').
+    const maskedSql = maskStringsAndComments(sql);
     return {
-        hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
-        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
-        hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
-        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(sql),
-        hasQualify: /\bQUALIFY\b/i.test(sql),
-        hasIlike: /\bILIKE\b/i.test(sql),
-        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(sql),
-        hasMergeInto: /\bMERGE\s+INTO\b/i.test(sql),
-        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
-        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
-        hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
+        // Match JSON path access like payload:items, but avoid false positives from time literals (00:00:00)
+        hasSnowflakePathOperator: /\b[A-Za-z_][\w$]*\s*:\s*[A-Za-z_][\w$]*(?!:)/.test(maskedSql),
+        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(maskedSql), // input => value
+        hasFlatten: /\bFLATTEN\s*\(/i.test(maskedSql),
+        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(maskedSql),
+        hasQualify: /\bQUALIFY\b/i.test(maskedSql),
+        hasIlike: /\bILIKE\b/i.test(maskedSql),
+        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(maskedSql),
+        hasMergeInto: /\bMERGE\s+INTO\b/i.test(maskedSql),
+        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(maskedSql),
+        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(maskedSql),
+        hasBigQueryArrayType: /\bARRAY<.*>/i.test(maskedSql),
         hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
-        hasPostgresDollarQuotes: /\$\$/.test(sql),
-        hasPostgresArrayAccess: /\w+\[\d+\]/.test(sql),
-        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(sql),
-        hasMysqlBackticks: /`[\w-]+`/.test(sql),
-        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(sql),
-        hasMysqlDual: /FROM\s+DUAL/i.test(sql),
-        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql),
-        hasTSqlTop: /TOP\s*\(/i.test(sql),
-        hasTSqlPivot: /\bPIVOT\s*\(/i.test(sql),
+        hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
+        hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
+        hasPostgresDollarQuotes: /\$\$/.test(maskedSql),
+        hasPostgresArrayAccess: /\w+\[\d+\]/.test(maskedSql),
+        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
+        hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),
+        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(maskedSql),
+        hasMysqlDual: /FROM\s+DUAL/i.test(maskedSql),
+        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(maskedSql),
+        hasTSqlTop: /TOP\s*\(/i.test(maskedSql),
+        hasTSqlPivot: /\bPIVOT\s*\(/i.test(maskedSql),
     };
 }
 
@@ -5977,6 +5999,8 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresTypeCast) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresAtTimeZone) { addScore('PostgreSQL'); }
     if (syntax.hasIlike) { addScore('PostgreSQL'); }
 
     // MySQL

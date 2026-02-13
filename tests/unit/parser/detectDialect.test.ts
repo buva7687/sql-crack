@@ -38,6 +38,19 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('none');
     });
 
+    it('ignores Snowflake-like tokens inside string literals', () => {
+        const result = detectDialect(`
+            SELECT
+                'payload:items' AS path_like,
+                'input => value' AS named_arg_like,
+                'FLATTEN(input => payload:items)' AS fn_like
+            FROM events
+        `);
+        expect(result.scores.Snowflake || 0).toBe(0);
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('none');
+    });
+
     it('detects BigQuery STRUCT + UNNEST with high confidence', () => {
         const result = detectDialect('SELECT item.x FROM UNNEST([STRUCT(1 AS x), STRUCT(2 AS x)]) AS item');
         expect(result.dialect).toBe('BigQuery');
@@ -80,5 +93,29 @@ describe('detectDialect', () => {
         expect(result.dialect).toBe('Snowflake');
         expect(result.confidence).toBe('high');
         expect(result.scores.Snowflake).toBeGreaterThanOrEqual(5);
+    });
+
+    it('does not treat time literals as Snowflake path operators', () => {
+        const result = detectDialect(`
+            SELECT
+              date_bin('15 minutes'::interval, created_at, timestamptz '1970-01-01 00:00:00+00') AS bucket
+            FROM events
+            WHERE created_at > now() - interval '24 hours'
+        `);
+        expect(result.scores.Snowflake || 0).toBe(0);
+        expect(result.dialect).toBe('PostgreSQL');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects PostgreSQL via AT TIME ZONE plus :: type cast', () => {
+        const result = detectDialect(`
+            SELECT
+                created_at AT TIME ZONE 'UTC' AS utc_time,
+                captured_at::date AS captured_date
+            FROM events
+        `);
+        expect(result.dialect).toBe('PostgreSQL');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.PostgreSQL).toBeGreaterThanOrEqual(2);
     });
 });

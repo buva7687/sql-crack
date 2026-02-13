@@ -5,7 +5,7 @@ import process from 'process/browser';
 import { parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
-import { BatchParseResult, LayoutType, SqlDialect } from './types';
+import { BatchParseResult, LayoutType, ParseError, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
     render,
@@ -119,6 +119,41 @@ let compareModeActive = false;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
+
+function truncateSourceLine(line: string, maxLength = 120): string {
+    return line.length > maxLength ? `${line.substring(0, maxLength)}...` : line;
+}
+
+function extractSourceLineFromParseError(parseError: ParseError, lineRange?: QueryLineRange): string | undefined {
+    if (!parseError.sql) {
+        return undefined;
+    }
+
+    const lines = parseError.sql.split('\n');
+    const candidateLines: number[] = [];
+
+    if (Number.isFinite(parseError.line)) {
+        const errorLine = parseError.line as number;
+        candidateLines.push(errorLine);
+
+        // parseSqlBatch offsets to absolute file lines; convert to statement-relative when possible.
+        if (lineRange?.startLine && lineRange.startLine > 0) {
+            candidateLines.push(errorLine - lineRange.startLine + 1);
+        }
+    }
+
+    for (const candidate of candidateLines) {
+        if (candidate >= 1 && candidate <= lines.length) {
+            const raw = lines[candidate - 1]?.trim();
+            if (raw) {
+                return truncateSourceLine(raw);
+            }
+        }
+    }
+
+    const firstNonEmpty = lines.find(line => line.trim().length > 0)?.trim();
+    return firstNonEmpty ? truncateSourceLine(firstNonEmpty) : undefined;
+}
 
 // Initialize when DOM is ready (guard against cached webview where DOMContentLoaded already fired)
 function setup(): void {
@@ -583,11 +618,16 @@ async function visualize(sql: string): Promise<void> {
 
     // Update error badge in toolbar if there are parse errors
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
-        const errorDetails = batchResult.parseErrors?.map(e => ({
-            queryIndex: e.queryIndex,
-            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
-            line: e.line
-        }));
+        const errorDetails = batchResult.parseErrors?.map(e => {
+            const lineRange = batchResult?.queryLineRanges?.[e.queryIndex];
+            const sourceLine = extractSourceLineFromParseError(e, lineRange);
+            return {
+                queryIndex: e.queryIndex,
+                message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
+                line: e.line,
+                sourceLine
+            };
+        });
         updateErrorBadge(batchResult.errorCount, errorDetails);
     } else {
         clearErrorBadge();
@@ -602,6 +642,16 @@ function renderCurrentQuery(): void {
     if (!batchResult || batchResult.queries.length === 0) { return; }
 
     const query = batchResult.queries[currentQueryIndex];
+
+    // If this query has a parse error, attach the source line for the renderer's error overlay
+    if (query.error && batchResult.parseErrors) {
+        const parseError = batchResult.parseErrors.find(e => e.queryIndex === currentQueryIndex);
+        if (parseError) {
+            const lineRange = batchResult.queryLineRanges?.[currentQueryIndex];
+            query.errorSourceLine = extractSourceLineFromParseError(parseError, lineRange);
+        }
+    }
+
     render(query);
 }
 
@@ -662,4 +712,3 @@ function getCurrentQuerySql(): { sql: string; name: string } {
 
     return { sql: sqlToPin, name: queryName };
 }
-
