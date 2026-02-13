@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-02-13
+
+### Fixed
+
+- **SQL Server dialect in settings** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Users can now select "SQL Server" directly in the `sqlCrack.defaultDialect` setting. Previously only "TransactSQL" was available, which was confusing since the toolbar shows "SQL Server".
+- **Default layout not applying on first open** ([#46](https://github.com/buva7687/sql-crack/issues/46)): The `sqlCrack.defaultLayout` setting (e.g., `"horizontal"`) now takes effect immediately when opening the visualization. Previously the parser's vertical positions were used regardless of the setting.
+- **Node drag disconnects edges** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Dragging nodes in horizontal, force, or radial layouts no longer detaches edges. Edge recalculation now uses the layout-aware `calculateEdgePath()` instead of hardcoded vertical-only math.
+
+### Tests
+
+- Added `normalizeDialect` unit tests for settings alias mapping.
+- Added source-level regression tests for default layout initialization, `updateNodeEdges` wiring, and `calculateEdgePath` layout branch coverage.
+- Added `package.json` schema tests verifying "SQL Server" enum presence and enum/description array length parity.
+
 ## [0.3.6] - 2026-02-12
 
 ### Fixed
@@ -570,6 +584,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.7]: https://github.com/buva7687/sql-crack/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/buva7687/sql-crack/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/buva7687/sql-crack/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/buva7687/sql-crack/compare/v0.3.3...v0.3.4

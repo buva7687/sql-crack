@@ -160,3 +160,10 @@ A VS Code extension that provides interactive SQL flow visualization, workspace 
     - **Fix:** Match keywords in the masked string, but skip whitespace and find arguments in the **original** SQL
     - **Lookahead on masked strings doesn't work:** `(?=')` fails because quotes are masked to spaces — instead, match the keyword with `\b` boundary, then manually check the original SQL at that position for a quote
     - Same pattern as `hoistNestedCtes`: preprocess before `parser.astify()`, preserve original SQL for display, add info hint when rewriting occurs
+
+15. **Settings enum aliases and normalization:**
+    - `package.json` enum values are what users see in the VS Code Settings UI dropdown
+    - When adding user-friendly aliases (e.g., `"SQL Server"` for internal `"TransactSQL"`), add the alias to the enum AND normalize it where the setting is read
+    - Use `normalizeDialect()` in `extension.ts` — every `config.get<string>('defaultDialect')` call site must go through it
+    - The renderer (`renderer.ts`) has heavy DOM/d3 dependencies that prevent direct Jest imports — use source-reading tests (read the `.ts` file as a string and assert on patterns) for regression guards
+    - When `updateNodeEdges()` or similar drag handlers compute geometry, they must respect `state.layoutType` — never hardcode a single layout's anchor points

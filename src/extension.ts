@@ -13,6 +13,11 @@ import {
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
+/** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL" */
+export function normalizeDialect(dialect: string): string {
+    return dialect === 'SQL Server' ? 'TransactSQL' : dialect;
+}
+
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -128,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         try {
             const config = getConfig();
-            const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+            const defaultDialect = normalizeDialect(normalizeDialect(config.get<string>('defaultDialect') || 'MySQL'));
             const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
             const maxStatements = config.get<number>('advanced.maxStatements', 50);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
@@ -212,7 +217,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         // Get default dialect from settings
         const config = getConfig();
-        const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+        const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
         // Create or show visualization panel
         VisualizationPanel.createOrShow(context.extensionUri, sqlCode, {
@@ -229,7 +234,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (document) {
             const sqlCode = document.getText();
             const config = getConfig();
-            const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+            const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
@@ -244,7 +249,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Command: Analyze Workspace Dependencies
     let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async () => {
         const config = getConfig();
-        const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+        const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
         await WorkspacePanel.createOrShow(
             context.extensionUri,
@@ -414,7 +419,7 @@ export function activate(context: vscode.ExtensionContext) {
                     const document = e.document;
                     if (document && VisualizationPanel.currentPanel) {
                         const sqlCode = document.getText();
-                        const defaultDialect = config.get<string>('defaultDialect') || 'MySQL';
+                        const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
                         VisualizationPanel.refresh(sqlCode, {
                             dialect: defaultDialect,

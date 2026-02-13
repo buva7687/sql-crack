@@ -133,7 +133,11 @@ const state: ViewState = {
     zoomedNodeId: null,
     previousZoomState: null,
     focusMode: 'all' as FocusMode,
-    layoutType: (window.defaultLayout === 'horizontal' ? 'horizontal' : 'vertical') as LayoutType
+    layoutType: ((): LayoutType => {
+        const valid: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
+        const dl = window.defaultLayout as LayoutType;
+        return valid.includes(dl) ? dl : 'vertical';
+    })()
 };
 
 let svg: SVGSVGElement | null = null;
@@ -942,10 +946,21 @@ function setupEventListeners(): void {
                 // Update node position
                 node.x = state.dragNodeStartX + deltaX;
                 node.y = state.dragNodeStartY + deltaY;
-                
+
+                // Update node's SVG visual position (same pattern as switchLayout)
+                const nodeGroup = mainGroup?.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+                if (nodeGroup) {
+                    const nodeRect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+                    if (nodeRect) {
+                        const origX = parseFloat(nodeRect.getAttribute('x') || '0');
+                        const origY = parseFloat(nodeRect.getAttribute('y') || '0');
+                        nodeGroup.setAttribute('transform', `translate(${node.x - origX}, ${node.y - origY})`);
+                    }
+                }
+
                 // Update cloud and arrow positions (maintains relative offset)
                 updateCloudAndArrow(node);
-                
+
                 // Also update edges connected to this node
                 updateNodeEdges(node);
             }
@@ -1700,15 +1715,8 @@ function updateNodeEdges(node: FlowNode): void {
         
         if (!sourceNode || !targetNode) { return; }
         
-        // Recalculate connection points (center bottom of source to center top of target)
-        const x1 = sourceNode.x + sourceNode.width / 2;
-        const y1 = sourceNode.y + sourceNode.height;
-        const x2 = targetNode.x + targetNode.width / 2;
-        const y2 = targetNode.y;
-        
-        // Update path with curved connection
-        const midY = (y1 + y2) / 2;
-        edgePath.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+        // Recalculate edge path using layout-aware function
+        edgePath.setAttribute('d', calculateEdgePath(sourceNode, targetNode, state.layoutType || 'vertical'));
     });
 }
 
@@ -1936,6 +1944,11 @@ export function render(result: ParseResult): void {
 
     // Fit view
     fitView();
+
+    // Apply non-default layout if configured (parser positions are always vertical)
+    if (state.layoutType && state.layoutType !== 'vertical') {
+        switchLayout(state.layoutType);
+    }
 
     // Update minimap for complex queries
     updateMinimap();
@@ -7120,7 +7133,7 @@ export function getCurrentLayout(): LayoutType {
 /**
  * Calculate edge path based on layout type and node positions
  */
-function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType): string {
+export function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType): string {
     if (layoutType === 'horizontal') {
         const sx = sourceNode.x + sourceNode.width;
         const sy = sourceNode.y + sourceNode.height / 2;
