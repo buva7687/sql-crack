@@ -8034,7 +8034,9 @@ export function toggleFullscreen(enable?: boolean): void {
 
         // Exit browser fullscreen if active
         if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {});
+            document.exitFullscreen().catch((e) => {
+                console.debug('[sql-crack] exitFullscreen failed:', e);
+            });
         }
     }
 

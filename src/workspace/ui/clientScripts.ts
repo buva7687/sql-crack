@@ -3677,7 +3677,9 @@ function getLineageGraphScript(): string {
                     const data = JSON.parse(graphDataEl.textContent || '{}');
                     graphWidth = data.width || 800;
                     graphHeight = data.height || 600;
-                } catch (e) {}
+                } catch (e) {
+                    console.debug('[sql-crack] Failed to parse graph data for minimap:', e);
+                }
             }
 
             // Update viewport rectangle on the minimap
