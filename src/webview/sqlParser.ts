@@ -1901,6 +1901,19 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         });
     }
 
+    // Preprocess PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals)
+    const preprocessedSql = preprocessPostgresSyntax(sql, dialect);
+    if (preprocessedSql !== null) {
+        sql = preprocessedSql;
+        ctx.hints.push({
+            type: 'info',
+            message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
+            suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const parser = new Parser();
 
     try {
@@ -5373,6 +5386,95 @@ function detectDialectSpecificSyntax(sql: string, currentDialect: SqlDialect): v
             });
         }
     }
+}
+
+/**
+ * Preprocess PostgreSQL-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. `AT TIME ZONE 'tz'` / `AT TIME ZONE identifier` - removed (timezone cast doesn't affect structure)
+ * 2. Type-prefixed literals (`timestamptz '...'`, `timestamp '...'`, `date '...'`, `time '...'`, `interval '...'`) - just the string literal
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'PostgreSQL') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    let result = sql;
+    let changed = false;
+
+    // 1. Remove AT TIME ZONE 'timezone' or AT TIME ZONE identifier
+    // Use masked version to find AT TIME ZONE keywords, but look at original SQL for the argument
+    // (masking replaces string contents with spaces, so we must not use trailing \s+ in the regex)
+    const atTimeZoneRegex = /\bAT\s+TIME\s+ZONE\b/gi;
+    let match;
+    // Collect matches, then process from end to start so positions stay valid
+    const attzMatches: { start: number; end: number }[] = [];
+    while ((match = atTimeZoneRegex.exec(masked)) !== null) {
+        let end = match.index + match[0].length;
+        // Skip whitespace in original SQL after AT TIME ZONE
+        while (end < result.length && /\s/.test(result[end])) {
+            end++;
+        }
+        // In original SQL, it's either a quoted string or an identifier
+        if (result[end] === "'") {
+            // Find closing quote in original SQL
+            end = end + 1;
+            while (end < result.length) {
+                if (result[end] === "'" && end + 1 < result.length && result[end + 1] === "'") {
+                    end += 2; // escaped quote
+                    continue;
+                }
+                if (result[end] === "'") {
+                    end++;
+                    break;
+                }
+                end++;
+            }
+        } else {
+            // Identifier: consume word characters
+            while (end < result.length && /\w/.test(result[end])) {
+                end++;
+            }
+        }
+        attzMatches.push({ start: match.index, end });
+    }
+    // Apply removals from end to start
+    for (let i = attzMatches.length - 1; i >= 0; i--) {
+        const m = attzMatches[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 2. Remove type prefixes from type-prefixed literals: timestamptz '...', timestamp '...', etc.
+    // Masking replaces quotes with spaces, so we match the keyword in the masked version
+    // but check the original SQL for the following quote character.
+    const masked2 = changed ? maskStringsAndComments(result) : masked;
+    const typePrefixRegex = /\b(timestamptz|timestamp|date|time|interval)\b/gi;
+    const typePrefixMatches: { start: number; end: number }[] = [];
+    while ((match = typePrefixRegex.exec(masked2)) !== null) {
+        // Check if followed by whitespace then a quote in the original SQL
+        let pos = match.index + match[0].length;
+        if (pos < result.length && /\s/.test(result[pos])) {
+            while (pos < result.length && /\s/.test(result[pos])) {
+                pos++;
+            }
+            if (pos < result.length && result[pos] === "'") {
+                // Remove the type keyword and whitespace (keep the quote/literal)
+                typePrefixMatches.push({ start: match.index, end: pos });
+            }
+        }
+    }
+    for (let i = typePrefixMatches.length - 1; i >= 0; i--) {
+        const m = typePrefixMatches[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    return changed ? result : null;
 }
 
 /**
