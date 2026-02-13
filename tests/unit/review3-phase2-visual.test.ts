@@ -21,6 +21,7 @@ describe('phase 2.1 dark surface blue-tint cleanup', () => {
     const pinnedTabs = readSource('src/webview/ui/pinnedTabs.ts');
     const colors = readSource('src/webview/constants/colors.ts');
     const workspaceStyles = readSource('src/workspace/ui/sharedStyles.ts');
+    const variablesStyles = readSource('src/workspace/ui/styles/variables.ts');
 
     it('uses neutral dark backgrounds in updated webview surfaces', () => {
         expect(toolbar).toContain('rgba(17, 17, 17, 0.95)');
@@ -34,7 +35,8 @@ describe('phase 2.1 dark surface blue-tint cleanup', () => {
     it('uses black-based overlay/track tones for dark theme tokens', () => {
         expect(colors).toContain("track: 'rgba(0, 0, 0, 0.35)'");
         expect(colors).toContain("shadowSoft: '0 4px 12px rgba(0, 0, 0, 0.12)'");
-        expect(workspaceStyles).toContain('--scrollbar-track: rgba(0, 0, 0, 0.35);');
+        // CSS variables are now in the extracted variables module
+        expect(variablesStyles).toContain('--scrollbar-track: rgba(0, 0, 0, 0.35);');
     });
 });
 
@@ -42,14 +44,15 @@ describe('phase 2.2 dark muted text values', () => {
     const theme = readSource('src/shared/theme.ts');
     const themeTokens = readSource('src/shared/themeTokens.ts');
     const colors = readSource('src/webview/constants/colors.ts');
-    const workspaceStyles = readSource('src/workspace/ui/sharedStyles.ts');
+    const variablesStyles = readSource('src/workspace/ui/styles/variables.ts');
 
     it('uses #71717A/#71717a for dark muted text tokens', () => {
         expect(themeTokens).toContain("textMuted: '#71717A'");
         expect(themeTokens).not.toContain("textMuted: '#94A3B8'");
         expect(theme).toContain("textMuted: '#71717a'");
         expect(colors).toContain("textMuted: '#71717a'");
-        expect(workspaceStyles).toContain('--text-muted: #71717a;');
+        // CSS variables are now in the extracted variables module
+        expect(variablesStyles).toContain('--text-muted: #71717a;');
     });
 });
 
