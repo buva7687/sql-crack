@@ -418,7 +418,8 @@ export class WorkspacePanel {
             buildIndexWithProgress: () => this.buildIndexWithProgress(),
             rebuildAndRenderGraph: () => this.rebuildAndRenderGraph(),
             buildLineageGraph: () => this.buildLineageGraph(),
-            handleExport: (format) => this.handleExport(format)
+            handleExport: (format) => this.handleExport(format),
+            savePngToFile: (base64Data, suggestedFilename) => this.savePngToFile(base64Data, suggestedFilename),
         };
 
         this._messageHandler = new MessageHandler(context);

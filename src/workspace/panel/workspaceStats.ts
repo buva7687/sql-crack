@@ -1,5 +1,6 @@
 import { getDisplayName } from '../identifiers';
 import { formatRelativeTime } from '../../shared/time';
+import { IndexStatus } from './types';
 import {
     DefinitionDetail,
     DetailedWorkspaceStats,
@@ -7,12 +8,6 @@ import {
     WorkspaceDependencyGraph,
     WorkspaceIndex,
 } from '../types';
-
-export interface IndexStatus {
-    text: string;
-    title: string;
-    level: 'fresh' | 'stale' | 'old' | 'missing';
-}
 
 export function buildIndexStatus(index: WorkspaceIndex | null): IndexStatus {
     if (!index) {

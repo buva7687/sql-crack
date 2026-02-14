@@ -121,15 +121,6 @@ export function getViewModeScriptFragment(): string {
             return escapeBreadcrumbText(value).replace(/"/g, '&quot;');
         }
 
-        function escapeHtmlSafe(text) {
-            return (text || '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
-        }
-
         function updateWorkspaceBreadcrumb() {
             if (!workspaceBreadcrumb) return;
             if (currentViewMode === 'graph') {
@@ -499,4 +490,3 @@ export function getViewModeScriptFragment(): string {
         updateWorkspaceBreadcrumb();
     `;
 }
-

@@ -10,6 +10,9 @@ export function getUtilityScriptFragment(): string {
         function escapeHtmlAttr(text) {
             return escapeHtml(text).replace(/"/g, '&quot;');
         }
+
+        function escapeHtmlSafe(text) {
+            return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
     `;
 }
-

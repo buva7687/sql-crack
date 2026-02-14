@@ -5,12 +5,7 @@ import {
     WorkspaceDependencyGraph,
 } from '../types';
 import { WORKSPACE_EXPORT_OPTIONS } from '../exportUtils';
-
-export interface IndexStatus {
-    text: string;
-    title: string;
-    level: 'fresh' | 'stale' | 'old' | 'missing';
-}
+import { IndexStatus } from './types';
 
 export interface GraphBodyHtmlOptions {
     graph: WorkspaceDependencyGraph;

@@ -10,28 +10,6 @@ export interface RenderWorkspaceGraphSvgOptions {
 export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions): string {
     const { graph, isDarkTheme, escapeHtml } = options;
 
-    // Calculate bounds (used for export, not for main SVG rendering)
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const node of graph.nodes) {
-        minX = Math.min(minX, node.x);
-        minY = Math.min(minY, node.y);
-        maxX = Math.max(maxX, node.x + node.width);
-        maxY = Math.max(maxY, node.y + node.height);
-    }
-
-    // These dimensions are only used for export, not for the interactive SVG
-    const width = Math.max(1200, maxX + 150);
-    const height = Math.max(800, maxY + 150);
-
-    // Prevent unused-variable lint while preserving bound computation side effects.
-    void minX;
-    void minY;
-    void width;
-    void height;
-
     // Pre-build node lookup map for O(1) access (avoids O(n) per edge)
     const nodeMap = new Map<string, WorkspaceNode>();
     for (const node of graph.nodes) {

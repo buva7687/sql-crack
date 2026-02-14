@@ -82,6 +82,7 @@ export interface MessageHandlerContext {
     rebuildAndRenderGraph: () => Promise<void>;
     buildLineageGraph: () => Promise<void>;
     handleExport: (format: string) => Promise<void>;
+    savePngToFile: (base64Data: string, suggestedFilename: string) => Promise<void>;
 }
 
 /**
@@ -364,6 +365,14 @@ export class MessageHandler {
 
                 case 'clearColumnSelection':
                     await this.handleClearColumnSelection();
+                    break;
+
+                case 'savePng':
+                    await this._context.savePngToFile(message.data, message.filename);
+                    break;
+
+                case 'exportPngError':
+                    vscode.window.showErrorMessage(message.error || 'PNG export failed.');
                     break;
 
                 default:

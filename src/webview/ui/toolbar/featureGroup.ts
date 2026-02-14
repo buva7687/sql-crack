@@ -3,8 +3,9 @@ import type { ToolbarCallbacks } from '../toolbar';
 import { ICONS } from '../../../shared/icons';
 import { prefersReducedMotion } from '../motion';
 import { createFocusModeSelector, createPinnedTabsButton, createViewLocationButton } from './featureMenus';
-import { ToolbarActionOptions } from './actionGroups';
+import type { ToolbarActionOptions } from './actionGroups';
 import { createLayoutPicker } from '../layoutPicker';
+import { createToolbarButton } from './buttonFactory';
 
 const LINEAGE_PULSE_STYLE_ID = 'sql-crack-lineage-pulse-style';
 let lineagePulseApplied = false;
@@ -53,26 +54,14 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
         onClick: () => void,
         ariaLabel?: string,
         dark = true
-    ): HTMLButtonElement => {
-        const btn = document.createElement('button');
-        btn.innerHTML = label;
-        btn.style.cssText = getBtnStyle(dark);
-        btn.addEventListener('click', onClick, listenerOptions);
-        btn.addEventListener('mouseenter', () => {
-            btn.style.background = 'rgba(148, 163, 184, 0.1)';
-        }, listenerOptions);
-        btn.addEventListener('mouseleave', () => {
-            if (!btn.style.background.includes('102, 241')) {
-                btn.style.background = 'transparent';
-            }
-        }, listenerOptions);
-
-        if (ariaLabel) {
-            btn.setAttribute('aria-label', ariaLabel);
-        }
-        btn.setAttribute('role', 'button');
-        return btn;
-    };
+    ): HTMLButtonElement => createToolbarButton({
+        label,
+        onClick,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel,
+        isDark: dark,
+    });
 
     const refreshBtn = createButton(ICONS.refresh, callbacks.onRefresh, 'Refresh visualization');
     refreshBtn.id = 'refresh-btn';

@@ -74,7 +74,9 @@ export type WorkspaceWebviewMessage =
     | { command: 'setLineageDirection'; nodeId: string; direction: 'both' | 'upstream' | 'downstream' }
     | { command: 'collapseNodeColumns'; nodeId: string }
     | { command: 'selectColumn'; tableId: string; columnName: string }
-    | { command: 'clearColumnSelection' };
+    | { command: 'clearColumnSelection' }
+    | { command: 'savePng'; data: string; filename: string }
+    | { command: 'exportPngError'; error: string };
 
 // ─── Host → Webview messages ───
 

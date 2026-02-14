@@ -2,6 +2,7 @@ import { createExportDropdown } from '../exportDropdown';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { applyOverflowMenuTheme, getOverflowPalette } from './overflowMenu';
 import type { ToolbarCallbacks } from '../toolbar';
+import { createToolbarButton } from './buttonFactory';
 
 export interface ToolbarActionOptions {
     isPinnedView: boolean;
@@ -129,6 +130,7 @@ function createZoomGroup(
     getListenerOptions: () => AddEventListenerOptions | undefined,
     getBtnStyle: (dark: boolean) => string
 ): HTMLElement {
+    const listenerOptions = getListenerOptions();
     const isDark = callbacks.isDarkTheme();
     const groupBackground = isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
@@ -144,19 +146,37 @@ function createZoomGroup(
         overflow: hidden;
     `;
 
-    const undoBtn = createButton('↶', callbacks.onUndo, getBtnStyle, getListenerOptions, 'Undo layout change');
+    const undoBtn = createToolbarButton({
+        label: '↶',
+        onClick: callbacks.onUndo,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel: 'Undo layout change',
+    });
     undoBtn.id = 'sql-crack-undo-btn';
     undoBtn.title = 'Undo (Ctrl/Cmd+Z)';
     undoBtn.style.borderRight = `1px solid ${borderColor}`;
     zoomGroup.appendChild(undoBtn);
 
-    const redoBtn = createButton('↷', callbacks.onRedo, getBtnStyle, getListenerOptions, 'Redo layout change');
+    const redoBtn = createToolbarButton({
+        label: '↷',
+        onClick: callbacks.onRedo,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel: 'Redo layout change',
+    });
     redoBtn.id = 'sql-crack-redo-btn';
     redoBtn.title = 'Redo (Ctrl/Cmd+Shift+Z)';
     redoBtn.style.borderRight = `1px solid ${borderColor}`;
     zoomGroup.appendChild(redoBtn);
 
-    const zoomOutBtn = createButton('−', callbacks.onZoomOut, getBtnStyle, getListenerOptions, 'Zoom out');
+    const zoomOutBtn = createToolbarButton({
+        label: '−',
+        onClick: callbacks.onZoomOut,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel: 'Zoom out',
+    });
     zoomOutBtn.title = 'Zoom out (-)';
     zoomGroup.appendChild(zoomOutBtn);
 
@@ -175,11 +195,23 @@ function createZoomGroup(
     zoomLevel.title = 'Current zoom level';
     zoomGroup.appendChild(zoomLevel);
 
-    const zoomInBtn = createButton('+', callbacks.onZoomIn, getBtnStyle, getListenerOptions, 'Zoom in');
+    const zoomInBtn = createToolbarButton({
+        label: '+',
+        onClick: callbacks.onZoomIn,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel: 'Zoom in',
+    });
     zoomInBtn.title = 'Zoom in (+)';
     zoomGroup.appendChild(zoomInBtn);
 
-    const fitBtn = createButton('⊡', callbacks.onResetView, getBtnStyle, getListenerOptions, 'Fit to view');
+    const fitBtn = createToolbarButton({
+        label: '⊡',
+        onClick: callbacks.onResetView,
+        getBtnStyle,
+        listenerOptions,
+        ariaLabel: 'Fit to view',
+    });
     fitBtn.title = 'Fit to view (R)';
     fitBtn.style.borderLeft = `1px solid ${borderColor}`;
     zoomGroup.appendChild(fitBtn);
@@ -231,33 +263,4 @@ function createExportGroup(
 
     exportGroup.appendChild(exportDropdown);
     return exportGroup;
-}
-
-function createButton(
-    label: string,
-    onClick: () => void,
-    getBtnStyle: (dark: boolean) => string,
-    getListenerOptions: () => AddEventListenerOptions | undefined,
-    ariaLabel?: string,
-    isDark = true
-): HTMLButtonElement {
-    const listenerOptions = getListenerOptions();
-    const btn = document.createElement('button');
-    btn.innerHTML = label;
-    btn.style.cssText = getBtnStyle(isDark);
-    btn.addEventListener('click', onClick, listenerOptions);
-    btn.addEventListener('mouseenter', () => {
-        btn.style.background = 'rgba(148, 163, 184, 0.1)';
-    }, listenerOptions);
-    btn.addEventListener('mouseleave', () => {
-        if (!btn.style.background.includes('102, 241')) {
-            btn.style.background = 'transparent';
-        }
-    }, listenerOptions);
-
-    if (ariaLabel) {
-        btn.setAttribute('aria-label', ariaLabel);
-    }
-    btn.setAttribute('role', 'button');
-    return btn;
 }
