@@ -1,8 +1,8 @@
-import type { FlowEdge, FlowNode } from '../../types';
+import type { FlowNode } from '../../types';
 import type { ParserContext } from '../context';
 import { escapeRegex } from '../../../shared';
 
-export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], _edges: FlowEdge[], sql: string): void {
+export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], sql: string): void {
     // Detect unused CTEs
     // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
     const cteNodes = nodes.filter(n => n.type === 'cte');
@@ -259,14 +259,13 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
                 }
             }
         });
-        
-            context.hints.push({
-                type: 'info',
+        context.hints.push({
+            type: 'info',
             message: `${group.length} similar subqueries detected`,
-                suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
-                category: 'quality',
-                severity: 'low'
-            });
+            suggestion: 'Consider extracting to a CTE to avoid duplication and improve maintainability',
+            category: 'quality',
+            severity: 'low'
+        });
     });
     
     // Also check exact matches (original logic)

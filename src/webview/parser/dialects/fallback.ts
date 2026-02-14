@@ -266,7 +266,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const stats: QueryStats = {
         tables: tableNames.size,
         joins: edges.length,
-        subqueries: (commentStripped.match(/\bsubquery\b/gi) || []).length,
+        subqueries: (commentStripped.match(/\(\s*SELECT\b/gi) || []).length,
         ctes: cteNames.size,
         aggregations: (commentStripped.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
         windowFunctions: (commentStripped.match(/\bOVER\s*\(/gi) || []).length,

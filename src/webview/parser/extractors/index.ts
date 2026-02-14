@@ -1,5 +1,5 @@
 // Re-export all extractors
-export { extractColumnInfos } from './columns';
+export { getAstString, formatExpressionFromAst, extractColumns, extractColumnInfos } from './columns';
 export { extractConditions, formatConditionRecursive, formatCondition } from './conditions';
 export {
     extractWindowFunctions,
@@ -7,4 +7,11 @@ export {
     extractAggregateFunctionDetails,
     extractCaseStatementDetails
 } from './functions';
-export { getTableName, extractTablesFromStatement } from './tables';
+export {
+    getTableName,
+    getNormalizedFromAlias,
+    getFromItemDisplayName,
+    getFromItemLookupKey,
+    getTableValuedFunctionName,
+    extractTablesFromStatement
+} from './tables';

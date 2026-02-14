@@ -1,23 +1,30 @@
-import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 import type {
     ColumnInfo,
-    ColumnLineage,
     FlowEdge,
     FlowNode,
-    QueryStats
+    SqlDialect
 } from '../../types';
 import { unwrapIdentifierValue } from '../astUtils';
-import { createFreshContext, type ParserContext } from '../context';
-import { getTableValuedFunctionName } from '../extractors/tables';
+import type { ParserContext } from '../context';
+import {
+    extractColumns,
+    extractColumnInfos,
+    extractConditions,
+    extractAggregateFunctionDetails,
+    extractCaseStatementDetails,
+    extractTablesFromStatement,
+    extractWindowFunctionDetails,
+    formatCondition,
+    getAstString,
+    getFromItemDisplayName,
+    getFromItemLookupKey,
+    getTableName,
+    getTableValuedFunctionName
+} from '../extractors';
 
 export interface SelectRuntimeDependencies {
     genId: (prefix: string) => string;
     processStatement: (context: ParserContext, stmt: any, nodes: FlowNode[], edges: FlowEdge[]) => string | null;
-    layoutGraph: (nodes: FlowNode[], edges: FlowEdge[]) => void;
-    extractColumnLineage: (stmt: any, nodes: FlowNode[]) => ColumnLineage[];
-    calculateColumnPositions: (nodes: FlowNode[]) => void;
-    assignLineNumbers: (nodes: FlowNode[], sql: string) => void;
-    calculateComplexity: (context: ParserContext) => void;
     trackTableUsage: (context: ParserContext, tableName: string) => void;
     trackFunctionUsage: (
         context: ParserContext,
@@ -26,54 +33,29 @@ export interface SelectRuntimeDependencies {
     ) => void;
 }
 
-let ctx: ParserContext = createFreshContext('MySQL');
-let runtimeDeps: SelectRuntimeDependencies | null = null;
-
-function getRuntimeDeps(): SelectRuntimeDependencies {
-    if (!runtimeDeps) {
-        throw new Error('Select runtime dependencies not initialized');
-    }
-    return runtimeDeps;
+interface SelectExecutionContext {
+    context: ParserContext;
+    deps: SelectRuntimeDependencies;
 }
 
-function genId(prefix: string): string {
-    return getRuntimeDeps().genId(prefix);
+function genId(runtime: SelectExecutionContext, prefix: string): string {
+    return runtime.deps.genId(prefix);
 }
 
-function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
-    return getRuntimeDeps().processStatement(context, stmt, nodes, edges);
+function processStatement(runtime: SelectExecutionContext, stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
+    return runtime.deps.processStatement(runtime.context, stmt, nodes, edges);
 }
 
-function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): void {
-    getRuntimeDeps().layoutGraph(nodes, edges);
-}
-
-function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
-    return getRuntimeDeps().extractColumnLineage(stmt, nodes);
-}
-
-function calculateColumnPositions(nodes: FlowNode[]): void {
-    getRuntimeDeps().calculateColumnPositions(nodes);
-}
-
-function assignLineNumbers(nodes: FlowNode[], sql: string): void {
-    getRuntimeDeps().assignLineNumbers(nodes, sql);
-}
-
-function calculateComplexity(context: ParserContext): void {
-    getRuntimeDeps().calculateComplexity(context);
-}
-
-function trackTableUsage(context: ParserContext, tableName: string): void {
-    getRuntimeDeps().trackTableUsage(context, tableName);
+function trackTableUsage(runtime: SelectExecutionContext, tableName: string): void {
+    runtime.deps.trackTableUsage(runtime.context, tableName);
 }
 
 function trackFunctionUsage(
-    context: ParserContext,
+    runtime: SelectExecutionContext,
     functionName: unknown,
     category: 'aggregate' | 'window' | 'tvf' | 'scalar'
 ): void {
-    getRuntimeDeps().trackFunctionUsage(context, functionName, category);
+    runtime.deps.trackFunctionUsage(runtime.context, functionName, category);
 }
 
 export function processSelectStatement(
@@ -84,18 +66,18 @@ export function processSelectStatement(
     deps: SelectRuntimeDependencies,
     cteNames: Set<string> = new Set()
 ): string {
-    runtimeDeps = deps;
-    return processSelect(context, stmt, nodes, edges, cteNames);
+    const runtime: SelectExecutionContext = { context, deps };
+    return processSelect(runtime, stmt, nodes, edges, cteNames);
 }
 
 function processSelect(
-    context: ParserContext,
+    runtime: SelectExecutionContext,
     stmt: any,
     nodes: FlowNode[],
     edges: FlowEdge[],
     cteNames: Set<string> = new Set()
 ): string {
-    ctx = context;
+    const ctx = runtime.context;
     const nodeIds: string[] = [];
 
     // Collect CTE names first
@@ -110,7 +92,7 @@ function processSelect(
     if (stmt.with && Array.isArray(stmt.with)) {
         for (const cte of stmt.with) {
             ctx.stats.ctes++;
-            const cteId = genId('cte');
+            const cteId = genId(runtime, 'cte');
             const cteName = cte.name?.value || cte.name || 'CTE';
 
             // Parse CTE's internal structure
@@ -124,7 +106,7 @@ function processSelect(
             if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
                 // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
-                parseCteOrSubqueryInternals(context, cteStmt, cteChildren, cteChildEdges, cteId, 0);
+                parseCteOrSubqueryInternals(runtime, cteStmt, cteChildren, cteChildEdges, cteId, 0);
             }
 
             // Calculate container size based on children
@@ -158,10 +140,10 @@ function processSelect(
 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const tableId = processFromItem(context, fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
+            const tableId = processFromItem(runtime, fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
             if (tableId) {
                 tableIds.push(tableId);
-                joinTableMap.set(getFromItemLookupKey(fromItem), tableId);
+                joinTableMap.set(getFromItemLookupKey(fromItem, ctx.dialect), tableId);
             }
         }
     }
@@ -172,7 +154,12 @@ function processSelect(
             seenTableLabels.add(tableNode.label.toLowerCase());
         }
     }
-    const scalarSubquerySourceTables = collectScalarSubquerySourceTables(stmt, cteNames, seenTableLabels);
+    const scalarSubquerySourceTables = collectScalarSubquerySourceTables(
+        stmt,
+        cteNames,
+        seenTableLabels,
+        ctx.dialect
+    );
 
     // Process JOINs - create join nodes and connect tables properly
     let lastOutputId = tableIds[0]; // Start with first table as base
@@ -184,10 +171,10 @@ function processSelect(
             const fromItem = stmt.from[i];
             if (fromItem.join) {
                 ctx.stats.joins++;
-                const joinId = genId('join');
+                const joinId = genId(runtime, 'join');
                 const joinType = fromItem.join || 'JOIN';
-                const joinTable = getFromItemDisplayName(fromItem);
-                const rightTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
+                const joinTable = getFromItemDisplayName(fromItem, ctx.dialect);
+                const rightTableId = joinTableMap.get(getFromItemLookupKey(fromItem, ctx.dialect));
 
                 // Extract join condition details
                 const joinDetails: string[] = [];
@@ -213,7 +200,7 @@ function processSelect(
                 // Store SQL clause and line number for edge click navigation
                 if (leftTableId) {
                     edges.push({
-                        id: genId('e'),
+                        id: genId(runtime, 'e'),
                         source: leftTableId,
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
@@ -225,7 +212,7 @@ function processSelect(
                 // Connect right side (join table) to join
                 if (rightTableId && rightTableId !== leftTableId) {
                     edges.push({
-                        id: genId('e'),
+                        id: genId(runtime, 'e'),
                         source: rightTableId,
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
@@ -245,7 +232,7 @@ function processSelect(
     for (const cteId of nodeIds) {
         if (tableIds[0]) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: cteId,
                 target: tableIds[0]
             });
@@ -259,26 +246,26 @@ function processSelect(
         for (let i = 1; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
             if (!fromItem.join) {
-                const extraTableId = joinTableMap.get(getFromItemLookupKey(fromItem));
+                const extraTableId = joinTableMap.get(getFromItemLookupKey(fromItem, ctx.dialect));
                 if (extraTableId && lastOutputId) {
                     // Create an implicit CROSS JOIN node
                     ctx.stats.joins++;
-                    const crossJoinId = genId('join');
+                    const crossJoinId = genId(runtime, 'join');
                     nodes.push({
                         id: crossJoinId,
                         type: 'join',
                         label: 'CROSS JOIN',
-                        description: `Implicit join with ${getFromItemDisplayName(fromItem)}`,
-                        details: [getFromItemDisplayName(fromItem)],
+                        description: `Implicit join with ${getFromItemDisplayName(fromItem, ctx.dialect)}`,
+                        details: [getFromItemDisplayName(fromItem, ctx.dialect)],
                         x: 0, y: 0, width: 140, height: 60
                     });
                     edges.push({
-                        id: genId('e'),
+                        id: genId(runtime, 'e'),
                         source: lastOutputId,
                         target: crossJoinId
                     });
                     edges.push({
-                        id: genId('e'),
+                        id: genId(runtime, 'e'),
                         source: extraTableId,
                         target: crossJoinId
                     });
@@ -291,7 +278,7 @@ function processSelect(
     // Process WHERE - connect from the last join output or first table
     let previousId = lastOutputId || tableIds[0];
     if (stmt.where) {
-        const whereId = genId('filter');
+        const whereId = genId(runtime, 'filter');
         const conditions = extractConditions(stmt.where);
         ctx.stats.conditions += conditions.length;
         nodes.push({
@@ -309,7 +296,7 @@ function processSelect(
             // Format WHERE clause SQL
             const whereClauseSql = conditions.join(' AND ');
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: whereId,
                 sqlClause: whereClauseSql, // SQL clause for edge click display
@@ -323,7 +310,7 @@ function processSelect(
     // Process GROUP BY
     if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
         ctx.stats.aggregations++;
-        const groupId = genId('agg');
+        const groupId = genId(runtime, 'agg');
         const groupCols = stmt.groupby.map((g: any) => g.column || g.expr?.column || '?').join(', ');
         nodes.push({
             id: groupId,
@@ -336,7 +323,7 @@ function processSelect(
 
         if (previousId) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: groupId
             });
@@ -346,7 +333,7 @@ function processSelect(
 
     // Process HAVING
     if (stmt.having) {
-        const havingId = genId('filter');
+        const havingId = genId(runtime, 'filter');
         nodes.push({
             id: havingId,
             type: 'filter',
@@ -358,7 +345,7 @@ function processSelect(
 
         if (previousId) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: havingId
             });
@@ -367,10 +354,10 @@ function processSelect(
     }
 
     // Check for aggregate functions in columns - with detailed breakdown
-    const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns);
+    const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns, ctx.dialect);
     // Always show aggregate node when aggregate functions are present (similar to window functions)
     if (aggregateFuncDetails.length > 0) {
-        const aggregateId = genId('aggregate');
+        const aggregateId = genId(runtime, 'aggregate');
 
         // Calculate height based on number of functions
         const baseHeight = 50;
@@ -388,7 +375,7 @@ function processSelect(
 
         if (previousId) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: aggregateId
             });
@@ -399,7 +386,7 @@ function processSelect(
     // Check for CASE statements in columns - with detailed breakdown
     const caseStatementDetails = extractCaseStatementDetails(stmt.columns);
     if (caseStatementDetails.length > 0) {
-        const caseId = genId('case');
+        const caseId = genId(runtime, 'case');
 
         // Calculate height based on number of CASE statements
         const baseHeight = 50;
@@ -417,7 +404,7 @@ function processSelect(
 
         if (previousId) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: caseId
             });
@@ -426,10 +413,12 @@ function processSelect(
     }
 
     // Check for window functions in columns - with detailed breakdown
-    const windowFuncDetails = extractWindowFunctionDetails(stmt.columns);
+    const windowFuncDetails = extractWindowFunctionDetails(stmt.columns, ctx.dialect, {
+        trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+    });
     if (windowFuncDetails.length > 0) {
         ctx.stats.windowFunctions += windowFuncDetails.length;
-        const windowId = genId('window');
+        const windowId = genId(runtime, 'window');
 
         // Calculate height based on number of functions
         const baseHeight = 50;
@@ -447,7 +436,7 @@ function processSelect(
 
         if (previousId) {
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: previousId,
                 target: windowId
             });
@@ -456,10 +445,17 @@ function processSelect(
     }
 
     // Process SELECT columns
-    const selectId = genId('select');
-    const columns = extractColumns(stmt.columns);
+    const selectId = genId(runtime, 'select');
+    const columns = extractColumns(stmt.columns, {
+        onSelectStar: () => {
+            ctx.hasSelectStar = true;
+        }
+    });
     // Extract column info for dead column detection
-    const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns);
+    const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
+        expressionMode: 'formatted',
+        trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+    });
     nodes.push({
         id: selectId,
         type: 'select',
@@ -472,7 +468,7 @@ function processSelect(
 
     if (previousId) {
         edges.push({
-            id: genId('e'),
+            id: genId(runtime, 'e'),
             source: previousId,
             target: selectId
         });
@@ -484,7 +480,7 @@ function processSelect(
             continue;
         }
 
-        const tableId = genId('table');
+        const tableId = genId(runtime, 'table');
         nodes.push({
             id: tableId,
             type: 'table',
@@ -494,7 +490,7 @@ function processSelect(
             x: 0, y: 0, width: 140, height: 60
         });
         edges.push({
-            id: genId('e'),
+            id: genId(runtime, 'e'),
             source: tableId,
             target: selectId,
             sqlClause: 'Subquery source',
@@ -503,7 +499,7 @@ function processSelect(
 
         seenTableLabels.add(tableKey);
         const hadTable = ctx.tableUsageMap.has(tableKey);
-        trackTableUsage(ctx, tableName);
+        trackTableUsage(runtime, tableName);
         if (!hadTable) {
             ctx.stats.tables++;
         }
@@ -513,7 +509,7 @@ function processSelect(
 
     // Process ORDER BY
     if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
-        const sortId = genId('sort');
+        const sortId = genId(runtime, 'sort');
         const sortCols = stmt.orderby.map((o: any) => {
             const col = o.expr?.column || o.expr?.value || '?';
             const dir = o.type || 'ASC';
@@ -529,7 +525,7 @@ function processSelect(
         });
 
         edges.push({
-            id: genId('e'),
+            id: genId(runtime, 'e'),
             source: previousId,
             target: sortId
         });
@@ -540,7 +536,7 @@ function processSelect(
     // (PostgreSQL, Snowflake, Trino, Redshift return { seperator: "", value: [] } when no LIMIT exists)
     if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         ctx.hasNoLimit = false;
-        const limitId = genId('limit');
+        const limitId = genId(runtime, 'limit');
         const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
         nodes.push({
             id: limitId,
@@ -552,7 +548,7 @@ function processSelect(
         });
 
         edges.push({
-            id: genId('e'),
+            id: genId(runtime, 'e'),
             source: previousId,
             target: limitId
         });
@@ -560,7 +556,7 @@ function processSelect(
     }
 
     // Add result node
-    const resultId = genId('result');
+    const resultId = genId(runtime, 'result');
     nodes.push({
         id: resultId,
         type: 'result',
@@ -570,7 +566,7 @@ function processSelect(
     });
 
     edges.push({
-        id: genId('e'),
+        id: genId(runtime, 'e'),
         source: previousId,
         target: resultId
     });
@@ -578,14 +574,14 @@ function processSelect(
     // Handle UNION/INTERSECT/EXCEPT
     if (stmt._next) {
         ctx.stats.unions++;
-        const nextResultId = processStatement(context, stmt._next, nodes, edges);
+        const nextResultId = processStatement(runtime, stmt._next, nodes, edges);
         if (nextResultId) {
-            const unionId = genId('union');
+            const unionId = genId(runtime, 'union');
             const setOp = stmt.set_op || 'UNION';
 
             // Collect tables from both sides for details
-            const leftTables = extractTablesFromStatement(stmt);
-            const rightTables = extractTablesFromStatement(stmt._next);
+            const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
+            const rightTables = extractTablesFromStatement(stmt._next, ctx.dialect);
             const unionDetails: string[] = [];
             if (leftTables.length > 0) {
                 unionDetails.push(`Left: ${leftTables.join(', ')}`);
@@ -605,12 +601,12 @@ function processSelect(
 
             // Connect both results to the union
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: resultId,
                 target: unionId
             });
             edges.push({
-                id: genId('e'),
+                id: genId(runtime, 'e'),
                 source: nextResultId,
                 target: unionId
             });
@@ -643,24 +639,24 @@ function getCteStatementAst(cte: any): any {
 }
 
 function processFromItem(
-    context: ParserContext,
+    runtime: SelectExecutionContext,
     fromItem: any,
     nodes: FlowNode[],
     _edges: FlowEdge[],
     cteNames: Set<string> = new Set(),
     asJoin: boolean = false
 ): string | null {
-    ctx = context;
+    const ctx = runtime.context;
     // Check for subquery
     if (fromItem.expr && fromItem.expr.ast) {
         ctx.stats.subqueries++;
-        const subqueryId = genId('subquery');
+        const subqueryId = genId(runtime, 'subquery');
         const alias = fromItem.as || 'subquery';
 
         // Parse subquery's internal structure
         const subChildren: FlowNode[] = [];
         const subChildEdges: FlowEdge[] = [];
-        parseCteOrSubqueryInternals(context, fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0);
+        parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0);
 
         // Subqueries as data sources should always be expanded
         // Calculate container size based on children
@@ -687,10 +683,10 @@ function processFromItem(
     // Table-valued function (UNNEST, OPENJSON, FLATTEN, JSON_TABLE, etc.)
     const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
     if (tableValuedFunctionName) {
-        trackFunctionUsage(ctx, tableValuedFunctionName, 'tvf');
+        trackFunctionUsage(runtime, tableValuedFunctionName, 'tvf');
         ctx.stats.tables++;
-        const tableId = genId('table');
-        const label = getFromItemDisplayName(fromItem);
+        const tableId = genId(runtime, 'table');
+        const label = getFromItemDisplayName(fromItem, ctx.dialect);
         const details: string[] = [`Function: ${tableValuedFunctionName}`];
         const rawAlias = typeof fromItem.as === 'string' ? fromItem.as.trim() : '';
         if (rawAlias && rawAlias !== label) {
@@ -708,7 +704,7 @@ function processFromItem(
             tableCategory: 'table_function',
             x: 0, y: 0, width: 140, height: 60
         });
-        trackTableUsage(ctx, label);
+        trackTableUsage(runtime, label);
         return tableId;
     }
 
@@ -717,8 +713,8 @@ function processFromItem(
     if (!tableName) { return null; }
 
     ctx.stats.tables++;
-    trackTableUsage(ctx, tableName);
-    const tableId = genId('table');
+    trackTableUsage(runtime, tableName);
+    const tableId = genId(runtime, 'table');
     // Determine if this is a CTE reference
     const isCteRef = cteNames.has(tableName.toLowerCase());
     nodes.push({
@@ -736,630 +732,15 @@ function processFromItem(
     return tableId;
 }
 
-export function getTableName(item: any): string {
-    if (typeof item === 'string') { return item; }
-    
-    // For table references, prefer the actual table name over alias
-    // The AST structure varies by parser, so check multiple possible fields
-    if (item.table) {
-        // If table is an object, extract the name
-        if (typeof item.table === 'object') {
-            return item.table.table || item.table.name || item.table.value || item.as || 'table';
-        }
-        return item.table;
-    }
-    
-    // Fallback to name, then alias, then default
-    return item.name || item.as || 'table';
-}
-
-function getNormalizedFromAlias(item: any): string | null {
-    const rawAlias = typeof item?.as === 'string' ? item.as.trim() : '';
-    if (!rawAlias) {
-        return null;
-    }
-    const parenIndex = rawAlias.indexOf('(');
-    if (parenIndex > 0) {
-        return rawAlias.slice(0, parenIndex).trim();
-    }
-    return rawAlias;
-}
-
-function getFromItemDisplayName(item: any): string {
-    const alias = getNormalizedFromAlias(item);
-    if (alias) {
-        return alias;
-    }
-    const tableName = getTableName(item);
-    if (tableName && tableName !== 'table') {
-        return tableName;
-    }
-    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
-}
-
-function getFromItemLookupKey(item: any): string {
-    const alias = getNormalizedFromAlias(item);
-    if (alias) {
-        return alias;
-    }
-    const tableName = getTableName(item);
-    if (tableName && tableName !== 'table') {
-        return tableName;
-    }
-    return getTableValuedFunctionName(item, ctx.dialect) || tableName;
-}
-
-/**
- * Extract a readable identifier/value from parser AST nodes across dialects.
- * Handles wrapped nodes like { expr: { type: 'default', value: 'col' } }.
- */
-export function getAstString(val: any, depth = 0): string | null {
-    if (depth > 6 || val === null || val === undefined) { return null; }
-    if (typeof val === 'string') { return val; }
-    if (typeof val === 'number' || typeof val === 'boolean') { return String(val); }
-
-    if (Array.isArray(val)) {
-        for (const item of val) {
-            const extracted = getAstString(item, depth + 1);
-            if (extracted) { return extracted; }
-        }
-        return null;
-    }
-
-    if (typeof val === 'object') {
-        const candidateKeys = ['value', 'name', 'column', 'table', 'expr'];
-        for (const key of candidateKeys) {
-            if (Object.prototype.hasOwnProperty.call(val, key)) {
-                const extracted = getAstString(val[key], depth + 1);
-                if (extracted) { return extracted; }
-            }
-        }
-    }
-
-    return null;
-}
-
-/**
- * Format an AST expression node into a readable SQL expression string
- */
-function formatExpressionFromAst(expr: any): string {
-    if (!expr) { return ''; }
-
-    // Simple column reference
-    if (expr.type === 'column_ref') {
-        const tableName = getAstString(expr.table);
-        const columnName = getAstString(expr.column);
-        const table = tableName ? `${tableName}.` : '';
-        return `${table}${columnName || '?'}`;
-    }
-
-    // Aggregate function
-    if (expr.type === 'aggr_func') {
-        const funcName = getAstString(expr.name) || 'AGG';
-        trackFunctionUsage(ctx, funcName, 'aggregate');
-        const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
-        let argsStr = '';
-
-        if (expr.args) {
-            const args = expr.args.value || expr.args.expr || expr.args;
-            if (Array.isArray(args)) {
-                argsStr = args.map((arg: any) => formatExpressionFromAst(arg)).join(', ');
-            } else if (args) {
-                argsStr = formatExpressionFromAst(args);
-            }
-        }
-
-        return `${funcName}(${distinct}${argsStr})`;
-    }
-
-    // Function call
-    if (expr.type === 'function') {
-        const funcName = getAstString(expr.name) || 'FUNC';
-        trackFunctionUsage(ctx, funcName, expr.over ? 'window' : 'scalar');
-        const args = expr.args?.value || expr.args || [];
-        const argsStr = Array.isArray(args)
-            ? args.map((arg: any) => formatExpressionFromAst(arg)).join(', ')
-            : formatExpressionFromAst(args);
-        return `${funcName}(${argsStr})`;
-    }
-
-    // Binary expression
-    if (expr.type === 'binary_expr') {
-        const left = formatExpressionFromAst(expr.left);
-        const right = formatExpressionFromAst(expr.right);
-        return `${left} ${expr.operator || '?'} ${right}`;
-    }
-
-    // Unary expression
-    if (expr.type === 'unary_expr') {
-        return `${expr.operator || ''}${formatExpressionFromAst(expr.expr)}`;
-    }
-
-    // CAST expression
-    if (expr.type === 'cast') {
-        const innerExpr = formatExpressionFromAst(expr.expr);
-        const dataType = expr.target?.dataType || expr.target || 'type';
-        return `CAST(${innerExpr} AS ${dataType})`;
-    }
-
-    // Number or string literal
-    if (expr.type === 'number' || expr.type === 'single_quote_string' || expr.type === 'string') {
-        return String(expr.value ?? '');
-    }
-
-    // Star
-    if (expr.type === 'star' || expr.column === '*') {
-        return '*';
-    }
-
-    // Window function (has over clause)
-    if (expr.over) {
-        const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
-        return `${funcName}() OVER(...)`;
-    }
-
-    // CASE expression
-    if (expr.type === 'case') {
-        return 'CASE...END';
-    }
-
-    // Fallback: try common properties
-    if (expr.column) { return getAstString(expr.column) || 'expr'; }
-    if (expr.value !== undefined) { return String(expr.value); }
-    if (expr.name) { return getAstString(expr.name) || 'expr'; }
-
-    return 'expr';
-}
-
-function extractColumns(columns: any): string[] {
-    if (!columns || columns === '*') {
-        ctx.hasSelectStar = true;
-        return ['*'];
-    }
-    if (!Array.isArray(columns)) { return ['*']; }
-
-    return columns.map((col: any) => {
-        const exprColumn = getAstString(col?.expr?.column);
-        if (col === '*' || exprColumn === '*') {
-            ctx.hasSelectStar = true;
-            return '*';
-        }
-        const aliasName = getAstString(col?.as);
-        if (aliasName) { return aliasName; }
-        if (exprColumn) { return exprColumn; }
-        const exprName = getAstString(col?.expr?.name);
-        if (exprName) { return `${exprName}()`; }
-        return 'expr';
-    }).slice(0, 10); // Limit to first 10
-}
-
-/**
- * Extract column information from SELECT statement AST for dead column detection.
- * 
- * This function extracts detailed column information including:
- * - Column name (prioritizing alias if present)
- * - Source column and table references
- * - Aggregate and window function indicators
- * - Transformation types (renamed, aggregated, calculated, passthrough)
- * 
- * @param columns - Column AST nodes from the SELECT statement
- * @returns Array of ColumnInfo objects for dead column detection
- */
-function extractColumnInfos(columns: any): ColumnInfo[] {
-    if (!columns || columns === '*') {
-        return [];
-    }
-    if (!Array.isArray(columns)) { return []; }
-
-    return columns.map((col: any): ColumnInfo => {
-        // Extract column name - prioritize alias, then column name, then expression
-        let name: string;
-        const aliasName = getAstString(col.as);
-        const exprColumn = getAstString(col.expr?.column);
-        const exprName = getAstString(col.expr?.name);
-        const exprValue = getAstString(col.expr?.value);
-
-        if (aliasName) {
-            name = aliasName;
-        } else if (exprColumn) {
-            name = exprColumn;
-        } else if (exprName) {
-            name = exprName;
-        } else if (exprValue) {
-            name = exprValue;
-        } else if (typeof col === 'string') {
-            name = col;
-        } else {
-            name = 'expr';
-        }
-        
-        const expression = col.expr ? formatExpressionFromAst(col.expr) : name;
-        
-        // Extract source column and table
-        // For CAST expressions, the source column is inside col.expr.expr
-        let sourceColName: string | undefined;
-        let sourceTableName: string | undefined;
-        
-        if (col.expr?.type === 'cast') {
-            // CAST expression: extract source from the inner expression
-            sourceColName = getAstString(col.expr.expr?.column) || undefined;
-            sourceTableName = getAstString(col.expr.expr?.table) || undefined;
-        } else {
-            // Regular expression: extract source from the expression itself
-            sourceColName = getAstString(col.expr?.column) || undefined;
-            sourceTableName = getAstString(col.expr?.table) || undefined;
-        }
-
-        return {
-            name: name,
-            expression: expression,
-            sourceColumn: sourceColName || undefined,
-            sourceTable: sourceTableName || undefined,
-            isAggregate: col.expr?.type === 'aggr_func' || false,
-            isWindowFunc: !!col.expr?.over,
-            transformationType: col.as && col.expr?.column ? 'renamed' :
-                               col.expr?.type === 'aggr_func' ? 'aggregated' :
-                               col.expr?.over ? 'calculated' : 'passthrough'
-        };
-    });
-}
-
-function extractWindowFunctions(columns: any): string[] {
-    if (!columns || !Array.isArray(columns)) { return []; }
-
-    const windowFuncs: string[] = [];
-    for (const col of columns) {
-        if (col.expr?.over) {
-            // Safely extract function name
-            let funcName = 'WINDOW';
-            const expr = col.expr;
-            const extractedFunc = getAstString(expr.name);
-            if (extractedFunc) { funcName = extractedFunc; }
-
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
-                getAstString(p.column) || getAstString(p.expr?.column) || '?'
-            ).join(', ');
-            let desc = `${funcName}()`;
-            if (partitionBy) {
-                desc += ` OVER(PARTITION BY ${partitionBy})`;
-            }
-            windowFuncs.push(desc);
-        }
-    }
-    return windowFuncs;
-}
-
-// Extract detailed window function information
-function extractWindowFunctionDetails(columns: any): Array<{
-    name: string;
-    partitionBy?: string[];
-    orderBy?: string[];
-    frame?: string;
-}> {
-    if (!columns || !Array.isArray(columns)) { return []; }
-
-    const details: Array<{
-        name: string;
-        partitionBy?: string[];
-        orderBy?: string[];
-        frame?: string;
-    }> = [];
-
-    // Get dialect-specific window functions
-    const windowFuncList = getWindowFunctions(ctx.dialect);
-
-    for (const col of columns) {
-        if (col.expr?.over) {
-            // Safely extract function name - could be in various formats
-            let funcName = 'WINDOW';
-            const expr = col.expr;
-
-            // Helper to safely get string value
-            const getStringName = (obj: any): string | null => {
-                if (typeof obj === 'string') {return obj;}
-                if (obj && typeof obj.name === 'string') {return obj.name;}
-                if (obj && typeof obj.value === 'string') {return obj.value;}
-                return null;
-            };
-
-            // Try multiple paths to find the function name
-            const nameFromExpr = getStringName(expr.name);
-            if (nameFromExpr) {
-                funcName = nameFromExpr;
-            } else if (expr.type === 'aggr_func' || expr.type === 'function') {
-                const aggName = getStringName(expr.name);
-                if (aggName) {funcName = aggName;}
-            } else if (expr.args?.expr) {
-                const argsName = getStringName(expr.args.expr.name) || getStringName(expr.args.expr);
-                if (argsName) {funcName = argsName;}
-            }
-
-            // Check for window function in alias patterns
-            if (funcName === 'WINDOW' && col.as) {
-                const alias = String(col.as).toLowerCase();
-                if (alias.includes('prev') || alias.includes('lag')) {funcName = 'LAG';}
-                else if (alias.includes('next') || alias.includes('lead')) {funcName = 'LEAD';}
-                else if (alias.includes('rank')) {funcName = 'RANK';}
-                else if (alias.includes('row_num')) {funcName = 'ROW_NUMBER';}
-                else if (alias.includes('running') || alias.includes('total')) {funcName = 'SUM';}
-                else if (alias.includes('avg') || alias.includes('average')) {funcName = 'AVG';}
-            }
-
-            // Final fallback - search JSON for known function names (dialect-aware)
-            if (funcName === 'WINDOW') {
-                try {
-                    const exprStr = JSON.stringify(expr).toUpperCase();
-                    for (const wf of windowFuncList) {
-                        if (exprStr.includes(`"NAME":"${wf}"`) || exprStr.includes(`"${wf}"`)) {
-                            funcName = wf;
-                            break;
-                        }
-                    }
-                } catch (e) {
-                    window.debugLogging && console.debug('[sqlParser] JSON.stringify failed for window function detection:', e);
-                }
-            }
-
-            // Extract PARTITION BY columns
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
-                p.column || p.expr?.column || p.value || '?'
-            ).filter(Boolean);
-
-            // Extract ORDER BY columns
-            const orderBy = col.expr.over?.orderby?.map((o: any) => {
-                const colName = o.expr?.column || o.column || '?';
-                const dir = o.type || '';
-                return dir ? `${colName} ${dir}` : colName;
-            }).filter(Boolean);
-
-            // Extract frame clause if present
-            let frame: string | undefined;
-            if (col.expr.over?.frame) {
-                const f = col.expr.over.frame;
-                frame = `${f.type || 'ROWS'} ${f.start || ''} ${f.end ? 'TO ' + f.end : ''}`.trim();
-            }
-
-            // Ensure funcName is a clean string
-            const cleanName = typeof funcName === 'string' ? funcName : 'WINDOW';
-            trackFunctionUsage(ctx, cleanName, 'window');
-
-            details.push({
-                name: cleanName.toUpperCase(),
-                partitionBy: partitionBy?.length > 0 ? partitionBy : undefined,
-                orderBy: orderBy?.length > 0 ? orderBy : undefined,
-                frame
-            });
-        }
-    }
-
-    return details;
-}
-
-// Extract aggregate functions from SELECT columns (not just GROUP BY)
-function extractAggregateFunctionDetails(columns: any): Array<{
-    name: string;
-    expression: string;
-    alias?: string;
-    sourceColumn?: string;
-    sourceTable?: string;
-}> {
-    if (!columns || !Array.isArray(columns)) { return []; }
-
-    // Get dialect-specific aggregate functions
-    const aggregateFuncSet = new Set(getAggregateFunctions(ctx.dialect));
-    const details: Array<{ name: string; expression: string; alias?: string; sourceColumn?: string; sourceTable?: string }> = [];
-
-    function getExpressionFunctionName(expr: any): string {
-        if (typeof expr?.name === 'string') {
-            return expr.name.toUpperCase();
-        }
-        const nameParts = expr?.name?.name;
-        if (Array.isArray(nameParts) && nameParts.length > 0) {
-            return String(nameParts[0]?.value || '').toUpperCase();
-        }
-        return '';
-    }
-
-    function normalizeColumnRefName(columnRef: any): string {
-        const normalized = unwrapIdentifierValue(columnRef?.column);
-        if (normalized) {
-            return normalized;
-        }
-        if (typeof columnRef?.column === 'string') {
-            return columnRef.column;
-        }
-        return '?';
-    }
-
-    function formatAggregateArg(arg: any): string {
-        if (!arg || typeof arg !== 'object') {
-            return arg === undefined ? '?' : String(arg);
-        }
-
-        if (arg.type === 'star') {
-            return '*';
-        }
-        if (arg.type === 'column_ref') {
-            return normalizeColumnRefName(arg);
-        }
-        if (arg.type === 'expr_list' && Array.isArray(arg.value)) {
-            return arg.value.map(formatAggregateArg).join(', ');
-        }
-        if (arg.type === 'number') {
-            return String(arg.value ?? '?');
-        }
-        if (arg.type && String(arg.type).includes('string')) {
-            return `'${String(arg.value ?? '')}'`;
-        }
-        if (arg.column) {
-            return String(arg.column);
-        }
-        if (arg.expr) {
-            return formatAggregateArg(arg.expr);
-        }
-        return '?';
-    }
-
-    function extractAggregatesFromExpr(expr: any): void {
-        if (!expr || typeof expr !== 'object') {
-            return;
-        }
-
-        if (Array.isArray(expr)) {
-            for (const item of expr) {
-                extractAggregatesFromExpr(item);
-            }
-            return;
-        }
-
-        // Check if this is an aggregate function (dialect-aware)
-        const exprType = typeof expr.type === 'string' ? expr.type.toLowerCase() : '';
-        const exprFuncName = getExpressionFunctionName(expr);
-        if (exprType === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
-            const funcName = exprFuncName || 'AGG';
-            const argsContainer = expr.args;
-            const argNode = argsContainer?.value ?? argsContainer?.expr ?? argsContainer;
-            const argList = Array.isArray(argNode) ? argNode : (argNode ? [argNode] : []);
-            const hasDistinct = String(argsContainer?.distinct || '').toUpperCase() === 'DISTINCT';
-
-            let sourceColumn: string | undefined;
-            let sourceTable: string | undefined;
-            const argStrs = argList.map((arg: any) => {
-                if (!sourceColumn && arg?.type === 'column_ref') {
-                    sourceColumn = normalizeColumnRefName(arg);
-                    sourceTable = arg.table;
-                } else if (!sourceColumn && arg?.expr?.type === 'column_ref') {
-                    sourceColumn = normalizeColumnRefName(arg.expr);
-                    sourceTable = arg.expr.table;
-                }
-                return formatAggregateArg(arg);
-            }).filter(Boolean);
-
-            const distinctPrefix = hasDistinct ? 'DISTINCT ' : '';
-            const expression = `${funcName}(${distinctPrefix}${argStrs.join(', ')})`;
-
-            details.push({
-                name: funcName,
-                expression,
-                alias: undefined,
-                sourceColumn,
-                sourceTable
-            });
-        }
-
-        // Recursively inspect all nested expression values so we catch
-        // aggregates inside CASE conditions and function arguments.
-        for (const value of Object.values(expr)) {
-            extractAggregatesFromExpr(value);
-        }
-    }
-
-    for (const col of columns) {
-        if (!col?.expr) {
-            continue;
-        }
-
-        const startIndex = details.length;
-        extractAggregatesFromExpr(col.expr);
-        const addedCount = details.length - startIndex;
-        const topExprType = typeof col.expr?.type === 'string' ? col.expr.type.toLowerCase() : '';
-        const topExprName = getExpressionFunctionName(col.expr);
-        const isTopLevelAggregate =
-            topExprType === 'aggr_func' || (topExprName && aggregateFuncSet.has(topExprName));
-
-        // Only attach alias when the SELECT expression itself is an aggregate.
-        // Derived expressions (e.g., DATE_DIFF(MAX(...)), CASE WHEN SUM(...)...) should not
-        // re-label nested aggregate internals.
-        if (col.as && addedCount === 1 && isTopLevelAggregate) {
-            details[startIndex].alias = col.as;
-        }
-    }
-
-    // De-duplicate repeated aggregate expressions while keeping the first meaningful alias.
-    const deduped: Array<{ name: string; expression: string; alias?: string; sourceColumn?: string; sourceTable?: string }> = [];
-    const indexByKey = new Map<string, number>();
-    for (const detail of details) {
-        const key = `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
-        const existingIndex = indexByKey.get(key);
-        if (existingIndex === undefined) {
-            indexByKey.set(key, deduped.length);
-            deduped.push(detail);
-            continue;
-        }
-        if (!deduped[existingIndex].alias && detail.alias) {
-            deduped[existingIndex].alias = detail.alias;
-        }
-    }
-
-    return deduped;
-}
-
-// Extract CASE statements from SELECT columns
-function extractCaseStatementDetails(columns: any): Array<{
-    conditions: Array<{ when: string; then: string }>;
-    elseValue?: string;
-    alias?: string;
-}> {
-    if (!columns || !Array.isArray(columns)) { return []; }
-
-    const caseDetails: Array<{
-        conditions: Array<{ when: string; then: string }>;
-        elseValue?: string;
-        alias?: string;
-    }> = [];
-
-    function formatExpr(expr: any): string {
-        if (!expr) {return '?';}
-        if (expr.column) {return expr.column;}
-        if (expr.value) {return String(expr.value);}
-        if (expr.type === 'binary_expr') {
-            const left = formatExpr(expr.left);
-            const right = formatExpr(expr.right);
-            return `${left} ${expr.operator} ${right}`;
-        }
-        return 'expr';
-    }
-
-    for (const col of columns) {
-        if (col.expr && col.expr.type === 'case') {
-            const caseExpr = col.expr;
-            const conditions: Array<{ when: string; then: string }> = [];
-
-            if (caseExpr.args && Array.isArray(caseExpr.args)) {
-                for (const arg of caseExpr.args) {
-                    if (arg.cond && arg.result) {
-                        conditions.push({
-                            when: formatExpr(arg.cond),
-                            then: formatExpr(arg.result)
-                        });
-                    }
-                }
-            }
-
-            const elseValue = caseExpr.else ? formatExpr(caseExpr.else) : undefined;
-            const alias = col.as;
-
-            if (conditions.length > 0) {
-                caseDetails.push({ conditions, elseValue, alias });
-            }
-        }
-    }
-
-    return caseDetails;
-}
-
-// Parse CTE or Subquery internal structure for nested visualization
-// Phase 1 Feature: Breadcrumb Navigation
-// Parse CTE/subquery internals and set parentId/depth for breadcrumb trail navigation
 function parseCteOrSubqueryInternals(
-    context: ParserContext,
+    runtime: SelectExecutionContext,
     stmt: any,
     nodes: FlowNode[],
     edges: FlowEdge[],
     parentId?: string,
     depth: number = 0
 ): void {
-    ctx = context;
+    const ctx = runtime.context;
     if (!stmt) { return; }
 
     let previousId: string | null = null;
@@ -1371,13 +752,13 @@ function parseCteOrSubqueryInternals(
             if (fromItem.expr && fromItem.expr.ast) {
                 ctx.stats.subqueries++; // Count nested subqueries
                 // Recursively parse the nested subquery
-                parseCteOrSubqueryInternals(context, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
             } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
                 if (tableName && tableName !== 'table') {
                     // Track table usage for stats (including tables from CTEs and subqueries)
-                    trackTableUsage(ctx, tableName);
-                    const tableId = genId('child_table');
+                    trackTableUsage(runtime, tableName);
+                    const tableId = genId(runtime, 'child_table');
                     nodes.push({
                         id: tableId,
                         type: 'table',
@@ -1388,7 +769,7 @@ function parseCteOrSubqueryInternals(
                         x: 0, y: 0, width: 100, height: 32
                     });
                     if (previousId) {
-                        edges.push({ id: genId('ce'), source: previousId, target: tableId });
+                        edges.push({ id: genId(runtime, 'ce'), source: previousId, target: tableId });
                     }
                     previousId = tableId;
                 }
@@ -1402,13 +783,13 @@ function parseCteOrSubqueryInternals(
                 if (fromItem.expr && fromItem.expr.ast) {
                     ctx.stats.subqueries++; // Count nested subqueries in joins
                     // Recursively parse the nested subquery
-                    parseCteOrSubqueryInternals(context, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                    parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
                 } else {
-                    const joinId = genId('child_join');
+                    const joinId = genId(runtime, 'child_join');
                     const joinTable = getTableName(fromItem);
                     // Track table usage for joined tables in CTEs/subqueries
                     if (joinTable && joinTable !== 'table') {
-                        trackTableUsage(ctx, joinTable);
+                        trackTableUsage(runtime, joinTable);
                     }
                     nodes.push({
                         id: joinId,
@@ -1420,7 +801,7 @@ function parseCteOrSubqueryInternals(
                         x: 0, y: 0, width: 120, height: 32
                     });
                     if (previousId) {
-                        edges.push({ id: genId('ce'), source: previousId, target: joinId });
+                        edges.push({ id: genId(runtime, 'ce'), source: previousId, target: joinId });
                     }
                     previousId = joinId;
                 }
@@ -1440,14 +821,14 @@ function parseCteOrSubqueryInternals(
             if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
                 ctx.stats.subqueries++; // Count scalar subqueries
                 // Recursively parse the nested subquery
-                parseCteOrSubqueryInternals(context, col.expr.ast, nodes, edges, parentId, depth + 1);
+                parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
             }
         }
     }
 
     // Add WHERE if present
     if (stmt.where) {
-        const whereId = genId('child_where');
+        const whereId = genId(runtime, 'child_where');
         nodes.push({
             id: whereId,
             type: 'filter',
@@ -1458,7 +839,7 @@ function parseCteOrSubqueryInternals(
             x: 0, y: 0, width: 80, height: 32
         });
         if (previousId) {
-            edges.push({ id: genId('ce'), source: previousId, target: whereId });
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: whereId });
         }
         previousId = whereId;
     }
@@ -1470,7 +851,7 @@ function parseCteOrSubqueryInternals(
         (stmt.groupby.columns && Array.isArray(stmt.groupby.columns) && stmt.groupby.columns.length > 0)
     );
     if (hasGroupBy) {
-        const groupId = genId('child_group');
+        const groupId = genId(runtime, 'child_group');
         nodes.push({
             id: groupId,
             type: 'aggregate',
@@ -1481,7 +862,7 @@ function parseCteOrSubqueryInternals(
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {
-            edges.push({ id: genId('ce'), source: previousId, target: groupId });
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: groupId });
         }
         previousId = groupId;
     }
@@ -1489,7 +870,7 @@ function parseCteOrSubqueryInternals(
     // Extract CASE statements from SELECT columns in CTEs
     const caseStatementDetails = extractCaseStatementDetails(stmt.columns);
     if (caseStatementDetails.length > 0) {
-        const caseId = genId('child_case');
+        const caseId = genId(runtime, 'child_case');
 
         // Calculate height based on number of CASE statements
         const baseHeight = 50;
@@ -1508,7 +889,7 @@ function parseCteOrSubqueryInternals(
         });
 
         if (previousId) {
-            edges.push({ id: genId('ce'), source: previousId, target: caseId });
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: caseId });
         }
         previousId = caseId;
     }
@@ -1520,7 +901,7 @@ function parseCteOrSubqueryInternals(
         (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
     );
     if (hasOrderBy) {
-        const sortId = genId('child_sort');
+        const sortId = genId(runtime, 'child_sort');
         nodes.push({
             id: sortId,
             type: 'sort',
@@ -1531,7 +912,7 @@ function parseCteOrSubqueryInternals(
             x: 0, y: 0, width: 90, height: 32
         });
         if (previousId) {
-            edges.push({ id: genId('ce'), source: previousId, target: sortId });
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: sortId });
         }
     }
 }
@@ -1539,7 +920,8 @@ function parseCteOrSubqueryInternals(
 function collectScalarSubquerySourceTables(
     stmt: any,
     cteNames: Set<string>,
-    excludedTableLabels: Set<string>
+    excludedTableLabels: Set<string>,
+    dialect: SqlDialect
 ): string[] {
     const sourceTables = new Set<string>();
     const scopedCteNames = new Set<string>(Array.from(cteNames).map(name => name.toLowerCase()));
@@ -1576,14 +958,19 @@ function collectScalarSubquerySourceTables(
     for (const expr of expressions) {
         const subqueries = findSubqueriesInExpression(expr);
         for (const subquery of subqueries) {
-            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
         }
     }
 
     return Array.from(sourceTables).filter(name => !excludedTableLabels.has(name.toLowerCase()));
 }
 
-function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inheritedCteNames: Set<string>): void {
+function collectTablesFromSelectTree(
+    stmt: any,
+    sourceTables: Set<string>,
+    inheritedCteNames: Set<string>,
+    dialect: SqlDialect
+): void {
     if (!stmt || typeof stmt !== 'object') {
         return;
     }
@@ -1600,7 +987,7 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
         for (const cte of stmt.with) {
             const cteStmt = getCteStatementAst(cte);
             if (cteStmt) {
-                collectTablesFromSelectTree(cteStmt, sourceTables, scopedCteNames);
+                collectTablesFromSelectTree(cteStmt, sourceTables, scopedCteNames, dialect);
             }
         }
     }
@@ -1609,9 +996,9 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
     for (const fromItem of fromItems) {
         const nestedFromSubquery = fromItem?.expr?.ast || (fromItem?.expr?.type === 'select' ? fromItem.expr : null);
         if (nestedFromSubquery) {
-            collectTablesFromSelectTree(nestedFromSubquery, sourceTables, scopedCteNames);
+            collectTablesFromSelectTree(nestedFromSubquery, sourceTables, scopedCteNames, dialect);
         } else {
-            const tableValuedFunctionName = getTableValuedFunctionName(fromItem, ctx.dialect);
+            const tableValuedFunctionName = getTableValuedFunctionName(fromItem, dialect);
             if (tableValuedFunctionName) {
                 sourceTables.add(tableValuedFunctionName);
             } else {
@@ -1625,7 +1012,7 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
         if (fromItem?.on) {
             const onSubqueries = findSubqueriesInExpression(fromItem.on);
             for (const subquery of onSubqueries) {
-                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
             }
         }
     }
@@ -1633,14 +1020,14 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
     if (stmt.where) {
         const whereSubqueries = findSubqueriesInExpression(stmt.where);
         for (const subquery of whereSubqueries) {
-            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
         }
     }
 
     if (stmt.having) {
         const havingSubqueries = findSubqueriesInExpression(stmt.having);
         for (const subquery of havingSubqueries) {
-            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
         }
     }
 
@@ -1651,7 +1038,7 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
             }
             const columnSubqueries = findSubqueriesInExpression(col.expr);
             for (const subquery of columnSubqueries) {
-                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
             }
         }
     }
@@ -1663,13 +1050,13 @@ function collectTablesFromSelectTree(stmt: any, sourceTables: Set<string>, inher
             }
             const orderSubqueries = findSubqueriesInExpression(orderItem.expr);
             for (const subquery of orderSubqueries) {
-                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames);
+                collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
             }
         }
     }
 
     if (stmt._next) {
-        collectTablesFromSelectTree(stmt._next, sourceTables, scopedCteNames);
+        collectTablesFromSelectTree(stmt._next, sourceTables, scopedCteNames, dialect);
     }
 }
 
@@ -1727,54 +1114,4 @@ function findSubqueriesInExpression(expr: any): any[] {
     }
 
     return subqueries;
-}
-
-export function extractConditions(where: any): string[] {
-    const conditions: string[] = [];
-    formatConditionRecursive(where, conditions);
-    return conditions.slice(0, 5); // Limit to first 5
-}
-
-function formatConditionRecursive(expr: any, conditions: string[], depth = 0): void {
-    if (!expr || depth > 3) { return; }
-
-    if (expr.type === 'binary_expr') {
-        if (expr.operator === 'AND' || expr.operator === 'OR') {
-            formatConditionRecursive(expr.left, conditions, depth + 1);
-            formatConditionRecursive(expr.right, conditions, depth + 1);
-        } else {
-            conditions.push(formatCondition(expr));
-        }
-    }
-}
-
-function formatCondition(expr: any): string {
-    if (!expr) { return '?'; }
-
-    if (expr.type === 'binary_expr') {
-        const left = expr.left?.column || expr.left?.value || '?';
-        const right = expr.right?.column || expr.right?.value || '?';
-        return `${left} ${expr.operator} ${right}`;
-    }
-
-    return 'condition';
-}
-
-function extractTablesFromStatement(stmt: any): string[] {
-    const tables: string[] = [];
-    if (!stmt || !stmt.from) { return tables; }
-
-    const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
-    for (const item of fromItems) {
-        const tableValuedFunctionName = getTableValuedFunctionName(item, ctx.dialect);
-        if (tableValuedFunctionName) {
-            tables.push(tableValuedFunctionName);
-            continue;
-        }
-        const name = getTableName(item);
-        if (name && name !== 'table') {
-            tables.push(name);
-        }
-    }
-    return tables;
 }

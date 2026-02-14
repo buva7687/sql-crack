@@ -52,6 +52,7 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(maskedSql),
         hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(maskedSql),
         hasBigQueryArrayType: /\bARRAY<.*>/i.test(maskedSql),
+        // Keep this check on raw SQL so quoted interval literals are preserved.
         hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
         hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
         hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),

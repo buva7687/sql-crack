@@ -1,4 +1,4 @@
-function stripLeadingComments(sql: string): string {
+export function stripLeadingComments(sql: string): string {
     let result = sql.trim();
     let changed = true;
 
