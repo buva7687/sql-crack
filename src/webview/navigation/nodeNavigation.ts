@@ -261,11 +261,24 @@ export function fitViewFeature(options: FitViewOptions): void {
 
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY) || graphWidth <= 0 || graphHeight <= 0) {
+        state.scale = 1;
+        onSetFitViewScale(state.scale);
+        state.offsetX = 50;
+        state.offsetY = 50;
+        state.zoomedNodeId = null;
+        state.previousZoomState = null;
+        onUpdateTransform();
+        onUpdateZoomIndicator();
+        return;
+    }
+
     const availableWidth = Math.max(100, rect.width - 320);
     const availableHeight = Math.max(100, rect.height - 100);
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
-    state.scale = Math.max(0.05, Math.min(scaleX, scaleY, 1.5));
+    const nextScale = Math.max(0.05, Math.min(scaleX, scaleY, 1.5));
+    state.scale = Number.isFinite(nextScale) && nextScale > 0 ? nextScale : 1;
     onSetFitViewScale(state.scale);
 
     state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
@@ -435,11 +448,19 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
     const availableHeight = rect.height - 100;
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY) || graphWidth <= 0 || graphHeight <= 0) {
+        onFitView();
+        return;
+    }
+
     const scaleX = (availableWidth * 0.8) / graphWidth;
     const scaleY = (availableHeight * 0.8) / graphHeight;
     const maxScaleAbsolute = 2.5;
     const maxScaleRelative = fitViewScale > 0 ? fitViewScale * 1.8 : maxScaleAbsolute;
-    const targetScale = Math.min(scaleX, scaleY, maxScaleAbsolute, maxScaleRelative);
+    const rawTargetScale = Math.min(scaleX, scaleY, maxScaleAbsolute, maxScaleRelative);
+    const targetScale = Number.isFinite(rawTargetScale) && rawTargetScale > 0
+        ? rawTargetScale
+        : Math.min(maxScaleAbsolute, maxScaleRelative);
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 

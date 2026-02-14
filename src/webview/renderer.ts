@@ -1979,11 +1979,22 @@ function calculateBounds(): { minX: number; minY: number; width: number; height:
         maxY = Math.max(maxY, node.y + node.height);
     }
 
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return {
+            minX: 0,
+            minY: 0,
+            width: 400,
+            height: 300,
+        };
+    }
+
+    const width = maxX - minX;
+    const height = maxY - minY;
     return {
-        minX: minX || 0,
-        minY: minY || 0,
-        width: (maxX - minX) || 400,
-        height: (maxY - minY) || 300
+        minX,
+        minY,
+        width: width > 0 ? width : 400,
+        height: height > 0 ? height : 300,
     };
 }
 

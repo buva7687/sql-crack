@@ -9,6 +9,47 @@ export interface ExportContext {
     calculateBounds: () => { minX: number; minY: number; width: number; height: number };
 }
 
+const MAX_EXPORT_DIMENSION = 4096;
+
+function showExportToast(message: string, isDarkTheme: boolean, isError = false): void {
+    const existing = document.getElementById('sql-flow-export-toast');
+    if (existing) {
+        existing.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.id = 'sql-flow-export-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        top: 72px;
+        right: 20px;
+        z-index: 10001;
+        border-radius: 8px;
+        border: 1px solid ${isError ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'};
+        background: ${isError
+            ? (isDarkTheme ? 'rgba(127, 29, 29, 0.9)' : 'rgba(254, 226, 226, 0.95)')
+            : (isDarkTheme ? 'rgba(6, 78, 59, 0.9)' : 'rgba(220, 252, 231, 0.95)')};
+        color: ${isError
+            ? (isDarkTheme ? '#fecaca' : '#7f1d1d')
+            : (isDarkTheme ? '#d1fae5' : '#065f46')};
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+    `;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+    });
+    window.setTimeout(() => {
+        toast.style.opacity = '0';
+        window.setTimeout(() => toast.remove(), 180);
+    }, 1500);
+}
+
 function prepareSvgForExport(
     svgElement: SVGSVGElement,
     calculateBounds: () => { minX: number; minY: number; width: number; height: number }
@@ -16,12 +57,15 @@ function prepareSvgForExport(
     const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
     const bounds = calculateBounds();
     const padding = 40;
-    const width = Math.ceil(bounds.width + padding * 2);
-    const height = Math.ceil(bounds.height + padding * 2);
+    const rawWidth = Math.max(1, Math.ceil(bounds.width + padding * 2));
+    const rawHeight = Math.max(1, Math.ceil(bounds.height + padding * 2));
+    const scaleDown = Math.min(1, MAX_EXPORT_DIMENSION / rawWidth, MAX_EXPORT_DIMENSION / rawHeight);
+    const width = Math.max(1, Math.floor(rawWidth * scaleDown));
+    const height = Math.max(1, Math.floor(rawHeight * scaleDown));
 
     svgClone.setAttribute('width', String(width));
     svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
+    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${rawWidth} ${rawHeight}`);
     svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
@@ -79,8 +123,14 @@ function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement):
 }
 
 export function exportToPng(context: ExportContext): void {
+    if (!context) {
+        showExportToast('PNG export failed', false, true);
+        return;
+    }
+
     const svgElement = context.getSvg() || (context.getContainerElement()?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
+        showExportToast('No graph available to export', context.isDarkTheme(), true);
         return;
     }
 
@@ -90,6 +140,7 @@ export function exportToPng(context: ExportContext): void {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
+            showExportToast('PNG export failed', context.isDarkTheme(), true);
             return;
         }
 
@@ -101,11 +152,12 @@ export function exportToPng(context: ExportContext): void {
         const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
         const svgUrl = URL.createObjectURL(svgBlob);
 
-        const img = new Image();
-        img.onload = () => {
+        const finishExport = (img: HTMLImageElement, urlToRevoke?: string) => {
             try {
                 ctx.drawImage(img, 0, 0);
-                URL.revokeObjectURL(svgUrl);
+                if (urlToRevoke) {
+                    URL.revokeObjectURL(urlToRevoke);
+                }
                 const pngDataUrl = canvas.toDataURL('image/png');
                 const vscodeApi = (window as any).vscodeApi;
                 if (vscodeApi && vscodeApi.postMessage) {
@@ -115,20 +167,41 @@ export function exportToPng(context: ExportContext): void {
                         data: base64Data,
                         filename: `sql-flow-${Date.now()}.png`
                     });
+                    showExportToast('Save dialog opened', context.isDarkTheme());
+                    return;
                 }
+                const a = document.createElement('a');
+                a.download = `sql-flow-${Date.now()}.png`;
+                a.href = pngDataUrl;
+                a.click();
+                showExportToast('PNG downloaded', context.isDarkTheme());
             } catch (e) {
                 if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
                     console.debug('[renderer] PNG export canvas draw failed:', e);
                 }
-                URL.revokeObjectURL(svgUrl);
+                if (urlToRevoke) {
+                    URL.revokeObjectURL(urlToRevoke);
+                }
+                showExportToast('PNG export failed', context.isDarkTheme(), true);
             }
         };
-        img.onerror = () => URL.revokeObjectURL(svgUrl);
+        const img = new Image();
+        img.onload = () => finishExport(img, svgUrl);
+        img.onerror = () => {
+            URL.revokeObjectURL(svgUrl);
+            const fallbackImg = new Image();
+            fallbackImg.onload = () => finishExport(fallbackImg);
+            fallbackImg.onerror = () => {
+                showExportToast('PNG export failed', context.isDarkTheme(), true);
+            };
+            fallbackImg.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        };
         img.src = svgUrl;
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] PNG export failed:', e);
         }
+        showExportToast('PNG export failed', context.isDarkTheme(), true);
     }
 }
 
@@ -186,21 +259,47 @@ export function copyMermaidToClipboard(context: ExportContext): void {
     }
 
     const mermaidCode = generateMermaidCode(nodes, context.getCurrentEdges(), context.isDarkTheme());
-    navigator.clipboard.writeText(mermaidCode).catch(() => {
+    const copyWithFallback = (): boolean => {
         const textarea = document.createElement('textarea');
         textarea.value = mermaidCode;
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
         textarea.select();
-        document.execCommand('copy');
+        const copied = document.execCommand('copy');
         document.body.removeChild(textarea);
-    });
+        return copied;
+    };
+
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(mermaidCode).then(() => {
+            showExportToast('Copied! Mermaid is in clipboard', context.isDarkTheme());
+        }).catch(() => {
+            if (copyWithFallback()) {
+                showExportToast('Copied! Mermaid is in clipboard', context.isDarkTheme());
+            } else {
+                showExportToast('Mermaid copy failed', context.isDarkTheme(), true);
+            }
+        });
+        return;
+    }
+
+    if (copyWithFallback()) {
+        showExportToast('Copied! Mermaid is in clipboard', context.isDarkTheme());
+    } else {
+        showExportToast('Mermaid copy failed', context.isDarkTheme(), true);
+    }
 }
 
 export function copyToClipboard(context: ExportContext): void {
+    if (!context) {
+        showExportToast('PNG copy failed', false, true);
+        return;
+    }
+
     const svgElement = context.getSvg() || (context.getContainerElement()?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
+        showExportToast('No graph available to copy', context.isDarkTheme(), true);
         return;
     }
 
@@ -210,6 +309,7 @@ export function copyToClipboard(context: ExportContext): void {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
+            showExportToast('PNG copy failed', context.isDarkTheme(), true);
             return;
         }
 
@@ -225,17 +325,21 @@ export function copyToClipboard(context: ExportContext): void {
                 if (blob && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
                     navigator.clipboard.write([
                         new ClipboardItem({ 'image/png': blob })
-                    ]).catch(() => {
+                    ]).then(() => {
+                        showExportToast('Copied! PNG is in clipboard', context.isDarkTheme());
+                    }).catch(() => {
                         const a = document.createElement('a');
                         a.download = `sql-flow-${Date.now()}.png`;
                         a.href = canvas.toDataURL('image/png');
                         a.click();
+                        showExportToast('Clipboard blocked, PNG downloaded', context.isDarkTheme());
                     });
                 } else {
                     const a = document.createElement('a');
                     a.download = `sql-flow-${Date.now()}.png`;
                     a.href = canvas.toDataURL('image/png');
                     a.click();
+                    showExportToast('Clipboard unavailable, PNG downloaded', context.isDarkTheme());
                 }
             }, 'image/png');
         };
@@ -250,9 +354,10 @@ export function copyToClipboard(context: ExportContext): void {
                 a.href = canvas.toDataURL('image/png');
                 a.click();
                 URL.revokeObjectURL(url);
+                showExportToast('Clipboard unavailable, PNG downloaded', context.isDarkTheme());
             };
             img2.onerror = () => {
-                // noop
+                showExportToast('PNG copy failed', context.isDarkTheme(), true);
             };
             img2.src = url;
         };
@@ -261,6 +366,7 @@ export function copyToClipboard(context: ExportContext): void {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] Clipboard copy failed:', e);
         }
+        showExportToast('PNG copy failed', context.isDarkTheme(), true);
     }
 }
 

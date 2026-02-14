@@ -66,11 +66,20 @@ export function buildWorkspaceGraphSvg(
     isDarkTheme: boolean,
     escapeHtml: (value: string) => string
 ): string {
+    const validNodes = graph.nodes.filter((node) =>
+        Number.isFinite(node.x)
+        && Number.isFinite(node.y)
+        && Number.isFinite(node.width)
+        && Number.isFinite(node.height)
+        && node.width > 0
+        && node.height > 0
+    );
+
     let minX = Infinity;
     let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const node of graph.nodes) {
+    let maxX = 0;
+    let maxY = 0;
+    for (const node of validNodes) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
@@ -81,7 +90,7 @@ export function buildWorkspaceGraphSvg(
     const height = Math.max(800, maxY + 150);
 
     const nodeMap = new Map<string, WorkspaceNode>();
-    for (const node of graph.nodes) {
+    for (const node of validNodes) {
         nodeMap.set(node.id, node);
     }
 
@@ -102,7 +111,7 @@ export function buildWorkspaceGraphSvg(
         return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
     }).join('\n');
 
-    const nodesHtml = graph.nodes.map(node => {
+    const nodesHtml = validNodes.map(node => {
         const color = getWorkspaceNodeColor(node.type, isDarkTheme);
         return `    <g transform="translate(${node.x}, ${node.y})">
         <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>
