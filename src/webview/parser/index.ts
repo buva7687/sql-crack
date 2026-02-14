@@ -32,8 +32,16 @@ export {
     extractTablesFromStatement
 } from './extractors';
 
-// Note: generateHints and detectAdvancedIssues are now internal to sqlParser.ts
-// They use the consolidated ParserContext (ctx) for state management.
+// Hints
+export { generateHints, detectAdvancedIssues, calculateEnhancedMetrics } from './hints';
+
+// Statements
+export {
+    getStatementPresentation,
+    tryProcessCreateStatement,
+    tryProcessDmlStatements,
+    processSelectStatement
+} from './statements';
 
 // Layout
 export { layoutGraph } from './layout';
