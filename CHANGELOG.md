@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Large-file refactor completed (Phases 1-6)**: Split major orchestrators into focused modules while preserving behavior and public workflows.
+  - `sharedStyles.ts`: 4,620 -> 68 lines (style assembler + extracted style modules)
+  - `sqlParser.ts`: 6,269 -> 1,071 lines (orchestrator + parser module tree)
+  - `renderer.ts`: 9,686 -> 3,040 lines (orchestrator + extracted rendering/feature/interaction/navigation modules)
+  - `clientScripts.ts`: 4,183 -> 173 lines (script assembler + extracted script fragments)
+  - `workspacePanel.ts`: 2,568 -> 780 lines (orchestrator + extracted panel modules)
+  - `toolbar.ts`: ~2,000 -> 475 lines (orchestrator + extracted toolbar modules)
+- **Workspace message routing hardening**: Typed workspace message protocol and host router now explicitly handle PNG save/error round-trips from webview exports.
+- **Shared escaping helper adoption**: Consolidated additional non-renderer HTML escaping paths to `src/shared/stringUtils.ts`.
+
+### Documentation
+
+- Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
+- Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
+
 ## [0.3.7] - 2026-02-13
 
 ### Fixed
