@@ -355,50 +355,39 @@ Press `F5` to launch the Extension Development Host.
 
 ### Architecture Overview
 
-```
-src/
-├── extension.ts           # VS Code extension entry point, commands, lifecycle
-├── visualizationPanel.ts  # Query visualization webview panel
-├── webview/               # Browser-side code (runs in webview)
-│   ├── index.ts           # Webview entry point
-│   ├── sqlParser.ts       # SQL parsing with node-sql-parser
-│   ├── renderer.ts        # SVG rendering, pan/zoom, interactions
-│   ├── constants/         # Centralized colors and theme
-│   ├── types/             # TypeScript interfaces
-│   └── ui/                # Toolbar, tabs, panels
-├── workspace/             # Workspace analysis (runs in extension host)
-│   ├── workspacePanel.ts  # Workspace webview panel
-│   ├── scanner.ts         # File discovery and parsing
-│   ├── indexManager.ts    # Incremental index with SHA-256 hashing
-│   ├── lineage/           # Cross-file lineage tracking
-│   └── ui/                # Workspace view renderers
-├── dialects/              # SQL dialect function registry
-└── shared/                # Shared utilities (theme, colors)
-```
-
-#### Module Structure Created (Phases 1-6)
-
 ```text
 src/
-├── workspace/ui/
-│   ├── sharedStyles.ts          # 68 lines (assembler)
-│   ├── clientScripts.ts         # 173 lines (assembler)
-│   ├── styles/                  # 7 style modules + index barrel
-│   └── scripts/                 # 17 JS fragment modules
-├── workspace/panel/             # 11 panel modules
-├── webview/
-│   ├── sqlParser.ts             # 1,071 lines (orchestrator)
-│   ├── renderer.ts              # 3,040 lines (orchestrator)
-│   ├── parser/                  # 20+ parser modules
-│   ├── rendering/               # 11 rendering modules
-│   ├── features/                # 10 feature modules
-│   ├── panels/                  # 2 panel modules
-│   ├── navigation/              # 3 navigation modules
-│   ├── interaction/             # 8 interaction modules
-│   ├── state/                   # 1 state module
-│   └── ui/toolbar/              # 8 toolbar modules
-├── workspace/workspacePanel.ts  # 780 lines
-└── webview/ui/toolbar.ts        # 475 lines
+├── extension.ts                 # Extension entrypoint, commands, lifecycle
+├── visualizationPanel.ts        # SQL Flow webview panel orchestration
+├── dialects/                    # Dialect registry/config
+├── shared/                      # Cross-layer tokens/utils/messages
+│   └── messages/                # Typed host/webview message contracts
+├── webview/                     # Browser-side SQL Flow runtime
+│   ├── index.ts                 # Webview bootstrap + wiring
+│   ├── sqlParser.ts             # Parse orchestrator (1,071 lines)
+│   ├── renderer.ts              # Render orchestrator (3,040 lines)
+│   ├── parser/                  # Extracted parser modules (validation, dialects, hints, statements, extractors)
+│   ├── rendering/               # Node/edge/cloud/viewport rendering modules
+│   ├── features/                # Export, lineage, theme, minimap, focus, search, metadata
+│   ├── interaction/             # Event listeners, drag/zoom/keyboard, pulse/selection
+│   ├── navigation/              # Node/table/keyboard navigation helpers
+│   ├── panels/                  # Info/stats/sql panel renderers
+│   ├── state/                   # Renderer state factories
+│   ├── constants/               # Color/theme constants
+│   ├── types/                   # Webview runtime types
+│   ├── ui/                      # Toolbar/context menu/tooltip/layout/command UI
+│   │   └── toolbar/             # Extracted toolbar component modules
+│   └── workers/                 # Worker scripts
+└── workspace/                   # Extension-host workspace analysis runtime
+    ├── workspacePanel.ts        # Workspace panel orchestrator (780 lines)
+    ├── scanner.ts               # SQL file discovery/scanning
+    ├── indexManager.ts          # Incremental index/cache/watcher
+    ├── handlers/                # Message routing + command handlers
+    ├── panel/                   # Workspace panel/page/export/stats modules
+    ├── lineage/                 # Cross-file lineage graph + analyzers
+    ├── extraction/              # Definition/reference extraction pipeline
+    ├── graph/                   # Workspace graph build/filter/layout modules
+    └── ui/                      # Workspace webview scripts/styles/views
 ```
 
 **Data Flow**:
