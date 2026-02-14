@@ -8,16 +8,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Read both the main file and extracted variables module
+// Read the main file and all extracted style modules
 // Path is relative to tests/workspace/ui/ so we need ../../../src/
+const stylesDir = path.join(__dirname, '../../../src/workspace/ui/styles');
 const sharedStylesPath = path.join(__dirname, '../../../src/workspace/ui/sharedStyles.ts');
 const sharedStylesSource = fs.readFileSync(sharedStylesPath, 'utf-8');
 
-const variablesPath = path.join(__dirname, '../../../src/workspace/ui/styles/variables.ts');
-const variablesSource = fs.readFileSync(variablesPath, 'utf-8');
+const styleModuleFiles = ['variables.ts', 'base.ts', 'lineage.ts', 'panels.ts', 'tables.ts', 'impact.ts', 'graph.ts'];
+const modulesSources = styleModuleFiles
+    .map(f => path.join(stylesDir, f))
+    .filter(p => fs.existsSync(p))
+    .map(p => fs.readFileSync(p, 'utf-8'));
 
-// Combined source for pattern matching (includes both files)
-const combinedSource = sharedStylesSource + '\n' + variablesSource;
+// Combined source for pattern matching (includes main file and all style modules)
+const combinedSource = [sharedStylesSource, ...modulesSources].join('\n');
 
 describe('sharedStyles.ts CSS Output Patterns', () => {
     /**
