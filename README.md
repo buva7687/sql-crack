@@ -376,6 +376,31 @@ src/
 └── shared/                # Shared utilities (theme, colors)
 ```
 
+#### Module Structure Created (Phases 1-6)
+
+```text
+src/
+├── workspace/ui/
+│   ├── sharedStyles.ts          # 68 lines (assembler)
+│   ├── clientScripts.ts         # 173 lines (assembler)
+│   ├── styles/                  # 7 style modules + index barrel
+│   └── scripts/                 # 17 JS fragment modules
+├── workspace/panel/             # 11 panel modules
+├── webview/
+│   ├── sqlParser.ts             # 1,071 lines (orchestrator)
+│   ├── renderer.ts              # 3,040 lines (orchestrator)
+│   ├── parser/                  # 20+ parser modules
+│   ├── rendering/               # 11 rendering modules
+│   ├── features/                # 10 feature modules
+│   ├── panels/                  # 2 panel modules
+│   ├── navigation/              # 3 navigation modules
+│   ├── interaction/             # 8 interaction modules
+│   ├── state/                   # 1 state module
+│   └── ui/toolbar/              # 8 toolbar modules
+├── workspace/workspacePanel.ts  # 780 lines
+└── webview/ui/toolbar.ts        # 475 lines
+```
+
 **Data Flow**:
 1. User opens `.sql` file → `extension.ts` creates `VisualizationPanel`
 2. SQL text → `sqlParser.ts` (node-sql-parser) → AST → `FlowNode[]` + `FlowEdge[]`
