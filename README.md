@@ -364,8 +364,8 @@ src/
 │   └── messages/                # Typed host/webview message contracts
 ├── webview/                     # Browser-side SQL Flow runtime
 │   ├── index.ts                 # Webview bootstrap + wiring
-│   ├── sqlParser.ts             # Parse orchestrator (1,071 lines)
-│   ├── renderer.ts              # Render orchestrator (3,040 lines)
+│   ├── sqlParser.ts             # Parse orchestrator
+│   ├── renderer.ts              # Render orchestrator
 │   ├── parser/                  # Extracted parser modules (validation, dialects, hints, statements, extractors)
 │   ├── rendering/               # Node/edge/cloud/viewport rendering modules
 │   ├── features/                # Export, lineage, theme, minimap, focus, search, metadata
@@ -379,7 +379,7 @@ src/
 │   │   └── toolbar/             # Extracted toolbar component modules
 │   └── workers/                 # Worker scripts
 └── workspace/                   # Extension-host workspace analysis runtime
-    ├── workspacePanel.ts        # Workspace panel orchestrator (780 lines)
+    ├── workspacePanel.ts        # Workspace panel orchestrator
     ├── scanner.ts               # SQL file discovery/scanning
     ├── indexManager.ts          # Incremental index/cache/watcher
     ├── handlers/                # Message routing + command handlers
@@ -405,6 +405,9 @@ src/
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
+- ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
+
+Refactoring milestone: large-file decomposition completed across core surfaces with full regression validation (`tsc`, lint, and test suite all green).
 
 **Planned**:
 - Export preview dialog with PDF support
