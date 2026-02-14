@@ -5,6 +5,7 @@ import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } 
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
 import { ICONS, getWorkspaceNodeIcon } from '../../shared';
+import { escapeHtml } from '../../shared/stringUtils';
 
 /**
  * Parameters for generating graph view body
@@ -256,18 +257,6 @@ function getNodeIcon(type: string): string {
 function truncateLabel(label: string, maxLength: number): string {
     if (label.length <= maxLength) {return label;}
     return label.substring(0, maxLength - 3) + '...';
-}
-
-/**
- * Escape HTML entities
- */
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }
 
 /**

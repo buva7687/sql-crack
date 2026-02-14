@@ -27,3 +27,15 @@ export function safeString(value: unknown): string {
     }
     return String(value);
 }
+
+/**
+ * Escape HTML-sensitive characters for safe insertion into text/attribute markup.
+ */
+export function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}

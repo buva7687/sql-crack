@@ -3,6 +3,7 @@
 import { SqlDialect } from '../sqlParser';
 import { FocusMode, LayoutType } from '../types';
 import { ICONS } from '../../shared/icons';
+import { escapeHtml } from '../../shared/stringUtils';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { getComponentUiColors } from '../constants';
@@ -74,14 +75,10 @@ function getToolbarListenerOptions(): AddEventListenerOptions | undefined {
     return toolbarAbortController ? { signal: toolbarAbortController.signal } : undefined;
 }
 
-function escapeHtmlInline(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 function createHintsBadgeMarkup(label: string): string {
     return `
         <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
-        <span>${escapeHtmlInline(label)}</span>
+        <span>${escapeHtml(label)}</span>
     `;
 }
 

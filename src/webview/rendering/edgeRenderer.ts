@@ -5,6 +5,7 @@ import { FlowEdge, FlowNode, LayoutType } from '../types';
 import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
 import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
+import { escapeHtml } from '../../shared/stringUtils';
 
 /**
  * Return a legible text color for a badge given its background color.
@@ -227,14 +228,6 @@ export function highlightConnectedEdges(
 // ============================================================
 // SQL Clause Panel
 // ============================================================
-
-function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
 
 function getClauseTypeColor(clauseType: string): string {
     return CONDITION_COLORS[clauseType] || CONDITION_COLORS.default;

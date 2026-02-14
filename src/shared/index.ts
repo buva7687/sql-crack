@@ -15,7 +15,7 @@ export {
 } from './theme';
 export type { ColorblindMode } from './theme';
 
-export { escapeRegex, safeString } from './stringUtils';
+export { escapeRegex, safeString, escapeHtml } from './stringUtils';
 
 export {
     CANVAS,
