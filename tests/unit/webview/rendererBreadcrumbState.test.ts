@@ -6,6 +6,10 @@ describe('webview renderer filter breadcrumb state reset', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const listenerSource = readFileSync(
+        join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'),
+        'utf8'
+    );
 
     it('resets breadcrumb/filter UI state before rendering a new query result', () => {
         expect(rendererSource).toContain('clearSearch();');
@@ -65,8 +69,8 @@ describe('webview renderer filter breadcrumb state reset', () => {
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
         expect(rendererSource).toContain('if (sqlSnippet.truncated)');
         expect(rendererSource).toContain('Press S for full SQL');
-        expect(rendererSource).toContain("if (e.key === 's' || e.key === 'S')");
-        expect(rendererSource).toContain('toggleSqlPreview();');
+        expect(listenerSource).toContain("if (e.key === 's' || e.key === 'S')");
+        expect(listenerSource).toContain('callbacks.toggleSqlPreview();');
     });
 
     it('uses theme-aware SQL preview heading and body text colors', () => {

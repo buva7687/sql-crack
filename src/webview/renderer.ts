@@ -57,7 +57,6 @@ import {
 } from './ui';
 import { prefersReducedMotion } from './ui/motion';
 import { attachResizablePanel } from './ui/resizablePanel';
-import { UndoManager } from './ui/undoManager';
 import {
     PANEL_LAYOUT_DEFAULTS,
     applyHintsPanelViewportBounds as applyHintsPanelBounds,
@@ -98,47 +97,15 @@ import {
     getKeyboardNavigableNodes,
     getSiblingCycleTarget,
 } from './navigation/keyboardNavigation';
+import {
+    createInitialViewState,
+    createLayoutHistory,
+    type LayoutHistorySnapshot
+} from './state/rendererState';
+import { setupEventListeners as setupRendererEventListeners } from './interaction/eventListeners';
+import type { RendererContext } from './types/rendererContext';
 
-const state: ViewState = {
-    scale: 1,
-    offsetX: 0,
-    offsetY: 0,
-    selectedNodeId: null,
-    isDragging: false,
-    dragStartX: 0,
-    dragStartY: 0,
-    isDraggingNode: false,
-    isDraggingCloud: false,
-    draggingNodeId: null,
-    draggingCloudNodeId: null,
-    dragNodeStartX: 0,
-    dragNodeStartY: 0,
-    dragCloudStartOffsetX: 0,
-    dragCloudStartOffsetY: 0,
-    dragMouseStartX: 0,
-    dragMouseStartY: 0,
-    searchTerm: '',
-    searchResults: [],
-    currentSearchIndex: -1,
-    focusModeEnabled: false,
-    legendVisible: true,
-    highlightedColumnSources: [],
-    isFullscreen: false,
-    isDarkTheme: window.vscodeTheme !== 'light',
-    isHighContrast: false,
-    breadcrumbPath: [],
-    showColumnLineage: false,
-    showColumnFlows: false,
-    selectedColumn: null,
-    zoomedNodeId: null,
-    previousZoomState: null,
-    focusMode: 'all' as FocusMode,
-    layoutType: ((): LayoutType => {
-        const valid: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
-        const dl = window.defaultLayout as LayoutType;
-        return valid.includes(dl) ? dl : 'vertical';
-    })()
-};
+const state: ViewState = createInitialViewState(window.vscodeTheme, window.defaultLayout);
 
 let svg: SVGSVGElement | null = null;
 let mainGroup: SVGGElement | null = null;
@@ -182,22 +149,7 @@ let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
 let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 
-interface LayoutHistorySnapshot {
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    selectedNodeId: string | null;
-    focusModeEnabled: boolean;
-    focusMode: FocusMode;
-    layoutType: LayoutType;
-    nodePositions: Array<{ id: string; x: number; y: number }>;
-    cloudOffsets: Array<{ nodeId: string; offsetX: number; offsetY: number }>;
-}
-
-const layoutHistory = new UndoManager<LayoutHistorySnapshot>({
-    maxEntries: 50,
-    serialize: (snapshot) => JSON.stringify(snapshot),
-});
+const layoutHistory = createLayoutHistory();
 
 // Virtualization state
 let virtualizationEnabled = true;
@@ -212,6 +164,48 @@ let cloudViewStates: Map<string, CloudViewState> = new Map();
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 let spinnerStyleElement: HTMLStyleElement | null = null;
 let reducedMotionStyleElement: HTMLStyleElement | null = null;
+
+function getRendererContext(): RendererContext {
+    return {
+        state,
+        dom: {
+            getSvg: () => svg,
+            getMainGroup: () => mainGroup,
+            getContainerElement: () => containerElement,
+            getSearchBox: () => searchBox,
+        },
+        renderData: {
+            getCurrentNodes: () => currentNodes,
+            getCurrentEdges: () => currentEdges,
+            getRenderNodes: () => renderNodes,
+            getRenderEdges: () => renderEdges,
+            getRenderNodeMap: () => renderNodeMap,
+            getCurrentClusters: () => currentClusters,
+            getClusterNodeMap: () => clusterNodeMap,
+            getCurrentColumnFlows: () => currentColumnFlows,
+            getCurrentStats: () => currentStats,
+            getCurrentHints: () => currentHints,
+            getCurrentSql: () => currentSql,
+            getCurrentColumnLineage: () => currentColumnLineage,
+            getCurrentTableUsage: () => currentTableUsage,
+        },
+        panels: {
+            getDetailsPanel: () => detailsPanel,
+            getStatsPanel: () => statsPanel,
+            getHintsPanel: () => hintsPanel,
+            getLegendPanel: () => legendPanel,
+            getSqlPreviewPanel: () => sqlPreviewPanel,
+        },
+        cloud: {
+            cloudOffsets,
+            cloudElements,
+            cloudViewStates,
+        },
+        emit: (_event: string, _data?: unknown): void => {
+            // Hook for extracted modules that need cross-feature notifications.
+        },
+    };
+}
 
 function getDefaultCloudOffset(cloudWidth: number, cloudHeight: number, nodeHeight: number, cloudGap: number): { offsetX: number; offsetY: number } {
     return {
@@ -859,7 +853,56 @@ export function initRenderer(container: HTMLElement): void {
     applyTheme(state.isDarkTheme);
 
     // Setup event listeners
-    setupEventListeners();
+    const rendererContext = getRendererContext();
+    setupRendererEventListeners(
+        {
+            state: rendererContext.state,
+            getSvg: rendererContext.dom.getSvg,
+            getMainGroup: rendererContext.dom.getMainGroup,
+            getCurrentNodes: rendererContext.renderData.getCurrentNodes,
+            cloudOffsets: rendererContext.cloud.cloudOffsets,
+            getSearchBox: rendererContext.dom.getSearchBox,
+            documentListeners,
+        },
+        {
+            updateCloudAndArrow,
+            updateNodeEdges,
+            updateTransform,
+            updateZoomIndicator,
+            recordLayoutHistorySnapshot,
+            selectNode,
+            clearFocusMode,
+            fitView,
+            getKeyboardNavigationNodes,
+            moveKeyboardFocusToNode,
+            toggleColumnFlows,
+            hideContextMenu,
+            clearSearch,
+            resetView,
+            undoLayoutChange,
+            redoLayoutChange,
+            toggleCommandBar,
+            isCommandBarVisible,
+            hideCommandBar,
+            navigateSearch,
+            switchLayout,
+            zoomIn,
+            zoomOut,
+            toggleFullscreen,
+            toggleTheme,
+            toggleLayout,
+            toggleSqlPreview,
+            toggleStats,
+            toggleHints,
+            setFocusMode,
+            toggleExpandAll,
+            toggleLegend,
+            showKeyboardShortcutsHelp,
+            getKeyboardShortcuts,
+            navigateToConnectedNode,
+            navigateToSiblingNode,
+        }
+    );
 
     // Setup ResizeObserver for auto-resize when panel changes
     rendererResizeObserver?.disconnect();
@@ -879,417 +922,6 @@ export function initRenderer(container: HTMLElement): void {
         }, 150);
     });
     rendererResizeObserver.observe(container);
-}
-
-function setupEventListeners(): void {
-    if (!svg) { return; }
-
-    // Pan (only if not dragging a node/cloud)
-    svg.addEventListener('mousedown', (e) => {
-        // Check if clicking on a draggable node or cloud
-        const target = e.target as Element;
-        const cloudGroup = target.closest('.cloud-container');
-        const nodeGroup = target.closest('.node[data-id]');
-        if (cloudGroup || nodeGroup) {
-            // Node/cloud dragging will be handled by node-specific handlers
-            return;
-        }
-        if (e.target === svg || target.tagName === 'svg') {
-            state.isDragging = true;
-            state.dragStartX = e.clientX - state.offsetX;
-            state.dragStartY = e.clientY - state.offsetY;
-            svg!.style.cursor = 'grabbing';
-        }
-    });
-
-    /**
-     * Handle mouse movement for dragging operations:
-     * - Cloud dragging: Updates cloud offset independently, keeping node position fixed
-     * - Node dragging: Moves node and updates cloud/arrow positions relative to node
-     * - Panning: Moves the entire view when dragging on empty space
-     */
-    svg.addEventListener('mousemove', (e) => {
-        if (state.isDraggingCloud && state.draggingCloudNodeId) {
-            // Handle cloud container dragging - update cloud offset independently
-            // The cloud can be moved anywhere while the node stays in place
-            const rect = svg!.getBoundingClientRect();
-            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
-            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
-            
-            const node = currentNodes.find(n => n.id === state.draggingCloudNodeId);
-            if (node) {
-                // Calculate new cloud offset relative to node position
-                const deltaX = mouseX - state.dragMouseStartX;
-                const deltaY = mouseY - state.dragMouseStartY;
-                
-                const newOffsetX = state.dragCloudStartOffsetX + deltaX;
-                const newOffsetY = state.dragCloudStartOffsetY + deltaY;
-                
-                // Update cloud offset (stored relative to node position)
-                cloudOffsets.set(node.id, { offsetX: newOffsetX, offsetY: newOffsetY });
-                
-                // Update cloud and arrow positions (arrow will adjust based on cloud location)
-                updateCloudAndArrow(node);
-            }
-        } else if (state.isDraggingNode && state.draggingNodeId) {
-            // Handle node dragging - move node, cloud follows with relative offset
-            // When dragging a CTE/subquery node, the cloud maintains its offset relative to the node
-            const rect = svg!.getBoundingClientRect();
-            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
-            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
-            
-            const deltaX = mouseX - state.dragMouseStartX;
-            const deltaY = mouseY - state.dragMouseStartY;
-            
-            const node = currentNodes.find(n => n.id === state.draggingNodeId);
-            if (node) {
-                // Update node position
-                node.x = state.dragNodeStartX + deltaX;
-                node.y = state.dragNodeStartY + deltaY;
-
-                // Update node's SVG visual position (same pattern as switchLayout)
-                const nodeGroup = mainGroup?.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
-                if (nodeGroup) {
-                    const nodeRect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-                    if (nodeRect) {
-                        const origX = parseFloat(nodeRect.getAttribute('x') || '0');
-                        const origY = parseFloat(nodeRect.getAttribute('y') || '0');
-                        nodeGroup.setAttribute('transform', `translate(${node.x - origX}, ${node.y - origY})`);
-                    }
-                }
-
-                // Update cloud and arrow positions (maintains relative offset)
-                updateCloudAndArrow(node);
-
-                // Also update edges connected to this node
-                updateNodeEdges(node);
-            }
-        } else if (state.isDragging) {
-            // Handle panning - move the entire view when dragging on empty space
-            state.offsetX = e.clientX - state.dragStartX;
-            state.offsetY = e.clientY - state.dragStartY;
-            updateTransform();
-        }
-    });
-
-    svg.addEventListener('mouseup', () => {
-        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
-
-        // Restore cloud opacity if dragging cloud
-        if (state.isDraggingCloud && state.draggingCloudNodeId) {
-            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
-            if (cloudGroup) {
-                cloudGroup.style.opacity = '1';
-            }
-        }
-        
-        // Restore node opacity if dragging node
-        if (state.isDraggingNode && state.draggingNodeId) {
-            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
-            if (nodeGroup) {
-                nodeGroup.style.opacity = '1';
-            }
-        }
-        
-        state.isDragging = false;
-        state.isDraggingNode = false;
-        state.isDraggingCloud = false;
-        state.draggingNodeId = null;
-        state.draggingCloudNodeId = null;
-        svg!.style.cursor = 'grab';
-
-        if (shouldRecordHistory) {
-            recordLayoutHistorySnapshot();
-        }
-    });
-
-    svg.addEventListener('mouseleave', () => {
-        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
-
-        // Restore cloud opacity if dragging cloud
-        if (state.isDraggingCloud && state.draggingCloudNodeId) {
-            const cloudGroup = mainGroup?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
-            if (cloudGroup) {
-                cloudGroup.style.opacity = '1';
-            }
-        }
-        
-        // Restore node opacity if dragging node
-        if (state.isDraggingNode && state.draggingNodeId) {
-            const nodeGroup = mainGroup?.querySelector(`.node[data-id="${state.draggingNodeId}"]`) as SVGGElement;
-            if (nodeGroup) {
-                nodeGroup.style.opacity = '1';
-            }
-        }
-        
-        state.isDragging = false;
-        state.isDraggingNode = false;
-        state.isDraggingCloud = false;
-        state.draggingNodeId = null;
-        state.draggingCloudNodeId = null;
-        svg!.style.cursor = 'grab';
-
-        if (shouldRecordHistory) {
-            recordLayoutHistorySnapshot();
-        }
-    });
-
-    // Zoom
-    svg.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newScale = Math.min(Math.max(state.scale * delta, 0.2), 3);
-
-        // Zoom towards mouse position
-        const rect = svg!.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        state.offsetX = mouseX - (mouseX - state.offsetX) * (newScale / state.scale);
-        state.offsetY = mouseY - (mouseY - state.offsetY) * (newScale / state.scale);
-        state.scale = newScale;
-
-        updateTransform();
-        updateZoomIndicator();
-    });
-
-    // Click outside to deselect, reset focus, and restore zoom
-    svg.addEventListener('click', (e) => {
-        if (e.target === svg) {
-            const wasZoomed = state.zoomedNodeId !== null;
-            selectNode(null);
-            clearFocusMode();
-            if (wasZoomed) {
-                fitView();
-                updateZoomIndicator();
-            }
-        }
-    });
-
-    // SVG-specific keyboard handler (for when SVG has focus after clicking nodes)
-    svg.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab') {
-            const orderedNodes = getKeyboardNavigationNodes();
-            if (orderedNodes.length > 0) {
-                e.preventDefault();
-                e.stopPropagation();
-                const seedId = state.selectedNodeId
-                    || (e.shiftKey ? orderedNodes[0].id : orderedNodes[orderedNodes.length - 1].id);
-                const target = getCycledNode(orderedNodes, seedId, e.shiftKey ? 'prev' : 'next');
-                if (target) {
-                    moveKeyboardFocusToNode(target);
-                }
-            }
-            return;
-        }
-
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            // Dismiss column lineage first if active
-            if (state.showColumnFlows) {
-                toggleColumnFlows(false);
-                return;
-            }
-            selectNode(null);
-            clearFocusMode();
-            hideContextMenu();
-            if (searchBox) {
-                searchBox.value = '';
-                clearSearch();
-            }
-            requestAnimationFrame(() => {
-                resetView();
-            });
-        }
-    });
-
-    // Keyboard shortcuts
-    const keydownHandler = (e: KeyboardEvent) => {
-        // Don't trigger shortcuts when typing in input fields
-        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
-                               document.activeElement?.tagName === 'TEXTAREA';
-
-        if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
-            e.preventDefault();
-            if (e.shiftKey) {
-                redoLayoutChange();
-            } else {
-                undoLayoutChange();
-            }
-            return;
-        }
-
-        // Ctrl/Cmd + Shift + P for command bar
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
-            e.preventDefault();
-            toggleCommandBar();
-            return;
-        }
-
-        // Escape closes command bar first if visible
-        if (e.key === 'Escape' && isCommandBarVisible()) {
-            e.preventDefault();
-            hideCommandBar();
-            return;
-        }
-
-        // Ctrl/Cmd + F for search
-        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-            e.preventDefault();
-            searchBox?.focus();
-            return;
-        }
-
-        // Escape to close panels, exit fullscreen, and reset view
-        if (e.key === 'Escape') {
-            // Dismiss column lineage mode first if active
-            if (state.showColumnFlows) {
-                toggleColumnFlows(false);
-                return;
-            }
-            if (state.isFullscreen) {
-                toggleFullscreen(false);
-            }
-            selectNode(null);
-            clearFocusMode();
-            hideContextMenu();
-            if (searchBox) {
-                searchBox.value = '';
-                clearSearch();
-            }
-            // Use requestAnimationFrame to ensure DOM updates are applied before fitView
-            requestAnimationFrame(() => {
-                resetView();
-            });
-            return;
-        }
-
-        // Enter to go to next search result
-        if (e.key === 'Enter' && document.activeElement === searchBox) {
-            navigateSearch(1);
-            return;
-        }
-
-        // Skip other shortcuts if input is focused
-        if (isInputFocused) {return;}
-
-        // Skip single-key shortcuts if modifier keys are pressed
-        // This allows native browser shortcuts (Ctrl+C, Cmd+V, etc.) to work normally
-        if (e.metaKey || e.ctrlKey || e.altKey) {return;}
-
-        // Number keys 1-5 for quick layout switching
-        if (e.key === '1') { e.preventDefault(); switchLayout('vertical'); return; }
-        if (e.key === '2') { e.preventDefault(); switchLayout('horizontal'); return; }
-        if (e.key === '3') { e.preventDefault(); switchLayout('compact'); return; }
-        if (e.key === '4') { e.preventDefault(); switchLayout('force'); return; }
-        if (e.key === '5') { e.preventDefault(); switchLayout('radial'); return; }
-
-        // + or = to zoom in
-        if (e.key === '+' || e.key === '=') {
-            e.preventDefault();
-            zoomIn();
-        }
-        // - to zoom out
-        if (e.key === '-') {
-            e.preventDefault();
-            zoomOut();
-        }
-        // R to reset view
-        if (e.key === 'r' || e.key === 'R') {
-            e.preventDefault();
-            resetView();
-        }
-        // F to toggle fullscreen
-        if (e.key === 'f' || e.key === 'F') {
-            e.preventDefault();
-            toggleFullscreen();
-        }
-        // T to toggle theme
-        if (e.key === 't' || e.key === 'T') {
-            e.preventDefault();
-            toggleTheme();
-        }
-        // H to toggle layout
-        if (e.key === 'h' || e.key === 'H') {
-            e.preventDefault();
-            toggleLayout();
-        }
-        // S to show SQL preview
-        if (e.key === 's' || e.key === 'S') {
-            e.preventDefault();
-            toggleSqlPreview();
-        }
-        // C to toggle column flows
-        if (e.key === 'c' || e.key === 'C') {
-            e.preventDefault();
-            toggleColumnFlows();
-        }
-        // Q to toggle query stats panel
-        if (e.key === 'q' || e.key === 'Q') {
-            e.preventDefault();
-            toggleStats();
-        }
-        // O to toggle optimization hints panel
-        if (e.key === 'o' || e.key === 'O') {
-            e.preventDefault();
-            toggleHints();
-        }
-        // U for upstream focus mode
-        if (e.key === 'u' || e.key === 'U') {
-            e.preventDefault();
-            setFocusMode('upstream');
-        }
-        // D for downstream focus mode
-        if (e.key === 'd' || e.key === 'D') {
-            e.preventDefault();
-            setFocusMode('downstream');
-        }
-        // A for all connected focus mode
-        if (e.key === 'a' || e.key === 'A') {
-            e.preventDefault();
-            setFocusMode('all');
-        }
-        // E to toggle expand/collapse all CTEs and subqueries
-        if (e.key === 'e' || e.key === 'E') {
-            e.preventDefault();
-            toggleExpandAll();
-        }
-        // / to focus search (like vim)
-        if (e.key === '/') {
-            e.preventDefault();
-            searchBox?.focus();
-        }
-        // L to toggle legend
-        if (e.key === 'l' || e.key === 'L') {
-            e.preventDefault();
-            toggleLegend();
-        }
-        // ? to show keyboard shortcuts help
-        if (e.key === '?') {
-            e.preventDefault();
-            showKeyboardShortcutsHelp(getKeyboardShortcuts(), state.isDarkTheme);
-        }
-
-        // Arrow keys for keyboard node navigation (accessibility)
-        if (e.key === 'ArrowUp' && state.selectedNodeId) {
-            e.preventDefault();
-            navigateToConnectedNode('upstream', state.selectedNodeId);
-        }
-        if (e.key === 'ArrowDown' && state.selectedNodeId) {
-            e.preventDefault();
-            navigateToConnectedNode('downstream', state.selectedNodeId);
-        }
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.selectedNodeId) {
-            const selectedNode = currentNodes.find(node => node.id === state.selectedNodeId);
-            if (selectedNode) {
-                e.preventDefault();
-                navigateToSiblingNode(selectedNode, e.key === 'ArrowRight' ? 'next' : 'prev');
-            }
-        }
-    };
-    document.addEventListener('keydown', keydownHandler);
-    documentListeners.push({ type: 'keydown', handler: keydownHandler as EventListener });
 }
 
 /**

@@ -6,13 +6,21 @@ describe('default layout initialization', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const stateSource = readFileSync(
+        join(__dirname, '../../../src/webview/state/rendererState.ts'),
+        'utf8'
+    );
+    const listenerSource = readFileSync(
+        join(__dirname, '../../../src/webview/interaction/dragListeners.ts'),
+        'utf8'
+    );
 
     it('accepts all valid LayoutType values from window.defaultLayout', () => {
         // The state initializer should not only check for 'horizontal'
         // It should accept vertical, horizontal, compact, force, radial
-        expect(rendererSource).toContain("'vertical', 'horizontal', 'compact', 'force', 'radial'");
+        expect(stateSource).toContain("'vertical', 'horizontal', 'compact', 'force', 'radial'");
         // Should NOT have the old pattern that only mapped horizontal
-        expect(rendererSource).not.toMatch(
+        expect(stateSource).not.toMatch(
             /layoutType:\s*\(window\.defaultLayout\s*===\s*'horizontal'\s*\?\s*'horizontal'\s*:\s*'vertical'\)/
         );
     });
@@ -44,7 +52,7 @@ describe('default layout initialization', () => {
         // The drag mousemove handler must update the node group's transform
         // so the visual position matches the data model (node.x, node.y)
         // Same pattern as switchLayout: translate(node.x - origX, node.y - origY)
-        const dragSection = rendererSource.match(
+        const dragSection = listenerSource.match(
             /isDraggingNode && state\.draggingNodeId[\s\S]*?updateNodeEdges\(node\)/
         );
         expect(dragSection).not.toBeNull();

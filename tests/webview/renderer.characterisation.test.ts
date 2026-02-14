@@ -13,6 +13,14 @@ import * as path from 'path';
 
 const rendererPath = path.join(__dirname, '../../src/webview/renderer.ts');
 const rendererSource = fs.readFileSync(rendererPath, 'utf-8');
+const listenerSources = [
+    '../../src/webview/interaction/eventListeners.ts',
+    '../../src/webview/interaction/dragListeners.ts',
+    '../../src/webview/interaction/zoomPanListeners.ts',
+    '../../src/webview/interaction/keyboardListeners.ts',
+].map((file) => fs.readFileSync(path.join(__dirname, file), 'utf-8')).join('\n');
+const rendererStatePath = path.join(__dirname, '../../src/webview/state/rendererState.ts');
+const rendererStateSource = fs.readFileSync(rendererStatePath, 'utf-8');
 
 const typesPath = path.join(__dirname, '../../src/webview/types/renderer.ts');
 const typesSource = fs.readFileSync(typesPath, 'utf-8');
@@ -99,12 +107,13 @@ describe('renderer.ts Source Structure', () => {
             ];
 
             requiredStateProps.forEach(prop => {
-                expect(rendererSource).toMatch(new RegExp(`${prop}:`));
+                expect(rendererStateSource).toMatch(new RegExp(`${prop}:`));
             });
         });
 
-        it('should have UndoManager import', () => {
-            expect(rendererSource).toMatch(/import.*UndoManager.*from/);
+        it('should have UndoManager usage in renderer state module', () => {
+            expect(rendererStateSource).toMatch(/import.*UndoManager.*from/);
+            expect(rendererStateSource).toMatch(/new UndoManager<LayoutHistorySnapshot>/);
         });
 
         it('should have layout history tracking', () => {
@@ -146,24 +155,25 @@ describe('renderer.ts Source Structure', () => {
     });
 
     describe('Event Handler Patterns', () => {
-        it('should have setupEventListeners function', () => {
-            expect(rendererSource).toMatch(/function setupEventListeners/);
+        it('should wire extracted setupEventListeners function', () => {
+            expect(rendererSource).toMatch(/setupRendererEventListeners/);
+            expect(listenerSources).toMatch(/export function setupEventListeners/);
         });
 
         it('should handle mousedown for dragging', () => {
-            expect(rendererSource).toMatch(/addEventListener\(['"]mousedown['"]/);
+            expect(listenerSources).toMatch(/addEventListener\(['"]mousedown['"]/);
         });
 
         it('should handle mousemove for dragging', () => {
-            expect(rendererSource).toMatch(/addEventListener\(['"]mousemove['"]/);
+            expect(listenerSources).toMatch(/addEventListener\(['"]mousemove['"]/);
         });
 
         it('should handle mouseup for drag end', () => {
-            expect(rendererSource).toMatch(/addEventListener\(['"]mouseup['"]/);
+            expect(listenerSources).toMatch(/addEventListener\(['"]mouseup['"]/);
         });
 
         it('should handle keydown for keyboard navigation', () => {
-            expect(rendererSource).toMatch(/addEventListener\(['"]keydown['"]/);
+            expect(listenerSources).toMatch(/addEventListener\(['"]keydown['"]/);
         });
     });
 
