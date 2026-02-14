@@ -63,8 +63,13 @@ import {
     applyPanelBottomOffsets,
     parsePixelValue as parsePanelPixelValue,
 } from './ui/panelLayout';
-import dagre from 'dagre';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
+import {
+    layoutSubflowNodes as layoutSubflowNodesFeature,
+    layoutSubflowNodesVertical as layoutSubflowNodesVerticalFeature,
+    renderCloudSubflow as renderCloudSubflowFeature,
+    renderSubflow as renderSubflowFeature,
+} from './rendering/cloudRenderer';
 import { getNodeAccentColor, NODE_SURFACE, getScrollbarColors, getComponentUiColors } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
@@ -97,6 +102,13 @@ import {
     getKeyboardNavigableNodes,
     getSiblingCycleTarget,
 } from './navigation/keyboardNavigation';
+import {
+    copyMermaidToClipboard as copyMermaidToClipboardFeature,
+    copyToClipboard as copyToClipboardFeature,
+    exportToMermaid as exportToMermaidFeature,
+    exportToPng as exportToPngFeature,
+    exportToSvg as exportToSvgFeature,
+} from './features/export';
 import {
     createInitialViewState,
     createLayoutHistory,
@@ -2849,104 +2861,12 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
 
 // Layout children nodes using dagre for subflow visualization
 function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
-    if (children.length === 0) {
-        return { width: 200, height: 100 };
-    }
-
-    const g = new dagre.graphlib.Graph();
-    g.setGraph({
-        rankdir: 'LR', // Left to right for horizontal flow inside container
-        nodesep: 30,
-        ranksep: 40,
-        marginx: 20,
-        marginy: 20
-    });
-    g.setDefaultEdgeLabel(() => ({}));
-
-    // Set default sizes for child nodes
-    for (const child of children) {
-        // Set appropriate width based on label length
-        const labelWidth = Math.max(80, child.label.length * 7 + 30);
-        child.width = labelWidth;
-        child.height = 36;
-        g.setNode(child.id, { width: child.width, height: child.height });
-    }
-
-    // Add edges
-    for (const edge of edges) {
-        g.setEdge(edge.source, edge.target);
-    }
-
-    // Run layout
-    dagre.layout(g);
-
-    // Apply positions (relative to container)
-    let maxX = 0;
-    let maxY = 0;
-    for (const child of children) {
-        const layoutNode = g.node(child.id);
-        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
-            child.x = layoutNode.x - child.width / 2;
-            child.y = layoutNode.y - child.height / 2;
-            maxX = Math.max(maxX, child.x + child.width);
-            maxY = Math.max(maxY, child.y + child.height);
-        }
-    }
-
-    return {
-        width: maxX + 20, // Add padding
-        height: maxY + 20
-    };
+    return layoutSubflowNodesFeature(children, edges);
 }
 
 // Layout children nodes VERTICALLY (top to bottom) for cloud visualization
 function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
-    if (children.length === 0) {
-        return { width: 120, height: 100 };
-    }
-
-    const g = new dagre.graphlib.Graph();
-    g.setGraph({
-        rankdir: 'TB', // Top to bottom for vertical flow
-        nodesep: 20,   // Increased spacing for full-size nodes
-        ranksep: 35,   // Increased spacing for full-size nodes
-        marginx: 15,
-        marginy: 15
-    });
-    g.setDefaultEdgeLabel(() => ({}));
-
-    // Set full-size dimensions for child nodes (matching main canvas nodes)
-    for (const child of children) {
-        child.width = 180;   // Full-size like main nodes
-        child.height = 60;   // Full-size like main nodes
-        g.setNode(child.id, { width: child.width, height: child.height });
-    }
-
-    // Add edges
-    for (const edge of edges) {
-        g.setEdge(edge.source, edge.target);
-    }
-
-    // Run layout
-    dagre.layout(g);
-
-    // Apply positions
-    let maxX = 0;
-    let maxY = 0;
-    for (const child of children) {
-        const layoutNode = g.node(child.id);
-        if (layoutNode && layoutNode.x !== undefined && layoutNode.y !== undefined) {
-            child.x = layoutNode.x - child.width / 2;
-            child.y = layoutNode.y - child.height / 2;
-            maxX = Math.max(maxX, child.x + child.width);
-            maxY = Math.max(maxY, child.y + child.height);
-        }
-    }
-
-    return {
-        width: maxX + 10,
-        height: maxY + 10
-    };
+    return layoutSubflowNodesVerticalFeature(children, edges);
 }
 
 // Render internal flow inside the floating cloud container
@@ -2960,120 +2880,19 @@ function renderCloudSubflow(
     _containerWidth: number,
     _containerHeight: number
 ): void {
-    // Draw child edges first (behind nodes)
-    for (const edge of childEdges) {
-        const sourceNode = children.find(n => n.id === edge.source);
-        const targetNode = children.find(n => n.id === edge.target);
-
-        if (sourceNode && targetNode) {
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-
-            // Calculate connection points (bottom of source to top of target for vertical layout)
-            // offsetX/offsetY are now 0 if using transform, or actual offsets if not
-            const sourceX = offsetX + sourceNode.x + sourceNode.width / 2;
-            const sourceY = offsetY + sourceNode.y + sourceNode.height;
-            const targetX = offsetX + targetNode.x + targetNode.width / 2;
-            const targetY = offsetY + targetNode.y;
-
-            // Create curved path
-            const midY = (sourceY + targetY) / 2;
-            const d = `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`;
-
-            path.setAttribute('d', d);
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', state.isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)');
-            path.setAttribute('stroke-width', '2');
-            path.setAttribute('stroke-linecap', 'round');
-
-            group.appendChild(path);
-        }
-    }
-
-    // Draw child nodes with full styling (like main flow nodes)
-    const cloudIsDark = state.isDarkTheme;
-    const cloudChildSurface = cloudIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
-
-    for (const child of children) {
-        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        childGroup.setAttribute('class', 'cloud-subflow-node');
-        childGroup.setAttribute('data-node-id', child.id);
-        childGroup.style.cursor = 'pointer';
-
-        const childX = offsetX + child.x;
-        const childY = offsetY + child.y;
-        const childAccent = getNodeAccentColor(child.type, cloudIsDark);
-        const hoverFill = cloudIsDark ? '#222222' : '#F1F5F9';
-
-        // Node rectangle — neutral fill + accent strip (matching main nodes)
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', String(childX));
-        rect.setAttribute('y', String(childY));
-        rect.setAttribute('width', String(child.width));
-        rect.setAttribute('height', String(child.height));
-        rect.setAttribute('rx', '6');
-        rect.setAttribute('fill', cloudChildSurface.fill);
-        rect.setAttribute('stroke', cloudChildSurface.border);
-        rect.setAttribute('stroke-width', '1');
-        rect.setAttribute('filter', 'url(#shadow)');
-        childGroup.appendChild(rect);
-
-        // Accent strip
-        const childAccentStrip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        childAccentStrip.setAttribute('x', String(childX));
-        childAccentStrip.setAttribute('y', String(childY));
-        childAccentStrip.setAttribute('width', '3');
-        childAccentStrip.setAttribute('height', String(child.height));
-        childAccentStrip.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
-        childAccentStrip.setAttribute('fill', childAccent);
-        childGroup.appendChild(childAccentStrip);
-
-        // Node icon (positioned like main nodes)
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        icon.setAttribute('x', String(childX + 14));
-        icon.setAttribute('y', String(childY + 26));
-        icon.setAttribute('fill', childAccent);
-        icon.setAttribute('font-size', '14');
-        icon.textContent = getNodeIcon(child.type);
-        childGroup.appendChild(icon);
-
-        // Node label (positioned like main nodes)
-        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        label.setAttribute('x', String(childX + 34));
-        label.setAttribute('y', String(childY + 26));
-        label.setAttribute('fill', cloudChildSurface.text);
-        label.setAttribute('font-size', '12');
-        label.setAttribute('font-weight', '600');
-        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        label.textContent = truncate(child.label, 18);
-        childGroup.appendChild(label);
-
-        // Description text (like main nodes)
-        if (child.description) {
-            const descText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            descText.setAttribute('x', String(childX + 14));
-            descText.setAttribute('y', String(childY + 45));
-            descText.setAttribute('fill', cloudChildSurface.textMuted);
-            descText.setAttribute('font-size', '10');
-            descText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            descText.textContent = truncate(child.description, 22);
-            childGroup.appendChild(descText);
-        }
-
-        // Tooltip event handlers
-        childGroup.addEventListener('mouseenter', (e) => {
-            rect.setAttribute('fill', hoverFill);
-            showTooltip(child, e as MouseEvent);
-        });
-        childGroup.addEventListener('mousemove', (e) => {
-            updateTooltipPosition(e as MouseEvent);
-        });
-        childGroup.addEventListener('mouseleave', () => {
-            rect.setAttribute('fill', cloudChildSurface.fill);
-            hideTooltip();
-        });
-
-        group.appendChild(childGroup);
-    }
+    renderCloudSubflowFeature({
+        childEdges,
+        children,
+        getNodeIcon,
+        group,
+        hideTooltip,
+        isDarkTheme: state.isDarkTheme,
+        offsetX,
+        offsetY,
+        showTooltip,
+        truncate,
+        updateTooltipPosition,
+    });
 }
 
 /**
@@ -3166,124 +2985,19 @@ function renderSubflow(
     containerWidth: number,
     containerHeight: number
 ): void {
-    // Create a clipping path for the subflow area
-    const clipId = `clip-${parentNode.id}`;
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
-    clipPath.setAttribute('id', clipId);
-    const clipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    clipRect.setAttribute('x', String(offsetX));
-    clipRect.setAttribute('y', String(offsetY));
-    clipRect.setAttribute('width', String(containerWidth));
-    clipRect.setAttribute('height', String(containerHeight));
-    clipRect.setAttribute('rx', '6');
-    clipPath.appendChild(clipRect);
-    defs.appendChild(clipPath);
-    group.appendChild(defs);
-
-    // Create subflow group with clipping
-    const subflowGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    subflowGroup.setAttribute('class', 'subflow-group');
-    subflowGroup.setAttribute('clip-path', `url(#${clipId})`);
-
-    // Background for subflow area — theme-aware
-    const sfIsDark = state.isDarkTheme;
-    const sfSurface = sfIsDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
-    const sfEdgeColor = sfIsDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
-    const sfBgColor = sfIsDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.03)';
-
-    const subflowBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    subflowBg.setAttribute('x', String(offsetX));
-    subflowBg.setAttribute('y', String(offsetY));
-    subflowBg.setAttribute('width', String(containerWidth));
-    subflowBg.setAttribute('height', String(containerHeight));
-    subflowBg.setAttribute('rx', '6');
-    subflowBg.setAttribute('fill', sfBgColor);
-    subflowGroup.appendChild(subflowBg);
-
-    // Draw child edges first (behind nodes)
-    for (const edge of childEdges) {
-        const sourceNode = children.find(n => n.id === edge.source);
-        const targetNode = children.find(n => n.id === edge.target);
-
-        if (sourceNode && targetNode) {
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-
-            // Calculate connection points
-            const sourceX = offsetX + sourceNode.x + sourceNode.width;
-            const sourceY = offsetY + sourceNode.y + sourceNode.height / 2;
-            const targetX = offsetX + targetNode.x;
-            const targetY = offsetY + targetNode.y + targetNode.height / 2;
-
-            // Create curved path
-            const midX = (sourceX + targetX) / 2;
-            const d = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
-
-            path.setAttribute('d', d);
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', sfEdgeColor);
-            path.setAttribute('stroke-width', '2');
-            path.setAttribute('stroke-linecap', 'round');
-
-            subflowGroup.appendChild(path);
-        }
-    }
-
-    // Draw child nodes
-    for (const child of children) {
-        const childGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        childGroup.setAttribute('class', 'subflow-node');
-
-        const childX = offsetX + child.x;
-        const childY = offsetY + child.y;
-        const sfChildAccent = getNodeAccentColor(child.type, sfIsDark);
-
-        // Node rectangle — neutral fill + accent strip
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', String(childX));
-        rect.setAttribute('y', String(childY));
-        rect.setAttribute('width', String(child.width));
-        rect.setAttribute('height', String(child.height));
-        rect.setAttribute('rx', '6');
-        rect.setAttribute('fill', sfSurface.fill);
-        rect.setAttribute('stroke', sfSurface.border);
-        rect.setAttribute('stroke-width', '1');
-        childGroup.appendChild(rect);
-
-        // Accent strip
-        const sfAccent = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        sfAccent.setAttribute('x', String(childX));
-        sfAccent.setAttribute('y', String(childY));
-        sfAccent.setAttribute('width', '3');
-        sfAccent.setAttribute('height', String(child.height));
-        sfAccent.setAttribute('clip-path', `inset(0 0 0 0 round 6px 0 0 6px)`);
-        sfAccent.setAttribute('fill', sfChildAccent);
-        childGroup.appendChild(sfAccent);
-
-        // Node icon
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        icon.setAttribute('x', String(childX + 8));
-        icon.setAttribute('y', String(childY + child.height / 2 + 4));
-        icon.setAttribute('fill', sfChildAccent);
-        icon.setAttribute('font-size', '11');
-        icon.textContent = getNodeIcon(child.type);
-        childGroup.appendChild(icon);
-
-        // Node label
-        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        label.setAttribute('x', String(childX + 22));
-        label.setAttribute('y', String(childY + child.height / 2 + 4));
-        label.setAttribute('fill', sfSurface.text);
-        label.setAttribute('font-size', '10');
-        label.setAttribute('font-weight', '500');
-        label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        label.textContent = truncate(child.label, 14);
-        childGroup.appendChild(label);
-
-        subflowGroup.appendChild(childGroup);
-    }
-
-    group.appendChild(subflowGroup);
+    renderSubflowFeature({
+        childEdges,
+        children,
+        containerHeight,
+        containerWidth,
+        getNodeIcon,
+        group,
+        isDarkTheme: state.isDarkTheme,
+        offsetX,
+        offsetY,
+        parentNode,
+        truncate,
+    });
 }
 
 function renderWindowNode(node: FlowNode, group: SVGGElement): void {
@@ -5956,542 +5670,35 @@ export function prevSearchResult(): void {
 }
 
 // Export functions
-
-/**
- * Prepares SVG clone for export by embedding inline styles and setting dimensions
- */
-function prepareSvgForExport(svgElement: SVGSVGElement): { svgClone: SVGSVGElement; width: number; height: number } {
-    const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
-
-    // Set explicit dimensions
-    const bounds = calculateBounds();
-    const padding = 40;
-    const width = bounds.width + padding * 2;
-    const height = bounds.height + padding * 2;
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${width} ${height}`);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Reset transform on main group
-    const mainG = svgClone.querySelector('g');
-    if (mainG) {
-        mainG.removeAttribute('transform');
-    }
-
-    // Add background rect
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('x', String(bounds.minX - padding));
-    bgRect.setAttribute('y', String(bounds.minY - padding));
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', state.isDarkTheme ? UI_COLORS.background : UI_COLORS.backgroundLightGray);
-    svgClone.insertBefore(bgRect, svgClone.firstChild);
-
-    // Embed inline styles for all elements (needed for image export)
-    embedInlineStyles(svgClone);
-
-    return { svgClone, width, height };
+function getExportFeatureContext() {
+    return {
+        getSvg: () => svg,
+        getContainerElement: () => containerElement,
+        getCurrentNodes: () => currentNodes,
+        getCurrentEdges: () => currentEdges,
+        isDarkTheme: () => state.isDarkTheme,
+        calculateBounds,
+    };
 }
 
-/**
- * Recursively embeds computed styles as inline styles on SVG elements
- * Required for proper rendering when exporting SVG to PNG (canvas needs inline styles)
- * 
- * Handles SVGAnimatedString issue: SVG elements have className as object, not string
- * Uses classList instead which works reliably for both HTML and SVG elements
- */
-function embedInlineStyles(element: Element): void {
-    // Get SVG from DOM if local reference is missing (fallback for export functions)
-    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
-
-    // Try to find original element by data-id first (most reliable)
-    let originalElement: Element | null = null;
-    const dataId = element.getAttribute('data-id');
-    if (dataId && svgElement) {
-        originalElement = svgElement.querySelector(`[data-id="${dataId}"]`);
-    }
-
-    // Fallback: try by class name using classList (handles SVGAnimatedString correctly)
-    if (!originalElement && element.classList && element.classList.length > 0) {
-        const firstClass = element.classList[0];
-        if (firstClass) {
-            try {
-                // Escape special CSS selector characters to prevent invalid selectors
-                const escapedClass = firstClass.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
-                originalElement = svgElement?.querySelector(`.${escapedClass}`) || 
-                                document.querySelector(`.${escapedClass}`);
-            } catch (e) {
-                window.debugLogging && console.debug('[renderer] Invalid CSS selector, skipping:', e);
-            }
-        }
-    }
-
-    // Style properties important for SVG rendering
-    const styleProps = ['fill', 'stroke', 'stroke-width', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor'];
-
-    if (originalElement) {
-        const origStyle = window.getComputedStyle(originalElement);
-        styleProps.forEach(prop => {
-            const value = origStyle.getPropertyValue(prop);
-            if (value && value !== 'none' && value !== '') {
-                (element as HTMLElement).style.setProperty(prop, value);
-            }
-        });
-    }
-
-    // Process children
-    Array.from(element.children).forEach(child => embedInlineStyles(child));
-}
-
-/**
- * Exports the current visualization as PNG image
- * Converts SVG to PNG via canvas with fallback mechanisms for webview compatibility
- */
 export function exportToPng(): void {
-    // Get SVG from DOM if local reference is missing (fallback for reliability)
-    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
-    if (!svgElement) {
-        return;
-    }
-
-    try {
-        const { svgClone, width, height } = prepareSvgForExport(svgElement);
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            return;
-        }
-
-        // High DPI scaling for crisp exports
-        const scale = 2;
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        ctx.scale(scale, scale);
-
-        // Use blob URL for loading SVG (more reliable in VS Code webviews)
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const svgUrl = URL.createObjectURL(svgBlob);
-
-        const img = new Image();
-        img.onload = () => {
-            try {
-                ctx.drawImage(img, 0, 0);
-                URL.revokeObjectURL(svgUrl);
-                const pngDataUrl = canvas.toDataURL('image/png');
-
-                // Send to VS Code extension for saving (webview downloads are blocked)
-                const vscodeApi = (window as any).vscodeApi;
-                if (vscodeApi && vscodeApi.postMessage) {
-                    // Extract base64 data (remove data:image/png;base64, prefix)
-                    const base64Data = pngDataUrl.split(',')[1];
-                    vscodeApi.postMessage({
-                        command: 'savePng',
-                        data: base64Data,
-                        filename: `sql-flow-${Date.now()}.png`
-                    });
-                }
-            } catch (e) {
-                window.debugLogging && console.debug('[renderer] PNG export canvas draw failed:', e);
-                URL.revokeObjectURL(svgUrl);
-            }
-        };
-
-        img.onerror = () => {
-            URL.revokeObjectURL(svgUrl);
-        };
-
-        img.src = svgUrl;
-    } catch (e) {
-        window.debugLogging && console.debug('[renderer] PNG export failed:', e);
-    }
+    exportToPngFeature(getExportFeatureContext());
 }
 
 export function exportToSvg(): void {
-    // Get SVG from DOM if local reference is missing
-    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
-    if (!svgElement) {
-        return;
-    }
-
-    try {
-        const { svgClone } = prepareSvgForExport(svgElement);
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-
-        // Export pattern: create blob URL and trigger download
-        const blob = new Blob([svgData], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.download = `sql-flow-${Date.now()}.svg`;
-        a.href = url;
-        a.click();
-        URL.revokeObjectURL(url);
-    } catch (e) {
-        window.debugLogging && console.debug('[renderer] SVG export failed:', e);
-    }
+    exportToSvgFeature(getExportFeatureContext());
 }
 
-function showExportNotification(type: 'success' | 'error', message: string): void {
-    showClipboardNotification(type, message);
-}
-
-/**
- * Export the current visualization to Mermaid.js flowchart format
- * Exports as .md file with code block for VS Code Mermaid preview compatibility
- */
 export function exportToMermaid(): void {
-    if (currentNodes.length === 0) {
-        return;
-    }
-
-    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
-
-    // Wrap in markdown code block for VS Code Mermaid extension compatibility
-    const markdownContent = `# SQL Flow Diagram
-
-\`\`\`mermaid
-${mermaidCode}
-\`\`\`
-`;
-
-    // Download as .md file
-    const blob = new Blob([markdownContent], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.download = `sql-flow-${Date.now()}.md`;
-    a.href = url;
-    a.click();
-
-    URL.revokeObjectURL(url);
+    exportToMermaidFeature(getExportFeatureContext());
 }
 
-/**
- * Copy Mermaid flowchart code to clipboard
- */
 export function copyMermaidToClipboard(): void {
-    if (currentNodes.length === 0) {
-        return;
-    }
-
-    const mermaidCode = generateMermaidCode(currentNodes, currentEdges);
-    navigator.clipboard.writeText(mermaidCode).catch(() => {
-        // Fallback: use textarea method
-        const textarea = document.createElement('textarea');
-        textarea.value = mermaidCode;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-    });
-}
-
-/**
- * Generate Mermaid flowchart code from nodes and edges
- */
-function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[]): string {
-    const direction = window.flowDirection === 'bottom-up' ? 'BT' : 'TD';
-    const lines: string[] = [`flowchart ${direction}`];
-
-    // Group nodes by type for subgraph organization
-    const tableNodes = nodes.filter(n => n.type === 'table');
-    const resultNodes = nodes.filter(n => n.type === 'result');
-    const otherNodes = nodes.filter(n => n.type !== 'table' && n.type !== 'result');
-
-    // Add Sources subgraph for tables
-    if (tableNodes.length > 0) {
-        lines.push('    subgraph Sources');
-        tableNodes.forEach(node => {
-            lines.push(`        ${formatMermaidNode(node)}`);
-        });
-        lines.push('    end');
-    }
-
-    // Add intermediate nodes
-    otherNodes.forEach(node => {
-        lines.push(`    ${formatMermaidNode(node)}`);
-    });
-
-    // Add Results subgraph
-    if (resultNodes.length > 0) {
-        lines.push('    subgraph Results');
-        resultNodes.forEach(node => {
-            lines.push(`        ${formatMermaidNode(node)}`);
-        });
-        lines.push('    end');
-    }
-
-    // Add blank line before edges
-    lines.push('');
-
-    // Add edges
-    edges.forEach(edge => {
-        const edgeLine = formatMermaidEdge(edge);
-        if (edgeLine) {
-            lines.push(`    ${edgeLine}`);
-        }
-    });
-
-    // Add styling section
-    const mermaidTextColor = state.isDarkTheme ? '#fff' : '#111827';
-    lines.push('');
-    lines.push('    %% Node styling');
-    lines.push(`    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:${mermaidTextColor}`);
-    lines.push(`    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:${mermaidTextColor}`);
-    lines.push(`    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:${mermaidTextColor}`);
-    lines.push(`    classDef aggregateStyle fill:#10b981,stroke:#047857,color:${mermaidTextColor}`);
-    lines.push(`    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:${mermaidTextColor}`);
-    lines.push(`    classDef resultStyle fill:#22c55e,stroke:#15803d,color:${mermaidTextColor}`);
-    lines.push(`    classDef cteStyle fill:#ec4899,stroke:#be185d,color:${mermaidTextColor}`);
-    lines.push(`    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:${mermaidTextColor}`);
-    lines.push(`    classDef defaultStyle fill:#64748b,stroke:#475569,color:${mermaidTextColor}`);
-
-    // Apply classes to nodes
-    const styleAssignments = generateStyleAssignments(nodes);
-    styleAssignments.forEach(assignment => {
-        lines.push(`    ${assignment}`);
-    });
-
-    return lines.join('\n');
-}
-
-/**
- * Format a node for Mermaid syntax with appropriate shape based on type
- */
-function formatMermaidNode(node: FlowNode): string {
-    const id = sanitizeMermaidId(node.id);
-    const label = escapeMermaidLabel(node.label);
-
-    // Different shapes for different node types
-    switch (node.type) {
-        case 'table':
-            // Cylinder shape for tables
-            return `${id}[("${label}")]`;
-        case 'filter':
-            // Diamond/rhombus for filters
-            return `${id}{"${label}"}`;
-        case 'join':
-            // Hexagon for joins
-            return `${id}{{"${label}"}}`;
-        case 'aggregate':
-            // Subroutine box for aggregates
-            return `${id}[["${label}"]]`;
-        case 'sort':
-            // Trapezoid for sort
-            return `${id}[/"${label}"/]`;
-        case 'result':
-            // Stadium shape for results
-            return `${id}(["${label}"])`;
-        case 'cte':
-            // Double circle for CTEs
-            return `${id}((("${label}")))`;
-        case 'union':
-            // Parallelogram for unions
-            return `${id}[/"${label}"\\]`;
-        case 'subquery':
-            // Subroutine for subqueries
-            return `${id}[["${label}"]]`;
-        case 'window':
-            // Asymmetric shape for window functions
-            return `${id}>"${label}"]`;
-        default:
-            // Default rounded rectangle
-            return `${id}("${label}")`;
-    }
-}
-
-/**
- * Format an edge for Mermaid syntax
- */
-function formatMermaidEdge(edge: FlowEdge): string {
-    const sourceId = sanitizeMermaidId(edge.source);
-    const targetId = sanitizeMermaidId(edge.target);
-
-    if (edge.label) {
-        const label = escapeMermaidLabel(edge.label);
-        return `${sourceId} -->|"${label}"| ${targetId}`;
-    }
-
-    return `${sourceId} --> ${targetId}`;
-}
-
-/**
- * Sanitize node ID for Mermaid (remove special characters)
- */
-function sanitizeMermaidId(id: string): string {
-    return id
-        .replace(/[^a-zA-Z0-9_]/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .replace(/_+/g, '_');
-}
-
-/**
- * Escape label text for Mermaid
- */
-function escapeMermaidLabel(label: string): string {
-    return label
-        .replace(/"/g, "'")
-        .replace(/\\/g, '\\\\')
-        .replace(/\n/g, ' ')
-        .substring(0, 50);
-}
-
-/**
- * Generate class assignments for node styling
- */
-function generateStyleAssignments(nodes: FlowNode[]): string[] {
-    const assignments: string[] = [];
-    const typeToClass: Record<string, string> = {
-        'table': 'tableStyle',
-        'filter': 'filterStyle',
-        'join': 'joinStyle',
-        'aggregate': 'aggregateStyle',
-        'sort': 'sortStyle',
-        'result': 'resultStyle',
-        'cte': 'cteStyle',
-        'union': 'unionStyle'
-    };
-
-    // Group nodes by type
-    const nodesByType = new Map<string, string[]>();
-
-    nodes.forEach(node => {
-        const className = typeToClass[node.type] || 'defaultStyle';
-        if (!nodesByType.has(className)) {
-            nodesByType.set(className, []);
-        }
-        nodesByType.get(className)!.push(sanitizeMermaidId(node.id));
-    });
-
-    // Generate class assignments
-    nodesByType.forEach((nodeIds, className) => {
-        if (nodeIds.length > 0) {
-            assignments.push(`class ${nodeIds.join(',')} ${className}`);
-        }
-    });
-
-    return assignments;
+    copyMermaidToClipboardFeature(getExportFeatureContext());
 }
 
 export function copyToClipboard(): void {
-    // Get SVG from DOM if local reference is missing
-    const svgElement = svg || (containerElement?.querySelector('svg') as SVGSVGElement | null);
-    if (!svgElement) {
-        return;
-    }
-
-    try {
-        const { svgClone, width, height } = prepareSvgForExport(svgElement);
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            return;
-        }
-
-        const scale = 2;
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        ctx.scale(scale, scale);
-
-        const img = new Image();
-        img.onload = () => {
-            ctx.drawImage(img, 0, 0);
-            canvas.toBlob((blob) => {
-                if (blob && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-                    navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]).then(() => {
-                        // Success - notification shown via UI
-                    }).catch(() => {
-                        // Fallback: download as PNG
-                        const a = document.createElement('a');
-                        a.download = `sql-flow-${Date.now()}.png`;
-                        a.href = canvas.toDataURL('image/png');
-                        a.click();
-                    });
-                } else {
-                    // Fallback: download as PNG
-                    const a = document.createElement('a');
-                    a.download = `sql-flow-${Date.now()}.png`;
-                    a.href = canvas.toDataURL('image/png');
-                    a.click();
-                }
-            }, 'image/png');
-        };
-        img.onerror = () => {
-            // Try with blob URL
-            const blob = new Blob([svgData], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            const img2 = new Image();
-            img2.onload = () => {
-                ctx.drawImage(img2, 0, 0);
-                const a = document.createElement('a');
-                a.download = `sql-flow-${Date.now()}.png`;
-                a.href = canvas.toDataURL('image/png');
-                a.click();
-                URL.revokeObjectURL(url);
-            };
-            img2.onerror = () => {
-                // Copy failed silently
-            };
-            img2.src = url;
-        };
-        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-    } catch (e) {
-        window.debugLogging && console.debug('[renderer] Clipboard copy failed:', e);
-    }
-}
-
-function showClipboardNotification(type: 'success' | 'error', message: string): void {
-    // Use the container element or fall back to body
-    const parent = containerElement || document.body;
-
-    // Remove existing notification if any
-    const existing = document.getElementById('clipboard-notification');
-    if (existing) {existing.remove();}
-
-    const notification = document.createElement('div');
-    notification.id = 'clipboard-notification';
-    notification.style.cssText = `
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 12px 24px;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 500;
-        z-index: ${Z_INDEX.toast};
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        ${type === 'success'
-            ? 'background: rgba(34, 197, 94, 0.95); color: white;'
-            : 'background: rgba(239, 68, 68, 0.95); color: white;'}
-    `;
-    notification.textContent = message;
-
-    parent.appendChild(notification);
-
-    // Animate in
-    notification.animate([
-        { transform: 'translateX(-50%) translateY(20px)', opacity: 0 },
-        { transform: 'translateX(-50%) translateY(0)', opacity: 1 }
-    ], { duration: 300, easing: 'ease-out' });
-
-    // Remove after 3 seconds
-    setTimeout(() => {
-        notification.animate([
-            { opacity: 1 },
-            { opacity: 0 }
-        ], { duration: 300, easing: 'ease-out' }).onfinish = () => {
-            notification.remove();
-        };
-    }, 3000);
+    copyToClipboardFeature(getExportFeatureContext());
 }
 
 function calculateBounds(): { minX: number; minY: number; width: number; height: number } {
