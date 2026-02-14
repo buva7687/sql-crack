@@ -82,3 +82,9 @@ export type {
     CompareViewOptions,
     CompareDiffResult,
 } from './compareView';
+
+export { showTooltip, updateTooltipPosition, hideTooltip } from './tooltip';
+export type { ShowTooltipOptions } from './tooltip';
+
+export { showContextMenu, hideContextMenu, showCopyFeedback } from './contextMenu';
+export type { ShowContextMenuOptions, ContextMenuColors, ContextMenuIcons } from './contextMenu';

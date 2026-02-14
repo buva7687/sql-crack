@@ -6,11 +6,16 @@ describe('minimap viewport sync', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const minimapFeatureSource = readFileSync(
+        join(__dirname, '../../../src/webview/features/minimap.ts'),
+        'utf8'
+    );
 
     it('updates minimap viewport directly during pan/zoom transforms', () => {
         expect(rendererSource).toContain('function updateTransform()');
         expect(rendererSource).toContain('updateMinimapViewport();');
-        expect(rendererSource).toContain('shouldShowMinimap(nodesForMinimap.length)');
+        expect(rendererSource).toContain('updateMinimapViewportFeature(getMinimapContext())');
+        expect(minimapFeatureSource).toContain('shouldShowMinimap(nodesForMinimap.length)');
 
         const updateTransformMatch = rendererSource.match(/function updateTransform\(\): void \{[\s\S]*?\n\}/);
         expect(updateTransformMatch).not.toBeNull();

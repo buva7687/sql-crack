@@ -55,8 +55,18 @@ import {
     clearBreadcrumbBar,
     updateHintsSummaryBadge,
 } from './ui';
+import {
+    hideContextMenu as hideContextMenuUi,
+    showContextMenu as showContextMenuUi,
+    showCopyFeedback as showCopyFeedbackUi,
+} from './ui/contextMenu';
 import { prefersReducedMotion } from './ui/motion';
 import { attachResizablePanel } from './ui/resizablePanel';
+import {
+    hideTooltip as hideTooltipUi,
+    showTooltip as showTooltipUi,
+    updateTooltipPosition as updateTooltipPositionUi,
+} from './ui/tooltip';
 import {
     PANEL_LAYOUT_DEFAULTS,
     applyHintsPanelViewportBounds as applyHintsPanelBounds,
@@ -109,6 +119,13 @@ import {
     exportToPng as exportToPngFeature,
     exportToSvg as exportToSvgFeature,
 } from './features/export';
+import { toggleFullscreen as toggleFullscreenFeature } from './features/fullscreen';
+import {
+    setupMinimapDrag as setupMinimapDragFeature,
+    updateMinimap as updateMinimapFeature,
+    updateMinimapViewport as updateMinimapViewportFeature,
+} from './features/minimap';
+import { applyColorblindModeToRenderedGraph as applyColorblindModeFeature } from './features/theme';
 import {
     createInitialViewState,
     createLayoutHistory,
@@ -6548,140 +6565,28 @@ export function getFormattedSql(): string {
 // FEATURE: Minimap for Complex Queries
 // ============================================================
 
+function getMinimapContext() {
+    return {
+        calculateBounds,
+        currentNodes,
+        getNodeColor,
+        renderNodes,
+        shouldShowMinimap,
+        state,
+        svg,
+    };
+}
+
 export function updateMinimap(): void {
-    const minimapContainer = document.getElementById('minimap-container');
-    const minimapSvg = document.getElementById('minimap-svg') as unknown as SVGSVGElement;
-    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
-
-    if (!minimapContainer || !minimapSvg || !shouldShowMinimap(nodesForMinimap.length)) {
-        // Hide minimap for trivial/empty graph states.
-        if (minimapContainer) {minimapContainer.style.display = 'none';}
-        return;
-    }
-
-    minimapContainer.style.display = 'block';
-
-    // Calculate bounds
-    const bounds = calculateBounds();
-    const padding = 10;
-    const mapWidth = 150;
-    const mapHeight = 100;
-
-    // Calculate scale to fit all nodes
-    const scaleX = (mapWidth - padding * 2) / bounds.width;
-    const scaleY = (mapHeight - padding * 2) / bounds.height;
-    const mapScale = Math.min(scaleX, scaleY, 0.15);
-
-    // Render mini nodes
-    minimapSvg.innerHTML = '';
-
-    for (const node of nodesForMinimap) {
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', String((node.x - bounds.minX) * mapScale + padding));
-        rect.setAttribute('y', String((node.y - bounds.minY) * mapScale + padding));
-        rect.setAttribute('width', String(Math.max(4, node.width * mapScale)));
-        rect.setAttribute('height', String(Math.max(3, node.height * mapScale)));
-        rect.setAttribute('fill', getNodeColor(node.type));
-        rect.setAttribute('rx', '1');
-        minimapSvg.appendChild(rect);
-    }
-
-    // Update viewport indicator
-    updateMinimapViewport();
+    updateMinimapFeature(getMinimapContext(), updateMinimapViewport);
 }
 
 function updateMinimapViewport(): void {
-    const viewport = document.getElementById('minimap-viewport');
-    const minimapContainer = document.getElementById('minimap-container');
-    const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
-
-    if (!viewport || !minimapContainer || !svg || !shouldShowMinimap(nodesForMinimap.length)) {return;}
-
-    const bounds = calculateBounds();
-    const svgRect = svg.getBoundingClientRect();
-    const mapWidth = 150;
-    const mapHeight = 100;
-    const padding = 10;
-
-    const scaleX = (mapWidth - padding * 2) / bounds.width;
-    const scaleY = (mapHeight - padding * 2) / bounds.height;
-    const mapScale = Math.min(scaleX, scaleY, 0.15);
-
-    // Calculate visible area in graph coordinates
-    const visibleLeft = -state.offsetX / state.scale;
-    const visibleTop = -state.offsetY / state.scale;
-    const visibleWidth = svgRect.width / state.scale;
-    const visibleHeight = svgRect.height / state.scale;
-
-    // Transform to minimap coordinates
-    const vpLeft = (visibleLeft - bounds.minX) * mapScale + padding;
-    const vpTop = (visibleTop - bounds.minY) * mapScale + padding;
-    const vpWidth = visibleWidth * mapScale;
-    const vpHeight = visibleHeight * mapScale;
-
-    viewport.style.left = `${Math.max(0, vpLeft)}px`;
-    viewport.style.top = `${Math.max(0, vpTop)}px`;
-    viewport.style.width = `${Math.min(mapWidth, vpWidth)}px`;
-    viewport.style.height = `${Math.min(mapHeight, vpHeight)}px`;
+    updateMinimapViewportFeature(getMinimapContext());
 }
 
 function setupMinimapDrag(minimapContainer: HTMLDivElement): void {
-    let dragging = false;
-
-    function panToMinimapPosition(e: MouseEvent): void {
-        if (!svg) { return; }
-        const nodesForMinimap = renderNodes.length > 0 ? renderNodes : currentNodes;
-        if (!shouldShowMinimap(nodesForMinimap.length)) { return; }
-
-        const bounds = calculateBounds();
-        const svgRect = svg.getBoundingClientRect();
-        const containerRect = minimapContainer.getBoundingClientRect();
-        const mapWidth = 150;
-        const mapHeight = 100;
-        const padding = 10;
-
-        const scaleX = (mapWidth - padding * 2) / bounds.width;
-        const scaleY = (mapHeight - padding * 2) / bounds.height;
-        const mapScale = Math.min(scaleX, scaleY, 0.15);
-
-        // Click position relative to minimap content area
-        const clickX = e.clientX - containerRect.left;
-        const clickY = e.clientY - containerRect.top;
-
-        // Convert minimap coordinates to graph coordinates
-        const graphX = (clickX - padding) / mapScale + bounds.minX;
-        const graphY = (clickY - padding) / mapScale + bounds.minY;
-
-        // Center viewport on the clicked point
-        const visibleWidth = svgRect.width / state.scale;
-        const visibleHeight = svgRect.height / state.scale;
-
-        state.offsetX = -(graphX - visibleWidth / 2) * state.scale;
-        state.offsetY = -(graphY - visibleHeight / 2) * state.scale;
-
-        updateTransform();
-    }
-
-    function onMouseMove(e: MouseEvent): void {
-        if (dragging) {
-            panToMinimapPosition(e);
-        }
-    }
-
-    function onMouseUp(): void {
-        dragging = false;
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-    }
-
-    minimapContainer.addEventListener('mousedown', (e: MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dragging = true;
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        panToMinimapPosition(e);
-    });
+    setupMinimapDragFeature(minimapContainer, getMinimapContext(), updateTransform);
 }
 
 // ============================================================
@@ -6736,183 +6641,27 @@ import { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS } from './constants/full
 export { FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS };
 
 export function toggleFullscreen(enable?: boolean): void {
-    state.isFullscreen = enable ?? !state.isFullscreen;
-
-    const rootElement = document.getElementById('root');
-    const body = document.body;
-    const html = document.documentElement;
-    const svgElement = svg;
-    
-    if (!rootElement) {
-        return;
-    }
-
-    // Single source of truth: all UI elements that should be hidden in fullscreen
-    // Resolved from FULLSCREEN_HIDE_IDS, FULLSCREEN_HIDE_SELECTORS, columnLineageBanner,
-    // plus any elements with data-fullscreen-hide attribute
-    const uiElements = [
-        ...FULLSCREEN_HIDE_IDS.map(id => document.getElementById(id) as HTMLElement),
-        ...FULLSCREEN_HIDE_SELECTORS.map(sel => document.querySelector(sel) as HTMLElement),
-        columnLineageBanner as HTMLElement,
-        // Also find any elements with data-fullscreen-hide attribute
-        ...Array.from(document.querySelectorAll('[data-fullscreen-hide]'))
-    ];
-
-    if (state.isFullscreen) {
-        // Save original styles and visibility (only save what we'll change)
-        // Using individual properties instead of cssText to preserve fonts and other styles
-        rootElement.dataset.originalPosition = rootElement.style.position || '';
-        rootElement.dataset.originalTop = rootElement.style.top || '';
-        rootElement.dataset.originalLeft = rootElement.style.left || '';
-        rootElement.dataset.originalWidth = rootElement.style.width || '';
-        rootElement.dataset.originalHeight = rootElement.style.height || '';
-        rootElement.dataset.originalMargin = rootElement.style.margin || '';
-        rootElement.dataset.originalPadding = rootElement.style.padding || '';
-        rootElement.dataset.originalOverflow = rootElement.style.overflow || '';
-        rootElement.dataset.originalZIndex = rootElement.style.zIndex || '';
-        
-        if (svgElement) {
-            svgElement.dataset.originalWidth = svgElement.style.width || '';
-            svgElement.dataset.originalHeight = svgElement.style.height || '';
-            svgElement.dataset.originalPosition = svgElement.style.position || '';
-            svgElement.dataset.originalTop = svgElement.style.top || '';
-            svgElement.dataset.originalLeft = svgElement.style.left || '';
-        }
-        
-        if (body) {
-            body.dataset.originalMargin = body.style.margin || '';
-            body.dataset.originalPadding = body.style.padding || '';
-            body.dataset.originalOverflow = body.style.overflow || '';
-            body.dataset.originalWidth = body.style.width || '';
-            body.dataset.originalHeight = body.style.height || '';
-        }
-        
-        if (html) {
-            html.dataset.originalMargin = html.style.margin || '';
-            html.dataset.originalPadding = html.style.padding || '';
-            html.dataset.originalOverflow = html.style.overflow || '';
-            html.dataset.originalWidth = html.style.width || '';
-            html.dataset.originalHeight = html.style.height || '';
-        }
-        
-        // Hide UI elements using the consolidated list
-        uiElements.forEach(el => {
-            if (el) {
-                (el as HTMLElement).dataset.originalDisplay = (el as HTMLElement).style.display || '';
-                (el as HTMLElement).style.display = 'none';
+    state.isFullscreen = toggleFullscreenFeature({
+        columnLineageBanner,
+        currentIsFullscreen: state.isFullscreen,
+        enable,
+        getTheme: getComponentUiColors,
+        hideIds: FULLSCREEN_HIDE_IDS,
+        hideSelectors: FULLSCREEN_HIDE_SELECTORS,
+        isDarkTheme: state.isDarkTheme,
+        onExitRequested: () => toggleFullscreen(false),
+        onRequestFullscreen: (nextEnable: boolean) => {
+            if (typeof window !== 'undefined' && (window as any).vscodeApi) {
+                (window as any).vscodeApi.postMessage({
+                    command: 'requestFullscreen',
+                    enable: nextEnable,
+                });
             }
-        });
-
-        // Make root fill the entire viewport (only set necessary properties)
-        // Using individual properties preserves fonts, colors, and other styles
-        rootElement.style.position = 'fixed';
-        rootElement.style.top = '0';
-        rootElement.style.left = '0';
-        rootElement.style.width = '100vw';
-        rootElement.style.height = '100vh';
-        rootElement.style.margin = '0';
-        rootElement.style.padding = '0';
-        rootElement.style.overflow = 'hidden';
-        rootElement.style.zIndex = String(Z_INDEX.debugTop);
-        // Don't change background - let it inherit or use existing
-        
-        if (svgElement) {
-            svgElement.style.width = '100vw';
-            svgElement.style.height = '100vh';
-            svgElement.style.position = 'absolute';
-            svgElement.style.top = '0';
-            svgElement.style.left = '0';
-        }
-        
-        if (body) {
-            body.style.margin = '0';
-            body.style.padding = '0';
-            body.style.overflow = 'hidden';
-            body.style.width = '100vw';
-            body.style.height = '100vh';
-        }
-        
-        if (html) {
-            html.style.margin = '0';
-            html.style.padding = '0';
-            html.style.overflow = 'hidden';
-            html.style.width = '100vw';
-            html.style.height = '100vh';
-        }
-
-        // Request fullscreen via VS Code API (for panel maximization)
-        if (typeof window !== 'undefined' && (window as any).vscodeApi) {
-            (window as any).vscodeApi.postMessage({
-                command: 'requestFullscreen',
-                enable: true
-            });
-        }
-
-        // Create floating exit button and toast
-        createFullscreenExitButton(rootElement);
-        createFullscreenToast(rootElement);
-    } else {
-        // Request exit fullscreen via VS Code API
-        if (typeof window !== 'undefined' && (window as any).vscodeApi) {
-            (window as any).vscodeApi.postMessage({
-                command: 'requestFullscreen',
-                enable: false
-            });
-        }
-
-        // Remove fullscreen exit button and toast
-        removeFullscreenOverlays();
-
-        // Restore UI elements using the consolidated list
-        uiElements.forEach(el => {
-            if (el && (el as HTMLElement).dataset.originalDisplay !== undefined) {
-                (el as HTMLElement).style.display = (el as HTMLElement).dataset.originalDisplay || '';
-                delete (el as HTMLElement).dataset.originalDisplay;
-            }
-        });
-
-        // Restore original styles (only the properties we changed)
-        rootElement.style.position = rootElement.dataset.originalPosition || '';
-        rootElement.style.top = rootElement.dataset.originalTop || '';
-        rootElement.style.left = rootElement.dataset.originalLeft || '';
-        rootElement.style.width = rootElement.dataset.originalWidth || '';
-        rootElement.style.height = rootElement.dataset.originalHeight || '';
-        rootElement.style.margin = rootElement.dataset.originalMargin || '';
-        rootElement.style.padding = rootElement.dataset.originalPadding || '';
-        rootElement.style.overflow = rootElement.dataset.originalOverflow || '';
-        rootElement.style.zIndex = rootElement.dataset.originalZIndex || '';
-        
-        if (svgElement) {
-            svgElement.style.width = svgElement.dataset.originalWidth || '';
-            svgElement.style.height = svgElement.dataset.originalHeight || '';
-            svgElement.style.position = svgElement.dataset.originalPosition || '';
-            svgElement.style.top = svgElement.dataset.originalTop || '';
-            svgElement.style.left = svgElement.dataset.originalLeft || '';
-        }
-        
-        if (body) {
-            body.style.margin = body.dataset.originalMargin || '';
-            body.style.padding = body.dataset.originalPadding || '';
-            body.style.overflow = body.dataset.originalOverflow || '';
-            body.style.width = body.dataset.originalWidth || '';
-            body.style.height = body.dataset.originalHeight || '';
-        }
-        
-        if (html) {
-            html.style.margin = html.dataset.originalMargin || '';
-            html.style.padding = html.dataset.originalPadding || '';
-            html.style.overflow = html.dataset.originalOverflow || '';
-            html.style.width = html.dataset.originalWidth || '';
-            html.style.height = html.dataset.originalHeight || '';
-        }
-
-        // Exit browser fullscreen if active
-        if (document.fullscreenElement) {
-            document.exitFullscreen().catch((e) => {
-                console.debug('[sql-crack] exitFullscreen failed:', e);
-            });
-        }
-    }
+        },
+        rootElement: document.getElementById('root'),
+        svgElement: svg,
+        zIndex: Z_INDEX.debugTop,
+    });
 
     // Refit view after fullscreen toggle
     setTimeout(() => {
@@ -6921,155 +6670,20 @@ export function toggleFullscreen(enable?: boolean): void {
     }, 100);
 }
 
-// Fullscreen overlay helpers (exit button + toast)
-let fullscreenMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
-let fullscreenFadeTimeout: ReturnType<typeof setTimeout> | null = null;
-
-function createFullscreenExitButton(container: HTMLElement): void {
-    const theme = getComponentUiColors(state.isDarkTheme);
-    const btn = document.createElement('button');
-    btn.id = 'fullscreen-exit-btn';
-    btn.textContent = '✕ Exit Fullscreen';
-    Object.assign(btn.style, {
-        position: 'fixed',
-        top: '16px',
-        right: '16px',
-        zIndex: '100000',
-        padding: '8px 16px',
-        border: `1px solid ${theme.border}`,
-        borderRadius: '8px',
-        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        color: theme.text,
-        fontSize: '13px',
-        fontFamily: 'inherit',
-        cursor: 'pointer',
-        opacity: '0',
-        transition: 'opacity 300ms ease',
-        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
-    });
-
-    btn.addEventListener('click', () => toggleFullscreen(false));
-    btn.addEventListener('mouseenter', () => { btn.style.background = theme.accent; btn.style.color = '#fff'; });
-    btn.addEventListener('mouseleave', () => { btn.style.background = state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)'; btn.style.color = theme.text; });
-
-    container.appendChild(btn);
-
-    // Show/hide on mouse move with 2s fade timeout
-    const showButton = () => {
-        btn.style.opacity = '1';
-        if (fullscreenFadeTimeout) { clearTimeout(fullscreenFadeTimeout); }
-        fullscreenFadeTimeout = setTimeout(() => { btn.style.opacity = '0'; }, 2000);
-    };
-
-    fullscreenMouseMoveHandler = showButton;
-    document.addEventListener('mousemove', fullscreenMouseMoveHandler);
-
-    // Show briefly on entry
-    showButton();
-}
-
-function createFullscreenToast(container: HTMLElement): void {
-    const theme = getComponentUiColors(state.isDarkTheme);
-    const toast = document.createElement('div');
-    toast.id = 'fullscreen-toast';
-    toast.textContent = 'Press ESC or F to exit fullscreen';
-    Object.assign(toast.style, {
-        position: 'fixed',
-        top: '16px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: '100000',
-        padding: '10px 20px',
-        borderRadius: '8px',
-        background: state.isDarkTheme ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        border: `1px solid ${theme.border}`,
-        color: theme.text,
-        fontSize: '13px',
-        fontFamily: 'inherit',
-        opacity: '0',
-        transition: 'opacity 400ms ease',
-        boxShadow: `0 2px 8px ${state.isDarkTheme ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
-    });
-
-    container.appendChild(toast);
-
-    // Fade in
-    requestAnimationFrame(() => { toast.style.opacity = '1'; });
-
-    // Fade out after 3s, then remove
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => { toast.remove(); }, 400);
-    }, 3000);
-}
-
-function removeFullscreenOverlays(): void {
-    const btn = document.getElementById('fullscreen-exit-btn');
-    if (btn) { btn.remove(); }
-
-    const toast = document.getElementById('fullscreen-toast');
-    if (toast) { toast.remove(); }
-
-    if (fullscreenMouseMoveHandler) {
-        document.removeEventListener('mousemove', fullscreenMouseMoveHandler);
-        fullscreenMouseMoveHandler = null;
-    }
-
-    if (fullscreenFadeTimeout) {
-        clearTimeout(fullscreenFadeTimeout);
-        fullscreenFadeTimeout = null;
-    }
-}
-
 export function isFullscreen(): boolean {
     return state.isFullscreen;
 }
 
 function applyColorblindModeToRenderedGraph(): void {
-    if (!mainGroup) { return; }
-
-    const allNodeGroups = mainGroup.querySelectorAll('.node');
-    allNodeGroups.forEach(group => {
-        const nodeId = group.getAttribute('data-id');
-        if (!nodeId) { return; }
-        const node = currentNodes.find(candidate => candidate.id === nodeId);
-        if (!node) { return; }
-
-        const accent = group.querySelector('.node-accent') as SVGRectElement | null;
-        if (accent) {
-            accent.setAttribute('fill', getNodeColor(node.type));
-        }
-
-        const nodeIcon = group.querySelector('.node-main-icon') as SVGTextElement | null;
-        if (nodeIcon) {
-            nodeIcon.textContent = getNodeVisualIcon(node);
-        }
-
-        const warningIndicator = getWarningIndicatorState(node.warnings);
-        const warningTriangle = group.querySelector('.node-warning-triangle') as SVGPathElement | null;
-        if (warningTriangle && warningIndicator) {
-            warningTriangle.setAttribute('fill', getWarningColor(warningIndicator.severity));
-        }
-
-        const warningIcon = group.querySelector('.node-warning-icon') as SVGTextElement | null;
-        if (warningIcon && warningIndicator) {
-            warningIcon.textContent = getSeverityIcon(warningIndicator.severity);
-        }
-    });
-
-    const allEdges = mainGroup.querySelectorAll('.edge');
-    allEdges.forEach(edge => {
-        const clauseType = edge.getAttribute('data-clause-type') || undefined;
-        const dashPattern = getEdgeDashPattern(clauseType || undefined);
-        if (dashPattern) {
-            edge.setAttribute('stroke-dasharray', dashPattern);
-        } else {
-            edge.removeAttribute('stroke-dasharray');
-        }
+    applyColorblindModeFeature({
+        getEdgeDashPattern,
+        getNodeColor,
+        getNodeVisualIcon,
+        getSeverityIcon,
+        getWarningColor,
+        getWarningIndicatorState,
+        mainGroup,
+        nodes: currentNodes,
     });
 }
 
@@ -7167,166 +6781,30 @@ function applyTheme(dark: boolean): void {
 // ============================================================
 
 function showTooltip(node: FlowNode, e: MouseEvent): void {
-    if (!tooltipElement) {return;}
-
-    // Build tooltip content
-    let content = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-            <span style="
-                background: ${getNodeColor(node.type)};
-                padding: 3px 8px;
-                border-radius: 4px;
-                font-size: 10px;
-                font-weight: 600;
-                color: white;
-            ">${getNodeVisualIcon(node)} ${node.type.toUpperCase()}</span>
-        </div>
-        <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${escapeHtml(node.label)}</div>
-    `;
-
-    if (node.description) {
-        content += `<div style="color: ${state.isDarkTheme ? '#94a3b8' : '#64748b'}; font-size: 11px; margin-bottom: 4px;">${escapeHtml(node.description)}</div>`;
-    }
-
-    // Show SQL fragment if we have line numbers
-    if (currentSql) {
-        const sqlSnippet = extractSqlSnippet(currentSql, node.startLine, node.endLine, 3, 180);
-        if (sqlSnippet) {
-            content += `
-                <div style="
-                    margin-top: 8px;
-                    padding: 8px;
-                    background: rgba(30, 41, 59, 0.6);
-                    border: 1px solid rgba(148, 163, 184, 0.2);
-                    border-radius: 4px;
-                    font-family: ${MONO_FONT_STACK};
-                    font-size: 10px;
-                    color: ${UI_COLORS.textBright};
-                    line-height: 1.4;
-                    white-space: pre-wrap;
-                    word-break: break-all;
-                    max-width: 300px;
-                ">${escapeHtml(sqlSnippet.snippet)}</div>
-            `;
-
-            // Add line number reference
-            content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                <span style="display: inline-flex; width: 10px; height: 10px; vertical-align: text-bottom;">${ICONS.pin}</span>
-                ${sqlSnippet.lineLabel}
-            </div>`;
-
-            if (sqlSnippet.truncated) {
-                content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#93c5fd' : '#1d4ed8'}; margin-top: 4px;">
-                    Press S for full SQL
-                </div>`;
-            }
-        }
-    }
-
-    // Add details based on node type
-    if (node.type === 'join' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${MONO_FONT_STACK};">
-            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
-        </div>`;
-    }
-
-    if (node.type === 'filter' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${MONO_FONT_STACK};">
-            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
-        </div>`;
-    }
-
-    if (node.type === 'aggregate' && node.aggregateDetails) {
-        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#fbbf24' : '#f59e0b'};">
-            ${node.aggregateDetails.functions.length} aggregate function(s)
-        </div>`;
-        if (node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0) {
-            content += `<div style="font-size: 10px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
-                Group by: ${escapeHtml(node.aggregateDetails.groupBy.join(', '))}
-            </div>`;
-        }
-    }
-
-    if (node.type === 'window' && node.windowDetails) {
-        content += `<div style="font-size: 10px; margin-top: 6px;">
-            <span style="color: ${BADGE_COLORS.functionName};">${node.windowDetails.functions.length} window function(s)</span>
-        </div>`;
-        node.windowDetails.functions.forEach((fn, idx) => {
-            if (idx < 3) { // Show first 3
-                content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
-                    ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${escapeHtml(fn.partitionBy.join(', '))})` : ''}
-                </div>`;
-            }
-        });
-    }
-
-    if (node.type === 'select' && node.columns && node.columns.length > 0) {
-        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">
-            <strong style="color: ${state.isDarkTheme ? '#cbd5e1' : '#475569'};">Columns:</strong> ${node.columns.length}
-        </div>`;
-    }
-
-    if (node.children && node.children.length > 0) {
-        content += `<div style="font-size: 10px; margin-top: 6px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'};">
-            Contains ${node.children.length} operation(s)
-        </div>`;
-    }
-
-    // Show warnings
-    if (node.warnings && node.warnings.length > 0) {
-        content += `<div style="margin-top: 8px; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;">`;
-        node.warnings.forEach((warning, idx) => {
-            if (idx < 3) { // Show up to 3 warnings
-                const iconStr = getWarningIcon(warning.type);
-                const colorStr = getWarningColor(warning.severity);
-                content += `<div style="font-size: 10px; color: ${colorStr}; margin-top: ${idx > 0 ? '4px' : '0'};">
-                    ${iconStr} <strong>${warning.severity.toUpperCase()}:</strong> ${escapeHtml(warning.message)}
-                </div>`;
-            }
-        });
-        if (node.warnings.length > 3) {
-            content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
-                +${node.warnings.length - 3} more warning(s)
-            </div>`;
-        }
-        content += `</div>`;
-    }
-
-    // Add keyboard hint
-    content += `<div style="font-size: 9px; color: ${state.isDarkTheme ? '#475569' : '#94a3b8'}; margin-top: 8px; border-top: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
-        Click to select • Double-click to zoom • Right-click for actions
-    </div>`;
-
-    tooltipElement.innerHTML = content;
-    tooltipElement.style.opacity = '1';
-    updateTooltipPosition(e);
+    showTooltipUi({
+        badgeFunctionNameColor: BADGE_COLORS.functionName,
+        currentSql,
+        escapeHtml,
+        extractSqlSnippet: (sql: string, startLine?: number, endLine?: number) => extractSqlSnippet(sql, startLine, endLine, 3, 180),
+        getNodeColor,
+        getNodeVisualIcon,
+        getWarningColor,
+        getWarningIcon,
+        isDarkTheme: state.isDarkTheme,
+        monoFontStack: MONO_FONT_STACK,
+        node,
+        pinIcon: ICONS.pin,
+        tooltipElement,
+        updateTooltipPosition,
+    }, e);
 }
 
 function updateTooltipPosition(e: MouseEvent): void {
-    if (!tooltipElement) {return;}
-
-    const padding = 12;
-    const tooltipRect = tooltipElement.getBoundingClientRect();
-
-    let left = e.clientX + padding;
-    let top = e.clientY + padding;
-
-    // Keep tooltip within viewport
-    if (left + tooltipRect.width > window.innerWidth - padding) {
-        left = e.clientX - tooltipRect.width - padding;
-    }
-    if (top + tooltipRect.height > window.innerHeight - padding) {
-        top = e.clientY - tooltipRect.height - padding;
-    }
-
-    tooltipElement.style.left = `${left}px`;
-    tooltipElement.style.top = `${top}px`;
+    updateTooltipPositionUi(tooltipElement, e);
 }
 
 function hideTooltip(): void {
-    if (tooltipElement) {
-        tooltipElement.style.opacity = '0';
-    }
+    hideTooltipUi(tooltipElement);
 }
 
 // ============================================================
@@ -7334,118 +6812,27 @@ function hideTooltip(): void {
 // ============================================================
 
 function showContextMenu(node: FlowNode, e: MouseEvent): void {
-    if (!contextMenuElement) { return; }
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const isDark = state.isDarkTheme;
-    const menuItemStyle = `
-        padding: 8px 12px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        transition: background 0.1s;
-    `;
-    const menuItemHoverBg = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.15)';
-    const separatorStyle = `
-        height: 1px;
-        background: ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
-        margin: 4px 0;
-    `;
-
-    // Build menu items based on node type
-    let menuItems = `
-        <div class="ctx-menu-item" data-action="zoom" style="${menuItemStyle}">
-            <span style="width: 16px; display: inline-flex;">${ICONS.search}</span>
-            <span>Zoom to node</span>
-        </div>
-        <div class="ctx-menu-item" data-action="focus-upstream" style="${menuItemStyle}">
-            <span style="width: 16px;">↑</span>
-            <span>Focus upstream</span>
-        </div>
-        <div class="ctx-menu-item" data-action="focus-downstream" style="${menuItemStyle}">
-            <span style="width: 16px;">↓</span>
-            <span>Focus downstream</span>
-        </div>
-        <div class="ctx-menu-item" data-action="reset-view" style="${menuItemStyle}">
-            <span style="width: 16px;">⊡</span>
-            <span>Reset view (Esc)</span>
-        </div>
-        <div style="${separatorStyle}"></div>
-    `;
-
-    // Add collapse/expand for CTE/subquery nodes
-    if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible && node.children && node.children.length > 0) {
-        const isExpanded = node.expanded !== false;
-        menuItems += `
-            <div class="ctx-menu-item" data-action="toggle-expand" style="${menuItemStyle}">
-                <span style="width: 16px; display: inline-flex;">${isExpanded ? ICONS.folderOpen : ICONS.folderClosed}</span>
-                <span>${isExpanded ? 'Collapse children' : 'Expand children'}</span>
-            </div>
-        `;
-    }
-
-    // Add copy options
-    menuItems += `
-        <div class="ctx-menu-item" data-action="copy-label" style="${menuItemStyle}">
-            <span style="width: 16px; display: inline-flex;">${ICONS.clipboard}</span>
-            <span>Copy node name</span>
-        </div>
-    `;
-
-    // Add copy details for certain node types
-    if (node.details && node.details.length > 0) {
-        menuItems += `
-            <div class="ctx-menu-item" data-action="copy-details" style="${menuItemStyle}">
-                <span style="width: 16px; display: inline-flex;">${ICONS.document}</span>
-                <span>Copy details</span>
-            </div>
-        `;
-    }
-
-    contextMenuElement.innerHTML = menuItems;
-
-    // Position the menu
-    const menuWidth = 180;
-    const menuHeight = contextMenuElement.offsetHeight || 200;
-    let left = e.clientX;
-    let top = e.clientY;
-
-    // Ensure menu stays within viewport
-    if (left + menuWidth > window.innerWidth) {
-        left = window.innerWidth - menuWidth - 10;
-    }
-    if (top + menuHeight > window.innerHeight) {
-        top = window.innerHeight - menuHeight - 10;
-    }
-
-    contextMenuElement.style.left = `${left}px`;
-    contextMenuElement.style.top = `${top}px`;
-    contextMenuElement.style.display = 'block';
-
-    // Update theme colors
-    contextMenuElement.style.background = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;
-    contextMenuElement.style.color = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;
-    contextMenuElement.style.borderColor = isDark ? UI_COLORS.borderMedium : 'rgba(148, 163, 184, 0.4)';
-
-    // Add hover effects and click handlers
-    const items = contextMenuElement.querySelectorAll('.ctx-menu-item');
-    items.forEach(item => {
-        const itemEl = item as HTMLElement;
-        itemEl.addEventListener('mouseenter', () => {
-            itemEl.style.background = menuItemHoverBg;
-        });
-        itemEl.addEventListener('mouseleave', () => {
-            itemEl.style.background = 'transparent';
-        });
-        itemEl.addEventListener('click', (clickE) => {
-            clickE.stopPropagation();
-            const action = itemEl.getAttribute('data-action');
-            handleContextMenuAction(action, node);
-            contextMenuElement!.style.display = 'none';
-        });
+    showContextMenuUi({
+        colors: {
+            backgroundDark: UI_COLORS.backgroundPanelSolid,
+            backgroundLight: UI_COLORS.backgroundPanelLightSolid,
+            borderDark: UI_COLORS.borderMedium,
+            borderLight: 'rgba(148, 163, 184, 0.4)',
+            textDark: UI_COLORS.textBright,
+            textLight: UI_COLORS.textLight,
+        },
+        contextMenuElement,
+        event: e,
+        icons: {
+            clipboard: ICONS.clipboard,
+            document: ICONS.document,
+            folderClosed: ICONS.folderClosed,
+            folderOpen: ICONS.folderOpen,
+            search: ICONS.search,
+        },
+        isDarkTheme: state.isDarkTheme,
+        node,
+        onAction: handleContextMenuAction,
     });
 }
 
@@ -7510,46 +6897,11 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
 }
 
 function showCopyFeedback(message: string): void {
-    // Create a temporary feedback element
-    const feedback = document.createElement('div');
-    feedback.textContent = message;
-    feedback.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(16, 185, 129, 0.9);
-        color: white;
-        padding: 8px 16px;
-        border-radius: 6px;
-        font-size: 12px;
-        z-index: ${Z_INDEX.firstRunOverlay};
-        animation: fadeInOut 1.5s ease forwards;
-    `;
-
-    // Add animation style if not exists
-    if (!document.getElementById('copy-feedback-style')) {
-        const style = document.createElement('style');
-        style.id = 'copy-feedback-style';
-        style.textContent = `
-            @keyframes fadeInOut {
-                0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
-                15% { opacity: 1; transform: translateX(-50%) translateY(0); }
-                85% { opacity: 1; transform: translateX(-50%) translateY(0); }
-                100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    document.body.appendChild(feedback);
-    setTimeout(() => feedback.remove(), 1500);
+    showCopyFeedbackUi(message, Z_INDEX.firstRunOverlay);
 }
 
 function hideContextMenu(): void {
-    if (contextMenuElement) {
-        contextMenuElement.style.display = 'none';
-    }
+    hideContextMenuUi(contextMenuElement);
 }
 
 // ============================================================

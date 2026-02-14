@@ -212,7 +212,7 @@ describe('defensive guards in visualizationPanel.ts', () => {
 // =========================================================================
 
 describe('XSS: renderer tooltip escaping', () => {
-    const source = readFileSync(join(__dirname, '../../src/webview/renderer.ts'), 'utf8');
+    const source = readFileSync(join(__dirname, '../../src/webview/ui/tooltip.ts'), 'utf8');
 
     it('should escape window function PARTITION BY values in tooltip markup', () => {
         expect(source).toContain('escapeHtml(fn.partitionBy.join(\', \'))');

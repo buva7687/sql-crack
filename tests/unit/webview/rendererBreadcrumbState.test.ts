@@ -10,6 +10,10 @@ describe('webview renderer filter breadcrumb state reset', () => {
         join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'),
         'utf8'
     );
+    const tooltipSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/tooltip.ts'),
+        'utf8'
+    );
 
     it('resets breadcrumb/filter UI state before rendering a new query result', () => {
         expect(rendererSource).toContain('clearSearch();');
@@ -67,8 +71,9 @@ describe('webview renderer filter breadcrumb state reset', () => {
     });
 
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
-        expect(rendererSource).toContain('if (sqlSnippet.truncated)');
-        expect(rendererSource).toContain('Press S for full SQL');
+        expect(tooltipSource).toContain('if (sqlSnippet.truncated)');
+        expect(tooltipSource).toContain('Press S for full SQL');
+        expect(rendererSource).toContain('showTooltipUi({');
         expect(listenerSource).toContain("if (e.key === 's' || e.key === 'S')");
         expect(listenerSource).toContain('callbacks.toggleSqlPreview();');
     });
