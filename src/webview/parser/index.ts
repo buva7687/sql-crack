@@ -3,6 +3,21 @@
 // due to their tight interdependencies with internal processing functions.
 // Parser state is managed via ParserContext (ctx) inside sqlParser.ts only.
 
+// Context
+export { createFreshContext } from './context';
+export type { ParserContext } from './context';
+
+// Validation
+export { DEFAULT_VALIDATION_LIMITS, validateSql } from './validation/validate';
+export { splitSqlStatements } from './validation/splitting';
+
+// Dialects
+export { detectDialect, rankDialectScores } from './dialects/detection';
+export type { DialectDetectionResult } from './dialects/detection';
+export { regexFallbackParse } from './dialects/fallback';
+export { hoistNestedCtes, preprocessPostgresSyntax } from './dialects/preprocessing';
+export { detectDialectSpecificSyntax } from './dialects/warnings';
+
 // Extractors
 export {
     extractColumnInfos,
