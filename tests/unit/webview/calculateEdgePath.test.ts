@@ -6,15 +6,21 @@ describe('calculateEdgePath layout support', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const edgeRendererSource = readFileSync(
+        join(__dirname, '../../../src/webview/rendering/edgeRenderer.ts'),
+        'utf8'
+    );
 
     // Extract the calculateEdgePath function body
-    const fnMatch = rendererSource.match(
+    const fnMatch = edgeRendererSource.match(
         /function calculateEdgePath\(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType\): string \{([\s\S]*?)\n\}/
     );
     const fnBody = fnMatch ? fnMatch[1] : '';
 
     it('function exists and is exported', () => {
         expect(rendererSource).toContain('export function calculateEdgePath(');
+        expect(edgeRendererSource).toContain('export function calculateEdgePath(');
+        expect(rendererSource).toContain('return calculateEdgePathFeature(sourceNode, targetNode, layoutType);');
     });
 
     it('handles horizontal layout with right/left connections', () => {

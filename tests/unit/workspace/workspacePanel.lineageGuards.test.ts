@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkspacePanel } from '../../../src/workspace/workspacePanel';
 import { LineageBuilder } from '../../../src/workspace/lineage/lineageBuilder';
+import { resolveAutoIndexThresholdFromConfig } from '../../../src/workspace/panel/settings';
 
 describe('WorkspacePanel lineage guards and config defaults', () => {
     beforeEach(() => {
@@ -55,12 +56,12 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
 
     it('reads auto-index threshold from configuration with bounds', () => {
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 999 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(500);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(500);
 
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 5 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(10);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(10);
 
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 73 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(73);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(73);
     });
 });

@@ -20,7 +20,10 @@ import { join } from 'path';
 // =========================================================================
 
 describe('XSS: clientScripts.ts lineage result rendering', () => {
-    const source = readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8');
+    const source = [
+        readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../src/workspace/ui/scripts/messageHandling.ts'), 'utf8'),
+    ].join('\n');
 
     it('should NOT use inline onclick for lineage clickable nodes', () => {
         // The old pattern: onclick="vscode.postMessage({command:'openFileAtLine'..."
@@ -52,7 +55,10 @@ describe('XSS: clientScripts.ts lineage result rendering', () => {
 // =========================================================================
 
 describe('XSS: tooltip sanitization in clientScripts.ts', () => {
-    const source = readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8');
+    const source = [
+        readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../src/workspace/ui/scripts/tooltip.ts'), 'utf8'),
+    ].join('\n');
 
     it('should define a sanitizeTooltipHtml function', () => {
         expect(source).toContain('function sanitizeTooltipHtml');

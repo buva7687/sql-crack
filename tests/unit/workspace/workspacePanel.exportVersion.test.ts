@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { WorkspacePanel } from '../../../src/workspace/workspacePanel';
+import { buildImpactReportExportData } from '../../../src/workspace/panel/impactExport';
 
 describe('workspace panel export metadata version', () => {
     beforeEach(() => {
@@ -7,8 +8,7 @@ describe('workspace panel export metadata version', () => {
     });
 
     it('uses extension version for impact report export payload', () => {
-        const payload = (WorkspacePanel.prototype as any).buildImpactReportExportData.call(
-            { _extensionVersion: '0.1.4' },
+        const payload = buildImpactReportExportData(
             {
                 changeType: 'modify',
                 target: { type: 'table', name: 'orders' },
@@ -23,7 +23,8 @@ describe('workspace panel export metadata version', () => {
                 },
                 severity: 'low',
                 suggestions: [],
-            }
+            } as any,
+            '0.1.4'
         );
 
         expect(payload.version).toBe('0.1.4');

@@ -5,7 +5,10 @@ describe('undo/redo layout history wiring', () => {
     const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
     const listenerSource = readFileSync(join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'), 'utf8');
     const rendererStateSource = readFileSync(join(__dirname, '../../../src/webview/state/rendererState.ts'), 'utf8');
-    const toolbarSource = readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8');
+    const toolbarSource = [
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar/actionGroups.ts'), 'utf8'),
+    ].join('\n');
     const indexSource = readFileSync(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
 
     it('wires Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z keyboard shortcuts in renderer', () => {

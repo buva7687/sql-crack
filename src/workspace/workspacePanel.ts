@@ -6,15 +6,10 @@ import { buildDependencyGraph } from './dependencyGraph';
 import {
     WorkspaceDependencyGraph,
     GraphMode,
-    WorkspaceNode,
     SearchFilter,
-    DetailedWorkspaceStats,
-    DefinitionDetail,
-    MissingDefinitionDetail,
     SqlDialect,
 } from './types';
 import { logger } from '../logger';
-import { getDisplayName } from './identifiers';
 
 // Lineage modules
 import { LineageBuilder } from './lineage/lineageBuilder';
@@ -33,14 +28,46 @@ import { getWebviewScript, getIssuesScript, WebviewScriptParams } from './ui/cli
 
 // Handler modules
 import { MessageHandler, MessageHandlerContext } from './handlers';
+import {
+    resolveAutoIndexThresholdFromConfig,
+    resolveDefaultLineageDepthFromConfig,
+    resolveWorkspaceThemeFromSettings,
+} from './panel/settings';
+import {
+    formatDurationText,
+    escapeHtmlText,
+    escapeForInlineScriptValue,
+    generateNonce,
+} from './panel/text';
+import {
+    buildImpactReportExportData as buildImpactReportExportPayload,
+    generateImpactReportMarkdown as renderImpactReportMarkdown,
+} from './panel/impactExport';
+import {
+    createLoadingHtml,
+    createManualIndexHtml,
+    createEmptyWorkspaceHtml,
+    createErrorHtml as createErrorStateHtml,
+} from './panel/statePages';
+import { renderWorkspaceGraphSvg } from './panel/graphSvg';
+import {
+    createGraphAreaHtml,
+    createGraphBodyHtml,
+    createStatsPanelHtml,
+} from './panel/graphTemplates';
+import { createIssuesPageHtml } from './panel/issuesPage';
+import {
+    copyWorkspaceMermaid,
+    exportWorkspaceDotFile,
+    exportWorkspaceJsonFile,
+    exportWorkspaceMermaidFile,
+    exportWorkspaceSvgFile,
+    saveWorkspacePng,
+} from './panel/graphExportActions';
+import { buildDetailedWorkspaceStats, buildIndexStatus } from './panel/workspaceStats';
 
 // Shared theme
-import { getReferenceTypeColor, getWorkspaceNodeColor, ICONS } from '../shared';
-import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from './exportUtils';
 import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
-
-const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
-const DEFAULT_LINEAGE_DEPTH = 5;
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
 
@@ -75,7 +102,6 @@ export class WorkspacePanel {
         useRegex: false,
         caseSensitive: false
     };
-    private _detailedStats: DetailedWorkspaceStats | null = null;
     private _showHelp: boolean = false;
     /** Guard: true while rebuildAndRenderGraph() is running */
     private _isRebuilding: boolean = false;
@@ -157,7 +183,7 @@ export class WorkspacePanel {
 
         // Detect theme from settings or VS Code theme
         this._isDarkTheme = this.getThemeFromSettings();
-        this._tableExplorer.setTraversalDepth(WorkspacePanel.resolveDefaultLineageDepth());
+        this._tableExplorer.setTraversalDepth(resolveDefaultLineageDepthFromConfig());
 
         // Handle panel disposal
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -201,7 +227,7 @@ export class WorkspacePanel {
                     this._postMessage({ command: 'themeChanged', css, isDark: this._isDarkTheme });
                 }
                 if (e.affectsConfiguration('sqlCrack.workspaceLineageDepth')) {
-                    const lineageDepth = WorkspacePanel.resolveDefaultLineageDepth();
+                    const lineageDepth = resolveDefaultLineageDepthFromConfig();
                     this._tableExplorer.setTraversalDepth(lineageDepth);
                     this._postMessage({
                         command: 'workspaceLineageDepthUpdated',
@@ -233,46 +259,24 @@ export class WorkspacePanel {
     }
 
     /**
-     * Resolve auto-index threshold from settings with bounds checking.
-     */
-    private static resolveAutoIndexThreshold(): number {
-        const configured = vscode.workspace
-            .getConfiguration('sqlCrack')
-            .get<number>('workspaceAutoIndexThreshold', DEFAULT_AUTO_INDEX_THRESHOLD);
-        const numeric = Number(configured);
-        if (!Number.isFinite(numeric)) {
-            return DEFAULT_AUTO_INDEX_THRESHOLD;
-        }
-        return Math.min(500, Math.max(10, Math.floor(numeric)));
-    }
-
-    /**
-     * Resolve default lineage traversal depth from settings.
-     */
-    private static resolveDefaultLineageDepth(): number {
-        const configured = vscode.workspace
-            .getConfiguration('sqlCrack')
-            .get<number>('workspaceLineageDepth', DEFAULT_LINEAGE_DEPTH);
-        const numeric = Number(configured);
-        if (!Number.isFinite(numeric)) {
-            return DEFAULT_LINEAGE_DEPTH;
-        }
-        return Math.min(20, Math.max(1, Math.floor(numeric)));
-    }
-
-    /**
      * Initialize the panel
      */
     private async initialize(): Promise<void> {
         // Show loading state
-        this._panel.webview.html = this.getLoadingHtml();
+        this._panel.webview.html = createLoadingHtml({
+            isDarkTheme: this._isDarkTheme,
+            nonce: generateNonce(),
+        });
 
         // Initialize index manager
-        const autoIndexThreshold = WorkspacePanel.resolveAutoIndexThreshold();
+        const autoIndexThreshold = resolveAutoIndexThresholdFromConfig();
         const { autoIndexed, fileCount } = await this._indexManager.initialize(autoIndexThreshold);
 
         if (fileCount === 0) {
-            this._panel.webview.html = this.getEmptyWorkspaceHtml();
+            this._panel.webview.html = createEmptyWorkspaceHtml({
+                isDarkTheme: this._isDarkTheme,
+                nonce: generateNonce(),
+            });
             return;
         }
 
@@ -287,7 +291,11 @@ export class WorkspacePanel {
             if (result === 'Index Now') {
                 await this.buildIndexWithProgress();
             } else {
-                this._panel.webview.html = this.getManualIndexHtml(fileCount);
+                this._panel.webview.html = createManualIndexHtml({
+                    fileCount,
+                    isDarkTheme: this._isDarkTheme,
+                    nonce: generateNonce(),
+                });
                 return;
             }
         }
@@ -334,7 +342,7 @@ export class WorkspacePanel {
                     const elapsed = Date.now() - startTime;
                     const avgTimePerFile = elapsed / current;
                     const remaining = avgTimePerFile * (total - current);
-                    const remainingStr = this.formatDuration(remaining);
+                    const remainingStr = formatDurationText(remaining);
 
                     progress.report({
                         message: `${current}/${total}: ${fileName} (~${remainingStr} remaining)`,
@@ -343,7 +351,7 @@ export class WorkspacePanel {
                 }, cancellationToken);
 
                 const duration = Date.now() - startTime;
-                logger.debug(`[Workspace] Index build completed in ${this.formatDuration(duration)} (${this._indexManager.getIndex()?.fileCount ?? 0} files)`);
+                logger.debug(`[Workspace] Index build completed in ${formatDurationText(duration)} (${this._indexManager.getIndex()?.fileCount ?? 0} files)`);
             }
         );
 
@@ -351,15 +359,6 @@ export class WorkspacePanel {
             logger.info('[Workspace] Index build was cancelled by user');
             vscode.window.showWarningMessage('Workspace indexing was cancelled. Partial results may be available.');
         }
-    }
-
-    /**
-     * Format duration in human-readable form
-     */
-    private formatDuration(ms: number): string {
-        if (ms < 1000) { return '<1s'; }
-        if (ms < 60000) { return `${Math.round(ms / 1000)}s`; }
-        return `${Math.round(ms / 60000)}m`;
     }
 
     /**
@@ -403,7 +402,7 @@ export class WorkspacePanel {
             getTableExplorer: () => this._tableExplorer,
             getLineageView: () => this._lineageView,
             getImpactView: () => this._impactView,
-            getDefaultLineageDepth: () => WorkspacePanel.resolveDefaultLineageDepth(),
+            getDefaultLineageDepth: () => resolveDefaultLineageDepthFromConfig(),
 
             // Theme state
             getIsDarkTheme: () => this._isDarkTheme,
@@ -507,481 +506,15 @@ export class WorkspacePanel {
     }
 
     /**
-     * Handle get lineage request
-     */
-    private async handleGetLineage(
-        nodeId: string,
-        direction: 'upstream' | 'downstream' | 'both',
-        depth: number
-    ): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._flowAnalyzer || !this._lineageGraph) {return;}
-
-        let result: FlowResult | null = null;
-
-        if (direction === 'upstream' || direction === 'both') {
-            result = this._flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
-        }
-        if (direction === 'downstream' || direction === 'both') {
-            const downstream = this._flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
-            if (result) {
-                result.nodes = [...result.nodes, ...downstream.nodes];
-                result.edges = [...result.edges, ...downstream.edges];
-            } else {
-                result = downstream;
-            }
-        }
-
-        this._currentFlowResult = result;
-
-        // Send result to webview
-        this._postMessage({
-            command: 'lineageResult',
-            data: {
-                nodeId,
-                direction,
-                result: result ? {
-                    nodes: result.nodes.map(n => ({
-                        id: n.id,
-                        name: n.name,
-                        type: n.type,
-                        filePath: n.filePath,
-                        lineNumber: n.lineNumber
-                    })),
-                    depth: result.depth,
-                    pathCount: result.paths.length
-                } : null
-            }
-        });
-    }
-
-    /**
-     * Handle impact analysis request
-     */
-    private async handleAnalyzeImpact(
-        type: 'table' | 'column',
-        name: string,
-        tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
-    ): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._impactAnalyzer) {return;}
-
-        let report: ImpactReport;
-        if (type === 'table') {
-            report = this._impactAnalyzer.analyzeTableChange(name, changeType);
-        } else {
-            report = this._impactAnalyzer.analyzeColumnChange(tableName!, name, changeType);
-        }
-
-        this._currentImpactReport = report;
-
-        // Send result to webview
-        this._postMessage({
-            command: 'impactResult',
-            data: {
-                report: {
-                    changeType: report.changeType,
-                    target: report.target,
-                    severity: report.severity,
-                    summary: report.summary,
-                    directImpacts: report.directImpacts.map(i => ({
-                        name: i.node.name,
-                        type: i.node.type,
-                        reason: i.reason,
-                        severity: i.severity,
-                        filePath: i.filePath,
-                        lineNumber: i.lineNumber
-                    })),
-                    transitiveImpacts: report.transitiveImpacts.map(i => ({
-                        name: i.node.name,
-                        type: i.node.type,
-                        reason: i.reason,
-                        severity: i.severity,
-                        filePath: i.filePath,
-                        lineNumber: i.lineNumber
-                    })),
-                    suggestions: report.suggestions
-                },
-                html: this._impactView.generateImpactReport(report)
-            }
-        });
-    }
-
-    /**
-     * Handle explore table request
-     */
-    private async handleExploreTable(tableName: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._lineageGraph) {return;}
-
-        const nodeId = `table:${tableName.toLowerCase()}`;
-        const node = this._lineageGraph.nodes.get(nodeId);
-
-        if (!node) {
-            this._postMessage({
-                command: 'tableDetailResult',
-                data: { error: `Table "${tableName}" not found in lineage graph` }
-            });
-            return;
-        }
-
-        this._selectedLineageNode = node;
-
-        const html = this._tableExplorer.generateTableView({
-            table: node,
-            graph: this._lineageGraph
-        });
-
-        this._postMessage({
-            command: 'tableDetailResult',
-            data: {
-                table: {
-                    id: node.id,
-                    name: node.name,
-                    type: node.type,
-                    filePath: node.filePath,
-                    lineNumber: node.lineNumber
-                },
-                html
-            }
-        });
-    }
-
-    /**
-     * Handle column lineage request
-     */
-    private async handleGetColumnLineage(tableName: string, columnName: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._columnLineageTracker || !this._lineageGraph) {return;}
-
-        const lineage = this._columnLineageTracker.getFullColumnLineage(
-            this._lineageGraph,
-            tableName,
-            columnName
-        );
-
-        const html = this._lineageView.generateColumnLineageView(lineage);
-
-        this._postMessage({
-            command: 'columnLineageResult',
-            data: {
-                tableName,
-                columnName,
-                upstream: lineage.upstream.map(p => ({
-                    depth: p.depth,
-                    nodeCount: p.nodes.length
-                })),
-                downstream: lineage.downstream.map(p => ({
-                    depth: p.depth,
-                    nodeCount: p.nodes.length
-                })),
-                html
-            }
-        });
-    }
-
-    /**
-     * Handle node selection in lineage view
-     */
-    private handleSelectLineageNode(nodeId: string): void {
-        if (!this._lineageGraph) {return;}
-
-        const node = this._lineageGraph.nodes.get(nodeId);
-        if (node) {
-            this._selectedLineageNode = node;
-        }
-    }
-
-    /**
-     * Handle get upstream request
-     */
-    private async handleGetUpstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._flowAnalyzer) {return;}
-
-        // For file nodes, get all tables defined in the file and aggregate their upstream
-        let nodeIds: string[] = [];
-        if (nodeType === 'file' && filePath) {
-            const index = this._indexManager.getIndex();
-            if (index) {
-                const fileAnalysis = index.files.get(filePath);
-                if (fileAnalysis) {
-                    nodeIds = fileAnalysis.definitions.map(def => `${def.type}:${def.name.toLowerCase()}`);
-                }
-            }
-        } else if (nodeId) {
-            nodeIds = [nodeId];
-        }
-
-        if (nodeIds.length === 0) {
-            this._postMessage({
-                command: 'upstreamResult',
-                data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
-            });
-            return;
-        }
-
-        // Aggregate results from all nodes
-        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
-        let maxDepth = 0;
-
-        for (const nid of nodeIds) {
-            const result = this._flowAnalyzer.getUpstream(nid, { maxDepth: depth });
-            for (const n of result.nodes) {
-                if (!allNodes.has(n.id)) {
-                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
-                }
-            }
-            maxDepth = Math.max(maxDepth, result.depth);
-        }
-
-        this._postMessage({
-            command: 'upstreamResult',
-            data: {
-                nodeId: nodeId || filePath,
-                nodes: Array.from(allNodes.values()),
-                depth: maxDepth
-            }
-        });
-    }
-
-    /**
-     * Handle get downstream request
-     */
-    private async handleGetDownstream(nodeId: string | undefined, depth: number = -1, nodeType?: string, filePath?: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._flowAnalyzer) {return;}
-
-        // For file nodes, get all tables defined in the file and aggregate their downstream
-        let nodeIds: string[] = [];
-        if (nodeType === 'file' && filePath) {
-            const index = this._indexManager.getIndex();
-            if (index) {
-                const fileAnalysis = index.files.get(filePath);
-                if (fileAnalysis) {
-                    nodeIds = fileAnalysis.definitions.map(def => `${def.type}:${def.name.toLowerCase()}`);
-                }
-            }
-        } else if (nodeId) {
-            nodeIds = [nodeId];
-        }
-
-        if (nodeIds.length === 0) {
-            this._postMessage({
-                command: 'downstreamResult',
-                data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
-            });
-            return;
-        }
-
-        // Aggregate results from all nodes
-        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
-        let maxDepth = 0;
-
-        for (const nid of nodeIds) {
-            const result = this._flowAnalyzer.getDownstream(nid, { maxDepth: depth });
-            for (const n of result.nodes) {
-                if (!allNodes.has(n.id)) {
-                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
-                }
-            }
-            maxDepth = Math.max(maxDepth, result.depth);
-        }
-
-        this._postMessage({
-            command: 'downstreamResult',
-            data: {
-                nodeId: nodeId || filePath,
-                nodes: Array.from(allNodes.values()),
-                depth: maxDepth
-            }
-        });
-    }
-
-    // ========== Visual Lineage Graph Methods ==========
-
-    /**
-     * Handle search for tables/views in lineage graph
-     */
-    private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._lineageGraph) {
-            this._postMessage({
-                command: 'lineageSearchResults',
-                data: { results: [] }
-            });
-            return;
-        }
-
-        const results: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
-        const queryLower = query.toLowerCase();
-
-        for (const [id, node] of this._lineageGraph.nodes) {
-            // Skip columns and external tables in search
-            if (node.type === 'column') {continue;}
-
-            // Apply type filter
-            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
-
-            // Match by name
-            if (node.name.toLowerCase().includes(queryLower)) {
-                results.push({
-                    id: node.id,
-                    name: node.name,
-                    type: node.type,
-                    filePath: node.filePath
-                });
-            }
-        }
-
-        // Sort by relevance (exact matches first, then by name)
-        results.sort((a, b) => {
-            const aExact = a.name.toLowerCase() === queryLower;
-            const bExact = b.name.toLowerCase() === queryLower;
-            if (aExact && !bExact) {return -1;}
-            if (!aExact && bExact) {return 1;}
-            return a.name.localeCompare(b.name);
-        });
-
-        this._postMessage({
-            command: 'lineageSearchResults',
-            data: { results: results.slice(0, 15) }
-        });
-    }
-
-    /**
-     * Handle get lineage graph for a specific node
-     */
-    private async handleGetLineageGraph(
-        nodeId: string,
-        depth: number,
-        direction: 'both' | 'upstream' | 'downstream',
-        expandedNodes?: string[]
-    ): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._lineageGraph) {
-            this._postMessage({
-                command: 'lineageGraphResult',
-                data: { error: 'No lineage graph available' }
-            });
-            return;
-        }
-
-        // Generate HTML using the new visual graph view
-        const html = this._lineageView.generateLineageGraphView(
-            this._lineageGraph,
-            nodeId,
-            {
-                depth,
-                direction,
-                expandedNodes: new Set(expandedNodes || [])
-            }
-        );
-
-        this._postMessage({
-            command: 'lineageGraphResult',
-            data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
-        });
-    }
-
-    /**
-     * Handle expand node columns request
-     * Sends confirmation to webview, which will trigger a graph re-render with the node expanded.
-     * Column data is fetched during the re-render, not here.
-     */
-    private async handleExpandNodeColumns(nodeId: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._lineageGraph) {return;}
-
-        const node = this._lineageGraph.nodes.get(nodeId);
-        if (!node) {return;}
-
-        // Send confirmation - webview will request graph re-render with this node expanded
-        this._postMessage({
-            command: 'nodeColumnsResult',
-            data: { nodeId }
-        });
-    }
-
-    /**
-     * Handle set lineage direction
-     */
-    private async handleSetLineageDirection(nodeId: string, direction: 'both' | 'upstream' | 'downstream'): Promise<void> {
-        // Re-generate graph with new direction
-        await this.handleGetLineageGraph(nodeId, WorkspacePanel.resolveDefaultLineageDepth(), direction);
-    }
-
-    /**
-     * Handle column selection - trace column lineage
-     */
-    private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
-        await this.buildLineageGraph();
-        if (!this._lineageGraph || !this._columnLineageTracker) {
-            return;
-        }
-
-        const columnEdgeCount = this._lineageGraph.columnEdges?.length || 0;
-
-        const lineage = this._columnLineageTracker.getFullColumnLineage(
-            this._lineageGraph,
-            tableId,
-            columnName
-        );
-
-        // Send result back to webview
-        this._postMessage({
-            command: 'columnLineageResult',
-            data: {
-                tableId,
-                columnName,
-                upstream: lineage.upstream,
-                downstream: lineage.downstream
-            }
-        });
-    }
-
-    /**
-     * Clear column selection
-     */
-    private async handleClearColumnSelection(): Promise<void> {
-        this._postMessage({
-            command: 'columnSelectionCleared'
-        });
-    }
-
-    /**
-     * Get lineage stats for display
-     */
-    private getLineageStats(): { tables: number; views: number; columns: number; edges: number } | null {
-        if (!this._lineageGraph) {return null;}
-
-        let tables = 0, views = 0, columns = 0;
-        for (const node of this._lineageGraph.nodes.values()) {
-            if (node.type === 'table') {tables++;}
-            else if (node.type === 'view') {views++;}
-            else if (node.type === 'column') {columns++;}
-        }
-
-        return {
-            tables,
-            views,
-            columns,
-            edges: this._lineageGraph.edges.length
-        };
-    }
-
-    /**
      * Get webview HTML with graph data and search functionality
      * Simplified to use extracted modules for styles and scripts
      */
     private getWebviewHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter = { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false }): string {
-        const nonce = getNonce();
-        const detailedStats = this.generateDetailedStats(graph);
+        const nonce = generateNonce();
         const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length;
 
         // Generate graph data JSON for client script
-        const graphData = this.escapeForInlineScript({
+        const graphData = escapeForInlineScriptValue({
             nodes: graph.nodes.map(node => ({
                 id: node.id,
                 label: node.label,
@@ -998,12 +531,29 @@ export class WorkspacePanel {
             searchFilterQuery: searchFilter.query || '',
             initialView: this._currentView === 'issues' ? 'graph' : this._currentView,
             currentGraphMode: this._currentGraphMode,
-            lineageDefaultDepth: WorkspacePanel.resolveDefaultLineageDepth()
+            lineageDefaultDepth: resolveDefaultLineageDepthFromConfig()
         };
         const script = getWebviewScript(scriptParams);
 
         // Generate HTML body content
-        const bodyContent = this.generateGraphBody(graph, searchFilter, detailedStats, totalIssues, script, this._currentGraphMode);
+        const bodyContent = createGraphBodyHtml({
+            graph,
+            searchFilter,
+            totalIssues,
+            script,
+            currentGraphMode: this._currentGraphMode,
+            isDarkTheme: this._isDarkTheme,
+            indexStatus: buildIndexStatus(this._indexManager.getIndex()),
+            statsHtml: createStatsPanelHtml({
+                escapeHtml: escapeHtmlText,
+            }),
+            graphHtml: createGraphAreaHtml({
+                graph,
+                searchFilter,
+                renderGraph: (currentGraph) => this.renderGraph(currentGraph),
+            }),
+            escapeHtml: escapeHtmlText,
+        });
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1021,775 +571,16 @@ ${bodyContent}
     }
 
     /**
-     * Generate HTML body content for graph view
-     */
-    private generateGraphBody(
-        graph: WorkspaceDependencyGraph,
-        searchFilter: SearchFilter,
-        detailedStats: DetailedWorkspaceStats,
-        totalIssues: number,
-        script: string,
-        currentGraphMode: GraphMode
-    ): string {
-        const statsHtml = this.generateStatsHtml();
-        const graphHtml = this.generateGraphAreaHtml(graph, searchFilter);
-        const indexStatus = this.getIndexStatus();
-        const filesActive = currentGraphMode === 'files';
-        const tablesActive = currentGraphMode === 'tables';
-        const hybridActive = currentGraphMode === 'hybrid';
-
-        return `<body>
-    <div id="app">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <span class="header-icon header-icon-svg">${ICONS.table}</span>
-                <h1 class="header-title">Workspace Dependencies</h1>
-            </div>
-
-            <!-- Header Center: View tabs (always in same position) and graph mode switcher (below when Graph active) -->
-            <div class="header-center">
-                <!-- View Mode Tabs -->
-                <div class="view-tabs">
-                    <button class="view-tab active" data-view="graph" 
-                        title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables."
-                        aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables.">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
-                            <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
-                        </svg>
-                        Graph
-                    </button>
-                    <button class="view-tab" data-view="lineage" 
-                        title="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
-                        aria-label="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 12h4l3 9 4-18 3 9h4"/>
-                        </svg>
-                        Lineage
-                    </button>
-                    <button class="view-tab" data-view="impact" 
-                        title="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes."
-                        aria-label="Impact Analysis: Select a table/view and change type (MODIFY/RENAME/DROP/ADD COLUMN) to see all affected queries and dependencies. Plan safe schema changes.">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                        </svg>
-                        Impact
-                    </button>
-                </div>
-                
-                <!-- Graph mode switcher (visible only when Graph tab is active, appears below view tabs) -->
-                <div id="graph-mode-switcher" class="graph-mode-switcher" 
-                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables (3+)."
-                    aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
-                    <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
-                        title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
-                        aria-label="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files.">Files</button>
-                    <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
-                        title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
-                        aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
-                    <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
-                        title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
-                        aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
-                    <button class="graph-mode-help" id="graph-mode-help-btn" type="button" aria-label="Help: Click to learn about graph modes">?</button>
-                </div>
-            </div>
-            <!-- Help tooltip (outside switcher to avoid clipping) -->
-            <div class="graph-mode-help-tooltip" id="graph-mode-help-tooltip">
-                <div class="help-tooltip-title">Graph Display Modes</div>
-                <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
-                <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
-                <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
-                <div class="help-tooltip-hint">Tip: To trace data flow from a specific table, use the Lineage tab.</div>
-            </div>
-
-            <div class="header-right">
-                <div class="search-box">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                    </svg>
-                    <input type="text" class="search-input" id="search-input" placeholder="Search nodes..." value="${this.escapeHtml(searchFilter.query)}">
-                    <select class="search-select" id="filter-type">
-                        <option value="all">All</option>
-                        <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files</option>
-                        <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables</option>
-                        <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views</option>
-                        <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
-                    </select>
-                    <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear search">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
-                    <span class="search-count" id="graph-search-count"></span>
-                </div>
-                <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <rect x="3" y="3" width="18" height="18" rx="2"/>
-                        <path d="M15 3v18"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" id="btn-theme" title="Toggle theme (${this._isDarkTheme ? 'Light' : 'Dark'})" aria-label="Toggle theme to ${this._isDarkTheme ? 'light' : 'dark'} mode">
-                    ${this._isDarkTheme ? `
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="5"/>
-                        <line x1="12" y1="1" x2="12" y2="3"/>
-                        <line x1="12" y1="21" x2="12" y2="23"/>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                        <line x1="1" y1="12" x2="3" y2="12"/>
-                        <line x1="21" y1="12" x2="23" y2="12"/>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                    </svg>` : `
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                    </svg>`}
-                </button>
-                <button class="icon-btn" id="btn-refresh" title="Refresh" aria-label="Refresh workspace data">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" id="btn-focus" title="Focus on selected node (neighbors only) [F]" aria-label="Focus on selected node (neighbors only)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M12 19V5M5 12l7-7 7 7"/>
-                    </svg>
-                </button>
-                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M12 5v14M5 12l7 7 7-7"/>
-                    </svg>
-                </button>
-            </div>
-        </header>
-
-        <!-- Stats Bar -->
-        <div class="stats-bar">
-            <span class="stat"><span class="stat-value">${graph.stats.totalFiles}</span> files</span>
-            <span class="separator">•</span>
-            <span class="stat"><span class="stat-value">${graph.stats.totalTables}</span> tables</span>
-            <span class="separator">•</span>
-            <span class="stat"><span class="stat-value">${graph.stats.totalViews}</span> views</span>
-            <span class="separator">•</span>
-            <span class="stat"><span class="stat-value">${graph.stats.totalReferences}</span> references</span>
-            <span class="stats-spacer"></span>
-            <button class="index-status index-status-${indexStatus.level}" data-graph-action="refresh" title="${this.escapeHtml(indexStatus.title)}">
-                <span class="status-dot"></span>
-                <span class="status-text">${this.escapeHtml(indexStatus.text)}</span>
-            </button>
-        </div>
-        <!-- Issue Banner -->
-        ${totalIssues > 0 ? `
-        <div class="issue-banner warning">
-            <svg class="issue-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            <span class="issue-banner-text">
-                <strong>${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found:</strong>
-                ${graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : ''}
-                ${graph.stats.orphanedDefinitions.length > 0 && graph.stats.missingDefinitions.length > 0 ? ', ' : ''}
-                ${graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : ''}
-            </span>
-            <button class="issue-banner-btn" id="btn-view-issues">View Details →</button>
-        </div>
-        ` : `
-        <div class="issue-banner success">
-            <svg class="issue-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-            </svg>
-            <span class="issue-banner-text"><strong>All clear</strong> — no issues found</span>
-        </div>
-        `}
-
-        <!-- Main Layout -->
-        <div class="main-layout">
-            <!-- Graph Area -->
-            <div class="graph-area-container">
-                <div class="graph-area" id="graph-area">
-                    ${graphHtml}
-                </div>
-            </div>
-
-            <!-- Sidebar -->
-            <aside class="sidebar" id="sidebar">
-                ${statsHtml}
-            </aside>
-
-            <!-- Lineage Panel (overlays graph) -->
-            <div id="lineage-panel" class="lineage-panel">
-                <div class="lineage-header">
-                    <button class="lineage-back-btn" id="lineage-back-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M19 12H5M12 19l-7-7 7-7"/>
-                        </svg>
-                        Back to Graph
-                    </button>
-                    <h2 id="lineage-title">Data Lineage</h2>
-                </div>
-                <div id="workspace-breadcrumb" class="workspace-breadcrumb" style="display: none;"></div>
-                <div class="lineage-content" id="lineage-content">
-                    <!-- Dynamic lineage content will be inserted here -->
-                </div>
-            </div>
-        </div>
-
-        <div id="tooltip" class="tooltip" style="display: none;"></div>
-
-        <!-- Context Menu -->
-        <div id="context-menu" class="context-menu">
-            <div class="context-menu-item" data-action="showUpstream">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 19V5M5 12l7-7 7 7"/>
-                </svg>
-                Show Upstream
-            </div>
-            <div class="context-menu-item" data-action="showDownstream">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 5v14M5 12l7 7 7-7"/>
-                </svg>
-                Show Downstream
-            </div>
-            <div class="context-menu-divider"></div>
-            <div class="context-menu-item" data-action="openFile">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                </svg>
-                Open File
-            </div>
-            <div class="context-menu-item" data-action="visualize">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
-                    <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
-                </svg>
-                Visualize Dependencies
-            </div>
-        </div>
-    </div>
-
-    ${script}
-</body>`;
-    }
-
-    /**
-     * Generate sidebar HTML (Legend + Export). Issues are shown in the top banner only;
-     * "View Details" opens the full Issues view.
-     */
-    private generateStatsHtml(): string {
-        const exportOptionsHtml = WORKSPACE_EXPORT_OPTIONS.map((option) => `
-            <button class="export-option ${option.group === 'advanced' ? 'export-option-advanced' : ''}" data-format="${option.format}">
-                ${this.escapeHtml(option.label)}
-            </button>
-        `).join('');
-
-        return `
-        <div class="sidebar-header">
-            <span class="sidebar-title">Panel</span>
-            <button class="sidebar-close" id="btn-sidebar-close">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 6L6 18M6 6l12 12"/>
-                </svg>
-            </button>
-        </div>
-        <div class="sidebar-content">
-            <!-- Selection Section (Graph tab only) -->
-            <div class="sidebar-section" data-sidebar-section="selection" id="selection-section">
-                <div class="section-header expanded" data-section="selection">
-                    <span class="section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-                        </svg>
-                        Selection
-                    </span>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-content">
-                    <div id="selection-empty" class="selection-empty">Click a node to see details and paths.</div>
-                    <div id="selection-details" class="selection-details" style="display: none;">
-                        <div class="selection-title" id="selection-title">—</div>
-                        <div class="selection-meta" id="selection-meta">—</div>
-                        <div class="selection-file" id="selection-file" style="display: none;"></div>
-                        <div class="selection-path">
-                            <div class="selection-path-row">
-                                <span class="path-label">Upstream</span>
-                                <span class="path-value" id="selection-upstream">—</span>
-                            </div>
-                            <div class="selection-path-row">
-                                <span class="path-label">Downstream</span>
-                                <span class="path-value" id="selection-downstream">—</span>
-                            </div>
-                        </div>
-                        <div class="selection-actions">
-                            <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
-                            <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
-                        </div>
-                        <div class="selection-cross-links" id="selection-cross-links" style="display: none;">
-                            <div class="selection-divider"></div>
-                            <div class="selection-actions-label">Actions</div>
-                            <div class="selection-actions">
-                                <button class="action-chip action-chip-small" data-graph-action="view-lineage">View Lineage</button>
-                                <button class="action-chip action-chip-small" data-graph-action="analyze-impact">Analyze Impact</button>
-                                <button class="action-chip action-chip-small" data-graph-action="open-file">Open File</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Export Section (Graph tab only) -->
-            <div class="sidebar-section" data-sidebar-section="export">
-                <div class="section-header" data-section="export">
-                    <span class="section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        Export
-                    </span>
-                    <span class="section-toggle">▼</span>
-                </div>
-                <div class="section-content">
-                    <div class="export-dropdown">
-                        <button class="export-trigger" id="workspace-export-trigger" aria-expanded="false">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Export as...
-                        </button>
-                        <div class="export-menu" id="workspace-export-menu" style="display: none;">
-                            ${exportOptionsHtml}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>`;
-    }
-
-    /**
-     * Generate graph area HTML with toolbar and SVG
-     */
-    private generateGraphAreaHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter): string {
-        return `
-        <div id="graph-container" style="width: 100%; height: 100%; position: relative;">
-            ${graph.nodes.length > 0 ? `
-                ${this.renderGraph(graph)}
-                <div class="graph-empty-overlay is-hidden" id="graph-empty-overlay" aria-hidden="true">
-                    <div class="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
-                        </svg>
-                        <div class="empty-state-title" id="graph-empty-title">Workspace dependencies at a glance</div>
-                        <div class="empty-state-desc" id="graph-empty-desc">This graph shows how your SQL files, tables, and views connect across the workspace.</div>
-                        <div class="empty-state-actions" id="graph-empty-actions">
-                            <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
-                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
-                            <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
-                            <button class="action-chip" data-graph-action="view-issues">View issues</button>
-                            <button class="action-chip" data-graph-action="refresh">Refresh index</button>
-                            <button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>
-                        </div>
-                    </div>
-                </div>
-            ` : `
-            <div class="empty-state">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
-                </svg>
-                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'Workspace dependencies at a glance'}</div>
-                <div class="empty-state-desc">
-                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0)
-                        ? 'Try clearing filters or changing your search terms.'
-                        : 'This graph shows how your SQL files, tables, and views connect across the workspace.'}
-                </div>
-                <div class="empty-state-actions">
-                    ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? `
-                        <button class="action-chip" data-graph-action="clear-search">Clear search</button>
-                        <button class="action-chip" data-graph-action="focus-search">Search again</button>
-                    ` : `
-                        <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
-                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
-                        <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
-                        <button class="action-chip" data-graph-action="view-issues">View issues</button>
-                        <button class="action-chip" data-graph-action="refresh">Refresh index</button>
-                    `}
-                </div>
-            </div>
-            `}
-        </div>
-
-        <!-- Zoom Toolbar -->
-        <div class="zoom-toolbar" role="toolbar" aria-label="Graph zoom controls">
-            <button class="zoom-btn" id="btn-zoom-out" title="Zoom out" aria-label="Zoom out">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <button class="zoom-btn" id="btn-zoom-in" title="Zoom in" aria-label="Zoom in">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <div class="zoom-divider"></div>
-            <span class="zoom-level" id="zoom-level" aria-live="polite">100%</span>
-            <div class="zoom-divider"></div>
-            <button class="zoom-btn" id="btn-zoom-reset" title="Reset view" aria-label="Reset zoom to default">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
-            </button>
-            <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-            </button>
-            <div class="zoom-divider"></div>
-            <button class="zoom-btn" id="btn-legend-toggle" title="Toggle legend (L)" aria-label="Toggle workspace legend" aria-pressed="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <rect x="4" y="5" width="16" height="14" rx="2"/>
-                    <line x1="8" y1="10" x2="16" y2="10"/>
-                    <line x1="8" y1="14" x2="12" y2="14"/>
-                </svg>
-            </button>
-        </div>
-
-        <!-- Keyboard Shortcuts Hint -->
-        <div class="keyboard-hints" id="graph-keyboard-hints">
-            <div class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Drag</kbd><span>Pan</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
-        </div>
-
-        <!-- Bottom Legend Bar -->
-        <div class="workspace-legend-bar" id="workspace-legend-bar" role="complementary" aria-label="Workspace graph legend" aria-hidden="false">
-            <div class="legend-scroll">
-                <div class="legend-inline-group">
-                    <span class="legend-inline-item"><span class="legend-inline-node file"></span><span>SQL Files</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node table"></span><span>Tables</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node view"></span><span>Views</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node external"></span><span>External</span></span>
-                </div>
-                <span class="legend-divider"></span>
-                <div class="legend-inline-group">
-                    <span class="legend-inline-item"><span class="legend-inline-edge select"></span><span>SELECT</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-edge join"></span><span>JOIN</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-edge insert"></span><span>INSERT</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-edge update"></span><span>UPDATE</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-edge delete"></span><span>DELETE</span></span>
-                </div>
-                <span class="legend-divider"></span>
-                <div class="legend-inline-group">
-                    <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
-                </div>
-            </div>
-            <button class="legend-dismiss" id="workspace-legend-dismiss" title="Dismiss legend (L)" aria-label="Dismiss workspace legend">×</button>
-        </div>`;
-    }
-
-    /**
-     * Build index status text for the stats bar badge.
-     */
-    private getIndexStatus(): { text: string; title: string; level: 'fresh' | 'stale' | 'old' | 'missing' } {
-        const index = this._indexManager.getIndex();
-        if (!index) {
-            return {
-                text: 'Index not ready',
-                title: 'No index available yet. Open SQL files and click Refresh to scan your workspace.',
-                level: 'missing'
-            };
-        }
-
-        const ageMs = Date.now() - index.lastUpdated;
-        const relative = this.formatRelativeTime(index.lastUpdated);
-        const fileCount = index.fileCount || 0;
-
-        let level: 'fresh' | 'stale' | 'old' = 'fresh';
-        if (ageMs > 60 * 60 * 1000) {
-            level = 'old';
-        } else if (ageMs > 10 * 60 * 1000) {
-            level = 'stale';
-        }
-
-        return {
-            text: `Indexed ${relative}`,
-            title: `Last indexed ${relative} • ${fileCount} file${fileCount === 1 ? '' : 's'}`,
-            level
-        };
-    }
-
-    /**
-     * Format a timestamp as a short relative time string.
-     */
-    private formatRelativeTime(timestamp: number): string {
-        const diffMs = Math.max(0, Date.now() - timestamp);
-        const minutes = Math.floor(diffMs / 60000);
-        if (minutes < 1) {return 'just now';}
-        if (minutes < 60) {return `${minutes}m ago`;}
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) {return `${hours}h ago`;}
-        const days = Math.floor(hours / 24);
-        return `${days}d ago`;
-    }
-
-    /**
-     * Generate detailed statistics for expandable sections
-     */
-    private generateDetailedStats(graph: WorkspaceDependencyGraph): DetailedWorkspaceStats {
-        const index = this._indexManager.getIndex();
-        if (!index) {
-            return {
-                ...graph.stats,
-                orphanedDetails: [],
-                missingDetails: []
-            };
-        }
-
-        // Generate orphaned details
-        const orphanedDetails: DefinitionDetail[] = [];
-        for (const tableKey of graph.stats.orphanedDefinitions) {
-            const defs = index.definitionMap.get(tableKey);
-            if (!defs) {continue;}
-            for (const def of defs) {
-                orphanedDetails.push({
-                    name: getDisplayName(def.name, def.schema),
-                    type: def.type,
-                    filePath: def.filePath,
-                    lineNumber: def.lineNumber
-                });
-            }
-        }
-
-        // Generate missing details
-        const missingDetails: MissingDefinitionDetail[] = [];
-        for (const tableKey of graph.stats.missingDefinitions) {
-            const refs = index.referenceMap.get(tableKey) || [];
-            const referencingFiles = [...new Set(refs.map(r => r.filePath))];
-            const displayName = refs[0]
-                ? getDisplayName(refs[0].tableName, refs[0].schema)
-                : tableKey;
-
-            missingDetails.push({
-                tableName: displayName,
-                references: refs,
-                referenceCount: refs.length,
-                referencingFiles
-            });
-        }
-
-        return {
-            ...graph.stats,
-            orphanedDetails,
-            missingDetails
-        };
-    }
-
-    /**
      * Render the graph SVG with improved edge styling.
      * Note: Bounds calculation is kept for export functionality, but the main SVG
      * doesn't use viewBox - it uses manual transforms for zoom/pan (see renderGraph method).
      */
     private renderGraph(graph: WorkspaceDependencyGraph): string {
-        // Calculate bounds (used for export, not for main SVG rendering)
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const node of graph.nodes) {
-            minX = Math.min(minX, node.x);
-            minY = Math.min(minY, node.y);
-            maxX = Math.max(maxX, node.x + node.width);
-            maxY = Math.max(maxY, node.y + node.height);
-        }
-
-        // These dimensions are only used for export, not for the interactive SVG
-        const width = Math.max(1200, maxX + 150);
-        const height = Math.max(800, maxY + 150);
-
-        // Pre-build node lookup map for O(1) access (avoids O(n) per edge)
-        const nodeMap = new Map<string, WorkspaceNode>();
-        for (const node of graph.nodes) {
-            nodeMap.set(node.id, node);
-        }
-
-        // Render edges with improved curvature
-        const edgesHtml = graph.edges.map(edge => {
-            const source = nodeMap.get(edge.source);
-            const target = nodeMap.get(edge.target);
-            if (!source || !target) {return '';}
-
-            // Calculate connection points
-            const x1 = source.x + source.width / 2;
-            const y1 = source.y + source.height;
-            const x2 = target.x + target.width / 2;
-            const y2 = target.y;
-
-            // Calculate vertical distance for curvature control
-            const verticalDistance = y2 - y1;
-            const curveIntensity = Math.max(verticalDistance * 0.3, 50);
-
-            // Create smooth bezier curve with better control points
-            const path = `M ${x1} ${y1} C ${x1} ${y1 + curveIntensity}, ${x2} ${y2 - curveIntensity}, ${x2} ${y2}`;
-
-            // Get edge color based on reference type (uses centralized theme)
-            const edgeColor = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
-
-            // Add edge ID for click-to-highlight functionality
-            const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
-            const tooltipContent = `<div class="tooltip-title">${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class="tooltip-content">Tables: ${edge.tables.map(t => this.escapeHtml(t)).join(', ')}</div>`;
-            const tooltipBase64 = Buffer.from(tooltipContent).toString('base64');
-            return `
-                <g class="edge edge-${edge.referenceType}" data-edge-id="${this.escapeHtml(edgeId)}"
-                   data-source="${this.escapeHtml(edge.source)}"
-                   data-target="${this.escapeHtml(edge.target)}"
-                   data-reference-type="${edge.referenceType}"
-                   data-tooltip="${tooltipBase64}">
-                    <path d="${path}"
-                          fill="none"
-                          stroke="${edgeColor}"
-                          stroke-width="2"
-                          marker-end="url(#arrowhead-${edge.referenceType})"
-                          opacity="0.7"/>
-                    ${edge.count > 1 ? `<text x="${(x1+x2)/2}" y="${(y1+y2)/2}" class="edge-label" text-anchor="middle" fill="var(--text-muted)" font-size="10">${edge.count}</text>` : ''}
-                </g>
-            `;
-        }).join('');
-
-        // Render nodes
-        const nodesHtml = graph.nodes.map(node => {
-            const typeClass = `node-${node.type}`;
-            const defInfo = node.definitions ? `${node.definitions.length} definition${node.definitions.length !== 1 ? 's' : ''}` : '';
-            const refInfo = node.referenceCount ? `${node.referenceCount} reference${node.referenceCount !== 1 ? 's' : ''}` : '';
-            const sublabel = [defInfo, refInfo].filter(Boolean).join(', ');
-
-            const tooltipContent = this.getNodeTooltipContent(node);
-
-            return `
-                <g class="node ${typeClass}"
-                   transform="translate(${node.x}, ${node.y})"
-                   data-id="${this.escapeHtml(node.id)}"
-                   data-label="${this.escapeHtml(node.label)}"
-                   data-type="${node.type}"
-                   data-filepath="${node.filePath ? this.escapeHtml(node.filePath) : ''}"
-                   data-tooltip="${Buffer.from(tooltipContent).toString('base64')}">
-                    <rect class="node-bg" width="${node.width}" height="${node.height}" rx="8" filter="url(#shadow)"/>
-                    <rect class="node-accent" x="0" y="0" width="4" height="${node.height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
-                    <text x="${node.width/2}" y="28" class="node-label" text-anchor="middle">${this.escapeHtml(node.label)}</text>
-                    ${sublabel ? `<text x="${node.width/2}" y="46" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
-                </g>
-            `;
-        }).join('');
-
-        // Generate arrow markers for each edge type
-        const edgeTypes = ['select', 'join', 'insert', 'update', 'delete', 'subquery'];
-        const arrowMarkers = edgeTypes.map(type => {
-            const markerColor = getReferenceTypeColor(type, this._isDarkTheme);
-            return `
-                <marker id="arrowhead-${type}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="${markerColor}"/>
-                </marker>
-            `;
-        }).join('');
-
-        /**
-         * Render SVG without viewBox to match Lineage view approach.
-         * This allows manual transform management for better zoom control and prevents content clipping.
-         * The container (.graph-area) handles sizing, and we apply transforms to the main-group.
-         */
-        return `
-            <svg id="graph-svg" style="width: 100%; height: 100%; overflow: visible;" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                    ${arrowMarkers}
-                    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
-                    </filter>
-                </defs>
-                <g id="main-group">
-                    ${edgesHtml}
-                    ${nodesHtml}
-                </g>
-            </svg>
-        `;
-    }
-
-    /**
-     * Get tooltip content for a node
-     */
-    private getNodeTooltipContent(node: WorkspaceNode): string {
-        let content = `<div class="tooltip-title">${this.escapeHtml(node.label)}</div>`;
-
-        if (node.type === 'file' && node.filePath) {
-            content += `<div class="tooltip-content">${this.escapeHtml(node.filePath)}</div>`;
-        }
-
-        if (node.definitions && node.definitions.length > 0) {
-            content += '<div class="tooltip-content">Defines:</div><ul class="tooltip-list">';
-            for (const def of node.definitions.slice(0, 5)) {
-                content += `<li>${def.type}: ${this.escapeHtml(def.name)}</li>`;
-            }
-            if (node.definitions.length > 5) {
-                content += `<li>...and ${node.definitions.length - 5} more</li>`;
-            }
-            content += '</ul>';
-        }
-
-        // NEW: Show column information for references
-        if (node.references && node.references.length > 0) {
-            content += '<div class="tooltip-content" style="margin-top:8px;">References:</div><ul class="tooltip-list">';
-
-            for (const ref of node.references.slice(0, 5)) {
-                content += `<li><strong>${this.escapeHtml(ref.tableName)}</strong> (${ref.referenceType})`;
-
-                // Show columns if available
-                if (ref.columns && ref.columns.length > 0) {
-                    const columnList = ref.columns.slice(0, 8).map(c => c.columnName).join(', ');
-                    const moreCount = ref.columns.length - 8;
-                    content += `<br><span style="font-size:9px;color:var(--text-muted);">Columns: ${this.escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
-                }
-
-                content += '</li>';
-            }
-
-            if (node.references.length > 5) {
-                content += `<li>...and ${node.references.length - 5} more tables</li>`;
-            }
-
-            content += '</ul>';
-        }
-
-        if (node.type === 'external') {
-            content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
-        }
-
-        content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
-
-        return content;
-    }
-
-    /**
-     * Escape HTML entities
-     */
-    private escapeHtml(text: string): string {
-        return text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    /**
-     * Safely escape JSON for embedding in an inline script tag.
-     */
-    private escapeForInlineScript(value: unknown): string {
-        const json = JSON.stringify(value);
-        return json
-            .replace(/<\/script/gi, '<\\/script')
-            .replace(/<!--/g, '<\\!--')
-            .replace(/-->/g, '--\\>')
-            .replace(/\]\]>/g, ']\\]>');
+        return renderWorkspaceGraphSvg({
+            graph,
+            isDarkTheme: this._isDarkTheme,
+            escapeHtml: escapeHtmlText,
+        });
     }
 
     /**
@@ -1863,9 +654,9 @@ ${bodyContent}
             return;
         }
 
-        const payload = this.buildImpactReportExportData(report);
+        const payload = buildImpactReportExportPayload(report, this._extensionVersion);
         const content = format === 'markdown'
-            ? this.generateImpactReportMarkdown(payload)
+            ? renderImpactReportMarkdown(payload)
             : JSON.stringify(payload, null, 2);
 
         await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
@@ -1873,155 +664,16 @@ ${bodyContent}
     }
 
     /**
-     * Build a stable export payload for impact report serialization.
-     */
-    private buildImpactReportExportData(report: ImpactReport): Record<string, unknown> {
-        const serializeItems = (items: typeof report.directImpacts) => items.map(item => ({
-            node: {
-                id: item.node.id,
-                name: item.node.name,
-                type: item.node.type,
-                filePath: item.node.filePath,
-                lineNumber: item.node.lineNumber
-            },
-            impactType: item.impactType,
-            reason: item.reason,
-            filePath: item.filePath,
-            lineNumber: item.lineNumber,
-            severity: item.severity
-        }));
-
-        return {
-            version: this._extensionVersion,
-            exportedAt: new Date().toISOString(),
-            report: {
-                changeType: report.changeType,
-                target: report.target,
-                severity: report.severity,
-                summary: report.summary,
-                directImpacts: serializeItems(report.directImpacts),
-                transitiveImpacts: serializeItems(report.transitiveImpacts),
-                suggestions: report.suggestions
-            }
-        };
-    }
-
-    /**
-     * Render Markdown output for an impact report export payload.
-     */
-    private generateImpactReportMarkdown(payload: Record<string, any>): string {
-        const report = payload.report as ImpactReport & {
-            directImpacts: Array<{
-                node: { name: string; type: string; };
-                reason: string;
-                filePath: string;
-                lineNumber: number;
-                severity: string;
-            }>;
-            transitiveImpacts: Array<{
-                node: { name: string; type: string; };
-                reason: string;
-                filePath: string;
-                lineNumber: number;
-                severity: string;
-            }>;
-        };
-        const lines: string[] = [];
-
-        lines.push('# Impact Analysis Report');
-        lines.push('');
-        lines.push(`- Exported: ${payload.exportedAt}`);
-        lines.push(`- Severity: ${report.severity.toUpperCase()}`);
-        lines.push(`- Change Type: ${report.changeType.toUpperCase()}`);
-        lines.push(`- Target: ${report.target.type} \`${report.target.name}\``);
-        lines.push('');
-        lines.push('## Summary');
-        lines.push('');
-        lines.push(`- Total Affected: ${report.summary.totalAffected}`);
-        lines.push(`- Tables Affected: ${report.summary.tablesAffected}`);
-        lines.push(`- Views Affected: ${report.summary.viewsAffected}`);
-        lines.push(`- Queries Affected: ${report.summary.queriesAffected}`);
-        lines.push(`- Files Affected: ${report.summary.filesAffected}`);
-        lines.push('');
-
-        const appendImpactSection = (
-            title: string,
-            items: Array<{
-                node: { name: string; type: string; };
-                reason: string;
-                filePath: string;
-                lineNumber: number;
-                severity: string;
-            }>
-        ) => {
-            lines.push(`## ${title}`);
-            lines.push('');
-            if (items.length === 0) {
-                lines.push('- None');
-                lines.push('');
-                return;
-            }
-
-            for (const item of items) {
-                const location = item.lineNumber > 0
-                    ? `${item.filePath}:${item.lineNumber}`
-                    : item.filePath;
-                lines.push(`- \`${item.node.name}\` (${item.node.type})`);
-                lines.push(`  - Severity: ${item.severity}`);
-                lines.push(`  - Reason: ${item.reason}`);
-                lines.push(`  - Location: ${location}`);
-            }
-            lines.push('');
-        };
-
-        appendImpactSection('Direct Impacts', report.directImpacts);
-        appendImpactSection('Transitive Impacts', report.transitiveImpacts);
-
-        lines.push('## Suggestions');
-        lines.push('');
-        if (report.suggestions.length === 0) {
-            lines.push('- None');
-        } else {
-            for (const suggestion of report.suggestions) {
-                lines.push(`- ${suggestion}`);
-            }
-        }
-        lines.push('');
-
-        return lines.join('\n');
-    }
-
-    /**
      * Export graph as Mermaid diagram
      */
     private async exportAsMermaid(): Promise<void> {
         if (!this._currentGraph) {return;}
-
-        const config = vscode.workspace.getConfiguration('sqlCrack');
-        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
-        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
-
-        // Save to file
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file('workspace-dependencies.md'),
-            filters: {
-                'Markdown': ['md']
-            }
-        });
-
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(mermaid));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
+        await exportWorkspaceMermaidFile(this._currentGraph);
     }
 
     private async copyMermaidToClipboard(): Promise<void> {
         if (!this._currentGraph) { return; }
-        const config = vscode.workspace.getConfiguration('sqlCrack');
-        const direction = config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
-        const mermaid = generateWorkspaceMermaid(this._currentGraph, direction as 'TD' | 'BT');
-        await vscode.env.clipboard.writeText(mermaid);
-        vscode.window.showInformationMessage('Mermaid copied to clipboard');
+        await copyWorkspaceMermaid(this._currentGraph);
     }
 
     /**
@@ -2029,20 +681,11 @@ ${bodyContent}
      */
     private async exportAsSvg(): Promise<void> {
         if (!this._currentGraph) {return;}
-
-        const svg = this.generateSvgString(this._currentGraph);
-
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file('workspace-dependencies.svg'),
-            filters: {
-                'SVG': ['svg']
-            }
-        });
-
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(svg));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
+        await exportWorkspaceSvgFile(
+            this._currentGraph,
+            this._isDarkTheme,
+            escapeHtmlText
+        );
     }
 
     /**
@@ -2051,50 +694,7 @@ ${bodyContent}
      */
     private async exportAsJson(): Promise<void> {
         if (!this._currentGraph) { return; }
-
-        const exportData = {
-            version: this._extensionVersion,
-            exportedAt: new Date().toISOString(),
-            graph: {
-                nodes: this._currentGraph.nodes.map(node => ({
-                    id: node.id,
-                    label: node.label,
-                    type: node.type,
-                    filePath: node.filePath,
-                    definitionCount: node.definitionCount,
-                    referenceCount: node.referenceCount
-                })),
-                edges: this._currentGraph.edges.map(edge => ({
-                    id: edge.id,
-                    source: edge.source,
-                    target: edge.target,
-                    referenceType: edge.referenceType,
-                    count: edge.count,
-                    tables: edge.tables
-                }))
-            },
-            statistics: {
-                nodeCount: this._currentGraph.nodes.length,
-                edgeCount: this._currentGraph.edges.length,
-                fileNodes: this._currentGraph.nodes.filter(n => n.type === 'file').length,
-                tableNodes: this._currentGraph.nodes.filter(n => n.type === 'table').length,
-                externalNodes: this._currentGraph.nodes.filter(n => n.type === 'external').length
-            }
-        };
-
-        const jsonContent = JSON.stringify(exportData, null, 2);
-
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file('workspace-dependencies.json'),
-            filters: {
-                'JSON': ['json']
-            }
-        });
-
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(jsonContent));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
+        await exportWorkspaceJsonFile(this._currentGraph, this._extensionVersion);
     }
 
     /**
@@ -2103,43 +703,7 @@ ${bodyContent}
      */
     private async exportAsDot(): Promise<void> {
         if (!this._currentGraph) { return; }
-
-        let dot = 'digraph WorkspaceDependencies {\n';
-        dot += '    // Graph settings\n';
-        dot += '    rankdir=TB;\n';
-        dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
-        dot += '    edge [fontname="Arial", fontsize=10];\n\n';
-
-        // Add nodes
-        dot += '    // Nodes\n';
-        for (const node of this._currentGraph.nodes) {
-            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
-            const label = node.label.replace(/"/g, '\\"');
-            dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
-        }
-
-        dot += '\n    // Edges\n';
-
-        // Add edges
-        for (const edge of this._currentGraph.edges) {
-            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
-            const label = edge.referenceType || '';
-            dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
-        }
-
-        dot += '}\n';
-
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file('workspace-dependencies.dot'),
-            filters: {
-                'Graphviz DOT': ['dot', 'gv']
-            }
-        });
-
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(dot));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
+        await exportWorkspaceDotFile(this._currentGraph, this._isDarkTheme);
     }
 
     /**
@@ -2147,82 +711,7 @@ ${bodyContent}
      * Receives base64-encoded PNG data from webview and saves to user-selected location
      */
     private async savePngToFile(base64Data: string, suggestedFilename: string): Promise<void> {
-        if (!base64Data) {
-            vscode.window.showErrorMessage('No PNG data to save');
-            return;
-        }
-
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(suggestedFilename || 'workspace-dependencies.png'),
-            filters: {
-                'PNG Image': ['png']
-            }
-        });
-
-        if (uri) {
-            try {
-                const buffer = Buffer.from(base64Data, 'base64');
-                await vscode.workspace.fs.writeFile(uri, buffer);
-                vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-            } catch (error) {
-                vscode.window.showErrorMessage(`Failed to save PNG: ${error}`);
-            }
-        }
-    }
-
-    /**
-     * Generate SVG string from graph
-     */
-    private generateSvgString(graph: WorkspaceDependencyGraph): string {
-        // Calculate bounds
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const node of graph.nodes) {
-            minX = Math.min(minX, node.x);
-            minY = Math.min(minY, node.y);
-            maxX = Math.max(maxX, node.x + node.width);
-            maxY = Math.max(maxY, node.y + node.height);
-        }
-
-        const width = Math.max(1200, maxX + 150);
-        const height = Math.max(800, maxY + 150);
-
-        // Pre-build node lookup map for O(1) access
-        const nodeMap = new Map<string, WorkspaceNode>();
-        for (const node of graph.nodes) {
-            nodeMap.set(node.id, node);
-        }
-
-        // Generate SVG (similar to renderGraph method but without interactivity)
-        const edgesHtml = graph.edges.map(edge => {
-            const source = nodeMap.get(edge.source);
-            const target = nodeMap.get(edge.target);
-            if (!source || !target) {return '';}
-
-            const x1 = source.x + source.width / 2;
-            const y1 = source.y + source.height;
-            const x2 = target.x + target.width / 2;
-            const y2 = target.y;
-
-            const path = `M ${x1} ${y1} C ${x1} ${y1 + 50}, ${x2} ${y2 - 50}, ${x2} ${y2}`;
-            const color = getReferenceTypeColor(edge.referenceType, this._isDarkTheme);
-
-            return `    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>`;
-        }).join('\n');
-
-        const nodesHtml = graph.nodes.map(node => {
-            const color = getWorkspaceNodeColor(node.type, this._isDarkTheme);
-
-            return `    <g transform="translate(${node.x}, ${node.y})">
-        <rect width="${node.width}" height="${node.height}" rx="8" fill="${color}"/>
-        <text x="${node.width/2}" y="${node.height/2}" text-anchor="middle" fill="white" font-size="12" font-weight="600">${this.escapeHtml(node.label)}</text>
-    </g>`;
-        }).join('\n');
-
-        return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
-${edgesHtml}
-${nodesHtml}
-</svg>`;
+        await saveWorkspacePng(base64Data, suggestedFilename);
     }
 
     /**
@@ -2230,313 +719,47 @@ ${nodesHtml}
      * Uses extracted styles and scripts for consistency
      */
     private getIssuesHtml(): string {
-        const nonce = getNonce();
-        const detailedStats = this._currentGraph ? this.generateDetailedStats(this._currentGraph) : null;
+        const nonce = generateNonce();
+        const detailedStats = this._currentGraph
+            ? buildDetailedWorkspaceStats(this._currentGraph, this._indexManager.getIndex())
+            : null;
         const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0);
-
         const styles = getIssuesStyles(this._isDarkTheme, this._isHighContrast);
         const script = getIssuesScript(nonce);
-
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SQL Workspace Issues</title>
-    <style>
-        ${styles}
-    </style>
-</head>
-<body>
-    <div id="app">
-        <header class="header">
-            <div class="header-left">
-                <button class="back-btn" id="btn-back">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 12H5M12 19l-7-7 7-7"/>
-                    </svg>
-                    Back to Graph
-                </button>
-                <h1 class="header-title">Workspace Issues</h1>
-            </div>
-            <div class="header-right">
-                ${totalIssues > 0
-                    ? `<span class="issue-count ${totalIssues > 5 ? 'error' : 'warning'}">${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found</span>`
-                    : `<span class="issue-count success"><span class="header-icon-svg">${ICONS.check}</span> All clear</span>`}
-            </div>
-        </header>
-
-        ${totalIssues > 0 && detailedStats ? `
-        <div class="summary-bar">
-            <div class="summary-card warning">
-                <div class="summary-card-value">${detailedStats.orphanedDetails.length}</div>
-                <div class="summary-card-label">Orphaned Definitions</div>
-            </div>
-            <div class="summary-card error">
-                <div class="summary-card-value">${detailedStats.missingDetails.length}</div>
-                <div class="summary-card-label">Missing Definitions</div>
-            </div>
-        </div>
-        ` : ''}
-
-        <div class="content">
-            ${!detailedStats || detailedStats.orphanedDetails.length === 0 ? '' : `
-            <div class="section">
-                <div class="section-header">
-                    <div class="section-icon warning">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span class="section-title">Orphaned Definitions</span>
-                            <span class="section-count">${detailedStats.orphanedDetails.length}</span>
-                        </div>
-                        <div class="section-desc">Tables and views defined but never referenced</div>
-                    </div>
-                </div>
-                <div class="list">
-                    ${detailedStats.orphanedDetails.slice(0, 50).map(item => `
-                    <div class="list-item" data-filepath="${this.escapeHtml(item.filePath)}" data-line="${item.lineNumber}">
-                        <span class="item-type ${item.type}">${item.type}</span>
-                        <div class="item-info">
-                            <div class="item-name">${this.escapeHtml(item.name)}</div>
-                            <div class="item-path">${this.escapeHtml(item.filePath)}</div>
-                        </div>
-                        <span class="item-line">line ${item.lineNumber}</span>
-                    </div>
-                    `).join('')}
-                    ${detailedStats.orphanedDetails.length > 50 ? `<div class="list-more">+ ${detailedStats.orphanedDetails.length - 50} more items</div>` : ''}
-                </div>
-            </div>
-            `}
-
-            ${!detailedStats || detailedStats.missingDetails.length === 0 ? '' : `
-            <div class="section">
-                <div class="section-header">
-                    <div class="section-icon error">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span class="section-title">Missing Definitions</span>
-                            <span class="section-count">${detailedStats.missingDetails.length}</span>
-                        </div>
-                        <div class="section-desc">Tables referenced but not defined in workspace</div>
-                    </div>
-                </div>
-                <div class="list">
-                    ${detailedStats.missingDetails.slice(0, 30).map(item => `
-                    <div class="missing-card">
-                        <div class="missing-card-header">
-                            <div class="missing-card-icon">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
-                                </svg>
-                            </div>
-                            <span class="missing-card-name">${this.escapeHtml(item.tableName)}</span>
-                            <span class="missing-card-count">${item.referenceCount} ref${item.referenceCount !== 1 ? 's' : ''}</span>
-                        </div>
-                        <div class="missing-card-refs">
-                            ${item.references.slice(0, 4).map(ref => `
-                            <div class="missing-ref-item" data-filepath="${this.escapeHtml(ref.filePath)}" data-line="${ref.lineNumber}">
-                                <span class="missing-ref-path">${this.escapeHtml(ref.filePath)}</span>
-                                <span class="missing-ref-line">:${ref.lineNumber}</span>
-                            </div>
-                            `).join('')}
-                            ${item.references.length > 4 ? `<div class="missing-more">+ ${item.references.length - 4} more references</div>` : ''}
-                        </div>
-                    </div>
-                    `).join('')}
-                    ${detailedStats.missingDetails.length > 30 ? `<div class="list-more">+ ${detailedStats.missingDetails.length - 30} more missing tables</div>` : ''}
-                </div>
-            </div>
-            `}
-
-            ${(!detailedStats || (detailedStats.orphanedDetails.length === 0 && detailedStats.missingDetails.length === 0)) ? `
-            <div class="empty-state">
-                <div class="empty-state-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                        <polyline points="22 4 12 14.01 9 11.01"/>
-                    </svg>
-                </div>
-                <div class="empty-state-title">No Issues Found</div>
-                <div class="empty-state-desc">All tables and views are properly defined and referenced in your workspace.</div>
-            </div>
-            ` : ''}
-        </div>
-    </div>
-
-    ${script}
-</body>
-</html>`;
-    }
-
-    /**
-     * Get loading HTML
-     */
-    private getLoadingHtml(): string {
-        const styles = getStateStyles(this._isDarkTheme);
-        const nonce = getNonce();
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <style>${styles}</style>
-</head>
-<body>
-    <div class="loader-container">
-        <div class="loader"></div>
-        <div class="loader-title">Analyzing Workspace</div>
-        <div class="loader-subtitle">Scanning SQL files...</div>
-    </div>
-</body>
-</html>`;
-    }
-
-    /**
-     * Get manual index HTML
-     */
-    private getManualIndexHtml(fileCount: number): string {
-        const nonce = getNonce();
-        const styles = getStateStyles(this._isDarkTheme);
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <style>${styles}</style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon accent">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-            </svg>
-        </div>
-        <div class="file-count">${fileCount}</div>
-        <div class="title">SQL Files Found</div>
-        <div class="subtitle">Large workspace detected. This may take a moment to analyze all dependencies.</div>
-        <button class="btn" id="manual-refresh-btn">
-            Start Analysis
-        </button>
-    </div>
-    <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-        document.getElementById('manual-refresh-btn')?.addEventListener('click', () => {
-            vscode.postMessage({ command: 'refresh' });
+        return createIssuesPageHtml({
+            nonce,
+            detailedStats,
+            totalIssues,
+            styles,
+            script,
+            escapeHtml: escapeHtmlText,
         });
-    </script>
-</body>
-</html>`;
-    }
-
-    /**
-     * Get empty workspace HTML
-     */
-    private getEmptyWorkspaceHtml(): string {
-        const styles = getStateStyles(this._isDarkTheme);
-        const nonce = getNonce();
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <style>${styles}</style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon muted">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <path d="M14 2v6h6"/>
-                <path d="M12 18v-6M9 15h6"/>
-            </svg>
-        </div>
-        <div class="title">No SQL Files Found</div>
-        <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
-        <button class="btn" id="empty-refresh-btn">
-            Refresh
-        </button>
-    </div>
-    <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-        document.getElementById('empty-refresh-btn')?.addEventListener('click', () => {
-            vscode.postMessage({ command: 'refresh' });
-        });
-    </script>
-</body>
-</html>`;
     }
 
     /**
      * Get error HTML
      */
     private getErrorHtml(message: string, detail?: string): string {
-        const nonce = getNonce();
-        const styles = getStateStyles(this._isDarkTheme);
-        const indexStatus = this.getIndexStatus();
+        const indexStatus = buildIndexStatus(this._indexManager.getIndex());
         const statusLine = indexStatus.level === 'missing'
             ? 'Index: not yet built'
             : indexStatus.title;
-        const safeMessage = this.escapeHtml(message);
-        const safeDetail = detail ? this.escapeHtml(detail) : '';
-        const safeStatusLine = this.escapeHtml(statusLine);
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <style>${styles}</style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon error">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
-            </svg>
-        </div>
-        <div class="title error">Something went wrong</div>
-        <div class="message">${safeMessage}</div>
-        ${safeDetail ? `<div class="message" style="opacity: 0.7; font-size: 0.9em; margin-top: 4px;">${safeDetail}</div>` : ''}
-        <div class="message" style="opacity: 0.5; font-size: 0.8em; margin-top: 8px;">${safeStatusLine}</div>
-        <button class="btn secondary" id="error-refresh-btn">
-            Refresh Index
-        </button>
-    </div>
-    <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-        document.getElementById('error-refresh-btn')?.addEventListener('click', () => {
-            vscode.postMessage({ command: 'refresh' });
+        return createErrorStateHtml({
+            message,
+            detail,
+            statusLine,
+            isDarkTheme: this._isDarkTheme,
+            nonce: generateNonce(),
         });
-    </script>
-</body>
-</html>`;
     }
 
     /**
      * Get theme preference from settings or VS Code theme
      */
     private getThemeFromSettings(): boolean {
-        const config = vscode.workspace.getConfiguration('sqlCrack');
-        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
-        const themeKind = vscode.window.activeColorTheme.kind;
-        this._isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
-
-        if (themePreference === 'light') {
-            return false;
-        } else if (themePreference === 'dark') {
-            return true;
-        } else {
-            // 'auto' - match VS Code theme
-            return themeKind !== vscode.ColorThemeKind.Light && themeKind !== vscode.ColorThemeKind.HighContrastLight;
-        }
+        const themeSettings = resolveWorkspaceThemeFromSettings();
+        this._isHighContrast = themeSettings.isHighContrast;
+        return themeSettings.isDarkTheme;
     }
 
     /**
@@ -2553,16 +776,4 @@ ${nodesHtml}
             if (d) {d.dispose();}
         }
     }
-}
-
-/**
- * Generate a nonce for CSP
- */
-function getNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
 }

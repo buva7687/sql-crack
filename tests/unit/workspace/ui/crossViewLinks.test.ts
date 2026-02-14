@@ -70,7 +70,7 @@ describe('workspace cross-view linking', () => {
         const css = getWebviewStyles(true);
 
         expect(script).toContain("action.indexOf('cross-view-') === 0");
-        expect(script).toContain('prefillImpactForm');
+        expect(script).toContain('scheduleImpactSelectionPrefill');
         expect(script).toContain("switchToView('lineage'");
         expect(script).toContain("action === 'cross-view-detail'");
         expect(script).not.toContain('cross-view-table-explorer');

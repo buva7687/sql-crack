@@ -10,13 +10,17 @@ describe('minimap drag-to-pan', () => {
         join(__dirname, '../../../src/webview/features/minimap.ts'),
         'utf8'
     );
+    const bootstrapSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/rendererBootstrap.ts'),
+        'utf8'
+    );
 
     it('defines setupMinimapDrag function', () => {
         expect(rendererSource).toContain('function setupMinimapDrag(minimapContainer: HTMLDivElement): void');
     });
 
     it('calls setupMinimapDrag during initialization', () => {
-        expect(rendererSource).toContain('setupMinimapDrag(minimapContainer)');
+        expect(bootstrapSource).toContain('onSetupMinimapDrag(minimapContainer);');
     });
 
     it('registers mousedown listener on minimap container', () => {

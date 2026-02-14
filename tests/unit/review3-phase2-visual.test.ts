@@ -15,7 +15,11 @@ const readSource = (relativePath: string): string =>
     readFileSync(join(__dirname, '../../', relativePath), 'utf8');
 
 describe('phase 2.1 dark surface blue-tint cleanup', () => {
-    const toolbar = readSource('src/webview/ui/toolbar.ts');
+    const toolbar = [
+        readSource('src/webview/ui/toolbar.ts'),
+        readSource('src/webview/ui/toolbar/featureMenus.ts'),
+        readSource('src/webview/ui/toolbar/overflowMenu.ts'),
+    ].join('\n');
     const batchTabs = readSource('src/webview/ui/batchTabs.ts');
     const compareView = readSource('src/webview/ui/compareView.ts');
     const pinnedTabs = readSource('src/webview/ui/pinnedTabs.ts');
@@ -58,7 +62,10 @@ describe('phase 2.2 dark muted text values', () => {
 
 describe('phase 2.4 localStorage wrappers', () => {
     const resizablePanel = readSource('src/webview/ui/resizablePanel.ts');
-    const clientScripts = readSource('src/workspace/ui/clientScripts.ts');
+    const clientScripts = [
+        readSource('src/workspace/ui/clientScripts.ts'),
+        readSource('src/workspace/ui/scripts/lineageGraph.ts'),
+    ].join('\n');
 
     it('wraps resizable panel localStorage access in try/catch with debug logging', () => {
         expect(resizablePanel).toContain('try {');

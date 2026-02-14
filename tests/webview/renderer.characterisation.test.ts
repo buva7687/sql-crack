@@ -306,8 +306,8 @@ describe('renderer.ts Source Structure', () => {
             const lines = rendererSource.split('\n').length;
             // Document current size - this should decrease after refactoring
             console.log(`renderer.ts current line count: ${lines}`);
-            expect(lines).toBeGreaterThan(7800); // Phase 4 in-progress baseline
-            expect(lines).toBeLessThan(12000);   // Sanity check
+            expect(lines).toBeGreaterThan(3000); // Phase 4 baseline after node dispatcher extraction
+            expect(lines).toBeLessThan(9000);    // Sanity check
         });
     });
 });

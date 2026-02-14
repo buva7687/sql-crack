@@ -2,10 +2,15 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('toolbar overflow theming', () => {
-    const source = readFileSync(
+    const toolbarSource = readFileSync(
         join(__dirname, '../../../src/webview/ui/toolbar.ts'),
         'utf8'
     );
+    const overflowSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/toolbar/overflowMenu.ts'),
+        'utf8'
+    );
+    const source = `${toolbarSource}\n${overflowSource}`;
 
     it('uses theme-aware palette helpers for overflow button and dropdown', () => {
         expect(source).toContain('function getOverflowPalette');
