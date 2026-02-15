@@ -7,7 +7,9 @@ const localStorageFile = path.join(os.tmpdir(), 'sql-crack-localstorage');
 
 const existingNodeOptions = process.env.NODE_OPTIONS || '';
 const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
-const hasLocalStorageOption = existingNodeOptions.split(/\s+/).some((opt) => opt.startsWith('--localstorage-file'));
+const hasLocalStorageOption = existingNodeOptions
+  .split(/\s+/)
+  .some((opt) => /^--localstorage-file(?:=|$)/.test(opt));
 const nextNodeOptions = (hasLocalStorageOption || nodeMajor < 22)
   ? existingNodeOptions
   : [existingNodeOptions, `--localstorage-file=${localStorageFile}`].filter(Boolean).join(' ');

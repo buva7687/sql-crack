@@ -63,4 +63,20 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('function scheduleLineageFilter(immediate = false)');
         expect(script).toContain('scheduleLineageFilter();');
     });
+
+    it('avoids duplicate legend setup calls and releases queued lineage updates on paint', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        const legendInitCalls = script.match(/initializeLineageLegendBar\(\);/g) || [];
+        expect(legendInitCalls).toHaveLength(1);
+        expect(script).toContain('function finishLineageSetup()');
+        expect(script).toContain('requestAnimationFrame(() => requestAnimationFrame(finishLineageSetup));');
+        expect(script).not.toContain('}, 200);');
+    });
 });

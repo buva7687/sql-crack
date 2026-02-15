@@ -26,7 +26,7 @@ describe('workspace clientScripts navigation context', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(script).toContain("Back to Graph' + fromLabel");
+        expect(script).toContain("lineageBackBtn.appendChild(document.createTextNode(' Back to Graph' + fromLabel));");
         expect(script).toContain("navigationOriginLabel = '';");
         expect(script).toContain("navigationOriginType = '';");
         expect(script).toContain('lineageDetailView = false;');

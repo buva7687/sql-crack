@@ -22,6 +22,17 @@ export function getLineageGraphScriptFragment(): string {
         let lineageOverlayResizeHandler = null;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
 
+        function finishLineageSetup() {
+            lineageSetupInProgress = false;
+            if (!pendingLineageGraphMessage) {
+                return;
+            }
+
+            const queued = pendingLineageGraphMessage;
+            pendingLineageGraphMessage = null;
+            processLineageGraphResult(queued);
+        }
+
         function processLineageGraphResult(message) {
             if (lineageContent && message.data?.html) {
                 lineageSetupInProgress = true;
@@ -41,15 +52,8 @@ export function getLineageGraphScriptFragment(): string {
                 setupDirectionButtons();
                 setupMinimap();
                 initializeLineageLegendBar();
-                setTimeout(() => {
-                    lineageSetupInProgress = false;
-                    // Process any queued message that arrived during setup
-                    if (pendingLineageGraphMessage) {
-                        const queued = pendingLineageGraphMessage;
-                        pendingLineageGraphMessage = null;
-                        processLineageGraphResult(queued);
-                    }
-                }, 200);
+                // Defer queue release to the next paint cycle without a fixed timeout.
+                requestAnimationFrame(() => requestAnimationFrame(finishLineageSetup));
             }
         }
 
@@ -797,8 +801,6 @@ export function getLineageGraphScriptFragment(): string {
             }
         };
         document.addEventListener('keydown', lineageShortcutHandler);
-
-        initializeLineageLegendBar();
 
         // ========== Mini-map Functionality ==========
         function setupMinimap() {

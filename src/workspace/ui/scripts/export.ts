@@ -101,6 +101,11 @@ export function getExportToPngScript(): string {
                 // Create canvas and draw
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    URL.revokeObjectURL(svgUrl);
+                    vscode.postMessage({ command: 'exportPngError', error: 'Canvas 2D context unavailable' });
+                    return;
+                }
                 const scale = 2; // 2x for retina quality
                 canvas.width = width * scale;
                 canvas.height = height * scale;
