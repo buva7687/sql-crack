@@ -22,4 +22,9 @@ const result = spawnSync(process.execPath, [jestBin, ...process.argv.slice(2)], 
   }
 });
 
+if (result.error) {
+  console.error('Failed to spawn Jest:', result.error.message);
+  process.exit(1);
+}
+
 process.exit(result.status ?? 1);

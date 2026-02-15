@@ -98,5 +98,10 @@ if (!fs.existsSync(hooksDir)) {
 }
 
 // Write the pre-push hook
-fs.writeFileSync(prePushPath, hookContent, { mode: 0o755 });
-console.log('Git pre-push hook installed successfully');
+try {
+    fs.writeFileSync(prePushPath, hookContent, { mode: 0o755 });
+    console.log('Git pre-push hook installed successfully');
+} catch (err) {
+    console.error('Failed to install git pre-push hook:', err.message);
+    process.exit(1);
+}
