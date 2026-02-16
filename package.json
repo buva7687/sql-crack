@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {

@@ -13,5 +13,6 @@ export {
     getFromItemDisplayName,
     getFromItemLookupKey,
     getTableValuedFunctionName,
+    resolveFunctionNameFromExpr,
     extractTablesFromStatement
 } from './tables';

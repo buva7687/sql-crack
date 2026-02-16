@@ -19,7 +19,8 @@ import {
     getFromItemDisplayName,
     getFromItemLookupKey,
     getTableName,
-    getTableValuedFunctionName
+    getTableValuedFunctionName,
+    resolveFunctionNameFromExpr
 } from '../extractors';
 
 export interface SelectRuntimeDependencies {
@@ -706,6 +707,33 @@ function processFromItem(
         });
         trackTableUsage(runtime, label);
         return tableId;
+    }
+
+    if (fromItem?.expr && !fromItem.expr.ast && fromItem.expr.type === 'function') {
+        let unrecognizedFunctionName = resolveFunctionNameFromExpr(fromItem.expr);
+        if (unrecognizedFunctionName?.toUpperCase() === 'TABLE') {
+            const firstArg = Array.isArray(fromItem.expr.args?.value)
+                ? fromItem.expr.args.value[0]
+                : (fromItem.expr.args?.value ?? fromItem.expr.args?.expr);
+            const wrappedName = resolveFunctionNameFromExpr(firstArg);
+            if (wrappedName) {
+                unrecognizedFunctionName = wrappedName;
+            }
+        }
+
+        if (unrecognizedFunctionName) {
+            const hintMessage = `Unrecognized table function: ${unrecognizedFunctionName}`;
+            const hasHint = ctx.hints.some(h => h.message === hintMessage && h.category === 'quality');
+            if (!hasHint) {
+                ctx.hints.push({
+                    type: 'info',
+                    message: hintMessage,
+                    suggestion: 'Add to sqlCrack.customTableValuedFunctions in settings if this function should be treated as a table source.',
+                    category: 'quality',
+                    severity: 'low',
+                });
+            }
+        }
     }
 
     // Regular table

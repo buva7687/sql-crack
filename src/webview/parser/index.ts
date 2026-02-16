@@ -15,7 +15,12 @@ export { splitSqlStatements } from './validation/splitting';
 export { detectDialect, rankDialectScores } from './dialects/detection';
 export type { DialectDetectionResult } from './dialects/detection';
 export { regexFallbackParse } from './dialects/fallback';
-export { hoistNestedCtes, preprocessPostgresSyntax } from './dialects/preprocessing';
+export {
+    hoistNestedCtes,
+    preprocessPostgresSyntax,
+    rewriteGroupingSets,
+    collapseSnowflakePaths
+} from './dialects/preprocessing';
 export { detectDialectSpecificSyntax } from './dialects/warnings';
 
 // Extractors

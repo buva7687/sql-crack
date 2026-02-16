@@ -242,6 +242,19 @@ describe('Dialect Support', () => {
         expect.stringContaining('summary'),
       ]));
     });
+
+    it('parses GROUPING SETS by rewriting to a parser-compatible GROUP BY', () => {
+      const sql = `
+        SELECT dept, region, COUNT(*) AS total
+        FROM sales
+        GROUP BY GROUPING SETS ((dept), (region), ())
+      `;
+      const result = parseSql(sql, dialect);
+
+      expect(result.partial).not.toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('Rewrote GROUPING SETS'))).toBe(true);
+    });
   });
 
   describe('Snowflake', () => {
@@ -284,6 +297,15 @@ describe('Dialect Support', () => {
     it('parses semi-structured data access', () => {
       const result = parseSql('SELECT data:name::string FROM json_table', dialect);
       // Document behavior for JSON path syntax
+    });
+
+    it('parses deep Snowflake paths by collapsing to parser-compatible depth', () => {
+      const sql = 'SELECT data:items:sku:value::string AS sku FROM json_table';
+      const result = parseSql(sql, dialect);
+
+      expect(result.partial).not.toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('Collapsed deep Snowflake path expressions'))).toBe(true);
     });
   });
 

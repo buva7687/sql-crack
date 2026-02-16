@@ -24,6 +24,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
 - Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
 
+## [0.3.8] - 2026-02-16
+
+### Added
+
+- **TVF registry coverage expansion**: Added missing table-valued functions across dialects:
+  - Redshift: `UNNEST`, `GENERATE_SERIES`
+  - Hive: `JSON_TUPLE`, `PARSE_URL_TUPLE`
+  - Athena: `SEQUENCE`, `FLATTEN`
+  - Snowflake: `EXTERNAL_TABLE_FILES`, `INFER_SCHEMA`
+  - BigQuery: `ML.TRAIN`, `VECTOR_SEARCH`
+- **Parser compatibility preprocessors**:
+  - `GROUPING SETS` rewrite support for parser compatibility.
+  - Snowflake deep path collapsing for `:<path>` chains with 3+ levels.
+- **Unrecognized TVF hinting**: FROM-clause function calls that are not recognized as table-valued now emit a low-severity quality hint with guidance to add custom TVFs.
+
+### Fixed
+
+- **GROUP BY clause scanning performance**: `findGroupByClauseEnd()` no longer runs regex matching against `substring()` at each character offset (quadratic behavior). The scan now uses a linear keyword boundary check.
+- **Hint duplication on retry preprocessing**: Parser compatibility hints are now deduplicated when parse retry applies the same rewrites.
+
+### Tests
+
+- Added unit tests for preprocessing transforms in `tests/unit/parser/preprocessing.test.ts` (including `GROUPING SETS` edge cases and Snowflake path/time-literal safety).
+- Added unit tests for unrecognized TVF hint behavior in `tests/unit/parser/unrecognizedTvf.test.ts`.
+- Expanded registry tests in `tests/unit/dialects/functionRegistry.test.ts` for new dialect TVFs.
+- Added integration coverage in `tests/unit/parser/dialectSupport.test.ts` for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
+
 ## [0.3.7] - 2026-02-13
 
 ### Fixed

@@ -7,8 +7,10 @@ import {
 } from './parser/dialects/detection';
 import { regexFallbackParse } from './parser/dialects/fallback';
 import {
+    collapseSnowflakePaths,
     hoistNestedCtes,
-    preprocessPostgresSyntax
+    preprocessPostgresSyntax,
+    rewriteGroupingSets
 } from './parser/dialects/preprocessing';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
 import {
@@ -100,7 +102,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, rewriteGroupingSets, collapseSnowflakePaths };
 export type { DialectDetectionResult };
 
 /**
@@ -662,6 +664,64 @@ function selectRetryDialectOnParseFailure(
     return { retryDialect: null, detection };
 }
 
+function pushHintOnce(context: ParserContext, hint: OptimizationHint): void {
+    const exists = context.hints.some(existing =>
+        existing.type === hint.type
+        && existing.message === hint.message
+        && existing.category === hint.category
+    );
+    if (exists) {
+        return;
+    }
+    context.hints.push(hint);
+}
+
+function applyParserCompatibilityPreprocessing(
+    sql: string,
+    dialect: SqlDialect,
+    context: ParserContext
+): string {
+    let transformedSql = sql;
+
+    const postgresPreprocessedSql = preprocessPostgresSyntax(transformedSql, dialect);
+    if (postgresPreprocessedSql !== null) {
+        transformedSql = postgresPreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
+            suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const groupingSetsRewrittenSql = rewriteGroupingSets(transformedSql);
+    if (groupingSetsRewrittenSql !== null) {
+        transformedSql = groupingSetsRewrittenSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote GROUPING SETS for parser compatibility',
+            suggestion: 'GROUPING SETS is valid SQL but unsupported by the parser. It was flattened to a standard GROUP BY list for visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const collapsedSnowflakePathSql = collapseSnowflakePaths(transformedSql, dialect);
+    if (collapsedSnowflakePathSql !== null) {
+        transformedSql = collapsedSnowflakePathSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Collapsed deep Snowflake path expressions for parser compatibility',
+            suggestion: 'Snowflake paths with 3+ levels were reduced to 2 levels for structural parsing while preserving casts.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    return transformedSql;
+}
+
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
     // Reset all parser state atomically by creating a fresh context
     ctx = createFreshContext(dialect);
@@ -691,18 +751,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         });
     }
 
-    // Preprocess PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals)
-    const preprocessedSql = preprocessPostgresSyntax(sql, dialect);
-    if (preprocessedSql !== null) {
-        sql = preprocessedSql;
-        ctx.hints.push({
-            type: 'info',
-            message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
-            suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
-            category: 'best-practice',
-            severity: 'low',
-        });
-    }
+    sql = applyParserCompatibilityPreprocessing(sql, dialect, ctx);
 
     const parser = new Parser();
 
@@ -733,18 +782,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             }
 
             try {
-                let retrySql = sql;
-                const retryPreprocessedSql = preprocessPostgresSyntax(sql, retryDialect);
-                if (retryPreprocessedSql !== null) {
-                    retrySql = retryPreprocessedSql;
-                    ctx.hints.push({
-                        type: 'info',
-                        message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
-                        suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
-                        category: 'best-practice',
-                        severity: 'low',
-                    });
-                }
+                const retrySql = applyParserCompatibilityPreprocessing(sql, retryDialect, ctx);
 
                 ast = parseWithDialect(retryDialect, retrySql);
                 effectiveDialect = retryDialect;

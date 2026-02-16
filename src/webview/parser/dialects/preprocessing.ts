@@ -76,6 +76,95 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
 }
 
 /**
+ * Rewrite GROUPING SETS clauses into a flat GROUP BY column list so the parser
+ * can continue when GROUPING SETS syntax is unsupported.
+ */
+export function rewriteGroupingSets(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const groupByRegex = /\bGROUP\s+BY\b/gi;
+    const rewrites: Array<{ start: number; end: number; replacement: string }> = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = groupByRegex.exec(masked)) !== null) {
+        const clauseStart = match.index + match[0].length;
+        const clauseEnd = findGroupByClauseEnd(masked, clauseStart);
+        const clauseSql = sql.substring(clauseStart, clauseEnd);
+        const clauseMasked = masked.substring(clauseStart, clauseEnd);
+        const rewrittenClause = rewriteGroupingSetsClause(clauseSql, clauseMasked);
+        if (rewrittenClause === null) {
+            continue;
+        }
+
+        rewrites.push({
+            start: match.index,
+            end: clauseEnd,
+            replacement: rewrittenClause.length > 0 ? `GROUP BY ${rewrittenClause}` : '',
+        });
+
+        groupByRegex.lastIndex = clauseEnd;
+    }
+
+    if (rewrites.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = rewrites.length - 1; i >= 0; i--) {
+        const rewrite = rewrites[i];
+        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
+    }
+    return result;
+}
+
+/**
+ * Collapse Snowflake path chains with 3+ segments (e.g. v:a:b:c) to 2 segments
+ * (v:a:b), which is enough for structure parsing and avoids parser failures.
+ */
+export function collapseSnowflakePaths(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Snowflake') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const deepPathRegex = /\b([A-Za-z0-9_][\w$]*)((?::(?!:)[A-Za-z0-9_][\w$]*){3,})/g;
+    const rewrites: Array<{ start: number; end: number; replacement: string }> = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = deepPathRegex.exec(masked)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const pathText = sql.substring(start, end);
+        const segments = pathText.split(':');
+        const prefix = segments[0]?.trim() || '';
+
+        if (/^\d+$/.test(prefix)) {
+            continue;
+        }
+        if (segments.length < 4) {
+            continue;
+        }
+
+        const collapsedPath = `${segments[0]}:${segments[1]}:${segments[2]}`;
+        if (collapsedPath === pathText) {
+            continue;
+        }
+
+        rewrites.push({ start, end, replacement: collapsedPath });
+    }
+
+    if (rewrites.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = rewrites.length - 1; i >= 0; i--) {
+        const rewrite = rewrites[i];
+        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
+    }
+    return result;
+}
+
+/**
  * Hoist CTEs nested inside subqueries to the top level.
  * Snowflake / Tableau generates `FROM ( WITH cte AS (...) SELECT ... ) t`
  * which node-sql-parser cannot handle. This rewrites the SQL to move the
@@ -101,6 +190,214 @@ export function hoistNestedCtes(sql: string): string | null {
     }
 
     return hoisted ? current : null;
+}
+
+function rewriteGroupingSetsClause(clauseSql: string, clauseMasked: string): string | null {
+    const groupingSetsRegex = /\bGROUPING\s+SETS\s*\(/gi;
+    const extractedGroupingColumns: string[] = [];
+    const clauseFragments: string[] = [];
+    let cursor = 0;
+    let changed = false;
+    let match: RegExpExecArray | null;
+
+    while ((match = groupingSetsRegex.exec(clauseMasked)) !== null) {
+        const openParenPos = match.index + match[0].length - 1;
+        const closeParenPos = findMatchingParen(clauseMasked, openParenPos);
+        if (closeParenPos === -1) {
+            continue;
+        }
+
+        changed = true;
+        clauseFragments.push(clauseSql.substring(cursor, match.index));
+        const groupingSetsBody = clauseSql.substring(openParenPos + 1, closeParenPos);
+        extractedGroupingColumns.push(...extractGroupingSetsColumns(groupingSetsBody));
+        cursor = closeParenPos + 1;
+
+        groupingSetsRegex.lastIndex = closeParenPos + 1;
+    }
+
+    if (!changed) {
+        return null;
+    }
+
+    clauseFragments.push(clauseSql.substring(cursor));
+    const mergedParts = [
+        ...clauseFragments.flatMap(fragment => splitTopLevelComma(fragment)),
+        ...extractedGroupingColumns,
+    ]
+        .map(part => part.trim())
+        .filter(Boolean);
+
+    const dedupedParts: string[] = [];
+    const seen = new Set<string>();
+    for (const part of mergedParts) {
+        const dedupeKey = normalizeSqlExpression(part);
+        if (seen.has(dedupeKey)) {
+            continue;
+        }
+        seen.add(dedupeKey);
+        dedupedParts.push(part);
+    }
+    return dedupedParts.join(', ');
+}
+
+function extractGroupingSetsColumns(groupingSetsBody: string): string[] {
+    const columns: string[] = [];
+    const seen = new Set<string>();
+    const groupingItems = splitTopLevelComma(groupingSetsBody)
+        .map(item => item.trim())
+        .filter(Boolean);
+
+    for (const groupingItem of groupingItems) {
+        let values: string[] = [];
+        if (groupingItem.startsWith('(') && groupingItem.endsWith(')')) {
+            const inner = groupingItem.slice(1, -1);
+            values = splitTopLevelComma(inner);
+        } else {
+            values = [groupingItem];
+        }
+
+        for (const value of values) {
+            const normalized = value.trim();
+            if (!normalized) {
+                continue;
+            }
+            const dedupeKey = normalizeSqlExpression(normalized);
+            if (seen.has(dedupeKey)) {
+                continue;
+            }
+            seen.add(dedupeKey);
+            columns.push(normalized);
+        }
+    }
+
+    return columns;
+}
+
+function normalizeSqlExpression(expression: string): string {
+    return expression.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function splitTopLevelComma(value: string): string[] {
+    const masked = maskStringsAndComments(value);
+    const parts: string[] = [];
+    let depth = 0;
+    let segmentStart = 0;
+
+    for (let i = 0; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') {
+            depth++;
+            continue;
+        }
+        if (ch === ')') {
+            if (depth > 0) {
+                depth--;
+            }
+            continue;
+        }
+        if (ch === ',' && depth === 0) {
+            parts.push(value.substring(segmentStart, i));
+            segmentStart = i + 1;
+        }
+    }
+
+    parts.push(value.substring(segmentStart));
+    return parts;
+}
+
+function findGroupByClauseEnd(masked: string, clauseStart: number): number {
+    const upperMasked = masked.toUpperCase();
+    let depth = 0;
+
+    for (let i = clauseStart; i < masked.length; i++) {
+        const ch = masked[i];
+
+        if (ch === '(') {
+            depth++;
+            continue;
+        }
+
+        if (ch === ')') {
+            if (depth === 0) {
+                return i;
+            }
+            depth--;
+            continue;
+        }
+
+        if (depth !== 0) {
+            continue;
+        }
+
+        if (!isWhitespace(ch)) {
+            continue;
+        }
+
+        let keywordStart = i;
+        while (keywordStart < masked.length && isWhitespace(masked[keywordStart])) {
+            keywordStart++;
+        }
+        if (keywordStart >= masked.length) {
+            break;
+        }
+
+        if (isClauseEndingKeywordAt(upperMasked, keywordStart)) {
+            return i;
+        }
+        i = keywordStart - 1;
+    }
+
+    return masked.length;
+}
+
+function isClauseEndingKeywordAt(upperSql: string, position: number): boolean {
+    const clauseEndKeywords = ['HAVING', 'QUALIFY', 'WINDOW', 'LIMIT', 'FETCH', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT'];
+    for (const keyword of clauseEndKeywords) {
+        if (matchesKeywordAt(upperSql, position, keyword)) {
+            return true;
+        }
+    }
+
+    if (upperSql.startsWith('ORDER BY', position)) {
+        const afterOrderBy = position + 'ORDER BY'.length;
+        if (isBoundaryChar(upperSql[afterOrderBy])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function matchesKeywordAt(upperSql: string, position: number, keyword: string): boolean {
+    if (!upperSql.startsWith(keyword, position)) {
+        return false;
+    }
+    const nextChar = upperSql[position + keyword.length];
+    return isBoundaryChar(nextChar);
+}
+
+function isWhitespace(ch: string | undefined): boolean {
+    if (!ch) {
+        return false;
+    }
+    return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+}
+
+function isBoundaryChar(ch: string | undefined): boolean {
+    if (!ch) {
+        return true;
+    }
+    if (isWhitespace(ch)) {
+        return true;
+    }
+    if (ch === ')' || ch === '(' || ch === ',' || ch === ';') {
+        return true;
+    }
+    if (ch === '\0') {
+        return true;
+    }
+    return !/[A-Z0-9_$]/.test(ch);
 }
 
 /**
