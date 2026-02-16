@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as `[object Object](...)`. Function names are now unwrapped from nested AST identifier objects before expression formatting.
 - **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, making line/column diagnostics actionable when comments/whitespace shift line numbers. The stored SQL context for parse errors was increased from 200 to 500 characters to improve source-line extraction reliability.
 - **Cross-dialect fallback parsing reliability**: Reduced false positives in dialect detection where time literals like `00:00:00` could be misclassified as dialect-specific path syntax. Also ensured dialect auto-retry applies compatibility preprocessing when needed (`AT TIME ZONE`, type-prefixed literals), reducing unnecessary regex fallback on valid SQL.
+- **False "Unused CTE" hints for chained CTEs**: CTE-to-CTE references (e.g., `high_value_customers` referencing `customer_totals` via JOIN) were not detected, causing valid CTEs to be flagged as unused. The detection now recursively checks CTE children including join nodes, and correctly strips `WITH RECURSIVE` prefixes.
 
 ### Tests
 
