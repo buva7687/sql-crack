@@ -37,6 +37,9 @@ Thumbs.db
 #archive
 archive/
 
+# Local example queries
+examples/sample_queries/
+
 # Local docs/notes
 docs/
 RELEASE_CHECKLIST.md
