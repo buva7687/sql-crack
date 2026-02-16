@@ -1,5 +1,6 @@
 node_modules
 out
+out-cjs
 dist
 *.vsix
 .vscode-test/
@@ -18,7 +19,8 @@ env/
 .cursor/
 .factory/
 .claude/
-claude.md
+CLAUDE.md
+AGENTS.md
 *.swp
 *.swo
 *~
@@ -37,6 +39,9 @@ archive/
 
 # Local docs/notes
 docs/
+
+# YouTube video scripts
+youtube/
 
 # Test coverage reports (generated)
 coverage/

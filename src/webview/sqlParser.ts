@@ -1202,7 +1202,7 @@ export function parseSqlBatch(
                 line: lineMatch ? parseInt(lineMatch[1], 10) : queryLineRanges[index]?.startLine,
                 column: columnMatch ? parseInt(columnMatch[1], 10) : undefined,
                 message: query.error,
-                sql: query.sql.substring(0, 200) + (query.sql.length > 200 ? '...' : '')
+                sql: query.sql.substring(0, 500) + (query.sql.length > 500 ? '...' : '')
             });
         } else {
             successCount++;
@@ -1920,11 +1920,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         let ast: any;
         let effectiveDialect = dialect;
 
-        const parseWithDialect = (targetDialect: SqlDialect): any => {
+        const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
             try {
-                return parser.astify(sql, { database: targetDialect });
+                return parser.astify(sqlText, { database: targetDialect });
             } catch (parseError) {
-                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sql, targetDialect);
+                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;
                 }
@@ -1943,7 +1943,20 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             }
 
             try {
-                ast = parseWithDialect(retryDialect);
+                let retrySql = sql;
+                const retryPreprocessedSql = preprocessPostgresSyntax(sql, retryDialect);
+                if (retryPreprocessedSql !== null) {
+                    retrySql = retryPreprocessedSql;
+                    ctx.hints.push({
+                        type: 'info',
+                        message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
+                        suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+                        category: 'best-practice',
+                        severity: 'low',
+                    });
+                }
+
+                ast = parseWithDialect(retryDialect, retrySql);
                 effectiveDialect = retryDialect;
                 ctx.dialect = retryDialect;
                 ctx.hints.push({
@@ -2219,44 +2232,62 @@ function generateHints(stmt: any): void {
 // Phase 2 Feature: Advanced SQL Annotations
 function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string): void {
     // Detect unused CTEs
-    // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
+    // Fix: Check CTE references in children (CTE-to-CTE refs) and join labels, not just top-level table nodes
     const cteNodes = nodes.filter(n => n.type === 'cte');
     const referencedCTEs = new Set<string>();
-    
-    // Build a set of all CTE names (without "WITH " prefix for accurate matching)
+
+    /** Extract the bare CTE name from a label like "WITH foo" or "WITH RECURSIVE foo" */
+    function extractCteName(label: string): string {
+        let name = label.toLowerCase();
+        if (name.startsWith('with recursive ')) {
+            name = name.substring('with recursive '.length).trim();
+        } else if (name.startsWith('with ')) {
+            name = name.substring('with '.length).trim();
+        }
+        return name;
+    }
+
+    // Build a set of all CTE names (without "WITH " / "WITH RECURSIVE " prefix for accurate matching)
     const allCteNames = new Set<string>();
     cteNodes.forEach(cteNode => {
-        let cteName = cteNode.label.toLowerCase();
-        if (cteName.startsWith('with ')) {
-            cteName = cteName.substring(5).trim();
-        }
-        allCteNames.add(cteName);
+        allCteNames.add(extractCteName(cteNode.label));
     });
 
     // Track which CTEs are actually referenced in the query
-    // Check all table nodes, not just those marked as cte_reference
-    nodes.forEach(node => {
-        if (node.type === 'table') {
-            const tableName = node.label.toLowerCase().trim();
-            // Check if this table name matches any CTE name
-            if (allCteNames.has(tableName)) {
-                referencedCTEs.add(tableName);
+    // Check all table nodes AND join nodes (including those nested inside CTE children)
+    function collectCteReferences(nodeList: FlowNode[]): void {
+        for (const node of nodeList) {
+            if (node.type === 'table') {
+                const tableName = node.label.toLowerCase().trim();
+                if (allCteNames.has(tableName)) {
+                    referencedCTEs.add(tableName);
+                }
+                if (node.tableCategory === 'cte_reference') {
+                    referencedCTEs.add(tableName);
+                }
             }
-            // Also check if it's marked as cte_reference (backup check)
-            if (node.tableCategory === 'cte_reference') {
-                referencedCTEs.add(tableName);
+            // Inside CTE children, join nodes have labels like "JOIN table_name" or "LEFT JOIN table_name"
+            if (node.type === 'join') {
+                const joinLabel = node.label.toLowerCase().trim();
+                const parts = joinLabel.split(/\s+/);
+                if (parts.length >= 2) {
+                    const joinedTable = parts[parts.length - 1];
+                    if (allCteNames.has(joinedTable)) {
+                        referencedCTEs.add(joinedTable);
+                    }
+                }
+            }
+            // Recurse into CTE/subquery children to find nested references
+            if (node.children && node.children.length > 0) {
+                collectCteReferences(node.children);
             }
         }
-    });
+    }
+    collectCteReferences(nodes);
 
     cteNodes.forEach(cteNode => {
-        // Extract CTE name from label (remove "WITH " prefix if present)
-        // This ensures accurate matching between CTE definitions and references
-        let cteName = cteNode.label.toLowerCase();
-        if (cteName.startsWith('with ')) {
-            cteName = cteName.substring(5).trim();
-        }
-        
+        const cteName = extractCteName(cteNode.label);
+
         if (!referencedCTEs.has(cteName)) {
             // CTE is defined but never used
             if (!cteNode.warnings) {cteNode.warnings = [];}
@@ -3988,7 +4019,7 @@ function formatExpressionFromAst(expr: any): string {
 
     // Aggregate function
     if (expr.type === 'aggr_func') {
-        const funcName = expr.name || 'AGG';
+        const funcName = getAstString(expr.name) || 'AGG';
         trackFunctionUsage(funcName, 'aggregate');
         const distinct = expr.args?.distinct ? 'DISTINCT ' : '';
         let argsStr = '';
@@ -4007,7 +4038,7 @@ function formatExpressionFromAst(expr: any): string {
 
     // Function call
     if (expr.type === 'function') {
-        const funcName = typeof expr.name === 'string' ? expr.name : expr.name?.name || 'FUNC';
+        const funcName = getAstString(expr.name) || 'FUNC';
         trackFunctionUsage(funcName, expr.over ? 'window' : 'scalar');
         const args = expr.args?.value || expr.args || [];
         const argsStr = Array.isArray(args)
@@ -5904,6 +5935,8 @@ function detectDialectSyntaxPatterns(sql: string): {
     hasBigQueryUnnest: boolean;
     hasBigQueryArrayType: boolean;
     hasPostgresInterval: boolean;
+    hasPostgresTypeCast: boolean;
+    hasPostgresAtTimeZone: boolean;
     hasPostgresDollarQuotes: boolean;
     hasPostgresArrayAccess: boolean;
     hasPostgresJsonOperators: boolean;
@@ -5914,28 +5947,35 @@ function detectDialectSyntaxPatterns(sql: string): {
     hasTSqlTop: boolean;
     hasTSqlPivot: boolean;
 } {
+    // Dialect detection should ignore contents inside string literals/comments.
+    // Use a masked representation for token matching, but keep original SQL for
+    // patterns that intentionally depend on quoted literals (e.g., INTERVAL '...').
+    const maskedSql = maskStringsAndComments(sql);
     return {
-        hasSnowflakePathOperator: /(?<!:):\w+(?!:)/.test(sql), // payload:items (excludes :: and :params)
-        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(sql), // input => value
-        hasFlatten: /\bFLATTEN\s*\(/i.test(sql),
-        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(sql),
-        hasQualify: /\bQUALIFY\b/i.test(sql),
-        hasIlike: /\bILIKE\b/i.test(sql),
-        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(sql),
-        hasMergeInto: /\bMERGE\s+INTO\b/i.test(sql),
-        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(sql),
-        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(sql),
-        hasBigQueryArrayType: /\bARRAY<.*>/i.test(sql),
+        // Match JSON path access like payload:items, but avoid false positives from time literals (00:00:00)
+        hasSnowflakePathOperator: /\b[A-Za-z_][\w$]*\s*:\s*[A-Za-z_][\w$]*(?!:)/.test(maskedSql),
+        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(maskedSql), // input => value
+        hasFlatten: /\bFLATTEN\s*\(/i.test(maskedSql),
+        hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(maskedSql),
+        hasQualify: /\bQUALIFY\b/i.test(maskedSql),
+        hasIlike: /\bILIKE\b/i.test(maskedSql),
+        hasCreateOrReplaceTable: /\bCREATE\s+OR\s+REPLACE\s+TABLE\b/i.test(maskedSql),
+        hasMergeInto: /\bMERGE\s+INTO\b/i.test(maskedSql),
+        hasBigQueryStruct: /\bSTRUCT\s*\(/i.test(maskedSql),
+        hasBigQueryUnnest: /\bUNNEST\s*\(/i.test(maskedSql),
+        hasBigQueryArrayType: /\bARRAY<.*>/i.test(maskedSql),
         hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
-        hasPostgresDollarQuotes: /\$\$/.test(sql),
-        hasPostgresArrayAccess: /\w+\[\d+\]/.test(sql),
-        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(sql),
-        hasMysqlBackticks: /`[\w-]+`/.test(sql),
-        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(sql),
-        hasMysqlDual: /FROM\s+DUAL/i.test(sql),
-        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(sql),
-        hasTSqlTop: /TOP\s*\(/i.test(sql),
-        hasTSqlPivot: /\bPIVOT\s*\(/i.test(sql),
+        hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
+        hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
+        hasPostgresDollarQuotes: /\$\$/.test(maskedSql),
+        hasPostgresArrayAccess: /\w+\[\d+\]/.test(maskedSql),
+        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
+        hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),
+        hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(maskedSql),
+        hasMysqlDual: /FROM\s+DUAL/i.test(maskedSql),
+        hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(maskedSql),
+        hasTSqlTop: /TOP\s*\(/i.test(maskedSql),
+        hasTSqlPivot: /\bPIVOT\s*\(/i.test(maskedSql),
     };
 }
 
@@ -5977,6 +6017,8 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasPostgresDollarQuotes) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresJsonOperators) { addScore('PostgreSQL'); }
     if (syntax.hasPostgresInterval) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresTypeCast) { addScore('PostgreSQL'); }
+    if (syntax.hasPostgresAtTimeZone) { addScore('PostgreSQL'); }
     if (syntax.hasIlike) { addScore('PostgreSQL'); }
 
     // MySQL

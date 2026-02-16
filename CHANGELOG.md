@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-02-13
+
+### Fixed
+
+- **SQL Server dialect in settings** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Users can now select "SQL Server" directly in the `sqlCrack.defaultDialect` setting. Previously only "TransactSQL" was available, which was confusing since the toolbar shows "SQL Server".
+- **Default layout not applying on first open** ([#46](https://github.com/buva7687/sql-crack/issues/46)): The `sqlCrack.defaultLayout` setting (e.g., `"horizontal"`) now takes effect immediately when opening the visualization. Previously the parser's vertical positions were used regardless of the setting.
+- **Node drag disconnects edges** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Dragging nodes in horizontal, force, or radial layouts no longer detaches edges. Edge recalculation now uses the layout-aware `calculateEdgePath()` instead of hardcoded vertical-only math.
+- **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as `[object Object](...)`. Function names are now unwrapped from nested AST identifier objects before expression formatting.
+- **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, making line/column diagnostics actionable when comments/whitespace shift line numbers. The stored SQL context for parse errors was increased from 200 to 500 characters to improve source-line extraction reliability.
+- **Cross-dialect fallback parsing reliability**: Reduced false positives in dialect detection where time literals like `00:00:00` could be misclassified as dialect-specific path syntax. Also ensured dialect auto-retry applies compatibility preprocessing when needed (`AT TIME ZONE`, type-prefixed literals), reducing unnecessary regex fallback on valid SQL.
+
+### Tests
+
+- Added `normalizeDialect` unit tests for settings alias mapping.
+- Added source-level regression tests for default layout initialization, `updateNodeEdges` wiring, and `calculateEdgePath` layout branch coverage.
+- Added `package.json` schema tests verifying "SQL Server" enum presence and enum/description array length parity.
+- Added a PostgreSQL column-lineage regression test to ensure calculated expressions keep readable function names (`round`, `nullif`) and never contain `[object Object]`.
+- Added webview wiring regression tests for parse-error source line propagation (index -> toolbar tooltip -> renderer overlay), including absolute-to-relative statement line mapping.
+- Added parser regressions for auto-retry behavior (including `examples/postgres_complex.sql`) plus dialect-detection coverage ensuring time literals are not misclassified as path syntax.
+
 ## [0.3.6] - 2026-02-12
 
 ### Fixed
@@ -570,6 +590,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.7]: https://github.com/buva7687/sql-crack/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/buva7687/sql-crack/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/buva7687/sql-crack/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/buva7687/sql-crack/compare/v0.3.3...v0.3.4

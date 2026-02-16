@@ -687,6 +687,71 @@ SELECT * FROM t3;`;
       expect(retryHint).toBeDefined();
     });
 
+    it('retries parsing for PostgreSQL AT TIME ZONE + :: cast when Snowflake is selected', () => {
+      const sql = `
+SELECT
+  created_at AT TIME ZONE 'UTC' AS utc_time,
+  captured_at::date AS captured_date
+FROM events
+WHERE created_at::date >= CURRENT_DATE - INTERVAL '7 days'
+`;
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      const retryHint = result.hints.find(h => h.message.includes('Auto-retried parse with PostgreSQL'));
+      expect(retryHint).toBeDefined();
+    });
+
+    it('applies PostgreSQL compatibility rewrites during Snowflake -> PostgreSQL retry', () => {
+      const sql = `
+WITH time_buckets AS (
+  SELECT
+    date_bin('15 minutes'::interval, created_at, timestamptz '1970-01-01 00:00:00+00') AS bucket,
+    count(*) AS event_count
+  FROM events
+  GROUP BY 1
+),
+recent AS (
+  SELECT
+    created_at AT TIME ZONE 'America/Chicago' AS local_time,
+    event_type
+  FROM events
+  WHERE created_at > now() - interval '24 hours'
+),
+summary AS (
+  SELECT
+    tb.bucket,
+    tb.event_count,
+    r.event_type
+  FROM time_buckets tb
+  JOIN recent r ON r.local_time >= tb.bucket
+)
+SELECT * FROM summary
+`;
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.partial).not.toBe(true);
+      const parseErrorHint = result.hints.find(h => h.type === 'error' && /parse error/i.test(h.message));
+      expect(parseErrorHint).toBeUndefined();
+      const retryHint = result.hints.find(h => h.message.includes('Auto-retried parse with PostgreSQL'));
+      expect(retryHint).toBeDefined();
+      const rewriteHint = result.hints.find(h => h.message.includes('Rewrote PostgreSQL-specific syntax'));
+      expect(rewriteHint).toBeDefined();
+    });
+
+    it('parses examples/postgres_complex.sql via Snowflake -> PostgreSQL retry', () => {
+      const fixturePath = path.resolve(__dirname, '../../../examples/postgres_complex.sql');
+      const sql = fs.readFileSync(fixturePath, 'utf8');
+      const result = parseSql(sql, 'Snowflake');
+
+      expect(result.partial).not.toBe(true);
+      const parseErrorHint = result.hints.find(h => h.type === 'error' && /parse error/i.test(h.message));
+      expect(parseErrorHint).toBeUndefined();
+      const retryHint = result.hints.find(h => h.message.includes('Auto-retried parse with PostgreSQL'));
+      expect(retryHint).toBeDefined();
+    });
+
     it('includes parser error details in hints for syntax errors', () => {
       const sql = `SELECT
   customer_id

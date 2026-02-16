@@ -273,4 +273,26 @@ describe('Column Lineage', () => {
       expect(result.columnFlows?.length).toBeGreaterThanOrEqual(3);
     });
   });
+
+  describe('PostgreSQL Expression Formatting', () => {
+    it('does not stringify function names as [object Object] in lineage expressions', () => {
+      const sql = `
+        SELECT
+          round(room.total_room / nullif(home.total_home, 0), 4) AS room_pct
+        FROM home
+        LEFT JOIN room ON home.time = room.min_15
+      `;
+
+      const result = parseSql(sql, 'PostgreSQL');
+      const flow = result.columnFlows?.find(f => f.outputColumn.toLowerCase() === 'room_pct');
+
+      expect(flow).toBeDefined();
+
+      const calculatedStep = flow?.lineagePath.find(step => step.transformation === 'calculated');
+      expect(calculatedStep?.expression).toBeDefined();
+      expect(calculatedStep?.expression).toContain('round(');
+      expect(calculatedStep?.expression).toContain('nullif(');
+      expect(calculatedStep?.expression).not.toContain('[object Object]');
+    });
+  });
 });

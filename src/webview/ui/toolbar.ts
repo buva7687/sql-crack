@@ -1894,7 +1894,7 @@ export function clearRefreshButtonStale(): void {
  */
 let errorBadgeClickCallback: ((queryIndex: number) => void) | null = null;
 let errorCycleIndex = 0;
-let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number }> = [];
+let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number; sourceLine?: string }> = [];
 
 /**
  * Register a callback for when the error badge is clicked.
@@ -1904,7 +1904,7 @@ export function setErrorBadgeClickHandler(callback: (queryIndex: number) => void
     errorBadgeClickCallback = callback;
 }
 
-export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number }>): void {
+export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex: number; message: string; line?: number; sourceLine?: string }>): void {
     const existingBadge = document.getElementById('sql-crack-error-badge');
 
     if (errorCount === 0) {
@@ -1962,10 +1962,14 @@ export function updateErrorBadge(errorCount: number, errors?: Array<{ queryIndex
         }
     }
 
-    // Build tooltip content — include line numbers when available
+    // Build tooltip content — include line numbers and source line when available
     const tooltipText = errors?.map(e => {
         const prefix = e.line ? `Q${e.queryIndex + 1} (line ${e.line})` : `Q${e.queryIndex + 1}`;
-        return `${prefix}: ${e.message}`;
+        let text = `${prefix}: ${e.message}`;
+        if (e.sourceLine) {
+            text += `\n→ ${e.sourceLine}`;
+        }
+        return text;
     }).join('\n') ||
         `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 

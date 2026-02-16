@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Validate release tag and package version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${TAG_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match package.json version ($PACKAGE_VERSION)."
+            exit 1
+          fi
+
+          node -e "
+            const v = process.argv[1].split('.').map(Number);
+            const min = [0, 3, 7];
+            const valid = v.length === 3 && v.every(Number.isFinite);
+            if (!valid) {
+              console.error('Invalid semver tag: ' + process.argv[1]);
+              process.exit(1);
+            }
+            const cmp =
+              v[0] - min[0] ||
+              v[1] - min[1] ||
+              v[2] - min[2];
+            if (cmp < 0) {
+              console.error('Release tags below v0.3.7 are not supported by this workflow.');
+              process.exit(1);
+            }
+          " "$TAG_VERSION"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run type check
+        run: npm run typecheck
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build extension
+        run: npm run package
+
+      - name: Package VSIX
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          npx @vscode/vsce package --out "sql-crack-${TAG_NAME}.vsix"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sql-crack-${{ github.ref_name }}.vsix
+          generate_release_notes: true
