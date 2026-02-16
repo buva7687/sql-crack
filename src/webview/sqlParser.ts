@@ -2232,44 +2232,62 @@ function generateHints(stmt: any): void {
 // Phase 2 Feature: Advanced SQL Annotations
 function detectAdvancedIssues(nodes: FlowNode[], _edges: FlowEdge[], sql: string): void {
     // Detect unused CTEs
-    // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
+    // Fix: Check CTE references in children (CTE-to-CTE refs) and join labels, not just top-level table nodes
     const cteNodes = nodes.filter(n => n.type === 'cte');
     const referencedCTEs = new Set<string>();
-    
-    // Build a set of all CTE names (without "WITH " prefix for accurate matching)
+
+    /** Extract the bare CTE name from a label like "WITH foo" or "WITH RECURSIVE foo" */
+    function extractCteName(label: string): string {
+        let name = label.toLowerCase();
+        if (name.startsWith('with recursive ')) {
+            name = name.substring('with recursive '.length).trim();
+        } else if (name.startsWith('with ')) {
+            name = name.substring('with '.length).trim();
+        }
+        return name;
+    }
+
+    // Build a set of all CTE names (without "WITH " / "WITH RECURSIVE " prefix for accurate matching)
     const allCteNames = new Set<string>();
     cteNodes.forEach(cteNode => {
-        let cteName = cteNode.label.toLowerCase();
-        if (cteName.startsWith('with ')) {
-            cteName = cteName.substring(5).trim();
-        }
-        allCteNames.add(cteName);
+        allCteNames.add(extractCteName(cteNode.label));
     });
 
     // Track which CTEs are actually referenced in the query
-    // Check all table nodes, not just those marked as cte_reference
-    nodes.forEach(node => {
-        if (node.type === 'table') {
-            const tableName = node.label.toLowerCase().trim();
-            // Check if this table name matches any CTE name
-            if (allCteNames.has(tableName)) {
-                referencedCTEs.add(tableName);
+    // Check all table nodes AND join nodes (including those nested inside CTE children)
+    function collectCteReferences(nodeList: FlowNode[]): void {
+        for (const node of nodeList) {
+            if (node.type === 'table') {
+                const tableName = node.label.toLowerCase().trim();
+                if (allCteNames.has(tableName)) {
+                    referencedCTEs.add(tableName);
+                }
+                if (node.tableCategory === 'cte_reference') {
+                    referencedCTEs.add(tableName);
+                }
             }
-            // Also check if it's marked as cte_reference (backup check)
-            if (node.tableCategory === 'cte_reference') {
-                referencedCTEs.add(tableName);
+            // Inside CTE children, join nodes have labels like "JOIN table_name" or "LEFT JOIN table_name"
+            if (node.type === 'join') {
+                const joinLabel = node.label.toLowerCase().trim();
+                const parts = joinLabel.split(/\s+/);
+                if (parts.length >= 2) {
+                    const joinedTable = parts[parts.length - 1];
+                    if (allCteNames.has(joinedTable)) {
+                        referencedCTEs.add(joinedTable);
+                    }
+                }
+            }
+            // Recurse into CTE/subquery children to find nested references
+            if (node.children && node.children.length > 0) {
+                collectCteReferences(node.children);
             }
         }
-    });
+    }
+    collectCteReferences(nodes);
 
     cteNodes.forEach(cteNode => {
-        // Extract CTE name from label (remove "WITH " prefix if present)
-        // This ensures accurate matching between CTE definitions and references
-        let cteName = cteNode.label.toLowerCase();
-        if (cteName.startsWith('with ')) {
-            cteName = cteName.substring(5).trim();
-        }
-        
+        const cteName = extractCteName(cteNode.label);
+
         if (!referencedCTEs.has(cteName)) {
             // CTE is defined but never used
             if (!cteNode.warnings) {cteNode.warnings = [];}
