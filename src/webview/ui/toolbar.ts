@@ -240,6 +240,7 @@ export function createToolbar(
             <option value="Trino">Trino</option>
             <option value="MariaDB">MariaDB</option>
             <option value="SQLite">SQLite</option>
+            <option value="Oracle">Oracle</option>
         </select>
         <span id="dialect-auto-indicator" style="
             display: none;

@@ -87,7 +87,8 @@ export class SchemaExtractor {
             'Hive': 'hive',
             'Redshift': 'redshift',
             'Athena': 'athena',
-            'Trino': 'trino'
+            'Trino': 'trino',
+            'Oracle': 'postgresql'
         };
         return dialectMap[dialect] || 'mysql';
     }

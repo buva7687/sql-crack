@@ -296,7 +296,8 @@ export class ReferenceExtractor {
             'Hive': 'hive',
             'Redshift': 'redshift',
             'Athena': 'athena',
-            'Trino': 'trino'
+            'Trino': 'trino',
+            'Oracle': 'postgresql'
         };
         return dialectMap[dialect] || 'mysql';
     }

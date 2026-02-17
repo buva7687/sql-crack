@@ -18,6 +18,7 @@ export { regexFallbackParse } from './dialects/fallback';
 export {
     hoistNestedCtes,
     preprocessPostgresSyntax,
+    preprocessOracleSyntax,
     rewriteGroupingSets,
     collapseSnowflakePaths
 } from './dialects/preprocessing';
