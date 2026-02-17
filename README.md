@@ -133,7 +133,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 
 ## Supported Dialects
 
-MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino
+MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino • Oracle
 
 ---
 

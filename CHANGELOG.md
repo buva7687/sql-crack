@@ -24,6 +24,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
 - Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
 
+## [0.3.9] - 2026-02-17
+
+### Added
+
+- **Oracle SQL dialect support**: Oracle is now a first-class dialect in SQL Crack.
+  - Added `Oracle` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
+  - Oracle-specific function registry: aggregates (LISTAGG, COLLECT, XMLAGG, MEDIAN, STATS_MODE), window functions (RATIO_TO_REPORT), and TVFs (XMLTABLE, JSON_TABLE, TABLE).
+  - Dialect auto-detection with 7 Oracle-specific patterns: `CONNECT BY`, `ROWNUM`, `NVL`/`DECODE`, `MINUS`, sequence `.NEXTVAL`/`.CURRVAL`, `(+)` outer joins, `SYSDATE`/`SYSTIMESTAMP`.
+  - Oracle preprocessing: strips `(+)` outer join operators, rewrites `MINUS` → `EXCEPT`, strips `START WITH`/`CONNECT BY`/`ORDER SIBLINGS BY` hierarchical clauses.
+  - Oracle-specific syntax warnings when Oracle patterns are used in non-Oracle dialects.
+  - Oracle → PostgreSQL proxy mapping for AST parsing (PostgreSQL is the closest supported parser dialect).
+  - `PL/SQL` alias normalization for the `defaultDialect` setting.
+  - Workspace extractors (`referenceExtractor`, `schemaExtractor`) now route Oracle through PostgreSQL proxy instead of falling back to MySQL.
+  - Added Oracle complex example file (`examples/oracle-complex.sql`) with 10 queries covering hierarchical queries, (+) joins, MINUS, DECODE/NVL, sequences, and ROWNUM.
+
+### Changed
+
+- **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
+
+### Fixed
+
+- **CONNECT BY + ORDER SIBLINGS BY stripping**: The preprocessing regex incorrectly terminated at `ORDER SIBLINGS BY` (treating it as a regular `ORDER BY`). Replaced with a keyword-scanning approach that correctly identifies and strips all three hierarchical clause types.
+- **CONNECT BY inside CTE bodies**: Hierarchical clause stripping now works correctly within CTE subqueries.
+
+### Tests
+
+- Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
+- Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
+- Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
+
 ## [0.3.8] - 2026-02-16
 
 ### Added
