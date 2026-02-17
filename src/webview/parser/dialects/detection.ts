@@ -38,6 +38,13 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasTSqlApply: boolean;
     hasTSqlTop: boolean;
     hasTSqlPivot: boolean;
+    hasOracleConnectBy: boolean;
+    hasOracleRownum: boolean;
+    hasOracleNvlDecode: boolean;
+    hasOracleMinus: boolean;
+    hasOracleSequence: boolean;
+    hasOracleOuterJoinOperator: boolean;
+    hasOracleSysdate: boolean;
 } {
     const maskedSql = maskStringsAndComments(sql);
     return {
@@ -65,6 +72,13 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(maskedSql),
         hasTSqlTop: /TOP\s*\(/i.test(maskedSql),
         hasTSqlPivot: /\bPIVOT\s*\(/i.test(maskedSql),
+        hasOracleConnectBy: /\bCONNECT\s+BY\b/i.test(maskedSql),
+        hasOracleRownum: /\bROWNUM\b/i.test(maskedSql),
+        hasOracleNvlDecode: /\b(NVL2?|DECODE)\s*\(/i.test(maskedSql),
+        hasOracleMinus: /\bMINUS\b/i.test(maskedSql),
+        hasOracleSequence: /\.\s*(NEXTVAL|CURRVAL)\b/i.test(maskedSql),
+        hasOracleOuterJoinOperator: /\(\+\)/.test(maskedSql),
+        hasOracleSysdate: /\bSYS(DATE|TIMESTAMP)\b/i.test(maskedSql),
     };
 }
 
@@ -119,6 +133,15 @@ export function detectDialect(sql: string): DialectDetectionResult {
 
     if (syntax.hasThreePartNames) { addScore('Redshift'); }
     if (syntax.hasIlike) { addScore('Redshift'); }
+
+    if (syntax.hasOracleConnectBy) { addScore('Oracle', 3); }
+    if (syntax.hasOracleRownum) { addScore('Oracle', 2); }
+    if (syntax.hasOracleNvlDecode) { addScore('Oracle'); }
+    if (syntax.hasOracleSequence) { addScore('Oracle', 2); }
+    if (syntax.hasOracleOuterJoinOperator) { addScore('Oracle', 3); }
+    if (syntax.hasOracleSysdate) { addScore('Oracle'); }
+    if (syntax.hasOracleMinus) { addScore('Oracle'); }
+    if (syntax.hasMergeInto) { addScore('Oracle'); }
 
     const matchedDialects = rankDialectScores(scores);
     if (matchedDialects.length === 0) {

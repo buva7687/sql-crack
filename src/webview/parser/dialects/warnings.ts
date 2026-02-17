@@ -83,6 +83,21 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
         });
     }
 
+    const hasOracleConnectBy = syntax.hasOracleConnectBy;
+    const hasOracleRownum = syntax.hasOracleRownum;
+    const hasOracleOuterJoinOperator = syntax.hasOracleOuterJoinOperator;
+    const hasOracleNvlDecode = syntax.hasOracleNvlDecode;
+    if ((hasOracleConnectBy || hasOracleRownum || hasOracleOuterJoinOperator || hasOracleNvlDecode)
+        && currentDialect !== 'Oracle') {
+        context.hints.push({
+            type: 'warning',
+            message: 'Oracle-specific syntax detected',
+            suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, (+) joins, or NVL/DECODE). Try Oracle dialect.',
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+
     const hasMerge = /\bMERGE\s+INTO\b/i.test(strippedSql);
     if (hasMerge) {
         const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery'];

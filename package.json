@@ -117,7 +117,8 @@
             "Athena",
             "Trino",
             "MariaDB",
-            "SQLite"
+            "SQLite",
+            "Oracle"
           ],
           "enumDescriptions": [
             "MySQL dialect",
@@ -131,7 +132,8 @@
             "Amazon Athena dialect",
             "Trino (formerly Presto) dialect",
             "MariaDB dialect",
-            "SQLite dialect"
+            "SQLite dialect",
+            "Oracle Database dialect"
           ],
           "description": "Default SQL dialect for parsing queries"
         },

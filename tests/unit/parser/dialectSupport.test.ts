@@ -9,7 +9,7 @@
  * - SQL Server (TransactSQL) specific features
  */
 
-import { parseSql, preprocessPostgresSyntax } from '../../../src/webview/sqlParser';
+import { parseSql, preprocessPostgresSyntax, preprocessOracleSyntax } from '../../../src/webview/sqlParser';
 
 describe('Dialect Support', () => {
   describe('MySQL', () => {
@@ -496,6 +496,112 @@ describe('Dialect Support', () => {
     it('parses TRY() function', () => {
       const result = parseSql("SELECT TRY(CAST('abc' AS INTEGER))", dialect);
       // Document behavior
+    });
+  });
+
+  describe('Oracle', () => {
+    const dialect = 'Oracle';
+
+    it('parses basic SELECT via PostgreSQL proxy', () => {
+      const result = parseSql('SELECT * FROM employees', dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses SELECT with WHERE clause', () => {
+      const result = parseSql('SELECT id, name FROM employees WHERE department_id = 10', dialect);
+      expect(result.error).toBeUndefined();
+      const tableLabels = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tableLabels).toContain('employees');
+    });
+
+    it('parses CTE queries', () => {
+      const result = parseSql(`
+        WITH dept_summary AS (
+          SELECT department_id, COUNT(*) AS cnt
+          FROM employees
+          GROUP BY department_id
+        )
+        SELECT * FROM dept_summary
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses JOINs', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e
+        JOIN departments d ON e.department_id = d.department_id
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.tables).toBeGreaterThanOrEqual(2);
+    });
+
+    it('parses window functions', () => {
+      const result = parseSql(`
+        SELECT employee_id, salary,
+          ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rn
+        FROM employees
+      `, dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('strips (+) outer join operator via preprocessing', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e, departments d
+        WHERE e.department_id = d.department_id(+)
+      `, dialect);
+      // Should parse (with or without fallback) after (+) is stripped
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('rewrites MINUS to EXCEPT via preprocessing', () => {
+      const result = parseSql(`
+        SELECT id FROM employees
+        MINUS
+        SELECT id FROM contractors
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    describe('preprocessOracleSyntax', () => {
+      it('removes (+) outer join operator', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT * FROM a, b WHERE a.id = b.id(+)',
+          'Oracle'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('(+)');
+      });
+
+      it('rewrites MINUS to EXCEPT', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT id FROM a MINUS SELECT id FROM b',
+          'Oracle'
+        );
+        expect(result).not.toBeNull();
+        expect(result).toContain('EXCEPT');
+        expect(result).not.toMatch(/\bMINUS\b/);
+      });
+
+      it('returns null for non-Oracle dialect', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT * FROM a WHERE a.id = b.id(+)',
+          'MySQL'
+        );
+        expect(result).toBeNull();
+      });
+
+      it('returns null when no rewrites needed', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT id, name FROM employees WHERE active = 1',
+          'Oracle'
+        );
+        expect(result).toBeNull();
+      });
     });
   });
 });

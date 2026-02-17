@@ -15,7 +15,9 @@ let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
 /** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL" */
 export function normalizeDialect(dialect: string): string {
-    return dialect === 'SQL Server' ? 'TransactSQL' : dialect;
+    if (dialect === 'SQL Server') { return 'TransactSQL'; }
+    if (dialect === 'PL/SQL') { return 'Oracle'; }
+    return dialect;
 }
 
 // Auto-refresh debounce timer

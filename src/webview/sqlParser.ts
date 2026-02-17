@@ -9,6 +9,7 @@ import { regexFallbackParse } from './parser/dialects/fallback';
 import {
     collapseSnowflakePaths,
     hoistNestedCtes,
+    preprocessOracleSyntax,
     preprocessPostgresSyntax,
     rewriteGroupingSets
 } from './parser/dialects/preprocessing';
@@ -102,7 +103,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, rewriteGroupingSets, collapseSnowflakePaths };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, rewriteGroupingSets, collapseSnowflakePaths };
 export type { DialectDetectionResult };
 
 /**
@@ -707,6 +708,18 @@ function applyParserCompatibilityPreprocessing(
         });
     }
 
+    const oraclePreprocessedSql = preprocessOracleSyntax(transformedSql, dialect);
+    if (oraclePreprocessedSql !== null) {
+        transformedSql = oraclePreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY) for parser compatibility',
+            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY) are partially supported.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const collapsedSnowflakePathSql = collapseSnowflakePaths(transformedSql, dialect);
     if (collapsedSnowflakePathSql !== null) {
         transformedSql = collapsedSnowflakePathSql;
@@ -760,8 +773,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         let effectiveDialect = dialect;
 
         const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
+            // Oracle is not supported by node-sql-parser; use PostgreSQL as the closest proxy
+            const parserDialect = targetDialect === 'Oracle' ? 'PostgreSQL' : targetDialect;
             try {
-                return parser.astify(sqlText, { database: targetDialect });
+                return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {
                 const fallbackAst = tryParseSnowflakeDmlFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {

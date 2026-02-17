@@ -118,4 +118,47 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
         expect(result.scores.PostgreSQL).toBeGreaterThanOrEqual(2);
     });
+
+    it('detects Oracle CONNECT BY with high confidence', () => {
+        const result = detectDialect(`
+            SELECT employee_id, manager_id, LEVEL
+            FROM employees
+            START WITH manager_id IS NULL
+            CONNECT BY PRIOR employee_id = manager_id
+        `);
+        expect(result.dialect).toBe('Oracle');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Oracle).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Oracle (+) outer join syntax with high confidence', () => {
+        const result = detectDialect(`
+            SELECT e.name, d.department_name
+            FROM employees e, departments d
+            WHERE e.department_id = d.department_id(+)
+        `);
+        expect(result.dialect).toBe('Oracle');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Oracle).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Oracle ROWNUM + sequence as Oracle signal', () => {
+        const result = detectDialect(`
+            SELECT my_seq.NEXTVAL, ROWNUM
+            FROM dual
+        `);
+        expect(result.scores.Oracle).toBeGreaterThanOrEqual(4);
+        expect(result.dialect).toBe('Oracle');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Oracle NVL/DECODE as low-confidence signal', () => {
+        const result = detectDialect('SELECT NVL(name, DECODE(status, 1, active, inactive)) FROM users');
+        expect(result.scores.Oracle).toBeGreaterThan(0);
+    });
+
+    it('ignores Oracle-like syntax inside comments', () => {
+        const result = detectDialect('-- CONNECT BY PRIOR\nSELECT 1');
+        expect(result.scores.Oracle || 0).toBe(0);
+    });
 });

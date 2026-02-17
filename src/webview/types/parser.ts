@@ -3,7 +3,7 @@
 import { FlowNode, FlowEdge } from './nodes';
 import { ColumnLineage, ColumnFlow } from './lineage';
 
-export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino';
+export type SqlDialect = 'MySQL' | 'PostgreSQL' | 'TransactSQL' | 'MariaDB' | 'SQLite' | 'Snowflake' | 'BigQuery' | 'Hive' | 'Redshift' | 'Athena' | 'Trino' | 'Oracle';
 
 export type ComplexityLevel = 'Simple' | 'Moderate' | 'Complex' | 'Very Complex';
 

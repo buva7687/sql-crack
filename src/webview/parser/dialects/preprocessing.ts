@@ -76,6 +76,61 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
 }
 
 /**
+ * Preprocess Oracle-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. `(+)` outer join operator — removed (confuses other parsers)
+ * 2. `MINUS` set operator — rewritten to `EXCEPT` for parser compatibility
+ * 3. `CONNECT BY` / `START WITH` clauses — stripped (hierarchical queries unsupported)
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Oracle') {
+        return null;
+    }
+
+    let result = sql;
+    let changed = false;
+
+    // 1. Remove (+) outer join operator
+    const outerJoinResult = result.replace(/\(\+\)/g, '');
+    if (outerJoinResult !== result) {
+        result = outerJoinResult;
+        changed = true;
+    }
+
+    // 2. Rewrite MINUS → EXCEPT (Oracle's MINUS is standard SQL EXCEPT)
+    const masked = maskStringsAndComments(result);
+    const minusRegex = /\bMINUS\b/gi;
+    const minusRewrites: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+    while ((match = minusRegex.exec(masked)) !== null) {
+        minusRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = minusRewrites.length - 1; i >= 0; i--) {
+        const m = minusRewrites[i];
+        result = result.substring(0, m.start) + 'EXCEPT' + result.substring(m.end);
+        changed = true;
+    }
+
+    // 3. Strip CONNECT BY and START WITH clauses
+    const masked2 = changed ? maskStringsAndComments(result) : masked;
+    const connectByRegex = /\b(START\s+WITH\b[^;]*?\bCONNECT\s+BY\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$)|\bCONNECT\s+BY\b[^;]*?\bSTART\s+WITH\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$)|\bCONNECT\s+BY\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$))/gi;
+    const connectByRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = connectByRegex.exec(masked2)) !== null) {
+        connectByRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = connectByRewrites.length - 1; i >= 0; i--) {
+        const m = connectByRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    return changed ? result : null;
+}
+
+/**
  * Rewrite GROUPING SETS clauses into a flat GROUP BY column list so the parser
  * can continue when GROUPING SETS syntax is unsupported.
  */

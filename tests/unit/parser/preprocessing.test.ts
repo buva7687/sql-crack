@@ -1,4 +1,4 @@
-import { collapseSnowflakePaths, rewriteGroupingSets } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax } from '../../../src/webview/sqlParser';
 
 describe('parser preprocessing transforms', () => {
     describe('rewriteGroupingSets', () => {
@@ -88,6 +88,52 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).toContain("'00:00:00'");
             expect(rewritten).toContain('12:34:56:78');
             expect(rewritten).toContain('payload:a:b::string');
+        });
+    });
+
+    describe('preprocessOracleSyntax', () => {
+        it('returns null for non-Oracle dialect', () => {
+            const sql = 'SELECT * FROM a WHERE a.id = b.id(+)';
+            expect(preprocessOracleSyntax(sql, 'MySQL')).toBeNull();
+        });
+
+        it('returns null when no Oracle-specific syntax present', () => {
+            const sql = 'SELECT id, name FROM employees WHERE active = 1';
+            expect(preprocessOracleSyntax(sql, 'Oracle')).toBeNull();
+        });
+
+        it('removes (+) outer join operator', () => {
+            const sql = 'SELECT * FROM a, b WHERE a.id = b.id(+) AND a.type = b.type(+)';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toContain('(+)');
+            expect(rewritten).toContain('a.id = b.id');
+            expect(rewritten).toContain('a.type = b.type');
+        });
+
+        it('rewrites MINUS to EXCEPT', () => {
+            const sql = 'SELECT id FROM employees MINUS SELECT id FROM contractors';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toContain('EXCEPT');
+            expect(rewritten).not.toMatch(/\bMINUS\b/);
+        });
+
+        it('handles multiple MINUS operators', () => {
+            const sql = 'SELECT id FROM a MINUS SELECT id FROM b MINUS SELECT id FROM c';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            const exceptCount = (rewritten!.match(/\bEXCEPT\b/g) || []).length;
+            expect(exceptCount).toBe(2);
+            expect(rewritten).not.toMatch(/\bMINUS\b/);
+        });
+
+        it('does not rewrite MINUS inside string literals', () => {
+            const sql = "SELECT 'MINUS' AS op FROM dual";
+            expect(preprocessOracleSyntax(sql, 'Oracle')).toBeNull();
         });
     });
 });

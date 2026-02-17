@@ -217,6 +217,26 @@
       ],
       "window": [],
       "tableValued": ["JSON_EACH", "JSON_TREE"]
+    },
+    "oracle": {
+      "aggregates": [
+        "LISTAGG", "COLLECT", "XMLAGG", "WM_CONCAT",
+        "MEDIAN", "STATS_MODE",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "ANY_VALUE", "APPROX_COUNT_DISTINCT",
+        "JSON_ARRAYAGG", "JSON_OBJECTAGG"
+      ],
+      "window": [
+        "RATIO_TO_REPORT", "NTH_VALUE", "FIRST_VALUE", "LAST_VALUE"
+      ],
+      "tableValued": [
+        "XMLTABLE", "JSON_TABLE", "TABLE",
+        "DBMS_XPLAN.DISPLAY", "DBMS_XPLAN.DISPLAY_CURSOR"
+      ]
     }
   }
 }
