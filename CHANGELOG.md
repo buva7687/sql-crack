@@ -24,40 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
 - Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
 
-## [0.3.9] - 2026-02-17
+## [0.3.8] - 2026-02-17
 
 ### Added
 
 - **Oracle SQL dialect support**: Oracle is now a first-class dialect in SQL Crack.
   - Added `Oracle` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
-  - Oracle-specific function registry: aggregates (LISTAGG, COLLECT, XMLAGG, MEDIAN, STATS_MODE), window functions (RATIO_TO_REPORT), and TVFs (XMLTABLE, JSON_TABLE, TABLE).
-  - Dialect auto-detection with 7 Oracle-specific patterns: `CONNECT BY`, `ROWNUM`, `NVL`/`DECODE`, `MINUS`, sequence `.NEXTVAL`/`.CURRVAL`, `(+)` outer joins, `SYSDATE`/`SYSTIMESTAMP`.
-  - Oracle preprocessing: strips `(+)` outer join operators, rewrites `MINUS` → `EXCEPT`, strips `START WITH`/`CONNECT BY`/`ORDER SIBLINGS BY` hierarchical clauses.
+  - Oracle-specific function registry: aggregates (LISTAGG, COLLECT, XMLAGG, MEDIAN, STATS_MODE), window functions (RATIO_TO_REPORT, CUME_DIST, PERCENT_RANK, PERCENTILE_CONT, PERCENTILE_DISC), and TVFs (XMLTABLE, JSON_TABLE, TABLE, XMLSEQUENCE).
+  - Dialect auto-detection with 10 Oracle-specific patterns: `CONNECT BY`, `ROWNUM`, `NVL`/`DECODE`, `MINUS`, sequence `.NEXTVAL`/`.CURRVAL`, `(+)` outer joins, `SYSDATE`/`SYSTIMESTAMP`, `PIVOT`, `AS OF SCN/TIMESTAMP` (flashback), `MODEL DIMENSION/MEASURES/RULES`.
+  - Oracle preprocessing: strips `(+)` outer join operators, rewrites `MINUS` → `EXCEPT`, strips `START WITH`/`CONNECT BY`/`ORDER SIBLINGS BY` hierarchical clauses, strips `PIVOT`/`UNPIVOT` clauses, strips `AS OF SCN/TIMESTAMP` flashback queries, strips `MODEL` clauses, strips `RETURNING ... INTO` bind variables.
+  - Oracle optimizer hints (`/*+ ... */`) detected and surfaced as info hints.
   - Oracle-specific syntax warnings when Oracle patterns are used in non-Oracle dialects.
   - Oracle → PostgreSQL proxy mapping for AST parsing (PostgreSQL is the closest supported parser dialect).
   - `PL/SQL` alias normalization for the `defaultDialect` setting.
-  - Workspace extractors (`referenceExtractor`, `schemaExtractor`) now route Oracle through PostgreSQL proxy instead of falling back to MySQL.
   - Added Oracle complex example file (`examples/oracle-complex.sql`) with 10 queries covering hierarchical queries, (+) joins, MINUS, DECODE/NVL, sequences, and ROWNUM.
-
-### Changed
-
-- **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
-
-### Fixed
-
-- **CONNECT BY + ORDER SIBLINGS BY stripping**: The preprocessing regex incorrectly terminated at `ORDER SIBLINGS BY` (treating it as a regular `ORDER BY`). Replaced with a keyword-scanning approach that correctly identifies and strips all three hierarchical clause types.
-- **CONNECT BY inside CTE bodies**: Hierarchical clause stripping now works correctly within CTE subqueries.
-
-### Tests
-
-- Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
-- Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
-- Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
-
-## [0.3.8] - 2026-02-16
-
-### Added
-
+- **Unified workspace preprocessing**: Workspace extractors (`referenceExtractor`, `schemaExtractor`) now apply all dialect preprocessing transforms via `preprocessForParsing()` — PostgreSQL (AT TIME ZONE, type-prefixed literals), Snowflake (deep path collapse), CTE hoisting, GROUPING SETS rewrite, and Oracle syntax. Previously workspace extractors had no preprocessing.
 - **TVF registry coverage expansion**: Added missing table-valued functions across dialects:
   - Redshift: `UNNEST`, `GENERATE_SERIES`
   - Hive: `JSON_TUPLE`, `PARSE_URL_TUPLE`
@@ -69,17 +50,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Snowflake deep path collapsing for `:<path>` chains with 3+ levels.
 - **Unrecognized TVF hinting**: FROM-clause function calls that are not recognized as table-valued now emit a low-severity quality hint with guidance to add custom TVFs.
 
+### Changed
+
+- **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
+- **PIVOT detection shared**: Renamed `hasTSqlPivot` → `hasPivot` in dialect detection; PIVOT now scores for both TransactSQL and Oracle.
+
 ### Fixed
 
+- **CONNECT BY + ORDER SIBLINGS BY stripping**: The preprocessing regex incorrectly terminated at `ORDER SIBLINGS BY` (treating it as a regular `ORDER BY`). Replaced with a keyword-scanning approach that correctly identifies and strips all three hierarchical clause types.
+- **CONNECT BY inside CTE bodies**: Hierarchical clause stripping now works correctly within CTE subqueries.
+- **T-SQL warning too broad for Oracle**: The T-SQL syntax warning was fully suppressed when Oracle was selected. Now only the ambiguous PIVOT signal is suppressed; T-SQL-only constructs (CROSS APPLY, TOP) still warn on Oracle dialect.
+- **RETURNING INTO cross-statement corruption**: The `RETURNING ... INTO` regex could match across semicolons into a subsequent statement (e.g., `UPDATE ... RETURNING id; INSERT INTO ...`). Constrained to single-statement scope with `[^;]` guard.
 - **GROUP BY clause scanning performance**: `findGroupByClauseEnd()` no longer runs regex matching against `substring()` at each character offset (quadratic behavior). The scan now uses a linear keyword boundary check.
 - **Hint duplication on retry preprocessing**: Parser compatibility hints are now deduplicated when parse retry applies the same rewrites.
 
 ### Tests
 
-- Added unit tests for preprocessing transforms in `tests/unit/parser/preprocessing.test.ts` (including `GROUPING SETS` edge cases and Snowflake path/time-literal safety).
-- Added unit tests for unrecognized TVF hint behavior in `tests/unit/parser/unrecognizedTvf.test.ts`.
-- Expanded registry tests in `tests/unit/dialects/functionRegistry.test.ts` for new dialect TVFs.
-- Added integration coverage in `tests/unit/parser/dialectSupport.test.ts` for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
+- Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
+- Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
+- Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
+- Added Oracle PIVOT/UNPIVOT preprocessing tests (basic, nested subquery, combined with (+) joins).
+- Added Oracle FLASHBACK (AS OF SCN/TIMESTAMP) preprocessing tests.
+- Added Oracle MODEL clause preprocessing tests (DIMENSION BY/MEASURES/RULES, PARTITION BY, column-name false positive guard).
+- Added Oracle RETURNING INTO preprocessing tests (single/multiple bind vars, multi-line, cross-statement boundary safety).
+- Added Oracle optimizer hints detection test.
+- Added `preprocessForParsing()` unified tests (PostgreSQL, GROUPING SETS, Oracle, Snowflake, CTE hoisting, no-op passthrough).
+- Added `PL/SQL` → `Oracle` normalizeDialect mapping test.
+- Added unit tests for preprocessing transforms (GROUPING SETS edge cases, Snowflake path/time-literal safety).
+- Added unit tests for unrecognized TVF hint behavior.
+- Expanded registry tests for new dialect TVFs.
+- Added integration coverage for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
 
 ## [0.3.7] - 2026-02-13
 
@@ -667,6 +667,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.8]: https://github.com/buva7687/sql-crack/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/buva7687/sql-crack/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/buva7687/sql-crack/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/buva7687/sql-crack/compare/v0.3.4...v0.3.5
