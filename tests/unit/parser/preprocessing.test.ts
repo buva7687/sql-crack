@@ -1,4 +1,4 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessForParsing } from '../../../src/webview/sqlParser';
 
 describe('parser preprocessing transforms', () => {
     describe('rewriteGroupingSets', () => {
@@ -169,6 +169,214 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
             expect(rewritten).toContain('WITH h AS');
             expect(rewritten).toContain('SELECT * FROM h');
+        });
+    });
+
+    describe('preprocessOracleSyntax — PIVOT/UNPIVOT', () => {
+        it('strips PIVOT clause', () => {
+            const sql = `SELECT * FROM sales
+                PIVOT (SUM(amount) FOR quarter IN ('Q1', 'Q2', 'Q3', 'Q4'))
+                WHERE year = 2024`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bPIVOT\b/i);
+            expect(rewritten).toContain('SELECT * FROM sales');
+            expect(rewritten).toContain('WHERE year = 2024');
+        });
+
+        it('strips UNPIVOT clause', () => {
+            const sql = `SELECT * FROM quarterly_sales
+                UNPIVOT (amount FOR quarter IN (q1, q2, q3, q4))`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bUNPIVOT\b/i);
+        });
+
+        it('strips PIVOT with nested parentheses', () => {
+            const sql = `SELECT * FROM (
+                SELECT product, quarter, amount FROM sales
+            )
+            PIVOT (SUM(amount) FOR quarter IN (SELECT DISTINCT quarter FROM periods))`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bPIVOT\b/i);
+        });
+
+        it('strips PIVOT inside a nested subquery', () => {
+            const sql = `SELECT * FROM (
+                SELECT * FROM (SELECT dept, qtr, amt FROM sales)
+                PIVOT (SUM(amt) FOR qtr IN ('Q1', 'Q2'))
+            ) pivoted WHERE dept = 10`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bPIVOT\b/i);
+            expect(rewritten).toContain('WHERE dept = 10');
+        });
+
+        it('handles (+) joins combined with PIVOT in same query', () => {
+            const sql = `SELECT * FROM orders o, customers c
+                WHERE o.cust_id = c.id(+)
+                PIVOT (COUNT(*) FOR status IN ('open', 'closed'))`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toContain('(+)');
+            expect(rewritten).not.toMatch(/\bPIVOT\b/i);
+        });
+    });
+
+    describe('preprocessOracleSyntax — FLASHBACK (AS OF)', () => {
+        it('strips AS OF SCN clause', () => {
+            const sql = 'SELECT * FROM employees AS OF SCN 123456';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bAS\s+OF\s+SCN\b/i);
+            expect(rewritten).toContain('SELECT * FROM employees');
+        });
+
+        it('strips AS OF TIMESTAMP clause', () => {
+            const sql = "SELECT * FROM employees AS OF TIMESTAMP SYSTIMESTAMP - INTERVAL '1' HOUR WHERE dept_id = 10";
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bAS\s+OF\s+TIMESTAMP\b/i);
+            expect(rewritten).toContain('WHERE dept_id = 10');
+        });
+    });
+
+    describe('preprocessOracleSyntax — MODEL clause', () => {
+        it('strips MODEL clause with DIMENSION BY, MEASURES, RULES', () => {
+            const sql = `SELECT country, year, sales FROM sales_view
+                MODEL
+                DIMENSION BY (country, year)
+                MEASURES (sales)
+                RULES (sales[country = 'US', year = 2025] = sales[cv(country), year = 2024] * 1.1)`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bMODEL\b/i);
+            expect(rewritten).toContain('SELECT country, year, sales FROM sales_view');
+        });
+
+        it('does not strip MODEL when it is a table/column name', () => {
+            const sql = 'SELECT model FROM cars WHERE model = 1';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            // No MODEL sub-keywords follow, so it should not be stripped
+            expect(rewritten).toBeNull();
+        });
+
+        it('strips MODEL clause with PARTITION BY', () => {
+            const sql = `SELECT country, year, sales FROM sales_view
+                MODEL
+                PARTITION BY (region)
+                DIMENSION BY (country, year)
+                MEASURES (sales)
+                RULES (sales['US', 2025] = 100)`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bMODEL\b/i);
+            expect(rewritten).toContain('SELECT country, year, sales FROM sales_view');
+        });
+    });
+
+    describe('preprocessOracleSyntax — RETURNING INTO', () => {
+        it('strips INTO clause after RETURNING', () => {
+            const sql = 'INSERT INTO employees (name) VALUES (\'John\') RETURNING id INTO :emp_id';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bINTO\s+:emp_id\b/);
+            expect(rewritten).toMatch(/\bRETURNING\b/i);
+        });
+
+        it('strips INTO with multiple bind variables', () => {
+            const sql = 'DELETE FROM employees WHERE id = 5 RETURNING name, salary INTO :n, :s';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            // Should keep RETURNING name, salary but strip INTO :n, :s
+            expect(rewritten).toMatch(/\bRETURNING\b/i);
+            expect(rewritten).toContain('name, salary');
+        });
+
+        it('does not cross statement boundaries', () => {
+            const sql = 'UPDATE t SET x = 1 RETURNING id; INSERT INTO t2 (id) VALUES (1)';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            // Should NOT strip the INSERT INTO — the RETURNING has no INTO in same statement
+            if (rewritten !== null) {
+                expect(rewritten).toContain('INSERT INTO t2');
+            }
+        });
+
+        it('handles multi-line RETURNING INTO', () => {
+            const sql = `UPDATE employees
+                SET salary = salary * 1.1
+                WHERE department_id = 10
+                RETURNING employee_id, salary
+                INTO :id, :sal`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toMatch(/\bRETURNING\b/i);
+            expect(rewritten).toContain('employee_id, salary');
+            expect(rewritten).not.toMatch(/INTO\s+:id/);
+        });
+    });
+
+    describe('preprocessForParsing (unified)', () => {
+        it('applies PostgreSQL preprocessing', () => {
+            const sql = "SELECT created_at AT TIME ZONE 'UTC' FROM events";
+            const result = preprocessForParsing(sql, 'PostgreSQL');
+
+            expect(result).not.toMatch(/AT\s+TIME\s+ZONE/i);
+            expect(result).toContain('SELECT created_at');
+        });
+
+        it('applies GROUPING SETS rewrite for any dialect', () => {
+            const sql = 'SELECT dept, SUM(sales) FROM t GROUP BY GROUPING SETS ((dept), (region))';
+            const result = preprocessForParsing(sql, 'MySQL');
+
+            expect(result).not.toMatch(/GROUPING\s+SETS/i);
+            expect(result).toContain('GROUP BY dept, region');
+        });
+
+        it('applies Oracle preprocessing', () => {
+            const sql = 'SELECT * FROM a, b WHERE a.id = b.id(+)';
+            const result = preprocessForParsing(sql, 'Oracle');
+
+            expect(result).not.toContain('(+)');
+        });
+
+        it('applies Snowflake path collapse', () => {
+            const sql = 'SELECT payload:a:b:c:d FROM events';
+            const result = preprocessForParsing(sql, 'Snowflake');
+
+            // Should collapse to 2 segments
+            expect(result).toContain('payload:a:b');
+            expect(result).not.toContain('payload:a:b:c:d');
+        });
+
+        it('applies CTE hoisting for any dialect', () => {
+            const sql = 'SELECT * FROM (WITH cte AS (SELECT 1 AS x) SELECT * FROM cte) t';
+            const result = preprocessForParsing(sql, 'Snowflake');
+
+            // CTE should be hoisted to top level
+            expect(result).toMatch(/^\s*WITH\s+cte\s+AS/i);
+        });
+
+        it('returns original SQL when no transforms apply', () => {
+            const sql = 'SELECT id, name FROM employees WHERE active = 1';
+            const result = preprocessForParsing(sql, 'MySQL');
+
+            expect(result).toBe(sql);
         });
     });
 });

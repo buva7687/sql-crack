@@ -37,7 +37,7 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasMysqlDual: boolean;
     hasTSqlApply: boolean;
     hasTSqlTop: boolean;
-    hasTSqlPivot: boolean;
+    hasPivot: boolean;
     hasOracleConnectBy: boolean;
     hasOracleRownum: boolean;
     hasOracleNvlDecode: boolean;
@@ -45,6 +45,8 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasOracleSequence: boolean;
     hasOracleOuterJoinOperator: boolean;
     hasOracleSysdate: boolean;
+    hasFlashback: boolean;
+    hasModelClause: boolean;
 } {
     const maskedSql = maskStringsAndComments(sql);
     return {
@@ -71,7 +73,7 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasMysqlDual: /FROM\s+DUAL/i.test(maskedSql),
         hasTSqlApply: /\b(CROSS|OUTER)\s+APPLY\b/i.test(maskedSql),
         hasTSqlTop: /TOP\s*\(/i.test(maskedSql),
-        hasTSqlPivot: /\bPIVOT\s*\(/i.test(maskedSql),
+        hasPivot: /\bPIVOT\s*\(/i.test(maskedSql),
         hasOracleConnectBy: /\bCONNECT\s+BY\b/i.test(maskedSql),
         hasOracleRownum: /\bROWNUM\b/i.test(maskedSql),
         hasOracleNvlDecode: /\b(NVL2?|DECODE)\s*\(/i.test(maskedSql),
@@ -79,6 +81,8 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasOracleSequence: /\.\s*(NEXTVAL|CURRVAL)\b/i.test(maskedSql),
         hasOracleOuterJoinOperator: /\(\+\)/.test(maskedSql),
         hasOracleSysdate: /\bSYS(DATE|TIMESTAMP)\b/i.test(maskedSql),
+        hasFlashback: /\bAS\s+OF\s+(SCN|TIMESTAMP)\b/i.test(maskedSql),
+        hasModelClause: /\bMODEL\s+(PARTITION\s+BY|DIMENSION\s+BY|MEASURES|RULES)\b/i.test(maskedSql),
     };
 }
 
@@ -127,7 +131,7 @@ export function detectDialect(sql: string): DialectDetectionResult {
 
     if (syntax.hasTSqlApply) { addScore('TransactSQL'); }
     if (syntax.hasTSqlTop) { addScore('TransactSQL'); }
-    if (syntax.hasTSqlPivot) { addScore('TransactSQL'); }
+    if (syntax.hasPivot) { addScore('TransactSQL'); }
     if (syntax.hasThreePartNames) { addScore('TransactSQL'); }
     if (syntax.hasMergeInto) { addScore('TransactSQL'); }
 
@@ -142,6 +146,9 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasOracleSysdate) { addScore('Oracle'); }
     if (syntax.hasOracleMinus) { addScore('Oracle'); }
     if (syntax.hasMergeInto) { addScore('Oracle'); }
+    if (syntax.hasPivot) { addScore('Oracle'); }
+    if (syntax.hasFlashback) { addScore('Oracle', 3); }
+    if (syntax.hasModelClause) { addScore('Oracle', 2); }
 
     const matchedDialects = rankDialectScores(scores);
     if (matchedDialects.length === 0) {

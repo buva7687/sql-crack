@@ -231,10 +231,11 @@
         "JSON_ARRAYAGG", "JSON_OBJECTAGG"
       ],
       "window": [
-        "RATIO_TO_REPORT", "NTH_VALUE", "FIRST_VALUE", "LAST_VALUE"
+        "RATIO_TO_REPORT", "NTH_VALUE", "FIRST_VALUE", "LAST_VALUE",
+        "CUME_DIST", "PERCENT_RANK", "PERCENTILE_CONT", "PERCENTILE_DISC"
       ],
       "tableValued": [
-        "XMLTABLE", "JSON_TABLE", "TABLE",
+        "XMLTABLE", "JSON_TABLE", "TABLE", "XMLSEQUENCE",
         "DBMS_XPLAN.DISPLAY", "DBMS_XPLAN.DISPLAY_CURSOR"
       ]
     }

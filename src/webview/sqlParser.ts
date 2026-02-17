@@ -8,7 +8,9 @@ import {
 import { regexFallbackParse } from './parser/dialects/fallback';
 import {
     collapseSnowflakePaths,
+    hasOracleHints,
     hoistNestedCtes,
+    preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
     rewriteGroupingSets
@@ -103,7 +105,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, rewriteGroupingSets, collapseSnowflakePaths };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths };
 export type { DialectDetectionResult };
 
 /**
@@ -713,8 +715,18 @@ function applyParserCompatibilityPreprocessing(
         transformedSql = oraclePreprocessedSql;
         pushHintOnce(context, {
             type: 'info',
-            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY) for parser compatibility',
-            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY) are partially supported.',
+            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL) for parser compatibility',
+            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY), PIVOT/UNPIVOT, flashback queries, and MODEL clauses are stripped for parser compatibility.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    if (dialect === 'Oracle' && hasOracleHints(sql)) {
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Oracle optimizer hints detected',
+            suggestion: 'Optimizer hints (/*+ ... */) are preserved in the SQL but do not affect the visualization.',
             category: 'best-practice',
             severity: 'low',
         });

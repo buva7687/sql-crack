@@ -72,8 +72,11 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
 
     const hasTSqlApply = syntax.hasTSqlApply;
     const hasTSqlTop = syntax.hasTSqlTop;
-    const hasTSqlPivot = syntax.hasTSqlPivot;
-    if ((hasTSqlApply || hasTSqlTop || hasTSqlPivot) && currentDialect !== 'TransactSQL') {
+    const hasPivot = syntax.hasPivot;
+    // PIVOT is shared between T-SQL and Oracle, so only warn for T-SQL-only constructs when on Oracle
+    const hasTSqlOnly = hasTSqlApply || hasTSqlTop;
+    const hasTSqlSignal = currentDialect === 'Oracle' ? hasTSqlOnly : (hasTSqlOnly || hasPivot);
+    if (hasTSqlSignal && currentDialect !== 'TransactSQL') {
         context.hints.push({
             type: 'warning',
             message: 'SQL Server (T-SQL) syntax detected',

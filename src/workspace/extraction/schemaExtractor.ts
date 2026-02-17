@@ -7,9 +7,10 @@ import {
     ForeignKeyRef,
     SqlDialect,
     ExtractionOptions,
-    DEFAULT_EXTRACTION_OPTIONS
+    DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
 import { escapeRegex } from '../../shared';
+import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
 
 // SQL reserved words that should never be treated as table/view names
 const SQL_RESERVED_WORDS = new Set([
@@ -50,7 +51,8 @@ export class SchemaExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(sql, { database: dbDialect });
+            const sqlToParse = preprocessForParsing(sql, dialect);
+            const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
             for (const stmt of statements) {

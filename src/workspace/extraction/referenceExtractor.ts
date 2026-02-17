@@ -13,6 +13,7 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { escapeRegex } from '../../shared';
+import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
 import type {
     AstStatement,
     AstTableRef,
@@ -149,7 +150,8 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(sql, { database: dbDialect });
+            const sqlToParse = preprocessForParsing(sql, dialect);
+            const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
             // Also collect CTE names from AST (may find names regex missed)

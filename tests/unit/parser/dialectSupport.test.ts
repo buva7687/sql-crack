@@ -632,5 +632,44 @@ describe('Dialect Support', () => {
         expect(result).toBeNull();
       });
     });
+
+    it('parses PIVOT query after preprocessing', () => {
+      const result = parseSql(`
+        SELECT * FROM (
+          SELECT department_id, job_id, salary FROM employees
+        )
+        PIVOT (SUM(salary) FOR job_id IN ('IT_PROG', 'SA_REP', 'FI_ACCOUNT'))
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('parses flashback query (AS OF TIMESTAMP) after preprocessing', () => {
+      const result = parseSql(`
+        SELECT * FROM employees AS OF TIMESTAMP SYSTIMESTAMP - INTERVAL '1' HOUR
+        WHERE department_id = 10
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses MODEL clause query after preprocessing', () => {
+      const result = parseSql(`
+        SELECT country, year, sales FROM sales_view
+        MODEL
+        DIMENSION BY (country, year)
+        MEASURES (sales)
+        RULES (sales['US', 2025] = sales[cv(country), 2024] * 1.1)
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('detects Oracle optimizer hints', () => {
+      const result = parseSql(`
+        SELECT /*+ FULL(e) PARALLEL(e, 4) */ employee_id, salary
+        FROM employees e
+        WHERE department_id = 10
+      `, dialect);
+      expect(result.hints.some(h => h.message.includes('Oracle optimizer hints'))).toBe(true);
+    });
   });
 });

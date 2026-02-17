@@ -139,6 +139,81 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         changed = true;
     }
 
+    // 4. Strip PIVOT(...) and UNPIVOT(...) clauses
+    //    Uses balanced-paren scanner to handle nested aggregates and subqueries.
+    let masked3 = changed ? maskStringsAndComments(result) : masked2;
+    const pivotRegex = /\b(UN)?PIVOT\s*\(/gi;
+    const pivotRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = pivotRegex.exec(masked3)) !== null) {
+        const start = match.index;
+        // The regex includes the opening '(' — find its position
+        const parenPos = start + match[0].length - 1;
+        const closePos = findMatchingParen(result, parenPos);
+        if (closePos === -1) { continue; }
+        pivotRewrites.push({ start, end: closePos + 1 });
+    }
+    for (let i = pivotRewrites.length - 1; i >= 0; i--) {
+        const m = pivotRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 5. Strip AS OF SCN/TIMESTAMP (flashback) clauses
+    masked3 = changed ? maskStringsAndComments(result) : masked3;
+    const flashbackRegex = /\bAS\s+OF\s+(SCN|TIMESTAMP)\b/gi;
+    const flashbackRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = flashbackRegex.exec(masked3)) !== null) {
+        const start = match.index;
+        const end = findClauseBoundary(masked3, start + match[0].length);
+        flashbackRewrites.push({ start, end });
+    }
+    for (let i = flashbackRewrites.length - 1; i >= 0; i--) {
+        const m = flashbackRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 6. Strip MODEL clause (DIMENSION BY / MEASURES / RULES)
+    masked3 = changed ? maskStringsAndComments(result) : masked3;
+    const modelRegex = /\bMODEL\b/gi;
+    while ((match = modelRegex.exec(masked3)) !== null) {
+        // Verify it's followed by MODEL sub-keywords (not just any "MODEL" identifier)
+        const afterModel = masked3.substring(match.index + match[0].length).replace(/^\s+/, '');
+        if (!/^(PARTITION\s+BY|DIMENSION\s+BY|MEASURES|RULES|\()/i.test(afterModel)) {
+            continue;
+        }
+        const start = match.index;
+        const end = findModelClauseEnd(masked3, start + match[0].length);
+        result = result.substring(0, start) + ' '.repeat(end - start) + result.substring(end);
+        changed = true;
+        // Re-mask after each model strip since positions changed
+        masked3 = maskStringsAndComments(result);
+        modelRegex.lastIndex = 0;
+        break; // restart scan in case of multiple MODEL clauses (rare)
+    }
+
+    // 7. Strip RETURNING ... INTO :var1, :var2 (keep RETURNING columns, strip INTO onwards)
+    //    Use [^;]+ to avoid crossing statement boundaries.
+    masked3 = changed ? maskStringsAndComments(result) : masked3;
+    const returningIntoRegex = /\bRETURNING\b[^;]+?\bINTO\b/gi;
+    while ((match = returningIntoRegex.exec(masked3)) !== null) {
+        // Find the INTO keyword position within the match
+        const intoSearch = /\bINTO\b/gi;
+        let intoPos = -1;
+        let m2: RegExpExecArray | null;
+        const regionToSearch = masked3.substring(match.index, match.index + match[0].length);
+        while ((m2 = intoSearch.exec(regionToSearch)) !== null) {
+            intoPos = match.index + m2.index;
+            break;
+        }
+        if (intoPos === -1) { continue; }
+        // Strip from INTO to end of statement (semicolon or end)
+        let endPos = masked3.indexOf(';', intoPos);
+        if (endPos === -1) { endPos = masked3.length; }
+        result = result.substring(0, intoPos) + ' '.repeat(endPos - intoPos) + result.substring(endPos);
+        changed = true;
+    }
+
     return changed ? result : null;
 }
 
@@ -174,7 +249,99 @@ function findHierarchicalClauseEnd(masked: string, pos: number): number {
             'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
             'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'FETCH', 'LIMIT', 'OFFSET',
             'START WITH', 'CONNECT BY', 'ORDER SIBLINGS BY',
+            'PIVOT', 'UNPIVOT', 'MODEL',
         ];
+        for (const kw of terminators) {
+            if (upper.startsWith(kw, keyStart)) {
+                const afterKw = keyStart + kw.length;
+                const nextCh = masked[afterKw];
+                if (!nextCh || /[\s();,]/.test(nextCh)) {
+                    return keyStart;
+                }
+            }
+        }
+
+        i = keyStart - 1;
+    }
+
+    return masked.length;
+}
+
+/**
+ * Find the boundary of a simple clause (AS OF SCN/TIMESTAMP expression).
+ * Scans forward until hitting a SQL keyword, comma at depth 0, closing paren at depth 0,
+ * semicolon, or end-of-string.
+ */
+function findClauseBoundary(masked: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth === 0) { return i; }
+            depth--;
+            continue;
+        }
+        if (ch === ';') { return i; }
+        if (ch === ',' && depth === 0) { return i; }
+
+        if (depth !== 0) { continue; }
+
+        if (!/\s/.test(ch)) { continue; }
+        let keyStart = i;
+        while (keyStart < masked.length && /\s/.test(masked[keyStart])) { keyStart++; }
+        if (keyStart >= masked.length) { return masked.length; }
+
+        const boundaryKeywords = [
+            'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
+            'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'FETCH', 'LIMIT', 'OFFSET',
+            'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'CROSS JOIN',
+            'ON', 'AND', 'OR', 'SET',
+        ];
+        for (const kw of boundaryKeywords) {
+            if (upper.startsWith(kw, keyStart)) {
+                const afterKw = keyStart + kw.length;
+                const nextCh = masked[afterKw];
+                if (!nextCh || /[\s();,]/.test(nextCh)) {
+                    return keyStart;
+                }
+            }
+        }
+
+        i = keyStart - 1;
+    }
+
+    return masked.length;
+}
+
+/**
+ * Find the end of an Oracle MODEL clause. Scans forward from after the MODEL keyword
+ * until hitting a set operator, closing paren at depth 0, semicolon, or end-of-string.
+ */
+function findModelClauseEnd(masked: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth === 0) { return i; }
+            depth--;
+            continue;
+        }
+        if (ch === ';') { return i; }
+
+        if (depth !== 0) { continue; }
+
+        if (!/\s/.test(ch)) { continue; }
+        let keyStart = i;
+        while (keyStart < masked.length && /\s/.test(masked[keyStart])) { keyStart++; }
+        if (keyStart >= masked.length) { return masked.length; }
+
+        const terminators = ['UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'FETCH', 'LIMIT', 'OFFSET', 'ORDER BY'];
         for (const kw of terminators) {
             if (upper.startsWith(kw, keyStart)) {
                 const afterKw = keyStart + kw.length;
@@ -809,6 +976,47 @@ function findTopLevelCteEnd(masked: string): number {
     }
 
     return pos;
+}
+
+/**
+ * Detect Oracle optimizer hints (`/*+ ... * /`) in raw SQL.
+ * Returns true if any hint comments are found.
+ */
+export function hasOracleHints(sql: string): boolean {
+    return /\/\*\+/.test(sql);
+}
+
+/**
+ * Apply all dialect-aware preprocessing transforms to SQL before parsing.
+ * This is the single entry point for workspace extractors and other callers
+ * that need the same transforms the webview parser applies.
+ *
+ * Order mirrors `applyParserCompatibilityPreprocessing()` in sqlParser.ts:
+ * 1. CTE hoisting (all dialects)
+ * 2. PostgreSQL syntax (AT TIME ZONE, type-prefixed literals)
+ * 3. GROUPING SETS rewrite (all dialects)
+ * 4. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
+ * 5. Snowflake deep path collapse
+ */
+export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
+    let result = sql;
+
+    const hoisted = hoistNestedCtes(result);
+    if (hoisted !== null) { result = hoisted; }
+
+    const postgres = preprocessPostgresSyntax(result, dialect);
+    if (postgres !== null) { result = postgres; }
+
+    const groupingSets = rewriteGroupingSets(result);
+    if (groupingSets !== null) { result = groupingSets; }
+
+    const oracle = preprocessOracleSyntax(result, dialect);
+    if (oracle !== null) { result = oracle; }
+
+    const snowflake = collapseSnowflakePaths(result, dialect);
+    if (snowflake !== null) { result = snowflake; }
+
+    return result;
 }
 
 export function stripSqlComments(sql: string): string {
