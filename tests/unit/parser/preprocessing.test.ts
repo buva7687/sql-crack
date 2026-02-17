@@ -135,5 +135,40 @@ describe('parser preprocessing transforms', () => {
             const sql = "SELECT 'MINUS' AS op FROM dual";
             expect(preprocessOracleSyntax(sql, 'Oracle')).toBeNull();
         });
+
+        it('strips START WITH / CONNECT BY clauses', () => {
+            const sql = 'SELECT employee_id FROM employees START WITH manager_id IS NULL CONNECT BY PRIOR employee_id = manager_id';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bSTART\s+WITH\b/i);
+            expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
+            expect(rewritten).toContain('SELECT employee_id FROM employees');
+        });
+
+        it('strips ORDER SIBLINGS BY', () => {
+            const sql = 'SELECT id FROM employees START WITH mgr IS NULL CONNECT BY PRIOR id = mgr ORDER SIBLINGS BY name';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bORDER\s+SIBLINGS\s+BY\b/i);
+            expect(rewritten).not.toMatch(/\bSTART\s+WITH\b/i);
+            expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
+        });
+
+        it('strips CONNECT BY inside a CTE while preserving the CTE structure', () => {
+            const sql = `WITH h AS (
+                SELECT id, name FROM departments
+                START WITH parent_id IS NULL
+                CONNECT BY PRIOR id = parent_id
+            )
+            SELECT * FROM h`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
+            expect(rewritten).toContain('WITH h AS');
+            expect(rewritten).toContain('SELECT * FROM h');
+        });
     });
 });

@@ -567,6 +567,35 @@ describe('Dialect Support', () => {
       expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
     });
 
+    it('strips CONNECT BY with ORDER SIBLINGS BY', () => {
+      const result = parseSql(`
+        SELECT employee_id, first_name, last_name, salary
+        FROM employees
+        START WITH manager_id IS NULL
+        CONNECT BY PRIOR employee_id = manager_id
+        ORDER SIBLINGS BY last_name
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('strips CONNECT BY inside CTE body', () => {
+      const result = parseSql(`
+        WITH dept_hierarchy AS (
+          SELECT department_id, department_name, manager_id
+          FROM departments
+          START WITH manager_id IS NULL
+          CONNECT BY PRIOR department_id = manager_id
+        )
+        SELECT dh.department_id, dh.department_name, e.employee_id
+        FROM dept_hierarchy dh
+        LEFT JOIN employees e ON dh.department_id = e.department_id
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
     describe('preprocessOracleSyntax', () => {
       it('removes (+) outer join operator', () => {
         const result = preprocessOracleSyntax(

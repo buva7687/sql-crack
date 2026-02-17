@@ -114,20 +114,81 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         changed = true;
     }
 
-    // 3. Strip CONNECT BY and START WITH clauses
+    // 3. Strip START WITH, CONNECT BY, and ORDER SIBLINGS BY clauses
+    //    These are Oracle hierarchical query clauses unsupported by the proxy parser.
+    //    We find each keyword in the masked SQL and scan forward to the clause boundary.
     const masked2 = changed ? maskStringsAndComments(result) : masked;
-    const connectByRegex = /\b(START\s+WITH\b[^;]*?\bCONNECT\s+BY\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$)|\bCONNECT\s+BY\b[^;]*?\bSTART\s+WITH\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$)|\bCONNECT\s+BY\b[^;]*?(?=\bORDER\b|\bGROUP\b|\bHAVING\b|\bUNION\b|\bMINUS\b|\bEXCEPT\b|\bINTERSECT\b|\bFETCH\b|\bLIMIT\b|\bOFFSET\b|;|$))/gi;
-    const connectByRewrites: Array<{ start: number; end: number }> = [];
-    while ((match = connectByRegex.exec(masked2)) !== null) {
-        connectByRewrites.push({ start: match.index, end: match.index + match[0].length });
+    const hierarchicalKeywords = /\b(START\s+WITH|CONNECT\s+BY|ORDER\s+SIBLINGS\s+BY)\b/gi;
+    const hierarchicalRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = hierarchicalKeywords.exec(masked2)) !== null) {
+        const start = match.index;
+        const end = findHierarchicalClauseEnd(masked2, start + match[0].length);
+        // Avoid overlapping with a previously found region
+        if (hierarchicalRewrites.length > 0) {
+            const prev = hierarchicalRewrites[hierarchicalRewrites.length - 1];
+            if (start < prev.end) {
+                prev.end = Math.max(prev.end, end);
+                continue;
+            }
+        }
+        hierarchicalRewrites.push({ start, end });
     }
-    for (let i = connectByRewrites.length - 1; i >= 0; i--) {
-        const m = connectByRewrites[i];
+    for (let i = hierarchicalRewrites.length - 1; i >= 0; i--) {
+        const m = hierarchicalRewrites[i];
         result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
         changed = true;
     }
 
     return changed ? result : null;
+}
+
+/**
+ * Find where an Oracle hierarchical clause (START WITH / CONNECT BY / ORDER SIBLINGS BY)
+ * ends in masked SQL. Scans forward from `pos` until hitting a clause-ending keyword,
+ * a semicolon, a closing paren at depth 0, or end-of-string.
+ */
+function findHierarchicalClauseEnd(masked: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth === 0) { return i; }
+            depth--;
+            continue;
+        }
+        if (ch === ';') { return i; }
+
+        if (depth !== 0) { continue; }
+
+        // Check for clause-ending keywords at word boundary
+        if (!/\s/.test(ch)) { continue; }
+        let keyStart = i;
+        while (keyStart < masked.length && /\s/.test(masked[keyStart])) { keyStart++; }
+        if (keyStart >= masked.length) { return masked.length; }
+
+        // Keywords that end the hierarchical clause (another hierarchical keyword is handled by the caller)
+        const terminators = [
+            'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
+            'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'FETCH', 'LIMIT', 'OFFSET',
+            'START WITH', 'CONNECT BY', 'ORDER SIBLINGS BY',
+        ];
+        for (const kw of terminators) {
+            if (upper.startsWith(kw, keyStart)) {
+                const afterKw = keyStart + kw.length;
+                const nextCh = masked[afterKw];
+                if (!nextCh || /[\s();,]/.test(nextCh)) {
+                    return keyStart;
+                }
+            }
+        }
+
+        i = keyStart - 1;
+    }
+
+    return masked.length;
 }
 
 /**
