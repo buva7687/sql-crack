@@ -405,8 +405,14 @@ export class MessageHandler {
         const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
         const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
         this._context.setCurrentGraphMode(m);
+        // Clear search filter — previous search terms may not apply to the new mode
+        this._context.setCurrentSearchFilter({
+            query: '',
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        });
         // Ensure we're on Graph view when switching modes (not Lineage/Tables/Impact)
-        // This prevents the view from switching to the wrong tab after mode change
         this._context.setCurrentView('graph');
         await this._context.rebuildAndRenderGraph();
     }

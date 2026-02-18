@@ -161,18 +161,18 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                         <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-focus" title="Focus on selected node (neighbors only) [F]" aria-label="Focus on selected node (neighbors only)">
+                <button class="icon-btn btn-disabled" id="btn-focus" title="Focus on selected node (neighbors only) [F]" aria-label="Focus on selected node (neighbors only)" aria-disabled="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources">
+                <button class="icon-btn btn-disabled" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources" aria-disabled="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 19V5M5 12l7-7 7 7"/>
                     </svg>
                 </button>
-                <button class="icon-btn" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers">
+                <button class="icon-btn btn-disabled" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers" aria-disabled="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 5v14M5 12l7 7 7-7"/>
                     </svg>

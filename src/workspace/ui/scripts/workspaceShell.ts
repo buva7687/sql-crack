@@ -84,7 +84,10 @@ export function getWorkspaceShellScriptFragment(): string {
         });
 
         // ========== Commands ==========
-        function refresh() { vscode.postMessage({ command: 'refresh' }); }
+        function refresh() {
+            document.body.style.cursor = 'wait';
+            vscode.postMessage({ command: 'refresh' });
+        }
         function openFile(filePath) { vscode.postMessage({ command: 'openFile', filePath }); }
         function openFileAtLine(filePath, line) { vscode.postMessage({ command: 'openFileAtLine', filePath, line }); }
         function visualizeFile(filePath) { vscode.postMessage({ command: 'visualizeFile', filePath }); }

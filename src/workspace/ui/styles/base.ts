@@ -69,7 +69,7 @@ export function getBaseStyles(): string {
         .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
         .icon-btn.active { background: var(--accent); color: white; }
         .icon-btn svg { width: 16px; height: 16px; }
-        .icon-btn.btn-disabled { opacity: 0.35; cursor: default; }
+        .icon-btn.btn-disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
         /* ========== Search Box ========== */
         .search-box {

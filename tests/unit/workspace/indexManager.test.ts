@@ -101,13 +101,13 @@ describe('IndexManager', () => {
     describe('initialization', () => {
         it('should create index manager with default dialect', () => {
             const manager = new IndexManager(mockContext as vscode.ExtensionContext);
-            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL');
+            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL', undefined, undefined);
             manager.dispose();
         });
 
         it('should create index manager with specified dialect', () => {
             const manager = new IndexManager(mockContext as vscode.ExtensionContext, 'PostgreSQL');
-            expect(WorkspaceScanner).toHaveBeenCalledWith('PostgreSQL');
+            expect(WorkspaceScanner).toHaveBeenCalledWith('PostgreSQL', undefined, undefined);
             manager.dispose();
         });
 

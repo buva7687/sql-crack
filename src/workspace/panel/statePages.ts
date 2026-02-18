@@ -85,7 +85,7 @@ export function createEmptyWorkspaceHtml(options: StatePageBaseOptions): string 
             </svg>
         </div>
         <div class="title">No SQL Files Found</div>
-        <div class="subtitle">Open a <code>.sql</code> file and click Refresh to start building the dependency graph.</div>
+        <div class="subtitle">No <code>.sql</code> files were found in the scanned folder. If your SQL files use a different extension, add it via <code>sqlCrack.additionalFileExtensions</code> in Settings.</div>
         <button class="btn" id="empty-refresh-btn">
             Refresh
         </button>

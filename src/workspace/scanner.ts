@@ -19,12 +19,14 @@ export class WorkspaceScanner {
     private referenceExtractor: ReferenceExtractor;
     private dialect: SqlDialect;
     private maxFileSize: number;
+    private scopeUri: vscode.Uri | undefined;
 
-    constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024) {
+    constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024, scopeUri?: vscode.Uri) {
         this.schemaExtractor = new SchemaExtractor();
         this.referenceExtractor = new ReferenceExtractor();
         this.dialect = dialect;
         this.maxFileSize = maxFileSize; // Default 10MB
+        this.scopeUri = scopeUri;
     }
 
     /**
@@ -55,9 +57,14 @@ export class WorkspaceScanner {
         const extensions = this.getSqlExtensions();
 
         // Build glob pattern: **/*.{sql,hql,bteq,...}
-        const pattern = extensions.length === 1
+        const rawPattern = extensions.length === 1
             ? `**/*.${extensions[0]}`
             : `**/*.{${extensions.join(',')}}`;
+
+        // If scoped to a subfolder, use RelativePattern to restrict search
+        const pattern = this.scopeUri
+            ? new vscode.RelativePattern(this.scopeUri, rawPattern)
+            : rawPattern;
 
         const files = await vscode.workspace.findFiles(
             pattern,

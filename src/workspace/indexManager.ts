@@ -27,6 +27,7 @@ export class IndexManager {
     private context: vscode.ExtensionContext;
     private scanner: WorkspaceScanner;
     private dialect: SqlDialect;
+    private scopeUri: vscode.Uri | undefined;
     private index: WorkspaceIndex | null = null;
     private fileWatcher: vscode.FileSystemWatcher | null = null;
     private updateQueue: Set<string> = new Set();
@@ -36,10 +37,11 @@ export class IndexManager {
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
 
-    constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL') {
+    constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
         this.dialect = dialect;
-        this.scanner = new WorkspaceScanner(dialect);
+        this.scopeUri = scopeUri;
+        this.scanner = new WorkspaceScanner(dialect, undefined, scopeUri);
     }
 
     /**
@@ -526,7 +528,14 @@ export class IndexManager {
      * do not re-index generated/dependency folders.
      */
     private shouldIndexFile(uri: vscode.Uri): boolean {
-        return !/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath);
+        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath)) {
+            return false;
+        }
+        // When scoped to a subfolder, only index files within that folder
+        if (this.scopeUri && !uri.fsPath.startsWith(this.scopeUri.fsPath)) {
+            return false;
+        }
+        return true;
     }
 
     /**

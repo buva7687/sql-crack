@@ -249,14 +249,15 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Command: Analyze Workspace Dependencies
-    let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async () => {
+    let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async (uri?: vscode.Uri) => {
         const config = getConfig();
         const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
         await WorkspacePanel.createOrShow(
             context.extensionUri,
             context,
-            defaultDialect as any
+            defaultDialect as any,
+            uri
         );
     });
 

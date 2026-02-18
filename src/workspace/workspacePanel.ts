@@ -1,6 +1,7 @@
 // Workspace Panel - VS Code webview panel for workspace dependency visualization
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { IndexManager } from './indexManager';
 import { buildDependencyGraph } from './dependencyGraph';
 import {
@@ -90,6 +91,7 @@ export class WorkspacePanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private readonly _extensionVersion: string;
+    private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
@@ -139,20 +141,33 @@ export class WorkspacePanel {
     public static async createOrShow(
         extensionUri: vscode.Uri,
         context: vscode.ExtensionContext,
-        dialect: SqlDialect = 'MySQL'
+        dialect: SqlDialect = 'MySQL',
+        scopeUri?: vscode.Uri
     ): Promise<void> {
         const column = vscode.ViewColumn.Beside;
 
-        // If panel exists, reveal it
+        // If panel exists and scope changed, dispose and recreate
         if (WorkspacePanel.currentPanel) {
-            WorkspacePanel.currentPanel._panel.reveal(column);
-            return;
+            const currentScope = WorkspacePanel.currentPanel._scopeUri?.fsPath;
+            const newScope = scopeUri?.fsPath;
+            if (currentScope !== newScope) {
+                // Different scope — dispose old panel and create new one
+                WorkspacePanel.currentPanel.dispose();
+            } else {
+                WorkspacePanel.currentPanel._panel.reveal(column);
+                return;
+            }
         }
+
+        const folderName = scopeUri ? path.basename(scopeUri.fsPath) : undefined;
+        const title = folderName
+            ? `SQL Dependencies: ${folderName}`
+            : 'SQL Workspace Dependencies';
 
         // Create new panel
         const panel = vscode.window.createWebviewPanel(
             WorkspacePanel.viewType,
-            'SQL Workspace Dependencies',
+            title,
             column,
             {
                 enableScripts: true,
@@ -163,7 +178,7 @@ export class WorkspacePanel {
             }
         );
 
-        WorkspacePanel.currentPanel = new WorkspacePanel(panel, extensionUri, context, dialect);
+        WorkspacePanel.currentPanel = new WorkspacePanel(panel, extensionUri, context, dialect, scopeUri);
         await WorkspacePanel.currentPanel.initialize();
     }
 
@@ -174,12 +189,14 @@ export class WorkspacePanel {
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
         context: vscode.ExtensionContext,
-        dialect: SqlDialect
+        dialect: SqlDialect,
+        scopeUri?: vscode.Uri
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
-        this._indexManager = new IndexManager(context, dialect);
+        this._scopeUri = scopeUri;
+        this._indexManager = new IndexManager(context, dialect, scopeUri);
 
         // Detect theme from settings or VS Code theme
         this._isDarkTheme = this.getThemeFromSettings();

@@ -37,13 +37,17 @@ export function getNodeInteractionsScriptFragment(): string {
                 }
             });
 
+            function decodeTooltip(base64) {
+                try { return atob(base64); } catch (e) { return null; }
+            }
+
             svg.addEventListener('mouseover', (e) => {
                 const edge = e.target.closest('.edge');
                 if (edge) {
                     const base64 = edge.getAttribute('data-tooltip');
                     if (base64) {
-                        const content = atob(base64);
-                        showTooltip(e, content);
+                        const content = decodeTooltip(base64);
+                        if (content) showTooltip(e, content);
                     }
                     return;
                 }
@@ -52,8 +56,8 @@ export function getNodeInteractionsScriptFragment(): string {
                 if (node) {
                     const base64 = node.getAttribute('data-tooltip');
                     if (base64) {
-                        const content = atob(base64);
-                        showTooltip(e, content);
+                        const content = decodeTooltip(base64);
+                        if (content) showTooltip(e, content);
                     }
                 }
             });
