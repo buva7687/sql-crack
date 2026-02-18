@@ -148,6 +148,15 @@ MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • Big
 
 Or install directly: [SQL Crack on Marketplace](https://marketplace.visualstudio.com/items?itemName=buvan.sql-crack)
 
+### Cursor
+
+1. Open Cursor
+2. Go to Extensions (`Cmd+Shift+X` / `Ctrl+Shift+X`)
+3. Search for **"buvan.sql-crack"** (use the publisher-qualified name for reliable results)
+4. Click **Install**
+
+Or install from [Open VSX Registry](https://open-vsx.org/extension/buvan/sql-crack).
+
 ### From Source
 
 ```bash

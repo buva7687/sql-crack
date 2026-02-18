@@ -47,6 +47,28 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasOracleSysdate: boolean;
     hasFlashback: boolean;
     hasModelClause: boolean;
+    // Hive
+    hasHiveLateralView: boolean;
+    hasHiveDistributeBy: boolean;
+    hasHiveClusterBy: boolean;
+    hasHiveSortBy: boolean;
+    hasHiveSerDe: boolean;
+    // Trino
+    hasTrinoRowsFrom: boolean;
+    hasTrinoMapFunctions: boolean;
+    // Athena/Hive DDL
+    hasExternalTable: boolean;
+    hasTblProperties: boolean;
+    // Redshift
+    hasDistkey: boolean;
+    hasSortkey: boolean;
+    hasDiststyle: boolean;
+    hasRedshiftCopy: boolean;
+    hasRedshiftUnload: boolean;
+    // SQLite
+    hasSqliteAutoincrement: boolean;
+    hasSqliteGlob: boolean;
+    hasSqlitePragma: boolean;
 } {
     const maskedSql = maskStringsAndComments(sql);
     return {
@@ -83,6 +105,28 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasOracleSysdate: /\bSYS(DATE|TIMESTAMP)\b/i.test(maskedSql),
         hasFlashback: /\bAS\s+OF\s+(SCN|TIMESTAMP)\b/i.test(maskedSql),
         hasModelClause: /\bMODEL\s+(PARTITION\s+BY|DIMENSION\s+BY|MEASURES|RULES)\b/i.test(maskedSql),
+        // Hive
+        hasHiveLateralView: /\bLATERAL\s+VIEW\b/i.test(maskedSql),
+        hasHiveDistributeBy: /\bDISTRIBUTE\s+BY\b/i.test(maskedSql),
+        hasHiveClusterBy: /\bCLUSTER\s+BY\b/i.test(maskedSql),
+        hasHiveSortBy: /\bSORT\s+BY\b/i.test(maskedSql),
+        hasHiveSerDe: /\b(SERDE|ROW\s+FORMAT)\b/i.test(maskedSql),
+        // Trino
+        hasTrinoRowsFrom: /\bROWS\s+FROM\s*\(/i.test(maskedSql),
+        hasTrinoMapFunctions: /\b(MAP_FROM_ENTRIES|MAP_AGG|ARRAY_JOIN)\s*\(/i.test(maskedSql),
+        // Athena/Hive DDL
+        hasExternalTable: /\bCREATE\s+EXTERNAL\s+TABLE\b/i.test(maskedSql),
+        hasTblProperties: /\bTBLPROPERTIES\s*\(/i.test(maskedSql),
+        // Redshift
+        hasDistkey: /\bDISTKEY\b/i.test(maskedSql),
+        hasSortkey: /\bSORTKEY\b/i.test(maskedSql),
+        hasDiststyle: /\bDISTSTYLE\s+(KEY|ALL|EVEN|AUTO)\b/i.test(maskedSql),
+        hasRedshiftCopy: /\bCOPY\s+\w+\s+FROM\b/i.test(maskedSql),
+        hasRedshiftUnload: /\bUNLOAD\s*\(/i.test(maskedSql),
+        // SQLite
+        hasSqliteAutoincrement: /\bAUTOINCREMENT\b/i.test(maskedSql),
+        hasSqliteGlob: /\bGLOB\b/i.test(maskedSql),
+        hasSqlitePragma: /\bPRAGMA\s+/i.test(maskedSql),
     };
 }
 
@@ -149,6 +193,33 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasPivot) { addScore('Oracle'); }
     if (syntax.hasFlashback) { addScore('Oracle', 3); }
     if (syntax.hasModelClause) { addScore('Oracle', 2); }
+
+    // Hive
+    if (syntax.hasHiveLateralView) { addScore('Hive', 3); }
+    if (syntax.hasHiveDistributeBy) { addScore('Hive', 3); }
+    if (syntax.hasHiveClusterBy) { addScore('Hive', 2); }
+    if (syntax.hasHiveSortBy) { addScore('Hive', 2); }
+    if (syntax.hasHiveSerDe) { addScore('Hive', 2); }
+
+    // Trino
+    if (syntax.hasTrinoRowsFrom) { addScore('Trino', 3); }
+    if (syntax.hasTrinoMapFunctions) { addScore('Trino', 2); }
+
+    // Athena (shares Hive DDL patterns)
+    if (syntax.hasExternalTable) { addScore('Athena', 2); }
+    if (syntax.hasTblProperties) { addScore('Athena', 1); }
+
+    // Redshift
+    if (syntax.hasDistkey) { addScore('Redshift', 3); }
+    if (syntax.hasSortkey) { addScore('Redshift', 3); }
+    if (syntax.hasDiststyle) { addScore('Redshift', 2); }
+    if (syntax.hasRedshiftCopy) { addScore('Redshift', 2); }
+    if (syntax.hasRedshiftUnload) { addScore('Redshift', 3); }
+
+    // SQLite
+    if (syntax.hasSqliteAutoincrement) { addScore('SQLite', 3); }
+    if (syntax.hasSqliteGlob) { addScore('SQLite', 2); }
+    if (syntax.hasSqlitePragma) { addScore('SQLite', 3); }
 
     const matchedDialects = rankDialectScores(scores);
     if (matchedDialects.length === 0) {

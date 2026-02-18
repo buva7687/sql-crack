@@ -161,4 +161,123 @@ describe('detectDialect', () => {
         const result = detectDialect('-- CONNECT BY PRIOR\nSELECT 1');
         expect(result.scores.Oracle || 0).toBe(0);
     });
+
+    // Hive detection
+    it('detects Hive LATERAL VIEW with high confidence', () => {
+        const result = detectDialect('SELECT * FROM src LATERAL VIEW EXPLODE(items) t AS item');
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Hive).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Hive DISTRIBUTE BY + SORT BY with high confidence', () => {
+        const result = detectDialect('SELECT * FROM events DISTRIBUTE BY category SORT BY timestamp');
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Hive).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Hive CLUSTER BY with high confidence', () => {
+        const result = detectDialect('SELECT * FROM orders CLUSTER BY customer_id');
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Hive SERDE/ROW FORMAT with high confidence', () => {
+        const result = detectDialect("CREATE TABLE logs (msg STRING) ROW FORMAT DELIMITED FIELDS TERMINATED BY ','");
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+    });
+
+    // Trino detection
+    it('detects Trino ROWS FROM with high confidence', () => {
+        const result = detectDialect('SELECT * FROM UNNEST(ROWS FROM(sequence(1, 5)))');
+        expect(result.dialect).toBe('Trino');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Trino).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Trino MAP_FROM_ENTRIES with high confidence', () => {
+        const result = detectDialect('SELECT MAP_FROM_ENTRIES(ARRAY[(1, 2), (3, 4)])');
+        expect(result.dialect).toBe('Trino');
+        expect(result.confidence).toBe('high');
+    });
+
+    // Athena detection
+    it('detects Athena CREATE EXTERNAL TABLE with high confidence', () => {
+        const result = detectDialect('CREATE EXTERNAL TABLE sales (id INT) LOCATION \'s3://bucket/path\' TBLPROPERTIES (\'format\'=\'parquet\')');
+        expect(result.dialect).toBe('Athena');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Athena TBLPROPERTIES with high confidence', () => {
+        const result = detectDialect("CREATE TABLE t (id INT) TBLPROPERTIES ('skip.header.line.count'='1')");
+        expect(result.dialect).toBe('Athena');
+        expect(result.confidence).toBe('high');
+    });
+
+    // Redshift detection
+    it('detects Redshift DISTKEY with high confidence', () => {
+        const result = detectDialect('CREATE TABLE sales (id INT, amount DECIMAL(10,2)) DISTKEY(id)');
+        expect(result.dialect).toBe('Redshift');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Redshift).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Redshift SORTKEY with high confidence', () => {
+        const result = detectDialect('CREATE TABLE t (id INT) SORTKEY(id)');
+        expect(result.dialect).toBe('Redshift');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Redshift DISTSTYLE with high confidence', () => {
+        const result = detectDialect('CREATE TABLE t (id INT) DISTSTYLE ALL');
+        expect(result.dialect).toBe('Redshift');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Redshift COPY with high confidence', () => {
+        const result = detectDialect("COPY users FROM 's3://bucket/file' IAM_ROLE 'arn:aws:iam::role'");
+        expect(result.dialect).toBe('Redshift');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Redshift UNLOAD with high confidence', () => {
+        const result = detectDialect("UNLOAD ('SELECT * FROM events') TO 's3://bucket/output'");
+        expect(result.dialect).toBe('Redshift');
+        expect(result.confidence).toBe('high');
+    });
+
+    // SQLite detection
+    it('detects SQLite AUTOINCREMENT with high confidence', () => {
+        const result = detectDialect('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+        expect(result.dialect).toBe('SQLite');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.SQLite).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects SQLite PRAGMA with high confidence', () => {
+        const result = detectDialect('PRAGMA table_info(users)');
+        expect(result.dialect).toBe('SQLite');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects SQLite GLOB operator with high confidence', () => {
+        const result = detectDialect("SELECT * FROM files WHERE name GLOB '*.txt'");
+        expect(result.dialect).toBe('SQLite');
+        expect(result.confidence).toBe('high');
+    });
+
+    // Overlap tests
+    it('Hive LATERAL VIEW without EXTERNAL TABLE scores high confidence for Hive', () => {
+        const result = detectDialect('SELECT * FROM src LATERAL VIEW EXPLODE(arr) t AS item');
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('Hive DISTRIBUTE BY scores high confidence for Hive over Athena signals', () => {
+        const result = detectDialect('SELECT * FROM t DISTRIBUTE BY x SORT BY y');
+        expect(result.dialect).toBe('Hive');
+        expect(result.confidence).toBe('high');
+    });
 });
