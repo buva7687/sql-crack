@@ -2315,14 +2315,16 @@ function clearFocusMode(): void {
 export function setFocusMode(mode: FocusMode): void {
     state.focusMode = mode;
 
-    // Re-apply focus mode if enabled and a node is selected
-    if (state.focusModeEnabled && state.selectedNodeId) {
+    if (state.selectedNodeId) {
+        state.focusModeEnabled = true;
         applyFocusMode(state.selectedNodeId);
-    }
-
-    // Also re-apply if zoomed to a node
-    if (state.zoomedNodeId && state.selectedNodeId) {
-        // Will be handled by zoom module
+        const modeLabel = mode === 'upstream' ? 'Upstream' : mode === 'downstream' ? 'Downstream' : 'All';
+        addBreadcrumbSegment({
+            id: 'focus-mode',
+            label: `Focus: ${modeLabel}`,
+            icon: mode === 'upstream' ? '\u2191' : mode === 'downstream' ? '\u2193' : '\u21c4',
+            onClear: () => { toggleFocusMode(false); },
+        });
     }
 
     recordLayoutHistorySnapshot();

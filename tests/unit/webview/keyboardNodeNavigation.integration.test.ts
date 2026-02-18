@@ -25,6 +25,21 @@ describe('renderer keyboard node navigation integration', () => {
         expect(nodeDispatcherSource).toContain("navigateToSiblingNode(node, 'prev');");
     });
 
+    it('maps U/D/A shortcuts to focus direction and enables focus mode from setFocusMode', () => {
+        expect(listenerSource).toContain("if (e.key === 'u' || e.key === 'U')");
+        expect(listenerSource).toContain("callbacks.setFocusMode('upstream');");
+        expect(listenerSource).toContain("if (e.key === 'd' || e.key === 'D')");
+        expect(listenerSource).toContain("callbacks.setFocusMode('downstream');");
+        expect(listenerSource).toContain("if (e.key === 'a' || e.key === 'A')");
+        expect(listenerSource).toContain("callbacks.setFocusMode('all');");
+
+        expect(rendererSource).toContain('if (state.selectedNodeId) {');
+        expect(rendererSource).toContain('state.focusModeEnabled = true;');
+        expect(rendererSource).toContain('const modeLabel = mode === \'upstream\' ? \'Upstream\' : mode === \'downstream\' ? \'Downstream\' : \'All\';');
+        expect(rendererSource).toContain("id: 'focus-mode',");
+        expect(rendererSource).toContain('label: `Focus: ${modeLabel}`');
+    });
+
     it('adds accessibility metadata and announces focused nodes via live region', () => {
         expect(nodeDispatcherSource).toContain("group.setAttribute('role', 'button');");
         expect(nodeDispatcherSource).toContain("group.setAttribute('tabindex', '0');");
