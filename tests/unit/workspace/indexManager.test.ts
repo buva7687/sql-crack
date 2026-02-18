@@ -111,6 +111,13 @@ describe('IndexManager', () => {
             manager.dispose();
         });
 
+        it('should pass scopeUri to WorkspaceScanner', () => {
+            const scopeUri = vscode.Uri.file('/workspace/subfolder');
+            const manager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL', scopeUri);
+            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL', undefined, scopeUri);
+            manager.dispose();
+        });
+
         it('should auto-index small workspaces', async () => {
             // Small workspace: 10 files (under default threshold of 50)
             mockScanner.getFileCount.mockResolvedValue(10);
@@ -860,6 +867,32 @@ describe('IndexManager', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             expect(removeSpy).not.toHaveBeenCalled();
+        });
+
+        it('should ignore updates from outside scopeUri', async () => {
+            // Create a scoped IndexManager
+            indexManager.dispose();
+            const scopeUri = vscode.Uri.file('/workspace/subfolder');
+            indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL', scopeUri);
+
+            mockScanner.getFileCount.mockResolvedValue(3);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/subfolder/q1.sql', [{ name: 'orders' }])
+            ]);
+            await indexManager.initialize();
+
+            const watcher = __getFileSystemWatcher();
+
+            // File outside scope — should be ignored
+            watcher?.__triggerChange(vscode.Uri.file('/workspace/other_folder/query.sql'));
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+
+            // analyzeFile should NOT be called for the out-of-scope file
+            // (it was called once during initialize for the in-scope file)
+            expect(mockScanner.analyzeFile).not.toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/workspace/other_folder/query.sql' })
+            );
         });
     });
 
