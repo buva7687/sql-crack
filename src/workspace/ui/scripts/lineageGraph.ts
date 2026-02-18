@@ -21,6 +21,7 @@ export function getLineageGraphScriptFragment(): string {
         let lineageShortcutHandler = null;
         let lineageOverlayResizeHandler = null;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
+        const warnedLineageIconTypes = new Set();
         function finishLineageSetup() {
             lineageSetupInProgress = false;
             if (!pendingLineageGraphMessage) {
@@ -442,6 +443,12 @@ export function getLineageGraphScriptFragment(): string {
                 cte: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1-3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 3v2.5h-2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
                 external: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" stroke="currentColor" stroke-width="1"/></svg>'
             };
+            if (!icons[type] && type && !warnedLineageIconTypes.has(type)) {
+                warnedLineageIconTypes.add(type);
+                if (window.debugLogging) {
+                    console.debug('[sql-crack] Unknown lineage node type icon fallback:', type);
+                }
+            }
             return icons[type] || '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 5.5L8 2.5l5.5 3v7L8 15.5l-5.5-3v-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
         }
 
@@ -828,16 +835,17 @@ export function getLineageGraphScriptFragment(): string {
             // Get graph data for calculations
             const graphDataEl = document.getElementById('lineage-graph-data');
             let graphWidth = 800, graphHeight = 600;
+            const MAX_MINIMAP_GRAPH_DIMENSION = 20000;
             if (graphDataEl) {
                 try {
                     const data = JSON.parse(graphDataEl.textContent || '{}');
                     const parsedWidth = Number(data.width);
                     const parsedHeight = Number(data.height);
                     if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
-                        graphWidth = parsedWidth;
+                        graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);
                     }
                     if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
-                        graphHeight = parsedHeight;
+                        graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);
                     }
                 } catch (e) {
                     console.debug('[sql-crack] Failed to parse graph data for minimap:', e);

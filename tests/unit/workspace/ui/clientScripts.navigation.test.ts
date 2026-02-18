@@ -18,6 +18,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('function getViewScrollContainer(view)');
         expect(script).toContain("root.querySelector('.view-container')");
         expect(script).toContain('requestAnimationFrame(() => requestAnimationFrame(() => {');
+        expect(script).toContain("const parts = raw.split(/[\\\\/]+/).filter(Boolean);");
     });
 
     it('shows contextual back label with originating node and clears stale origin on manual switches', () => {

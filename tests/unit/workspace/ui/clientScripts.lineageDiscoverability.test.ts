@@ -54,6 +54,20 @@ describe('workspace lineage discoverability script', () => {
         expect(script).not.toContain('localStorage.getItem(lineageLegendStorageKey)');
     });
 
+    it('logs unknown lineage node icon types once when debug logging is enabled', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('const warnedLineageIconTypes = new Set();');
+        expect(script).toContain('if (!icons[type] && type && !warnedLineageIconTypes.has(type)) {');
+        expect(script).toContain("console.debug('[sql-crack] Unknown lineage node type icon fallback:', type);");
+    });
+
     it('injects initial lineage legend visibility from host state', () => {
         const hiddenScript = getWebviewScript({
             nonce: 'test',

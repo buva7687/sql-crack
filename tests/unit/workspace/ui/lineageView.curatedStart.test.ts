@@ -2,6 +2,7 @@ import { getWebviewScript } from '../../../../src/workspace/ui/clientScripts';
 import { LineageView } from '../../../../src/workspace/ui/lineageView';
 import { getWebviewStyles } from '../../../../src/workspace/ui/sharedStyles';
 import { LineageGraph } from '../../../../src/workspace/lineage/types';
+import { LineageGraphRenderer } from '../../../../src/workspace/ui/lineageGraphRenderer';
 
 function createGraph(): LineageGraph {
     return {
@@ -143,5 +144,50 @@ describe('LineageView curated start content', () => {
         expect(ordersCard).toContain('class="conn-up">↑1</span>');
         expect(ordersCard).toContain('class="conn-down">↓2</span>');
         expect(ordersCard).toContain('data-total="3"');
+    });
+
+    it('shows no-relationships state when lineage render has nodes but no connecting edges', () => {
+        const view = new LineageView();
+        const html = view.generateLineageGraphView({
+            nodes: new Map([
+                ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
+                ['view:orders_rollup', { id: 'view:orders_rollup', type: 'view', name: 'orders_rollup', metadata: {} }],
+            ]),
+            edges: [],
+            columnEdges: [],
+            getUpstream: () => [],
+            getDownstream: () => [],
+            getColumnLineage: () => [],
+        }, 'table:orders');
+
+        expect(html).toContain('lineage-no-relations');
+        expect(html).toContain('has no upstream or downstream relationships');
+        expect(html).not.toContain('id="lineage-graph-container"');
+    });
+
+    it('clamps minimap dimensions in graph payload and viewBox for pathological layout sizes', () => {
+        const buildGraphSpy = jest.spyOn(LineageGraphRenderer.prototype, 'buildGraph').mockReturnValue({
+            nodes: [
+                { id: 'table:orders', name: 'orders', type: 'table', x: 0, y: 0, width: 200, height: 78, expanded: false, upstreamCount: 0, downstreamCount: 0, depth: 0, metadata: {} } as any,
+                { id: 'view:orders_rollup', name: 'orders_rollup', type: 'view', x: 999500, y: 999500, width: 200, height: 78, expanded: false, upstreamCount: 1, downstreamCount: 0, depth: 1, metadata: {} } as any,
+            ],
+            edges: [
+                { id: 'e1', source: 'table:orders', target: 'view:orders_rollup', type: 'direct', points: [] }
+            ],
+            centerNodeId: 'table:orders',
+            width: 999999,
+            height: 999999,
+            stats: { upstreamCount: 0, downstreamCount: 1, totalNodes: 2 },
+        } as any);
+        const generateSvgSpy = jest.spyOn(LineageGraphRenderer.prototype, 'generateSVG').mockReturnValue('<svg class="lineage-graph-svg"></svg>');
+
+        const html = new LineageView().generateLineageGraphView(createGraph(), 'table:orders');
+
+        expect(html).toContain('viewBox="0 0 20000 20000"');
+        expect(html).toContain('"width":20000');
+        expect(html).toContain('"height":20000');
+
+        buildGraphSpy.mockRestore();
+        generateSvgSpy.mockRestore();
     });
 });

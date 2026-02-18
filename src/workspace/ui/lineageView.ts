@@ -159,6 +159,12 @@ export class LineageView {
             (renderableGraph.nodes.length === 1 && renderableGraph.nodes[0].id === centerNodeId)) {
             return this.generateNoRelationshipsView(centerName, direction, centerNodeId, centerNode?.type || 'table');
         }
+        if (renderableGraph.edges.length === 0) {
+            return this.generateNoRelationshipsView(centerName, direction, centerNodeId, centerNode?.type || 'table');
+        }
+
+        const minimapWidth = Math.min(Math.max(renderableGraph.width, 1), 20000);
+        const minimapHeight = Math.min(Math.max(renderableGraph.height, 1), 20000);
 
         // Generate SVG
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
@@ -342,7 +348,7 @@ export class LineageView {
                             <span>Overview</span>
                         </div>
                         <div class="minimap-content" id="minimap-content">
-                            <svg class="minimap-svg" id="minimap-svg" viewBox="0 0 ${renderableGraph.width} ${renderableGraph.height}">
+                            <svg class="minimap-svg" id="minimap-svg" viewBox="0 0 ${minimapWidth} ${minimapHeight}">
                                 <g class="minimap-nodes">
                                     ${renderableGraph.nodes.map(node => `
                                         <rect class="minimap-node minimap-node-${node.type}"
@@ -424,8 +430,8 @@ export class LineageView {
                         depth,
                         nodeCount: renderableGraph.nodes.length,
                         edgeCount: renderableGraph.edges.length,
-                        width: renderableGraph.width,
-                        height: renderableGraph.height
+                        width: minimapWidth,
+                        height: minimapHeight
                     })}
                 </script>
             </div>

@@ -32,5 +32,8 @@ describe('workspace lineage minimap script', () => {
         expect(script).toContain('if (!Number.isFinite(lineageScale) || lineageScale <= 0) return;');
         expect(script).toContain('if (graphWidth <= 0 || graphHeight <= 0) return;');
         expect(script).toContain('if (minimapRect.width <= 0 || minimapRect.height <= 0) {');
+        expect(script).toContain('const MAX_MINIMAP_GRAPH_DIMENSION = 20000;');
+        expect(script).toContain('graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);');
+        expect(script).toContain('graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);');
     });
 });

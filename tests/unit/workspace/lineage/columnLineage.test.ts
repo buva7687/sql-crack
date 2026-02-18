@@ -193,6 +193,16 @@ describe('ColumnLineageTracker', () => {
             expect(result.upstream).toHaveLength(0);
             expect(result.downstream).toHaveLength(0);
         });
+
+        it('does not treat malformed table IDs as valid suffix matches', () => {
+            const colEdge = makeColumnEdge('table:orders', 'amount', 'table:order_summary', 'total');
+            const graph = createMockGraph([srcTable, tgtTable], [], [colEdge]);
+            const tracker = new ColumnLineageTracker(graph);
+
+            const result = tracker.getColumnLineagePaths(graph, 'bad:order_summary', 'total');
+            expect(result.upstream).toHaveLength(0);
+            expect(result.downstream).toHaveLength(0);
+        });
     });
 
     describe('mapTransformToEdgeType (via traceColumnUpstream edge types)', () => {

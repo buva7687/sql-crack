@@ -4,8 +4,13 @@
 export function getGraphInteractionsScriptFragment(): string {
     return `
         function basenameFromPath(filePath) {
-            const normalized = (filePath || '').replace(/\\\\/g, '/');
-            return normalized.split('/').pop() || filePath || '';
+            const raw = typeof filePath === 'string' ? filePath : '';
+            if (!raw) {
+                return '';
+            }
+
+            const parts = raw.split(/[\\\\/]+/).filter(Boolean);
+            return parts.length > 0 ? parts[parts.length - 1] : raw;
         }
 
         function setGraphLegendVisible(visible) {
