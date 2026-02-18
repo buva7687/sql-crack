@@ -115,6 +115,7 @@ export class WorkspacePanel {
     private _impactAnalyzer: ImpactAnalyzer | null = null;
     private _columnLineageTracker: ColumnLineageTracker | null = null;
     private _lineageBuildPromise: Promise<void> | null = null;
+    private _lineageBuildVersion = 0;
     private _selectedLineageNode: LineageNode | null = null;
     private _currentImpactReport: ImpactReport | null = null;
     private _currentFlowResult: FlowResult | null = null;
@@ -458,18 +459,22 @@ export class WorkspacePanel {
         this._isRebuilding = true;
         try {
             // Clear cached lineage graph so it rebuilds with new data
-            this._lineageGraph = null;
-            this._lineageBuilder = null;
-            this._flowAnalyzer = null;
-            this._impactAnalyzer = null;
-            this._columnLineageTracker = null;
-            this._lineageBuildPromise = null;
+            this.invalidateLineageState();
 
             this._currentGraph = buildDependencyGraph(index, this._currentGraphMode);
             this.renderCurrentView();
         } finally {
             this._isRebuilding = false;
         }
+    }
+
+    private invalidateLineageState(): void {
+        this._lineageBuildVersion += 1;
+        this._lineageGraph = null;
+        this._lineageBuilder = null;
+        this._flowAnalyzer = null;
+        this._impactAnalyzer = null;
+        this._columnLineageTracker = null;
     }
 
     /**
@@ -498,28 +503,62 @@ export class WorkspacePanel {
      */
     private async buildLineageGraph(): Promise<void> {
         if (this._lineageGraph) {return;} // Already built
-        if (this._lineageBuildPromise) {
-            await this._lineageBuildPromise;
-            return;
-        }
 
-        this._lineageBuildPromise = Promise.resolve().then(() => {
-            if (this._lineageGraph) {return;}
-
+        while (!this._lineageGraph) {
             const index = this._indexManager.getIndex();
-            if (!index) {return;}
+            if (!index) {
+                return;
+            }
 
-            this._lineageBuilder = new LineageBuilder({ includeExternal: true, includeColumns: true });
-            this._lineageGraph = this._lineageBuilder.buildFromIndex(index);
-            this._flowAnalyzer = new FlowAnalyzer(this._lineageGraph);
-            this._impactAnalyzer = new ImpactAnalyzer(this._lineageGraph, this._flowAnalyzer);
-            this._columnLineageTracker = new ColumnLineageTracker(this._lineageGraph);
-        });
+            if (this._lineageBuildPromise) {
+                const inFlight = this._lineageBuildPromise;
+                await inFlight;
+                if (this._lineageBuildPromise === inFlight) {
+                    this._lineageBuildPromise = null;
+                }
+                if (this._lineageGraph || !this._indexManager.getIndex()) {
+                    return;
+                }
+                continue;
+            }
 
-        try {
-            await this._lineageBuildPromise;
-        } finally {
-            this._lineageBuildPromise = null;
+            const buildVersion = this._lineageBuildVersion;
+            const buildPromise = Promise.resolve().then(() => {
+                if (this._lineageGraph) {return;}
+
+                const currentIndex = this._indexManager.getIndex();
+                if (!currentIndex) {return;}
+
+                const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+                const graph = builder.buildFromIndex(currentIndex);
+
+                // If graph state was invalidated while building, discard stale results.
+                if (buildVersion !== this._lineageBuildVersion) {
+                    return;
+                }
+
+                this._lineageBuilder = builder;
+                this._lineageGraph = graph;
+                this._flowAnalyzer = new FlowAnalyzer(graph);
+                this._impactAnalyzer = new ImpactAnalyzer(graph, this._flowAnalyzer);
+                this._columnLineageTracker = new ColumnLineageTracker(graph);
+            });
+
+            this._lineageBuildPromise = buildPromise;
+            try {
+                await buildPromise;
+            } finally {
+                if (this._lineageBuildPromise === buildPromise) {
+                    this._lineageBuildPromise = null;
+                }
+            }
+
+            if (this._lineageGraph) {
+                return;
+            }
+            if (buildVersion === this._lineageBuildVersion) {
+                return;
+            }
         }
     }
 

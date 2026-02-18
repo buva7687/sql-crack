@@ -72,7 +72,7 @@ export class TableExplorer {
             node.type === 'table' || node.type === 'view' || node.type === 'cte';
 
         const tablesWithCounts = tables.map(table => {
-            const cached = graphConnectionCache!.get(table.id);
+            const cached = graphConnectionCache.get(table.id);
             if (cached) {
                 return {
                     table,
@@ -86,7 +86,7 @@ export class TableExplorer {
             const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
             const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
 
-            graphConnectionCache!.set(table.id, { upstreamCount, downstreamCount });
+            graphConnectionCache.set(table.id, { upstreamCount, downstreamCount });
             return {
                 table,
                 upstreamCount,

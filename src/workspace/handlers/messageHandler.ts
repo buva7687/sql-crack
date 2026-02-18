@@ -142,6 +142,17 @@ export function findSimilarTableNames(
     return candidates.slice(0, limit).map(c => c.name);
 }
 
+function createEmptyLineageGraph(): LineageGraph {
+    return {
+        nodes: new Map(),
+        edges: [],
+        columnEdges: [],
+        getUpstream: () => [],
+        getDownstream: () => [],
+        getColumnLineage: () => []
+    };
+}
+
 export class MessageHandler {
     private _context: MessageHandlerContext;
 
@@ -516,13 +527,13 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
 
         const lineageGraph = this._context.getLineageGraph();
-        if (lineageGraph) {
-            const html = this._context.getLineageView().generateLineageOverview(lineageGraph);
-            this.postMessage({
-                command: 'lineageOverviewResult',
-                data: { html }
-            });
-        }
+        const graph = lineageGraph || createEmptyLineageGraph();
+        const html = this._context.getLineageView().generateLineageSearchView(graph);
+
+        this.postMessage({
+            command: 'lineageOverviewResult',
+            data: { html }
+        });
     }
 
     private async handleSwitchToImpactView(): Promise<void> {
