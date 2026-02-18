@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RETURNING INTO cross-statement corruption**: The `RETURNING ... INTO` regex could match across semicolons into a subsequent statement (e.g., `UPDATE ... RETURNING id; INSERT INTO ...`). Constrained to single-statement scope with `[^;]` guard.
 - **GROUP BY clause scanning performance**: `findGroupByClauseEnd()` no longer runs regex matching against `substring()` at each character offset (quadratic behavior). The scan now uses a linear keyword boundary check.
 - **Hint duplication on retry preprocessing**: Parser compatibility hints are now deduplicated when parse retry applies the same rewrites.
+- **Keyboard sibling cycling at same depth (`←/→`)**: Sibling navigation now falls back to visual row/column bucketing when semantic `depth` metadata is too strict, so side-by-side nodes (for example `customer_segments` and `regional_metrics` in `examples/demo-showcase.sql`) can be cycled reliably.
+- **Focus direction shortcuts (`U` / `D` / `A`)**: Selecting focus direction now immediately enables focus mode when a node is selected and refreshes the breadcrumb label (`Focus: Upstream/Downstream/All`) to match the active mode.
 
 ### Tests
 
@@ -93,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added unit tests for unrecognized TVF hint behavior.
 - Expanded registry tests for new dialect TVFs.
 - Added integration coverage for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
+- Added keyboard navigation regression tests for sibling cycling fallback when visual peers have different `depth` metadata.
+- Added integration assertions for `U`/`D`/`A` focus direction shortcuts and `setFocusMode()` auto-enable breadcrumb behavior.
 
 ## [0.3.7] - 2026-02-13
 
