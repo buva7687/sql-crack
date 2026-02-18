@@ -21,7 +21,6 @@ export function getLineageGraphScriptFragment(): string {
         let lineageShortcutHandler = null;
         let lineageOverlayResizeHandler = null;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
-
         function finishLineageSetup() {
             lineageSetupInProgress = false;
             if (!pendingLineageGraphMessage) {
@@ -398,26 +397,20 @@ export function getLineageGraphScriptFragment(): string {
             if (!legendPanel) return;
             const nextVisible = typeof show === 'boolean' ? show : legendPanel.classList.contains('is-hidden');
             setLineageLegendVisible(nextVisible);
+            lineageLegendVisibleFromHost = nextVisible;
             try {
                 localStorage.setItem(lineageLegendStorageKey, nextVisible ? '1' : '0');
             } catch (error) {
                 // localStorage may be unavailable in restricted webview contexts
             }
+            vscode.postMessage({ command: 'setLineageLegendVisibility', visible: nextVisible });
         }
 
         function initializeLineageLegendBar() {
             const legendPanel = document.getElementById('lineage-legend');
             if (!legendPanel) return;
 
-            let showLegend = true;
-            try {
-                const stored = localStorage.getItem(lineageLegendStorageKey);
-                if (stored !== null) {
-                    showLegend = stored === '1';
-                }
-            } catch (error) {
-                // localStorage may be unavailable in restricted webview contexts
-            }
+            const showLegend = lineageLegendVisibleFromHost !== false;
 
             setLineageLegendVisible(showLegend);
             requestAnimationFrame(syncLineageOverlayOffsets);

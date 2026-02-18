@@ -75,6 +75,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(lightVars).toContain('--lineage-minimap-viewport-fill: rgba(79, 70, 229, 0.15)');
     });
 
+    it('defines a theme token for text rendered on accent surfaces', () => {
+        const darkVars = getCssVariables(true);
+        const lightVars = getCssVariables(false);
+
+        expect(darkVars).toContain('--text-on-accent: #ffffff');
+        expect(lightVars).toContain('--text-on-accent: #ffffff');
+    });
+
     it('uses CSS variables for column edge strokes and arrowhead fills', () => {
         const css = getWebviewStyles(true);
 
@@ -133,5 +141,15 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.lineage-legend .legend-numeric { background: var(--lineage-coltype-numeric); }');
         expect(css).toContain('.lineage-minimap .minimap-viewport {\n            fill: var(--lineage-minimap-viewport-fill);');
         expect(css).not.toContain('.lineage-legend .legend-numeric { background: #60a5fa; }');
+    });
+
+    it('uses text-on-accent token for lineage badges and connection pills', () => {
+        const css = getWebviewStyles(true);
+
+        expect(css).toContain('.badge-primary {\n            background: var(--accent); color: var(--text-on-accent);');
+        expect(css).toContain('.badge-not-null {\n            background: var(--warning); color: var(--text-on-accent);');
+        expect(css).toContain('.connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }');
+        expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
+        expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');
     });
 });

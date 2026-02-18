@@ -73,6 +73,7 @@ export type WorkspaceWebviewMessage =
     | { command: 'expandNodeColumns'; nodeId: string }
     | { command: 'setLineageDirection'; nodeId: string; direction: 'both' | 'upstream' | 'downstream' }
     | { command: 'collapseNodeColumns'; nodeId: string }
+    | { command: 'setLineageLegendVisibility'; visible: boolean }
     | { command: 'selectColumn'; tableId: string; columnName: string }
     | { command: 'clearColumnSelection' }
     | { command: 'savePng'; data: string; filename: string }

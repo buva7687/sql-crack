@@ -292,10 +292,10 @@ export function getLineageVisualStyles(): string {
             border-radius: var(--radius-sm); margin-top: 2px;
         }
         .badge-primary {
-            background: var(--accent); color: white;
+            background: var(--accent); color: var(--text-on-accent);
         }
         .badge-not-null {
-            background: var(--warning); color: white;
+            background: var(--warning); color: var(--text-on-accent);
         }
 
         /* ========== Lineage Overview ========== */
@@ -330,7 +330,7 @@ export function getLineageVisualStyles(): string {
             font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm);
             min-width: 28px; text-align: center;
         }
-        .connection-count.has-connections { background: var(--accent); color: white; }
+        .connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }
         .connection-count.no-connections { background: var(--bg-tertiary); color: var(--text-muted); }
         .node-item.no-connections { opacity: 0.6; }
         .node-item.no-connections:hover { opacity: 1; }

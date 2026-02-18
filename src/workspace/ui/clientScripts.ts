@@ -28,6 +28,7 @@ export interface WebviewScriptParams {
     initialView?: string;
     currentGraphMode?: 'files' | 'tables' | 'hybrid';
     lineageDefaultDepth?: number;
+    lineageLegendVisible?: boolean;
 }
 
 /**
@@ -40,7 +41,8 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         searchFilterQuery,
         initialView = 'graph',
         currentGraphMode = 'tables',
-        lineageDefaultDepth = 5
+        lineageDefaultDepth = 5,
+        lineageLegendVisible = true
     } = params;
     const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
         ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
@@ -53,6 +55,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const initialViewMode = '${initialView}';
         let currentGraphMode = '${currentGraphMode}';
         let lineageDepth = ${normalizedLineageDepth};
+        let lineageLegendVisibleFromHost = ${lineageLegendVisible ? 'true' : 'false'};
         function normalizeLineageDepth(value, fallbackDepth = 5) {
             const numeric = Number(value);
             if (!Number.isFinite(numeric)) {

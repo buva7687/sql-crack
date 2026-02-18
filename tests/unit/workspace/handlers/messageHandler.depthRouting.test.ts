@@ -49,6 +49,8 @@ function createContext(overrides: Record<string, unknown> = {}) {
         setCurrentImpactReport: jest.fn(),
         getCurrentFlowResult: jest.fn(() => null),
         setCurrentFlowResult: jest.fn(),
+        getLineageLegendVisible: jest.fn(() => true),
+        setLineageLegendVisible: jest.fn(),
         getTableExplorer: jest.fn(),
         getLineageView: jest.fn(() => lineageView),
         getImpactView: jest.fn(),
@@ -228,5 +230,17 @@ describe('MessageHandler depth and column lineage routing', () => {
                 }]
             }
         });
+    });
+
+    it('routes lineage legend visibility changes to panel state setter', async () => {
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'setLineageLegendVisibility',
+            visible: false,
+        });
+
+        expect(context.setLineageLegendVisible).toHaveBeenCalledWith(false);
     });
 });

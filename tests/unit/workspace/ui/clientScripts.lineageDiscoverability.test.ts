@@ -49,6 +49,31 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
         expect(script).toContain("const dismissBtn = document.getElementById('legend-dismiss');");
         expect(script).toContain("const legendToggleBtn = document.getElementById('lineage-legend-toggle');");
+        expect(script).toContain('vscode.postMessage({ command: \'setLineageLegendVisibility\', visible: nextVisible });');
+        expect(script).toContain('const showLegend = lineageLegendVisibleFromHost !== false;');
+        expect(script).not.toContain('localStorage.getItem(lineageLegendStorageKey)');
+    });
+
+    it('injects initial lineage legend visibility from host state', () => {
+        const hiddenScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+            lineageLegendVisible: false,
+        });
+        const visibleScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+            lineageLegendVisible: true,
+        });
+
+        expect(hiddenScript).toContain('let lineageLegendVisibleFromHost = false;');
+        expect(visibleScript).toContain('let lineageLegendVisibleFromHost = true;');
     });
 
     it('debounces lineage table search input for smoother typing on large workspaces', () => {

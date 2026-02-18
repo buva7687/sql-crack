@@ -91,6 +91,18 @@ export function getEventDelegationScriptFragment(): string {
                         break;
                 }
             });
+
+            lineageContent.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') {
+                    return;
+                }
+                const target = e.target.closest('[data-action]');
+                if (!target) {
+                    return;
+                }
+                e.preventDefault();
+                target.click();
+            });
         }
     `;
 }

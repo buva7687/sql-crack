@@ -60,6 +60,8 @@ export interface MessageHandlerContext {
     setCurrentImpactReport: (report: ImpactReport | null) => void;
     getCurrentFlowResult: () => FlowResult | null;
     setCurrentFlowResult: (result: FlowResult | null) => void;
+    getLineageLegendVisible: () => boolean;
+    setLineageLegendVisible: (visible: boolean) => void;
 
     // UI generators
     getTableExplorer: () => TableExplorer;
@@ -368,6 +370,10 @@ export class MessageHandler {
 
                 case 'collapseNodeColumns':
                     this.handleCollapseNodeColumns(message.nodeId);
+                    break;
+
+                case 'setLineageLegendVisibility':
+                    this._context.setLineageLegendVisible(message.visible);
                     break;
 
                 case 'selectColumn':

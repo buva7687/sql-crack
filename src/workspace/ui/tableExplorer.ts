@@ -193,6 +193,9 @@ export class TableExplorer {
                      data-table="${this.escapeHtml(table.name)}"
                      data-type="${table.type}"
                      data-name="${this.escapeHtml(table.name.toLowerCase())}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Explore ${this.escapeHtml(table.type)} ${this.escapeHtml(table.name)}"
                      title="Click to explore: columns, data sources (upstream), and consumers (downstream)">
                     <div class="table-list-icon-wrapper">
                         <div class="table-list-icon">${typeIcon}</div>
@@ -277,7 +280,9 @@ export class TableExplorer {
                                 data-action="cross-view-lineage"
                                 data-table="${this.escapeHtml(table.name)}"
                                 data-node-id="${this.escapeHtml(table.id)}"
-                                data-node-type="${table.type}">
+                                data-node-type="${table.type}"
+                                aria-label="View lineage for ${this.escapeHtml(table.name)}"
+                                title="View lineage for ${this.escapeHtml(table.name)}">
                             View Lineage
                         </button>
                         <button type="button"
@@ -285,7 +290,9 @@ export class TableExplorer {
                                 data-action="cross-view-impact"
                                 data-table="${this.escapeHtml(table.name)}"
                                 data-node-id="${this.escapeHtml(table.id)}"
-                                data-node-type="${table.type}">
+                                data-node-type="${table.type}"
+                                aria-label="Analyze impact for ${this.escapeHtml(table.name)}"
+                                title="Analyze impact for ${this.escapeHtml(table.name)}">
                             Analyze Impact
                         </button>
                     </div>
@@ -441,7 +448,7 @@ export class TableExplorer {
                         : '';
                 
                 html += `
-                    <div class="flow-item flow-item-internal" data-action="explore-table" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}">
+                    <div class="flow-item flow-item-internal" data-action="explore-table" data-node-id="${this.escapeHtml(node.id)}" data-table="${this.escapeHtml(node.name)}" role="button" tabindex="0" aria-label="Explore ${this.escapeHtml(typeLabel)} ${this.escapeHtml(node.name)}">
                         <span class="flow-node-icon">${this.getTypeIcon(node.type)}</span>
                         <span class="flow-node-name">${this.escapeHtml(node.name)}</span>
                         <span class="flow-node-type">${typeLabel}</span>

@@ -71,6 +71,7 @@ import { buildDetailedWorkspaceStats, buildIndexStatus } from './panel/workspace
 import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
+const LINEAGE_LEGEND_VISIBILITY_STATE_KEY = 'sqlCrack.workspace.lineageLegendVisible';
 
 /**
  * Get graph mode from VS Code settings with validation.
@@ -90,6 +91,7 @@ export class WorkspacePanel {
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
+    private readonly _extensionContext: vscode.ExtensionContext;
     private readonly _extensionVersion: string;
     private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
@@ -119,6 +121,7 @@ export class WorkspacePanel {
     private _selectedLineageNode: LineageNode | null = null;
     private _currentImpactReport: ImpactReport | null = null;
     private _currentFlowResult: FlowResult | null = null;
+    private _lineageLegendVisible: boolean = true;
 
     // UI generators
     private _tableExplorer: TableExplorer = new TableExplorer();
@@ -195,6 +198,7 @@ export class WorkspacePanel {
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._extensionContext = context;
         this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
         this._scopeUri = scopeUri;
         this._indexManager = new IndexManager(context, dialect, scopeUri);
@@ -202,6 +206,10 @@ export class WorkspacePanel {
         // Detect theme from settings or VS Code theme
         this._isDarkTheme = this.getThemeFromSettings();
         this._tableExplorer.setTraversalDepth(resolveDefaultLineageDepthFromConfig());
+        const savedLineageLegendVisibility = context.workspaceState.get<boolean>(LINEAGE_LEGEND_VISIBILITY_STATE_KEY);
+        if (typeof savedLineageLegendVisibility === 'boolean') {
+            this._lineageLegendVisible = savedLineageLegendVisibility;
+        }
 
         // Handle panel disposal
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -415,6 +423,11 @@ export class WorkspacePanel {
             setCurrentImpactReport: (report) => { this._currentImpactReport = report; },
             getCurrentFlowResult: () => this._currentFlowResult,
             setCurrentFlowResult: (result) => { this._currentFlowResult = result; },
+            getLineageLegendVisible: () => this._lineageLegendVisible,
+            setLineageLegendVisible: (visible) => {
+                this._lineageLegendVisible = visible;
+                void this._extensionContext.workspaceState.update(LINEAGE_LEGEND_VISIBILITY_STATE_KEY, visible);
+            },
 
             // UI generators
             getTableExplorer: () => this._tableExplorer,
@@ -588,7 +601,8 @@ export class WorkspacePanel {
             searchFilterQuery: searchFilter.query || '',
             initialView: this._currentView === 'issues' ? 'graph' : this._currentView,
             currentGraphMode: this._currentGraphMode,
-            lineageDefaultDepth: resolveDefaultLineageDepthFromConfig()
+            lineageDefaultDepth: resolveDefaultLineageDepthFromConfig(),
+            lineageLegendVisible: this._lineageLegendVisible
         };
         const script = getWebviewScript(scriptParams);
 
