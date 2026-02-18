@@ -90,7 +90,7 @@ export type WorkspaceHostMessage =
     | { command: 'impactFormResult'; data: { html: string } }
     | { command: 'impactResult'; data: { report: ImpactReportResult; html: string } | { error: string } }
     | { command: 'tableDetailResult'; data: { table?: LineageNodeResult; html?: string; error?: string } }
-    | { command: 'columnLineageResult'; data: { tableName?: string; tableId?: string; columnName: string; upstream: unknown[]; downstream: unknown[]; html?: string } }
+    | { command: 'columnLineageResult'; data: { tableName?: string; tableId?: string; columnName: string; upstream: unknown[]; downstream: unknown[]; html?: string; warning?: string } }
     | { command: 'upstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number } }
     | { command: 'downstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number } }
     // Visual lineage graph

@@ -15,6 +15,7 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('columnTraceHintStorageKey');
         expect(script).toContain('buildColumnFlowSummary');
         expect(script).toContain('Clear trace');
+        expect(script).toContain('if (warning && typeof showCopyFeedback === \'function\')');
     });
 
     it('supports keyboard navigation through expanded column rows', () => {

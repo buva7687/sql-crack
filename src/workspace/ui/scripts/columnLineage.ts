@@ -10,7 +10,16 @@ export function getColumnLineageScriptFragment(): string {
         function handleColumnLineageResult(data) {
             if (!data) return;
 
-            const { tableId, columnName, upstream, downstream } = data;
+            const { tableId, columnName, upstream, downstream, warning } = data;
+
+            const hasLineage = (Array.isArray(upstream) && upstream.length > 0) || (Array.isArray(downstream) && downstream.length > 0);
+            if (warning && typeof showCopyFeedback === 'function') {
+                showCopyFeedback(warning);
+            }
+            if (warning && !hasLineage) {
+                clearColumnHighlighting();
+                return;
+            }
 
             selectedColumn = { tableId, columnName };
             window.__workspaceSelectedColumnLabel = columnName;

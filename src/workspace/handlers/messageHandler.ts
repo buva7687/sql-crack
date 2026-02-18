@@ -572,8 +572,8 @@ export class MessageHandler {
         let result: FlowResult | null = null;
 
         if (direction === 'both') {
-            const upstream = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
-            const downstream = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+            const upstream = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth, excludeExternal: true });
+            const downstream = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth, excludeExternal: true });
             result = {
                 nodes: this.dedupeLineageNodes([...upstream.nodes, ...downstream.nodes]),
                 edges: this.dedupeLineageEdges([...upstream.edges, ...downstream.edges]),
@@ -581,9 +581,9 @@ export class MessageHandler {
                 depth: Math.max(upstream.depth, downstream.depth)
             };
         } else if (direction === 'upstream') {
-            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
+            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth, excludeExternal: true });
         } else {
-            result = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+            result = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth, excludeExternal: true });
         }
 
         this._context.setCurrentFlowResult(result);
@@ -814,7 +814,7 @@ export class MessageHandler {
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
-            const result = flowAnalyzer.getUpstream(nid, { maxDepth: depth });
+            const result = flowAnalyzer.getUpstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
                     allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
@@ -872,7 +872,7 @@ export class MessageHandler {
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
-            const result = flowAnalyzer.getDownstream(nid, { maxDepth: depth });
+            const result = flowAnalyzer.getDownstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
                     allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
@@ -910,7 +910,7 @@ export class MessageHandler {
 
         for (const [id, node] of lineageGraph.nodes) {
             // Skip columns and external tables in search
-            if (node.type === 'column') {continue;}
+            if (node.type === 'column' || node.type === 'external') {continue;}
 
             // Apply type filter
             if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
@@ -1016,7 +1016,20 @@ export class MessageHandler {
             return;
         }
 
-        const columnEdgeCount = lineageGraph.columnEdges?.length || 0;
+        const selectedTable = lineageGraph.nodes.get(tableId);
+        if (!selectedTable) {
+            this.postMessage({
+                command: 'columnLineageResult',
+                data: {
+                    tableId,
+                    columnName,
+                    upstream: [],
+                    downstream: [],
+                    warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.'
+                }
+            });
+            return;
+        }
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,

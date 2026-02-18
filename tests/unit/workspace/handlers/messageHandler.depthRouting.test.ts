@@ -136,4 +136,97 @@ describe('MessageHandler depth and column lineage routing', () => {
             expect.objectContaining({ depth: 11, direction: 'upstream' })
         );
     });
+
+    it('excludes external nodes when requesting lineage traversal', async () => {
+        const flowAnalyzer = {
+            getUpstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),
+            getDownstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),
+        };
+        const { context } = createContext({
+            getFlowAnalyzer: jest.fn(() => flowAnalyzer),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getLineage',
+            nodeId: 'table:orders',
+            direction: 'both',
+            depth: 4,
+        });
+
+        expect(flowAnalyzer.getUpstream).toHaveBeenCalledWith('table:orders', { maxDepth: 4, excludeExternal: true });
+        expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('table:orders', { maxDepth: 4, excludeExternal: true });
+    });
+
+    it('sends a warning when selecting a column for a table missing from lineage index', async () => {
+        const columnLineageTracker = {
+            getFullColumnLineage: jest.fn(() => ({ upstream: [], downstream: [] })),
+        };
+        const { context, postMessage } = createContext({
+            getColumnLineageTracker: jest.fn(() => columnLineageTracker),
+            getLineageGraph: jest.fn(() => ({
+                nodes: new Map([
+                    ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
+                ]),
+                edges: [],
+                columnEdges: [],
+                getUpstream: jest.fn(),
+                getDownstream: jest.fn(),
+                getColumnLineage: jest.fn(),
+            })),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'selectColumn',
+            tableId: 'table:missing_orders',
+            columnName: 'customer_id',
+        });
+
+        expect(columnLineageTracker.getFullColumnLineage).not.toHaveBeenCalled();
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'columnLineageResult',
+            data: expect.objectContaining({
+                tableId: 'table:missing_orders',
+                columnName: 'customer_id',
+                warning: expect.stringContaining('not available in the lineage index yet'),
+            }),
+        }));
+    });
+
+    it('filters external nodes out of lineage table search results', async () => {
+        const { context, postMessage } = createContext({
+            getLineageGraph: jest.fn(() => ({
+                nodes: new Map([
+                    ['table:customers', { id: 'table:customers', type: 'table', name: 'customers', metadata: {} }],
+                    ['external:customers_raw', { id: 'external:customers_raw', type: 'external', name: 'customers_raw', metadata: {} }],
+                    ['column:customers.id', { id: 'column:customers.id', type: 'column', name: 'id', metadata: {} }],
+                ]),
+                edges: [],
+                columnEdges: [],
+                getUpstream: jest.fn(),
+                getDownstream: jest.fn(),
+                getColumnLineage: jest.fn(),
+            })),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'searchLineageTables',
+            query: 'customer',
+            typeFilter: 'all',
+        });
+
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'lineageSearchResults',
+            data: {
+                results: [{
+                    id: 'table:customers',
+                    name: 'customers',
+                    type: 'table',
+                    filePath: undefined,
+                }]
+            }
+        });
+    });
 });
