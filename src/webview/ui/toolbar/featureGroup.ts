@@ -83,6 +83,13 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     onHintsButtonReady(hintsSummaryBtn);
 
     if (!options.isPinnedView) {
+        const viewLocBtn = createViewLocationButton(callbacks, options.viewLocation, {
+            documentListeners,
+            getListenerOptions,
+            getBtnStyle,
+        });
+        featureGroup.appendChild(viewLocBtn);
+
         const pinBtn = createButton(ICONS.pin, () => {
             const { sql, name } = callbacks.getCurrentQuerySql();
             callbacks.onPinVisualization(sql, 'MySQL' as SqlDialect, name);
@@ -91,13 +98,6 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
         pinBtn.style.borderLeft = `1px solid ${borderColor}`;
         pinBtn.dataset.overflowIcon = ICONS.pin;
         featureGroup.appendChild(pinBtn);
-
-        const viewLocBtn = createViewLocationButton(callbacks, options.viewLocation, {
-            documentListeners,
-            getListenerOptions,
-            getBtnStyle,
-        });
-        featureGroup.appendChild(viewLocBtn);
 
         if (options.persistedPinnedTabs.length > 0) {
             const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs, {
