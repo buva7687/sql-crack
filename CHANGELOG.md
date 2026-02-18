@@ -19,10 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace message routing hardening**: Typed workspace message protocol and host router now explicitly handle PNG save/error round-trips from webview exports.
 - **Shared escaping helper adoption**: Consolidated additional non-renderer HTML escaping paths to `src/shared/stringUtils.ts`.
 
+### Fixed
+
+- **Cloud node not draggable**: Removed internal pan mousedown/mousemove/mouseup listeners from cloud `nestedSvg` that intercepted whole-cloud drag via the cloud rect. Wheel zoom for internal navigation is preserved.
+- **Cloud arrow disconnects when dragging CTE node**: Removed `updateCloudAndArrow` call from the node drag path — the cloud is a child of the node group, so the group transform already moves it correctly. Calling `updateCloudAndArrow` with absolute coordinates inside the transformed group caused the arrow to overshoot.
+- **Search not clearing when text is deleted**: The search input listener now calls `onClearSearch()` when the input value becomes empty, resetting breadcrumbs and highlights (same as pressing Escape).
+- **R key now triggers full refresh**: Pressing `R` dispatches a `sql-crack-reset-view` event that triggers a full re-parse and re-render (same as the toolbar refresh button), collapsing all expanded cloud nodes and resetting positions.
+
 ### Documentation
 
 - Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
 - Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
+- Added Cursor installation instructions to `README.md` with Open VSX Registry link and publisher-qualified search name.
+
+### Tests
+
+- Added `UndoManager.getInitial()` unit tests (5 cases: basic, after undo/redo, empty, cleared, max history eviction).
+- Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
 
 ## [0.3.8] - 2026-02-17
 

@@ -576,7 +576,7 @@ export function initRenderer(container: HTMLElement): void {
     registerCommandBarActions([
         { id: 'zoom-in', label: 'Zoom In', shortcut: '+', action: () => zoomIn() },
         { id: 'zoom-out', label: 'Zoom Out', shortcut: '-', action: () => zoomOut() },
-        { id: 'fit-view', label: 'Fit to View', shortcut: 'R', action: () => resetView() },
+        { id: 'fit-view', label: 'Refresh Visualization', shortcut: 'R', action: () => resetView() },
         { id: 'toggle-theme', label: 'Toggle Theme', shortcut: 'T', category: 'View', action: () => toggleTheme() },
         { id: 'toggle-fullscreen', label: 'Toggle Fullscreen', shortcut: 'F', category: 'View', action: () => toggleFullscreen() },
         { id: 'toggle-legend', label: 'Toggle Legend', shortcut: 'L', category: 'View', action: () => toggleLegend() },
@@ -1781,9 +1781,7 @@ export function setViewState(viewState: TabViewState): void {
 }
 
 export function resetView(): void {
-    fitView();
-    updateZoomIndicator();
-    recordLayoutHistorySnapshot();
+    document.dispatchEvent(new CustomEvent('sql-crack-reset-view'));
 }
 
 export function undoLayoutChange(): void {

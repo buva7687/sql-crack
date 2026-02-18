@@ -261,6 +261,19 @@ function init(): void {
     initRenderer(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
+    // R key triggers a full re-visualize (same as toolbar refresh)
+    document.addEventListener('sql-crack-reset-view', () => {
+        if (window.vscodeApi) {
+            window.vscodeApi.postMessage({ command: 'requestRefresh' });
+        } else {
+            const sql = window.initialSqlCode || '';
+            if (sql) {
+                void visualize(sql);
+                clearStaleIndicator();
+            }
+        }
+    });
+
     // Apply minimap mode from settings
     const minimapMode = (window.showMinimap as MinimapMode) || 'auto';
     setMinimapMode(minimapMode);

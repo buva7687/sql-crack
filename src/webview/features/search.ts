@@ -70,6 +70,11 @@ export function setSearchBoxFeature(
             clearTimeout(runtime.searchDebounceTimer);
         }
 
+        if (!input.value) {
+            callbacks.onClearSearch();
+            return;
+        }
+
         callbacks.onHighlightMatches(input.value);
         callbacks.onUpdateSearchCountDisplay();
 

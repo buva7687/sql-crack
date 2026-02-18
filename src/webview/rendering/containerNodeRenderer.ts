@@ -403,41 +403,6 @@ function attachCloudPanZoomListeners(
     subflowGroup: SVGGElement,
     deps: ContainerNodeRendererDeps
 ): void {
-    nestedSvg.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        const cloudState = deps.ensureCloudViewState(nodeId);
-        cloudState.isDragging = true;
-        cloudState.dragStartX = e.clientX - cloudState.offsetX;
-        cloudState.dragStartY = e.clientY - cloudState.offsetY;
-        nestedSvg.style.cursor = 'grabbing';
-    });
-
-    nestedSvg.addEventListener('mousemove', (e) => {
-        const cloudState = deps.cloudViewStates.get(nodeId);
-        if (cloudState?.isDragging) {
-            e.stopPropagation();
-            cloudState.offsetX = e.clientX - cloudState.dragStartX;
-            cloudState.offsetY = e.clientY - cloudState.dragStartY;
-            subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
-        }
-    });
-
-    nestedSvg.addEventListener('mouseup', () => {
-        const cloudState = deps.cloudViewStates.get(nodeId);
-        if (cloudState) {
-            cloudState.isDragging = false;
-        }
-        nestedSvg.style.cursor = 'grab';
-    });
-
-    nestedSvg.addEventListener('mouseleave', () => {
-        const cloudState = deps.cloudViewStates.get(nodeId);
-        if (cloudState) {
-            cloudState.isDragging = false;
-        }
-        nestedSvg.style.cursor = 'grab';
-    });
-
     nestedSvg.addEventListener('wheel', (e) => {
         e.preventDefault();
         e.stopPropagation();

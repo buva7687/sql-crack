@@ -65,7 +65,9 @@ export function registerDragListeners(
                     }
                 }
 
-                callbacks.updateCloudAndArrow(node);
+                // Cloud follows via group transform — don't recalculate
+                // (updateCloudAndArrow uses absolute node.x/y but coordinates
+                // are in group-local space, causing double-offset)
                 callbacks.updateNodeEdges(node);
             }
         } else if (state.isDragging) {
