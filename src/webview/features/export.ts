@@ -10,6 +10,7 @@ export interface ExportContext {
 }
 
 const MAX_EXPORT_DIMENSION = 4096;
+const MAX_RASTER_DIMENSION = 4096;
 
 function showExportToast(message: string, isDarkTheme: boolean, isError = false): void {
     const existing = document.getElementById('sql-flow-export-toast');
@@ -68,6 +69,12 @@ function prepareSvgForExport(
     svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${rawWidth} ${rawHeight}`);
     svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
+    // Reset the pan/zoom transform on the main group so nodes align with the viewBox
+    const mainGroupClone = svgClone.querySelector('g');
+    if (mainGroupClone) {
+        mainGroupClone.removeAttribute('transform');
+    }
+
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
     style.textContent = `
         text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -81,6 +88,12 @@ function prepareSvgForExport(
     svgClone.insertBefore(style, svgClone.firstChild);
 
     embedInlineStyles(svgClone, svgElement);
+
+    // Remove foreignObject elements — browsers block SVG-as-image rendering
+    // when foreignObject is present (security restriction). This affects join
+    // nodes that use foreignObject for Venn diagram icons.
+    const foreignObjects = svgClone.querySelectorAll('foreignObject');
+    foreignObjects.forEach(fo => fo.remove());
 
     return { svgClone, width, height };
 }
@@ -122,6 +135,14 @@ function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement):
     Array.from(element.children).forEach(child => embedInlineStyles(child, originalSvgElement));
 }
 
+function getRasterScale(width: number, height: number, preferredScale = 2): number {
+    const safeWidth = Math.max(1, width);
+    const safeHeight = Math.max(1, height);
+    const widthLimitScale = MAX_RASTER_DIMENSION / safeWidth;
+    const heightLimitScale = MAX_RASTER_DIMENSION / safeHeight;
+    return Math.max(1, Math.min(preferredScale, widthLimitScale, heightLimitScale));
+}
+
 export function exportToPng(context: ExportContext): void {
     if (!context) {
         showExportToast('PNG export failed', false, true);
@@ -144,7 +165,7 @@ export function exportToPng(context: ExportContext): void {
             return;
         }
 
-        const scale = 2;
+        const scale = getRasterScale(width, height);
         canvas.width = width * scale;
         canvas.height = height * scale;
         ctx.scale(scale, scale);
@@ -313,7 +334,7 @@ export function copyToClipboard(context: ExportContext): void {
             return;
         }
 
-        const scale = 2;
+        const scale = getRasterScale(width, height);
         canvas.width = width * scale;
         canvas.height = height * scale;
         ctx.scale(scale, scale);
