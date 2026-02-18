@@ -67,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
 - **PIVOT detection shared**: Renamed `hasTSqlPivot` → `hasPivot` in dialect detection; PIVOT now scores for both TransactSQL and Oracle.
+- **Toolbar pin affordance refresh**: Replaced the pin glyph with a cleaner pushpin icon and reordered controls to keep pin-related actions grouped (`View location` → `Pin visualization as new tab` → `Pinned tabs`).
+- **Examples compare documentation**: Expanded `examples/README.md` with a dedicated "Compare with Baseline Query" section and updated wording to reference the compare button label (instead of legacy `⇆` symbol text).
 
 ### Fixed
 
@@ -79,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyboard sibling cycling at same depth (`←/→`)**: Sibling navigation now falls back to visual row/column bucketing when semantic `depth` metadata is too strict, so side-by-side nodes (for example `customer_segments` and `regional_metrics` in `examples/demo-showcase.sql`) can be cycled reliably.
 - **Focus direction shortcuts (`U` / `D` / `A`)**: Selecting focus direction now immediately enables focus mode when a node is selected and refreshes the breadcrumb label (`Focus: Upstream/Downstream/All`) to match the active mode.
 - **WHERE node condition rendering (`[object Object]`)**: Filter details now format nested AST operands correctly (wrapped `column_ref`, `expr_list`/`IN`, function/unary operands), preventing `[object Object]` placeholders in Q1 (`examples/demo-showcase.sql`) and similar queries.
+- **Compare overlay label collisions**: Removed/ghost diff nodes are now repositioned when they overlap active nodes, preventing stacked/overlapping text in side-by-side compare mode.
 
 ### Tests
 
@@ -100,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added integration assertions for `U`/`D`/`A` focus direction shortcuts and `setFocusMode()` auto-enable breadcrumb behavior.
 - Added condition extractor unit regressions for wrapped `column_ref` operands and `IN` `expr_list` formatting.
 - Added demo showcase integration regression ensuring Q1 WHERE details never contain `[object Object]`.
+- Added compare-view regression coverage for removed ghost-node repositioning to avoid overlap with active nodes and other ghost nodes.
 
 ## [0.3.7] - 2026-02-13
 

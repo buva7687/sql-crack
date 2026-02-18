@@ -27,7 +27,7 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **CASE expressions** | `basic-case-expressions.sql` | Check node details panel for branch logic |
 | **Set operations** | `basic-set-operations.sql` | See UNION/INTERSECT/EXCEPT connecting nodes |
 | **Table-valued functions** | `tvf-bigquery.sql`, `tvf-snowflake.sql`, `tvf-transactsql.sql` | Verify UNNEST/FLATTEN/OPENJSON appear as table-function nodes |
-| **Query compare mode** | `compare-mode-before.sql` + `compare-mode-after.sql` | Pin the first, open second, click `⇆` to inspect added/removed/changed nodes |
+| **Query compare mode** | `compare-mode-before.sql` + `compare-mode-after.sql` | Pin the first, open second, click **Compare with Baseline Query** to inspect added/removed/changed nodes |
 | **Query compare mode (KPI refactor)** | `compare-mode-kpi-before.sql` + `compare-mode-kpi-after.sql` | Compare correlated-subquery baseline vs CTE/join rewrite and inspect structural deltas |
 | **Inline diagnostics + quick fix** | `diagnostics-playground.sql` | Save file, open Problems, use **Show in SQL Flow** quick fix |
 | **Parser resilience / mixed batch behavior** | `parser-resilience-playground.sql` | Check mixed valid/invalid/procedural statements and fallback behavior |
@@ -36,6 +36,35 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **Write operations** | `dml-write-operations.sql` | See INSERT/UPDATE/DELETE/MERGE badges |
 | **Complex queries** | `complex-analytics-queries.sql` | Press `E` to expand all CTEs at once |
 | **Data pipelines** | `lineage-data-pipeline.sql` | Trace multi-stage ETL transformations |
+
+---
+
+## Compare with Baseline Query
+
+Use compare mode to diff the current query graph against a baseline query graph.
+
+### How baseline is selected
+
+1. **Newest pinned query** (excluding the exact current SQL text)
+2. Otherwise, **another query in the same multi-query file** (fallback)
+3. If neither exists, compare mode shows a baseline warning
+
+### Recommended workflow
+
+1. Open `compare-mode-before.sql` (or Q1 in `demo-showcase.sql`) and visualize
+2. Click **Pin visualization as new tab**
+3. Open the revised query (`compare-mode-after.sql` or modified Q1)
+4. Click **Compare with Baseline Query**
+5. Read the diff:
+   - **Added** (green)
+   - **Removed** (red, dashed)
+   - **Changed** (amber)
+
+### Compare tips
+
+- Each pane supports **independent pan/zoom**.
+- Compare mode shows a **stats delta** (joins, subqueries, complexity score).
+- Pinning multiple snapshots works; compare uses the **most recent pinned** snapshot as baseline.
 
 ---
 
@@ -152,11 +181,11 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 
 8. **Keyboard navigation**: Use `Tab` to focus nodes, `Arrow keys` to navigate, `Enter` to select. Great for accessibility or when mouse isn't available.
 
-9. **Compare query revisions**: Pin a query snapshot, switch to a modified query, then use the compare (`⇆`) toolbar button to see side-by-side added/removed/changed node differences.
+9. **Compare query revisions**: Pin a query snapshot, switch to a modified query, then use the **Compare with Baseline Query** toolbar button to see side-by-side added/removed/changed node differences.
 
 10. **Use diagnostics in editor**: Save a SQL file with anti-patterns (for example from `quality-performance-hints.sql`) and check Problems panel entries from **SQL Crack**. Use the quick fix **Show in SQL Flow** to jump straight into the graph.
 
-11. **Validate compare mode quickly**: Visualize `compare-mode-before.sql`, pin it, then visualize `compare-mode-after.sql` and click `⇆`. Confirm green/amber/red diff highlights and stats delta.
+11. **Validate compare mode quickly**: Visualize `compare-mode-before.sql`, pin it, then visualize `compare-mode-after.sql` and click **Compare with Baseline Query**. Confirm green/amber/red diff highlights and stats delta.
 12. **Try a second compare scenario**: Repeat the same flow with `compare-mode-kpi-before.sql` and `compare-mode-kpi-after.sql` to compare correlated subqueries vs CTE/join refactor.
 13. **Stress parser resilience**: Open `parser-resilience-playground.sql` and navigate batch tabs with `[` and `]` to verify mixed statements stay individually navigable.
 14. **Legend behavior**: The legend is visible by default for first-time use and remembers your last toggle state. Press `L` anytime to show/hide it.
