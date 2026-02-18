@@ -45,6 +45,42 @@ describe('Condition Extractors', () => {
             expect(formatCondition(expr)).toBe('a.id = b.id');
         });
 
+        it('formats wrapped column_ref identifiers without [object Object]', () => {
+            const expr = {
+                type: 'binary_expr',
+                operator: '>',
+                left: {
+                    type: 'column_ref',
+                    table: 'cs',
+                    column: { expr: { type: 'default', value: 'total_orders' } }
+                },
+                right: { type: 'number', value: 0 }
+            };
+
+            expect(formatCondition(expr)).toBe('cs.total_orders > 0');
+        });
+
+        it('formats IN lists from expr_list nodes', () => {
+            const expr = {
+                type: 'binary_expr',
+                operator: 'IN',
+                left: {
+                    type: 'column_ref',
+                    table: null,
+                    column: { expr: { type: 'default', value: 'customer_tier' } }
+                },
+                right: {
+                    type: 'expr_list',
+                    value: [
+                        { type: 'single_quote_string', value: 'Platinum' },
+                        { type: 'single_quote_string', value: 'Gold' }
+                    ]
+                }
+            };
+
+            expect(formatCondition(expr)).toBe('customer_tier IN Platinum, Gold');
+        });
+
         it('returns "?" for null/undefined input', () => {
             expect(formatCondition(null)).toBe('?');
             expect(formatCondition(undefined)).toBe('?');

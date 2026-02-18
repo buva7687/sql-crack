@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hint duplication on retry preprocessing**: Parser compatibility hints are now deduplicated when parse retry applies the same rewrites.
 - **Keyboard sibling cycling at same depth (`←/→`)**: Sibling navigation now falls back to visual row/column bucketing when semantic `depth` metadata is too strict, so side-by-side nodes (for example `customer_segments` and `regional_metrics` in `examples/demo-showcase.sql`) can be cycled reliably.
 - **Focus direction shortcuts (`U` / `D` / `A`)**: Selecting focus direction now immediately enables focus mode when a node is selected and refreshes the breadcrumb label (`Focus: Upstream/Downstream/All`) to match the active mode.
+- **WHERE node condition rendering (`[object Object]`)**: Filter details now format nested AST operands correctly (wrapped `column_ref`, `expr_list`/`IN`, function/unary operands), preventing `[object Object]` placeholders in Q1 (`examples/demo-showcase.sql`) and similar queries.
 
 ### Tests
 
@@ -97,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added integration coverage for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
 - Added keyboard navigation regression tests for sibling cycling fallback when visual peers have different `depth` metadata.
 - Added integration assertions for `U`/`D`/`A` focus direction shortcuts and `setFocusMode()` auto-enable breadcrumb behavior.
+- Added condition extractor unit regressions for wrapped `column_ref` operands and `IN` `expr_list` formatting.
+- Added demo showcase integration regression ensuring Q1 WHERE details never contain `[object Object]`.
 
 ## [0.3.7] - 2026-02-13
 

@@ -124,6 +124,21 @@ describe('Demo Showcase E2E Tests', () => {
             ]));
             expect(outputColumns.filter(name => name === 'expr')).toHaveLength(0);
         });
+
+        it('Q1 WHERE filter details should not contain [object Object] placeholders', () => {
+            const query1 = result.queries.find(q =>
+                /FROM\s+customer_segments\s+cs/i.test(q.sql) &&
+                /JOIN\s+regional_metrics\s+rm/i.test(q.sql)
+            );
+
+            expect(query1).toBeDefined();
+            const whereNode = query1?.nodes.find(n => n.type === 'filter' && n.label === 'WHERE');
+            expect(whereNode).toBeDefined();
+
+            const details = whereNode?.details || [];
+            expect(details.join(' ')).not.toContain('[object Object]');
+            expect(details.some(d => />\s*0/.test(d))).toBe(true);
+        });
     });
 
     describe('Query Complexity', () => {
