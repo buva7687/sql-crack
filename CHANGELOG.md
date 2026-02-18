@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Focus direction shortcuts (`U` / `D` / `A`)**: Selecting focus direction now immediately enables focus mode when a node is selected and refreshes the breadcrumb label (`Focus: Upstream/Downstream/All`) to match the active mode.
 - **WHERE node condition rendering (`[object Object]`)**: Filter details now format nested AST operands correctly (wrapped `column_ref`, `expr_list`/`IN`, function/unary operands), preventing `[object Object]` placeholders in Q1 (`examples/demo-showcase.sql`) and similar queries.
 - **Compare overlay label collisions**: Removed/ghost diff nodes are now repositioned when they overlap active nodes, preventing stacked/overlapping text in side-by-side compare mode.
+- **Duplicate repeated-table performance hints**: Prevented overlapping hints for the same table/count pair (for example `scanned 2 times` + `is accessed 2 times`) by deduplicating repeated-scan/access signals across analyzers.
+- **Aggregate detail placeholders in CASE expressions**: Aggregate node details now format `EXTRACT(...)` and CASE `ELSE` branches correctly, eliminating residual `?` placeholders in Query 3-style expressions.
+- **Function usage stats from scalar subqueries**: Query Stats now includes aggregate/scalar functions found inside expression subqueries (for example Query 4 `COUNT(*)` scalar subquery), not just top-level SELECT expressions.
 
 ### Tests
 
@@ -104,6 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added condition extractor unit regressions for wrapped `column_ref` operands and `IN` `expr_list` formatting.
 - Added demo showcase integration regression ensuring Q1 WHERE details never contain `[object Object]`.
 - Added compare-view regression coverage for removed ghost-node repositioning to avoid overlap with active nodes and other ghost nodes.
+- Added regression test coverage for repeated-table hint deduplication (`scanned` vs `accessed`) so the same table is not reported twice.
+- Added aggregate extraction regressions for CASE + `EXTRACT(...)` formatting and function-usage tracking from scalar subqueries.
 
 ## [0.3.7] - 2026-02-13
 

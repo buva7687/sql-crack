@@ -161,6 +161,7 @@ function processSelect(
         seenTableLabels,
         ctx.dialect
     );
+    trackFunctionsFromExpressionSubqueries(runtime, stmt);
 
     // Process JOINs - create join nodes and connect tables properly
     let lastOutputId = tableIds[0]; // Start with first table as base
@@ -771,6 +772,15 @@ function parseCteOrSubqueryInternals(
     const ctx = runtime.context;
     if (!stmt) { return; }
 
+    // Track function usage inside nested SELECTs so stats include aggregates/scalars
+    // that appear only in scalar/WHERE subqueries (e.g., COUNT(*) in Query 4 demo).
+    if (stmt.columns && Array.isArray(stmt.columns)) {
+        extractColumnInfos(stmt.columns, {
+            expressionMode: 'formatted',
+            trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+        });
+    }
+
     let previousId: string | null = null;
 
     // Extract tables from FROM clause
@@ -991,6 +1001,133 @@ function collectScalarSubquerySourceTables(
     }
 
     return Array.from(sourceTables).filter(name => !excludedTableLabels.has(name.toLowerCase()));
+}
+
+function trackFunctionsFromExpressionSubqueries(
+    runtime: SelectExecutionContext,
+    stmt: any
+): void {
+    const expressions: any[] = [];
+
+    if (stmt?.where) {
+        expressions.push(stmt.where);
+    }
+    if (stmt?.having) {
+        expressions.push(stmt.having);
+    }
+    if (Array.isArray(stmt?.columns)) {
+        for (const col of stmt.columns) {
+            if (col?.expr) {
+                expressions.push(col.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (orderItem?.expr) {
+                expressions.push(orderItem.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt?.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem?.on) {
+                expressions.push(fromItem.on);
+            }
+        }
+    }
+
+    const visited = new Set<any>();
+    for (const expr of expressions) {
+        const subqueries = findSubqueriesInExpression(expr);
+        for (const subquery of subqueries) {
+            collectFunctionsFromSelectTree(runtime, subquery, visited);
+        }
+    }
+}
+
+function collectFunctionsFromSelectTree(
+    runtime: SelectExecutionContext,
+    stmt: any,
+    visited: Set<any>
+): void {
+    if (!stmt || typeof stmt !== 'object' || visited.has(stmt)) {
+        return;
+    }
+    visited.add(stmt);
+
+    if (Array.isArray(stmt.columns)) {
+        extractColumnInfos(stmt.columns, {
+            expressionMode: 'formatted',
+            trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+        });
+    }
+
+    if (Array.isArray(stmt.with)) {
+        for (const cte of stmt.with) {
+            const cteStmt = getCteStatementAst(cte);
+            if (cteStmt) {
+                collectFunctionsFromSelectTree(runtime, cteStmt, visited);
+            }
+        }
+    }
+
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : (stmt.from ? [stmt.from] : []);
+    for (const fromItem of fromItems) {
+        const nestedFromSubquery = fromItem?.expr?.ast || (fromItem?.expr?.type === 'select' ? fromItem.expr : null);
+        if (nestedFromSubquery) {
+            collectFunctionsFromSelectTree(runtime, nestedFromSubquery, visited);
+        }
+
+        if (fromItem?.on) {
+            const onSubqueries = findSubqueriesInExpression(fromItem.on);
+            for (const subquery of onSubqueries) {
+                collectFunctionsFromSelectTree(runtime, subquery, visited);
+            }
+        }
+    }
+
+    if (stmt.where) {
+        const whereSubqueries = findSubqueriesInExpression(stmt.where);
+        for (const subquery of whereSubqueries) {
+            collectFunctionsFromSelectTree(runtime, subquery, visited);
+        }
+    }
+
+    if (stmt.having) {
+        const havingSubqueries = findSubqueriesInExpression(stmt.having);
+        for (const subquery of havingSubqueries) {
+            collectFunctionsFromSelectTree(runtime, subquery, visited);
+        }
+    }
+
+    if (Array.isArray(stmt.columns)) {
+        for (const col of stmt.columns) {
+            if (!col?.expr) {
+                continue;
+            }
+            const columnSubqueries = findSubqueriesInExpression(col.expr);
+            for (const subquery of columnSubqueries) {
+                collectFunctionsFromSelectTree(runtime, subquery, visited);
+            }
+        }
+    }
+
+    if (Array.isArray(stmt.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (!orderItem?.expr) {
+                continue;
+            }
+            const orderSubqueries = findSubqueriesInExpression(orderItem.expr);
+            for (const subquery of orderSubqueries) {
+                collectFunctionsFromSelectTree(runtime, subquery, visited);
+            }
+        }
+    }
+
+    if (stmt._next) {
+        collectFunctionsFromSelectTree(runtime, stmt._next, visited);
+    }
 }
 
 function collectTablesFromSelectTree(

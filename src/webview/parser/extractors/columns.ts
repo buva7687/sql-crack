@@ -99,6 +99,13 @@ export function formatExpressionFromAst(expr: any, options: ExpressionFormatOpti
         return `CAST(${innerExpr} AS ${dataType})`;
     }
 
+    if (expr.type === 'extract') {
+        options.trackFunctionUsage?.('EXTRACT', 'scalar');
+        const field = expr.args?.field || '?';
+        const source = formatExpressionFromAst(expr.args?.source, options) || '?';
+        return `EXTRACT(${field} FROM ${source})`;
+    }
+
     if (expr.type === 'number' || expr.type === 'single_quote_string' || expr.type === 'string') {
         return String(expr.value ?? '');
     }

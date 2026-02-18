@@ -269,6 +269,25 @@ function analyzeJoinOrder(
 // 3. Repeated Table Scan Detection
 // Note: This function receives existingHints to check for duplicate subquery hints
 // from detectAdvancedIssues() and merge them into comprehensive hints
+function extractRepeatedTableHintSignature(message: string): { tableName: string; count: number } | null {
+    // Matches:
+    // - Table "orders" scanned 2 times
+    // - Table "orders" is scanned 2 times
+    // - Table 'orders' is accessed 2 times
+    const match = message.match(/^table\s+["']([^"']+)["']\s+(?:is\s+)?(?:scanned|accessed)\s+(\d+)\s+times\b/i);
+    if (!match) {
+        return null;
+    }
+
+    const tableName = match[1]?.toLowerCase();
+    const count = Number.parseInt(match[2] ?? '', 10);
+    if (!tableName || Number.isNaN(count)) {
+        return null;
+    }
+
+    return { tableName, count };
+}
+
 function detectRepeatedScans(
     _ast: any,
     tableUsage: Map<string, number>,
@@ -278,6 +297,16 @@ function detectRepeatedScans(
     tableUsage.forEach((count, tableName) => {
         if (count > 1) {
             const tableNameLower = tableName.toLowerCase();
+            const hasExistingRepeatedTableHint = existingHints.some(h => {
+                const signature = extractRepeatedTableHintSignature(h.message);
+                return signature?.tableName === tableNameLower;
+            });
+
+            // Advanced issue detection already emitted a repeated-scan hint for this table.
+            // Skip adding a second "accessed/scanned N times" hint with different wording.
+            if (hasExistingRepeatedTableHint) {
+                return;
+            }
 
             // Check if there's already a duplicate/similar subquery hint for this table
             const hasDuplicateSubqueryHint = existingHints.some(h => {

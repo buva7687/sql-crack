@@ -8,6 +8,7 @@ import type {
 } from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 import { unwrapIdentifierValue } from '../astUtils';
+import { formatExpressionFromAst } from './columns';
 
 export type TrackFunctionUsageFn = (
     functionName: unknown,
@@ -176,6 +177,8 @@ export function extractAggregateFunctionDetails(
             return arg === undefined ? '?' : String(arg);
         }
 
+        const argType = typeof arg.type === 'string' ? arg.type.toLowerCase() : '';
+
         if (arg.type === 'star') {
             return '*';
         }
@@ -185,11 +188,71 @@ export function extractAggregateFunctionDetails(
         if (arg.type === 'expr_list' && Array.isArray(arg.value)) {
             return arg.value.map(formatAggregateArg).join(', ');
         }
-        if (arg.type === 'number') {
+        if (argType === 'number' || argType === 'bool' || argType === 'boolean') {
             return String(arg.value ?? '?');
         }
-        if (arg.type && String(arg.type).includes('string')) {
+        if (argType === 'null') {
+            return 'NULL';
+        }
+        if (arg.type && String(arg.type).toLowerCase().includes('string')) {
             return `'${String(arg.value ?? '')}'`;
+        }
+        if (argType === 'binary_expr') {
+            const left = formatAggregateArg(arg.left);
+            const right = formatAggregateArg(arg.right);
+            return `${left} ${arg.operator || '?'} ${right}`;
+        }
+        if (argType === 'unary_expr') {
+            return `${arg.operator || ''}${formatAggregateArg(arg.expr ?? arg.value)}`;
+        }
+        if (argType === 'cast') {
+            const castExpr = formatAggregateArg(arg.expr);
+            const dataType = arg.target?.dataType || arg.target || '?';
+            return `CAST(${castExpr} AS ${String(dataType)})`;
+        }
+        if (argType === 'aggr_func' || argType === 'function') {
+            const funcName = getExpressionFunctionName(arg) || 'FUNC';
+            const argsContainer = arg.args;
+            const argNode = argsContainer?.value ?? argsContainer?.expr ?? argsContainer;
+            const argList = Array.isArray(argNode) ? argNode : (argNode ? [argNode] : []);
+            const distinct = argsContainer?.distinct ? 'DISTINCT ' : '';
+            const argsStr = argList.map(formatAggregateArg).join(', ');
+            return `${funcName}(${distinct}${argsStr})`;
+        }
+        if (argType === 'case') {
+            const baseExpr = arg.expr ? ` ${formatAggregateArg(arg.expr)}` : '';
+            let elseExpr = arg.else !== undefined ? ` ELSE ${formatAggregateArg(arg.else)}` : '';
+            const clauses = Array.isArray(arg.args)
+                ? arg.args
+                    .map((caseArg: any) => {
+                        const caseArgType = typeof caseArg?.type === 'string' ? caseArg.type.toLowerCase() : '';
+                        if (caseArgType === 'else') {
+                            const elseResult = caseArg?.result ?? caseArg?.expr ?? caseArg?.value;
+                            if (elseResult !== undefined && !elseExpr) {
+                                elseExpr = ` ELSE ${formatAggregateArg(elseResult)}`;
+                            }
+                            return '';
+                        }
+
+                        const whenExpr = caseArg?.cond ?? caseArg?.when ?? caseArg?.expr;
+                        const thenExpr = caseArg?.result ?? caseArg?.then ?? caseArg?.value;
+                        if (!whenExpr || thenExpr === undefined) {
+                            return '';
+                        }
+                        return `WHEN ${formatAggregateArg(whenExpr)} THEN ${formatAggregateArg(thenExpr)}`;
+                    })
+                    .filter(Boolean)
+                    .join(' ')
+                : '';
+            if (!clauses && !elseExpr) {
+                return 'CASE...END';
+            }
+            return `CASE${baseExpr} ${clauses}${elseExpr} END`.replace(/\s+/g, ' ').trim();
+        }
+        if (argType === 'extract') {
+            const field = arg.args?.field ? String(arg.args.field) : '?';
+            const source = arg.args?.source ? formatAggregateArg(arg.args.source) : '?';
+            return `EXTRACT(${field} FROM ${source})`;
         }
         if (arg.value !== undefined) {
             return String(arg.value);
@@ -199,6 +262,10 @@ export function extractAggregateFunctionDetails(
         }
         if (arg.expr) {
             return formatAggregateArg(arg.expr);
+        }
+        const formatted = formatExpressionFromAst(arg);
+        if (formatted && formatted !== 'expr') {
+            return formatted;
         }
         return '?';
     }
