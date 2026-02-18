@@ -14,6 +14,29 @@ export function getViewModeScriptFragment(): string {
         let navigationOriginLabel = '';
         let navigationOriginType = '';
 
+        function getViewScrollContainer(view) {
+            const root = lineageContent || document.querySelector('.lineage-content');
+            if (!root) {
+                return null;
+            }
+
+            if (view === 'lineage') {
+                return root.querySelector('.lineage-tables-grid')
+                    || root.querySelector('.view-container')
+                    || root.querySelector('.view-content')
+                    || root;
+            }
+
+            if (view === 'impact') {
+                return root.querySelector('#impact-results')
+                    || root.querySelector('.view-container')
+                    || root.querySelector('.view-content')
+                    || root;
+            }
+
+            return root;
+        }
+
         function saveCurrentViewState() {
             if (currentViewMode === 'graph') {
                 viewStates['graph'] = {
@@ -23,8 +46,11 @@ export function getViewModeScriptFragment(): string {
                     selectedNodeId
                 };
             } else {
+                if (currentViewMode === 'lineage' && typeof window.captureLineageSearchState === 'function') {
+                    window.captureLineageSearchState();
+                }
                 // Save scroll position for non-graph views (lineage, impact)
-                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                const scrollContainer = getViewScrollContainer(currentViewMode);
                 if (scrollContainer) {
                     viewStates[currentViewMode] = {
                         scrollTop: scrollContainer.scrollTop,
@@ -52,12 +78,12 @@ export function getViewModeScriptFragment(): string {
                 }
             } else if (viewStates[view]) {
                 // Restore scroll position for non-graph views
-                const scrollContainer = lineageContent || document.querySelector('.lineage-content');
+                const scrollContainer = getViewScrollContainer(view);
                 if (scrollContainer) {
-                    requestAnimationFrame(() => {
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
                         scrollContainer.scrollTop = viewStates[view].scrollTop || 0;
                         scrollContainer.scrollLeft = viewStates[view].scrollLeft || 0;
-                    });
+                    }));
                 }
             }
         }

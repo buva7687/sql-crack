@@ -539,23 +539,38 @@ export function getLineageGraphScriptFragment(): string {
             if (hintEl) hintEl.textContent = hintText;
 
             // Position near mouse cursor with boundary checks
-            const tooltipWidth = 220;
-            const tooltipHeight = 280;
             const padding = 15;
+            tooltip.style.display = 'block';
+            const tooltipWidth = Math.max(tooltip.offsetWidth || 0, 220);
+            const tooltipHeight = Math.max(tooltip.offsetHeight || 0, 220);
             let left = e.clientX + padding;
             let top = e.clientY + padding;
+            const lineageBounds = lineageContent ? lineageContent.getBoundingClientRect() : null;
+            const panelBounds = document.getElementById('lineage-panel')?.getBoundingClientRect();
+            const bounds = lineageBounds || panelBounds;
 
-            // Keep within viewport
-            if (left + tooltipWidth > window.innerWidth) {
+            // Keep within lineage panel bounds first, fallback to viewport.
+            const minLeft = bounds ? bounds.left + padding : padding;
+            const maxLeft = bounds
+                ? bounds.right - tooltipWidth - padding
+                : window.innerWidth - tooltipWidth - padding;
+            const minTop = bounds ? bounds.top + padding : padding;
+            const maxTop = bounds
+                ? bounds.bottom - tooltipHeight - padding
+                : window.innerHeight - tooltipHeight - padding;
+
+            if (left > maxLeft) {
                 left = e.clientX - tooltipWidth - padding;
             }
-            if (top + tooltipHeight > window.innerHeight) {
+            if (top > maxTop) {
                 top = e.clientY - tooltipHeight - padding;
             }
 
+            left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
+            top = Math.min(Math.max(top, minTop), Math.max(minTop, maxTop));
+
             tooltip.style.left = left + 'px';
             tooltip.style.top = top + 'px';
-            tooltip.style.display = 'block';
         }
 
         function hideLineageTooltip() {
@@ -823,8 +838,14 @@ export function getLineageGraphScriptFragment(): string {
             if (graphDataEl) {
                 try {
                     const data = JSON.parse(graphDataEl.textContent || '{}');
-                    graphWidth = data.width || 800;
-                    graphHeight = data.height || 600;
+                    const parsedWidth = Number(data.width);
+                    const parsedHeight = Number(data.height);
+                    if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
+                        graphWidth = parsedWidth;
+                    }
+                    if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
+                        graphHeight = parsedHeight;
+                    }
                 } catch (e) {
                     console.debug('[sql-crack] Failed to parse graph data for minimap:', e);
                 }
@@ -833,15 +854,23 @@ export function getLineageGraphScriptFragment(): string {
             // Update viewport rectangle on the minimap
             function updateMinimapViewport() {
                 if (!minimapViewport) return;
+                if (!Number.isFinite(lineageScale) || lineageScale <= 0) return;
+                if (graphWidth <= 0 || graphHeight <= 0) return;
 
                 const containerRect = container.getBoundingClientRect();
                 const minimapRect = minimapContent.getBoundingClientRect();
+                if (containerRect.width <= 0 || containerRect.height <= 0 || minimapRect.width <= 0 || minimapRect.height <= 0) {
+                    return;
+                }
 
                 // Calculate the visible area in graph coordinates
-                const visibleX = -lineageOffsetX / lineageScale;
-                const visibleY = -lineageOffsetY / lineageScale;
-                const visibleWidth = containerRect.width / lineageScale;
-                const visibleHeight = containerRect.height / lineageScale;
+                const visibleX = Math.max(0, Math.min(graphWidth, -lineageOffsetX / lineageScale));
+                const visibleY = Math.max(0, Math.min(graphHeight, -lineageOffsetY / lineageScale));
+                const visibleWidth = Math.max(0, Math.min(graphWidth, containerRect.width / lineageScale));
+                const visibleHeight = Math.max(0, Math.min(graphHeight, containerRect.height / lineageScale));
+                if (!Number.isFinite(visibleX) || !Number.isFinite(visibleY) || !Number.isFinite(visibleWidth) || !Number.isFinite(visibleHeight)) {
+                    return;
+                }
 
                 minimapViewport.setAttribute('x', String(visibleX));
                 minimapViewport.setAttribute('y', String(visibleY));
@@ -875,6 +904,15 @@ export function getLineageGraphScriptFragment(): string {
             function panToMinimapPosition(e) {
                 const minimapRect = minimapContent.getBoundingClientRect();
                 const containerRect = container.getBoundingClientRect();
+                if (minimapRect.width <= 0 || minimapRect.height <= 0) {
+                    return;
+                }
+                if (graphWidth <= 0 || graphHeight <= 0) {
+                    return;
+                }
+                if (!Number.isFinite(lineageScale) || lineageScale <= 0) {
+                    lineageScale = 1;
+                }
 
                 // Calculate click position relative to minimap
                 const clickX = e.clientX - minimapRect.left;

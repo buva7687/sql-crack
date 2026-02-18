@@ -5,6 +5,37 @@ export function getVisualLineageSearchScriptFragment(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
         let lineageTypeFilter = 'all';
+        let lineageSearchState = {
+            query: '',
+            typeFilter: 'all',
+            sort: 'connected',
+            showAllTables: false
+        };
+
+        function captureLineageSearchState() {
+            const searchInput = document.getElementById('lineage-search-input');
+            const sortSelect = document.getElementById('lineage-sort');
+            const activeFilter = document.querySelector('.view-quick-filters .view-filter-chip.active');
+            if (!searchInput && !sortSelect && !activeFilter) {
+                return lineageSearchState;
+            }
+
+            const nextTypeFilter = activeFilter ? (activeFilter.getAttribute('data-filter') || 'all') : lineageSearchState.typeFilter;
+            const nextSort = sortSelect ? (sortSelect.value || 'connected') : lineageSearchState.sort;
+            const query = searchInput ? (searchInput.value || '') : lineageSearchState.query;
+            const showAllTables = lineageSearchState.showAllTables || !!query.trim() || nextTypeFilter !== 'all';
+
+            lineageSearchState = {
+                query,
+                typeFilter: nextTypeFilter,
+                sort: nextSort,
+                showAllTables
+            };
+
+            return lineageSearchState;
+        }
+
+        window.captureLineageSearchState = captureLineageSearchState;
 
         function setupVisualLineageSearch() {
             const searchInput = document.getElementById('lineage-search-input');
@@ -17,9 +48,37 @@ export function getVisualLineageSearchScriptFragment(): string {
             const emptyFilter = document.getElementById('lineage-empty-filter');
             const resultsInfo = document.getElementById('lineage-results-info');
             const resultsCount = document.getElementById('lineage-results-count');
-            let showAllTables = false;
+            let showAllTables = lineageSearchState.showAllTables;
             let lineageFilterDebounceTimer = null;
             const lineageFilterDebounceMs = 180;
+
+            function persistLineageSearchState() {
+                lineageSearchState = {
+                    query: searchInput ? (searchInput.value || '') : lineageSearchState.query,
+                    typeFilter: lineageTypeFilter || 'all',
+                    sort: sortSelect ? (sortSelect.value || 'connected') : lineageSearchState.sort,
+                    showAllTables
+                };
+            }
+
+            const allowedFilters = new Set(['all', 'table', 'view', 'cte']);
+            lineageTypeFilter = allowedFilters.has(lineageSearchState.typeFilter) ? lineageSearchState.typeFilter : 'all';
+            showAllTables = lineageSearchState.showAllTables === true;
+
+            if (searchInput) {
+                searchInput.value = lineageSearchState.query || '';
+            }
+            if (searchClear) {
+                searchClear.style.display = searchInput && searchInput.value.trim() ? 'flex' : 'none';
+            }
+            if (sortSelect && lineageSearchState.sort) {
+                sortSelect.value = lineageSearchState.sort;
+            }
+            filterChips.forEach(chip => {
+                const isActive = (chip.getAttribute('data-filter') || 'all') === lineageTypeFilter;
+                chip.classList.toggle('active', isActive);
+            });
+            persistLineageSearchState();
 
             function setLineageGridMode(expanded) {
                 if (tablesGrid) {
@@ -119,6 +178,8 @@ export function getVisualLineageSearchScriptFragment(): string {
                         resultsInfo.style.display = 'none';
                     }
                 }
+
+                persistLineageSearchState();
             }
 
             function scheduleLineageFilter(immediate = false) {
@@ -142,6 +203,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 if (!query) {
                     showAllTables = false;
                 }
+                persistLineageSearchState();
                 scheduleLineageFilter();
             });
 
@@ -150,6 +212,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                     searchInput.value = '';
                     if (searchClear) searchClear.style.display = 'none';
                     showAllTables = false;
+                    persistLineageSearchState();
                     scheduleLineageFilter(true);
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
@@ -165,6 +228,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
                 showAllTables = false;
+                persistLineageSearchState();
                 scheduleLineageFilter(true);
                 searchInput?.focus();
             });
@@ -177,14 +241,19 @@ export function getVisualLineageSearchScriptFragment(): string {
                     if (lineageTypeFilter === 'all' && !(searchInput?.value || '').trim()) {
                         showAllTables = false;
                     }
+                    persistLineageSearchState();
                     scheduleLineageFilter(true);
                 });
             });
 
-            sortSelect?.addEventListener('change', () => scheduleLineageFilter(true));
+            sortSelect?.addEventListener('change', () => {
+                persistLineageSearchState();
+                scheduleLineageFilter(true);
+            });
 
             showAllBtn?.addEventListener('click', () => {
                 showAllTables = true;
+                persistLineageSearchState();
                 scheduleLineageFilter(true);
             });
 
@@ -194,13 +263,17 @@ export function getVisualLineageSearchScriptFragment(): string {
                     e.preventDefault();
                     const nodeId = item.getAttribute('data-node-id');
                     if (nodeId) {
+                        persistLineageSearchState();
                         selectLineageNode(nodeId);
                     }
                 });
             });
+
+            scheduleLineageFilter(true);
         }
 
         function selectLineageNode(nodeId) {
+            captureLineageSearchState();
             if (lineageContent) {
                 lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
             }

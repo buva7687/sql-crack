@@ -95,6 +95,9 @@ export function getMessageHandlingScriptFragment(): string {
                                 setSafeHtml(lineageContent, message.data.html);
                             }
                             setupImpactSummaryDetails();
+                            if (typeof restoreViewState === 'function') {
+                                restoreViewState(currentViewMode);
+                            }
                         }
                     }
                     break;
@@ -104,6 +107,9 @@ export function getMessageHandlingScriptFragment(): string {
                             lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                         } else if (message.data?.html) {
                             setSafeHtml(lineageContent, message.data.html);
+                            if (typeof restoreViewState === 'function') {
+                                restoreViewState(currentViewMode);
+                            }
                         }
                     }
                     break;
@@ -117,12 +123,18 @@ export function getMessageHandlingScriptFragment(): string {
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
                         setupImpactForm();
+                        if (typeof restoreViewState === 'function') {
+                            restoreViewState(currentViewMode);
+                        }
                     }
                     break;
                 case 'lineageOverviewResult':
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
                         setupVisualLineageSearch();
+                        if (typeof restoreViewState === 'function') {
+                            restoreViewState(currentViewMode);
+                        }
                     }
                     break;
                 case 'lineageSearchResults':

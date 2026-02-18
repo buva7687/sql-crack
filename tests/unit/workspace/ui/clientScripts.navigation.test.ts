@@ -15,6 +15,9 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('offsetY,');
         expect(script).toContain('selectedNodeId');
         expect(script).toContain("restoreViewState('graph')");
+        expect(script).toContain('function getViewScrollContainer(view)');
+        expect(script).toContain("root.querySelector('.view-container')");
+        expect(script).toContain('requestAnimationFrame(() => requestAnimationFrame(() => {');
     });
 
     it('shows contextual back label with originating node and clears stale origin on manual switches', () => {
@@ -111,6 +114,8 @@ describe('workspace clientScripts navigation context', () => {
 
         expect(script).toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*lineageCurrentDirection/);
         expect(script).not.toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*'both'/);
+        expect(script).toContain('window.captureLineageSearchState = captureLineageSearchState;');
+        expect(script).toContain('captureLineageSearchState();');
     });
 
     it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {
@@ -214,5 +219,20 @@ describe('workspace clientScripts navigation context', () => {
 
         const passiveWheelListeners = script.match(/addEventListener\('wheel'[\s\S]*?\{\s*passive:\s*false\s*}\);/g) || [];
         expect(passiveWheelListeners.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('restores non-graph scroll state after lineage and impact HTML re-renders', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("case 'lineageOverviewResult':");
+        expect(script).toContain("case 'impactFormResult':");
+        expect(script).toContain("case 'impactResult':");
+        expect(script).toContain('restoreViewState(currentViewMode);');
     });
 });

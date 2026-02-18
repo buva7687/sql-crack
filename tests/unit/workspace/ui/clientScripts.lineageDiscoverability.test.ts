@@ -63,6 +63,9 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('lineageFilterDebounceMs = 180');
         expect(script).toContain('function scheduleLineageFilter(immediate = false)');
         expect(script).toContain('scheduleLineageFilter();');
+        expect(script).toContain('let lineageSearchState = {');
+        expect(script).toContain('window.captureLineageSearchState = captureLineageSearchState;');
+        expect(script).toContain('searchInput.value = lineageSearchState.query || \'\';');
     });
 
     it('avoids duplicate legend setup calls and releases queued lineage updates on paint', () => {
@@ -79,5 +82,7 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('function finishLineageSetup()');
         expect(script).toContain('requestAnimationFrame(() => requestAnimationFrame(finishLineageSetup));');
         expect(script).not.toContain('}, 200);');
+        expect(script).toContain('const lineageBounds = lineageContent ? lineageContent.getBoundingClientRect() : null;');
+        expect(script).toContain('left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));');
     });
 });
