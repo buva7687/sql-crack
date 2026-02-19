@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lineage graph presentation and controls**:
   - Improved viewport utilization for sparse lineage graphs (layout spacing and auto-fit behavior).
   - Removed the redundant lineage legend toggle icon near zoom controls while preserving the `L` shortcut and bottom legend controls.
+  - Simplified lineage stats: removed redundant node count badge and relationship count; upstream/downstream counts now include external nodes with a parenthetical annotation.
+  - Removed CTEs from lineage list view — CTEs are query-scoped and their referenced tables/views already appear as lineage nodes.
+  - Moved direction filter buttons (Upstream/Both/Downstream) into the graph header row to save vertical space.
 
 ### Fixed
 

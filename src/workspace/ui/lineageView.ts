@@ -54,7 +54,7 @@ export class LineageView {
                 <div class="view-compact-header">
                     <span class="view-icon">${ICONS.columns}</span>
                     <h3>Lineage</h3>
-                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views, ${stats.relationships} relationships</span>
+                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views</span>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -202,6 +202,32 @@ export class LineageView {
                             ${downstreamLabel}
                         </span>
                     </div>
+                    <div class="direction-controls">
+                        <button class="direction-btn ${direction === 'upstream' ? 'active' : ''}"
+                                data-direction="upstream"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M12 19V5M5 12l7-7 7 7"/>
+                            </svg>
+                            Upstream
+                        </button>
+                        <button class="direction-btn ${direction === 'both' ? 'active' : ''}"
+                                data-direction="both"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M7 17l5 5 5-5M7 7l5-5 5 5"/>
+                            </svg>
+                            Both
+                        </button>
+                        <button class="direction-btn ${direction === 'downstream' ? 'active' : ''}"
+                                data-direction="downstream"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M12 5v14M5 12l7 7 7-7"/>
+                            </svg>
+                            Downstream
+                        </button>
+                    </div>
                     <div class="cross-link-actions">
                         <button type="button"
                                 class="cross-link-btn icon-only"
@@ -228,34 +254,6 @@ export class LineageView {
                             <span>Analyze Impact</span>
                         </button>
                     </div>
-                </div>
-
-                <!-- Direction Toggle -->
-                <div class="direction-controls">
-                    <button class="direction-btn ${direction === 'upstream' ? 'active' : ''}"
-                            data-direction="upstream"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M12 19V5M5 12l7-7 7 7"/>
-                        </svg>
-                        Upstream Only
-                    </button>
-                    <button class="direction-btn ${direction === 'both' ? 'active' : ''}"
-                            data-direction="both"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M7 17l5 5 5-5M7 7l5-5 5 5"/>
-                        </svg>
-                        Both
-                    </button>
-                    <button class="direction-btn ${direction === 'downstream' ? 'active' : ''}"
-                            data-direction="downstream"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M12 5v14M5 12l7 7 7-7"/>
-                        </svg>
-                        Downstream Only
-                    </button>
                 </div>
 
                 <!-- Graph Container with SVG and overlays -->
@@ -629,11 +627,10 @@ export class LineageView {
     /**
      * Collect statistics from graph
      */
-    private collectStats(graph: LineageGraph): { tables: number; views: number; relationships: number } {
+    private collectStats(graph: LineageGraph): { tables: number; views: number } {
         const stats = {
             tables: 0,
-            views: 0,
-            relationships: graph.edges.length
+            views: 0
         };
 
         graph.nodes.forEach((node) => {
