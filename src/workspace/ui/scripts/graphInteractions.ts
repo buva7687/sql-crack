@@ -461,7 +461,9 @@ export function getGraphInteractionsScriptFragment(): string {
 
         function nodeMatchesColumnSearch(node, queryLower) {
             if (!node.columns || !Array.isArray(node.columns)) return false;
-            return node.columns.some(function(col) { return col.toLowerCase().includes(queryLower); });
+            return node.columns.some(function(col) {
+                return typeof col === 'string' && col.toLowerCase().includes(queryLower);
+            });
         }
 
         function getSearchMatchCount(query, typeFilter) {
