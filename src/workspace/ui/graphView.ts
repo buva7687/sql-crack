@@ -28,12 +28,29 @@ export function generateGraphBody(params: GraphBodyParams): string {
     
     // Generate graph data JSON for client script
     const graphData = JSON.stringify({
-        nodes: graph.nodes.map(node => ({
-            id: node.id,
-            label: node.label,
-            type: node.type,
-            filePath: node.filePath
-        }))
+        nodes: graph.nodes.map(node => {
+            const columnSet = new Set<string>();
+            if (node.definitions) {
+                for (const def of node.definitions) {
+                    if (!def || !Array.isArray(def.columns)) {
+                        continue;
+                    }
+                    for (const col of def.columns) {
+                        const name = typeof col?.name === 'string' ? col.name : '';
+                        if (name) {
+                            columnSet.add(name);
+                        }
+                    }
+                }
+            }
+            return {
+                id: node.id,
+                label: node.label,
+                type: node.type,
+                filePath: node.filePath,
+                columns: Array.from(columnSet)
+            };
+        })
     });
 
     // Generate search filter query

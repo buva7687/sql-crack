@@ -77,7 +77,9 @@ export type WorkspaceWebviewMessage =
     | { command: 'selectColumn'; tableId: string; columnName: string }
     | { command: 'clearColumnSelection' }
     | { command: 'savePng'; data: string; filename: string }
-    | { command: 'exportPngError'; error: string };
+    | { command: 'exportPngError'; error: string }
+    // Node-specific export
+    | { command: 'exportNodeLineage'; nodeId: string; nodeLabel: string; nodeType: string };
 
 // ─── Host → Webview messages ───
 

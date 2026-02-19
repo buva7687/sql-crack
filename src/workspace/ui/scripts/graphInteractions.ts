@@ -459,19 +459,34 @@ export function getGraphInteractionsScriptFragment(): string {
             activeEmptyState = state.id;
         }
 
+        function nodeMatchesColumnSearch(node, queryLower) {
+            if (!node.columns || !Array.isArray(node.columns)) return false;
+            return node.columns.some(function(col) {
+                return typeof col === 'string' && col.toLowerCase().includes(queryLower);
+            });
+        }
+
         function getSearchMatchCount(query, typeFilter) {
             if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return 0;
             const trimmedQuery = (query || '').trim();
             const hasQuery = trimmedQuery.length > 0;
             const queryLower = trimmedQuery.toLowerCase();
             const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;
+            const isColumnSearch = normalizedTypeFilter === 'column';
             let count = 0;
 
             for (const node of graphData.nodes) {
                 if (!node) continue;
-                if (normalizedTypeFilter && normalizedTypeFilter !== 'all' && node.type !== normalizedTypeFilter) continue;
-                if (!hasQuery) {
+                if (normalizedTypeFilter && normalizedTypeFilter !== 'all' && !isColumnSearch && node.type !== normalizedTypeFilter) continue;
+                if (!hasQuery && !isColumnSearch) {
                     count += 1;
+                    continue;
+                }
+
+                if (isColumnSearch) {
+                    if (hasQuery && nodeMatchesColumnSearch(node, queryLower)) {
+                        count += 1;
+                    }
                     continue;
                 }
 
@@ -624,12 +639,35 @@ export function getGraphInteractionsScriptFragment(): string {
             if (!svg) return;
             const query = searchInput ? searchInput.value.trim() : '';
             const typeFilter = filterType ? filterType.value : 'all';
-            const searchActive = Boolean(query) || typeFilter !== 'all';
+            const isColumnSearch = typeFilter === 'column';
+            const searchActive = Boolean(query) || (typeFilter !== 'all' && !isColumnSearch);
             const queryLower = query.toLowerCase();
+
+            // Build a set of node IDs that match column search for quick lookup
+            let columnMatchIds = null;
+            if (isColumnSearch && query && graphData && graphData.nodes) {
+                columnMatchIds = new Set();
+                for (const gNode of graphData.nodes) {
+                    if (gNode && nodeMatchesColumnSearch(gNode, queryLower)) {
+                        columnMatchIds.add(gNode.id);
+                    }
+                }
+            }
 
             document.querySelectorAll('.node').forEach(node => {
                 node.classList.remove('node-search-match', 'node-search-dim');
-                if (!searchActive) return;
+                if (!searchActive && !isColumnSearch) return;
+
+                if (isColumnSearch) {
+                    if (!query) return;
+                    const nodeId = node.getAttribute('data-id') || '';
+                    if (columnMatchIds && columnMatchIds.has(nodeId)) {
+                        node.classList.add('node-search-match');
+                    } else {
+                        node.classList.add('node-search-dim');
+                    }
+                    return;
+                }
 
                 const nodeType = node.getAttribute('data-type') || '';
                 if (typeFilter !== 'all' && nodeType !== typeFilter) {

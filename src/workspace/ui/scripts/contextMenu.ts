@@ -167,6 +167,16 @@ export function getContextMenuScriptFragment(): string {
                             visualizeFile(contextMenuTarget.filePath);
                         }
                         break;
+                    case 'exportLineage':
+                        if (contextMenuTarget.id) {
+                            vscode.postMessage({
+                                command: 'exportNodeLineage',
+                                nodeId: contextMenuTarget.id,
+                                nodeLabel: nodeName,
+                                nodeType: nodeType
+                            });
+                        }
+                        break;
                 }
                 hideContextMenu();
             });

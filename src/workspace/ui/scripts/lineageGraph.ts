@@ -38,6 +38,7 @@ export function getLineageGraphScriptFragment(): string {
                 lineageSetupInProgress = true;
                 setSafeHtml(lineageContent, message.data.html);
                 lineageDetailView = true;
+                document.querySelectorAll('.column-expansion-loader').forEach(el => el.remove());
                 if (message.data.nodeId) {
                     lineageCurrentNodeId = message.data.nodeId;
                 }
@@ -678,6 +679,48 @@ export function getLineageGraphScriptFragment(): string {
             });
         }
 
+        function showColumnExpansionLoader(nodeId) {
+            const node = document.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
+            if (!node) return;
+            const existing = node.querySelector('.column-expansion-loader');
+            if (existing) return;
+
+            const svgNs = 'http://www.w3.org/2000/svg';
+            const nodeBg = node.querySelector('.node-bg');
+            const width = Number(nodeBg ? nodeBg.getAttribute('width') : 0);
+            const height = Number(nodeBg ? nodeBg.getAttribute('height') : 0);
+            const loaderX = Number.isFinite(width) && width > 0 ? Math.round(width / 2) : 110;
+            const loaderY = Number.isFinite(height) && height > 0 ? Math.max(14, Math.round(height - 10)) : 56;
+
+            const loader = document.createElementNS(svgNs, 'g');
+            loader.setAttribute('class', 'column-expansion-loader');
+            loader.setAttribute('transform', 'translate(' + loaderX + ',' + loaderY + ')');
+
+            const track = document.createElementNS(svgNs, 'circle');
+            track.setAttribute('class', 'column-loader-track');
+            track.setAttribute('cx', '0');
+            track.setAttribute('cy', '0');
+            track.setAttribute('r', '7');
+
+            const spinner = document.createElementNS(svgNs, 'path');
+            spinner.setAttribute('class', 'column-loader-spinner');
+            spinner.setAttribute('d', 'M 0 -7 A 7 7 0 0 1 7 0');
+
+            const spin = document.createElementNS(svgNs, 'animateTransform');
+            spin.setAttribute('attributeName', 'transform');
+            spin.setAttribute('attributeType', 'XML');
+            spin.setAttribute('type', 'rotate');
+            spin.setAttribute('from', '0 0 0');
+            spin.setAttribute('to', '360 0 0');
+            spin.setAttribute('dur', '0.8s');
+            spin.setAttribute('repeatCount', 'indefinite');
+
+            spinner.appendChild(spin);
+            loader.appendChild(track);
+            loader.appendChild(spinner);
+            node.appendChild(loader);
+        }
+
         function expandNodeWithColumns(nodeId) {
             if (!lineageCurrentNodeId) {
                 return;
@@ -689,6 +732,7 @@ export function getLineageGraphScriptFragment(): string {
             }
             lineageExpandedNodes.add(nodeId);
 
+            showColumnExpansionLoader(nodeId);
             vscode.postMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,

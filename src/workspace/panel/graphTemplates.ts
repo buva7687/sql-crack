@@ -125,6 +125,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                         <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables</option>
                         <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views</option>
                         <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
+                        <option value="column">Columns</option>
                     </select>
                     <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear search">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -299,6 +300,14 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
                 </svg>
                 Visualize Dependencies
+            </div>
+            <div class="context-menu-item" data-action="exportLineage">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Export Node's Lineage
             </div>
         </div>
     </div>
@@ -493,6 +502,12 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
             <div class="hint-item"><kbd>U</kbd><span>Upstream</span></div>
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>D</kbd><span>Downstream</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Tab</kbd><span>Cycle nodes</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>↑↓←→</kbd><span>Navigate</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>Enter</kbd><span>Open file</span></div>
         </div>
 
         <!-- Bottom Legend Bar -->

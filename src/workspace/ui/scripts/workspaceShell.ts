@@ -20,14 +20,25 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
-            // Escape: Clear search (if in search input) or clear selection
+            // Escape: Clear search first, then clear selection
             if (e.key === 'Escape') {
+                // If actively typing in search, blur and clear
                 if (activeEl === searchInput) {
                     searchInput.blur();
                     clearSearch();
                     return;
                 }
-                // Only clear selection if not typing anywhere
+                // If search has content, clear it (even if not focused)
+                if (!isTyping && searchInput && searchInput.value.trim()) {
+                    clearSearch();
+                    return;
+                }
+                // If filter is active, reset it
+                if (!isTyping && filterType && filterType.value !== 'all') {
+                    clearSearch();
+                    return;
+                }
+                // Otherwise clear selection
                 if (!isTyping && selectedNodeId) {
                     clearSelection();
                 }
@@ -77,7 +88,131 @@ export function getWorkspaceShellScriptFragment(): string {
                 toggleGraphLegend();
                 return;
             }
+
+            // Tab: Cycle through nodes in visual left-to-right, top-to-bottom order
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const allNodes = getNodesSortedByPosition();
+                if (allNodes.length === 0) return;
+                const currentIdx = selectedNodeId
+                    ? allNodes.findIndex(function(n) { return n.getAttribute('data-id') === selectedNodeId; })
+                    : -1;
+                const nextIdx = e.shiftKey
+                    ? (currentIdx <= 0 ? allNodes.length - 1 : currentIdx - 1)
+                    : (currentIdx + 1) % allNodes.length;
+                updateSelectionPanel(allNodes[nextIdx]);
+                scrollNodeIntoView(allNodes[nextIdx]);
+                return;
+            }
+
+            // Arrow keys: Navigate to nearest node in the pressed direction (spatial)
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                const allNodes = Array.from(document.querySelectorAll('.node'));
+                if (allNodes.length === 0) return;
+                if (!selectedNodeId) {
+                    // No selection yet — select the first node by position
+                    const sorted = getNodesSortedByPosition();
+                    if (sorted.length > 0) {
+                        updateSelectionPanel(sorted[0]);
+                        scrollNodeIntoView(sorted[0]);
+                    }
+                    return;
+                }
+                const current = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
+                if (!current) return;
+                // Search ALL nodes in the pressed direction, not just edge-adjacent
+                const candidates = allNodes.filter(function(n) { return n !== current; });
+                const best = pickDirectionalNeighbor(current, candidates, e.key);
+                if (best) {
+                    updateSelectionPanel(best);
+                    scrollNodeIntoView(best);
+                }
+                return;
+            }
+
+            // Enter: Open file for selected node
+            if (e.key === 'Enter') {
+                if (!selectedNodeId) return;
+                const sel = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
+                if (sel) {
+                    const fp = sel.getAttribute('data-filepath');
+                    if (fp) openFile(fp);
+                }
+                return;
+            }
         });
+
+        function getNodesSortedByPosition() {
+            var nodes = Array.from(document.querySelectorAll('.node'));
+            nodes.sort(function(a, b) {
+                var ca = getNodeCenter(a);
+                var cb = getNodeCenter(b);
+                // Sort by y first (rows), then by x (left-to-right within a row)
+                // Use a threshold to group nodes on the same visual row
+                var rowThreshold = 30;
+                if (Math.abs(ca.y - cb.y) > rowThreshold) return ca.y - cb.y;
+                return ca.x - cb.x;
+            });
+            return nodes;
+        }
+
+        function getNodeCenter(nodeEl) {
+            var transform = nodeEl.getAttribute('transform') || '';
+            var match = /translate\\(([-\\d.]+)[,\\s]+([-\\d.]+)\\)/.exec(transform);
+            if (match) return { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+            var bbox = nodeEl.getBBox ? nodeEl.getBBox() : { x: 0, y: 0, width: 0, height: 0 };
+            return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+        }
+
+        function pickDirectionalNeighbor(currentNode, candidates, key) {
+            var cur = getNodeCenter(currentNode);
+            var best = null;
+            var bestScore = Infinity;
+            for (var i = 0; i < candidates.length; i++) {
+                var c = getNodeCenter(candidates[i]);
+                var dx = c.x - cur.x;
+                var dy = c.y - cur.y;
+                var ok = false;
+                if (key === 'ArrowUp') ok = dy < -5;
+                if (key === 'ArrowDown') ok = dy > 5;
+                if (key === 'ArrowLeft') ok = dx < -5;
+                if (key === 'ArrowRight') ok = dx > 5;
+                if (!ok) continue;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < bestScore) {
+                    bestScore = dist;
+                    best = candidates[i];
+                }
+            }
+            // Fallback: if no node in the exact direction, pick the closest neighbor
+            if (!best && candidates.length > 0) {
+                for (var i = 0; i < candidates.length; i++) {
+                    var c = getNodeCenter(candidates[i]);
+                    var dist = Math.sqrt((c.x - cur.x) * (c.x - cur.x) + (c.y - cur.y) * (c.y - cur.y));
+                    if (dist < bestScore) {
+                        bestScore = dist;
+                        best = candidates[i];
+                    }
+                }
+            }
+            return best;
+        }
+
+        function scrollNodeIntoView(nodeEl) {
+            var center = getNodeCenter(nodeEl);
+            var container = document.querySelector('.graph-area');
+            if (!container || !svg) return;
+            var containerRect = container.getBoundingClientRect();
+            var targetX = center.x * scale + offsetX;
+            var targetY = center.y * scale + offsetY;
+            // If node is outside visible area, pan to center it
+            if (targetX < 0 || targetX > containerRect.width || targetY < 0 || targetY > containerRect.height) {
+                offsetX = containerRect.width / 2 - center.x * scale;
+                offsetY = containerRect.height / 2 - center.y * scale;
+                updateTransform();
+            }
+        }
 
         // ========== Sidebar Toggle ==========
         document.getElementById('btn-sidebar')?.addEventListener('click', () => {

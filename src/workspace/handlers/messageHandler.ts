@@ -392,6 +392,14 @@ export class MessageHandler {
                     vscode.window.showErrorMessage(message.error || 'PNG export failed.');
                     break;
 
+                case 'exportNodeLineage':
+                    await this.handleExportNodeLineage(
+                        message.nodeId,
+                        message.nodeLabel,
+                        message.nodeType
+                    );
+                    break;
+
                 default:
                     logger.warn(`Unknown message command: ${(message as { command: string }).command}`);
             }
@@ -1059,6 +1067,103 @@ export class MessageHandler {
         this.postMessage({
             command: 'columnSelectionCleared'
         });
+    }
+
+    /**
+     * Resolve a workspace graph node ID (e.g. "table_5") to a lineage graph node ID (e.g. "table:daily_sales").
+     * Falls back to matching by type:label_lowercase and then by name substring.
+     */
+    private resolveLineageNodeId(
+        lineageGraph: LineageGraph,
+        graphNodeId: string,
+        nodeLabel: string,
+        nodeType: string
+    ): string | null {
+        // Direct match (unlikely since graph IDs differ from lineage IDs)
+        if (lineageGraph.nodes.has(graphNodeId)) {
+            return graphNodeId;
+        }
+
+        // Try type:label_lowercase (the lineage graph ID format)
+        const nameLower = nodeLabel.toLowerCase();
+        const candidateId = `${nodeType}:${nameLower}`;
+        if (lineageGraph.nodes.has(candidateId)) {
+            return candidateId;
+        }
+
+        // Try common type alternatives
+        const typeAlternatives = nodeType === 'view' ? ['view', 'table'] : nodeType === 'table' ? ['table', 'view'] : [nodeType];
+        for (const t of typeAlternatives) {
+            const altId = `${t}:${nameLower}`;
+            if (lineageGraph.nodes.has(altId)) {
+                return altId;
+            }
+        }
+
+        // Fallback: scan all nodes for matching name
+        for (const [id, node] of lineageGraph.nodes) {
+            if (node.type === 'column') { continue; }
+            if (node.name.toLowerCase() === nameLower) {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    private async handleExportNodeLineage(
+        nodeId: string,
+        nodeLabel: string,
+        nodeType: string
+    ): Promise<void> {
+        await this._context.buildLineageGraph();
+        const flowAnalyzer = this._context.getFlowAnalyzer();
+        const lineageGraph = this._context.getLineageGraph();
+
+        if (!flowAnalyzer || !lineageGraph) {
+            vscode.window.showErrorMessage('No lineage data available. Refresh the index first.');
+            return;
+        }
+
+        const resolvedId = this.resolveLineageNodeId(lineageGraph, nodeId, nodeLabel, nodeType);
+        if (!resolvedId) {
+            vscode.window.showErrorMessage(`Node "${nodeLabel}" not found in lineage graph. Try refreshing the workspace index.`);
+            return;
+        }
+
+        const node = lineageGraph.nodes.get(resolvedId)!;
+
+        const upstream = flowAnalyzer.getUpstream(resolvedId, { maxDepth: -1, excludeExternal: false });
+        const downstream = flowAnalyzer.getDownstream(resolvedId, { maxDepth: -1, excludeExternal: false });
+
+        const safeLabel = nodeLabel
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            || 'node';
+
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            node: { id: nodeId, name: nodeLabel, type: nodeType, filePath: node.filePath },
+            upstream: upstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
+            downstream: downstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
+            summary: {
+                upstreamCount: upstream.nodes.length,
+                downstreamCount: downstream.nodes.length,
+                upstreamDepth: upstream.depth,
+                downstreamDepth: downstream.depth
+            }
+        };
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`lineage-${safeLabel}.json`),
+            filters: { 'JSON': ['json'] }
+        });
+
+        if (!uri) { return; }
+
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(payload, null, 2)));
+        vscode.window.showInformationMessage(`Exported lineage for "${nodeLabel}" to ${uri.fsPath}`);
     }
 
     private dedupeLineageNodes(nodes: LineageNode[]): LineageNode[] {

@@ -57,7 +57,7 @@ export function getBaseStyles(): string {
             display: flex; align-items: center; gap: 12px;
             height: 100%; /* Match header height */
         }
-        .header-right { display: flex; align-items: center; gap: 8px; }
+        .header-right { display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
 
         /* ========== Icon Button ========== */
         .icon-btn {
@@ -232,6 +232,22 @@ export function getBaseStyles(): string {
         .skeleton-line.short { width: 40%; }
         .skeleton-line.medium { width: 70%; }
         .skeleton-line.long { width: 90%; }
+
+        /* ========== Column Expansion Loader ========== */
+        .column-expansion-loader {
+            pointer-events: none;
+        }
+        .column-loader-track {
+            fill: none;
+            stroke: var(--border-subtle);
+            stroke-width: 2;
+        }
+        .column-loader-spinner {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 2;
+            stroke-linecap: round;
+        }
         .skeleton-circle {
             width: 40px;
             height: 40px;
