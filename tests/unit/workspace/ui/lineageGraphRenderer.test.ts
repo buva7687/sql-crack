@@ -120,7 +120,7 @@ describe('LineageGraphRenderer UX markup', () => {
         expect(svg).toContain('column-close-btn-icon');
     });
 
-    it('reports upstream/downstream stats using internal lineage nodes only', () => {
+    it('includes external nodes in upstream/downstream stats', () => {
         const graphWithExternal: LineageGraph = {
             nodes: new Map([
                 ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
@@ -146,7 +146,9 @@ describe('LineageGraphRenderer UX markup', () => {
             includeExternal: true,
         });
 
-        expect(renderGraph.stats.upstreamCount).toBe(1);
+        expect(renderGraph.stats.upstreamCount).toBe(2);
+        expect(renderGraph.stats.externalUpstreamCount).toBe(1);
         expect(renderGraph.stats.downstreamCount).toBe(0);
+        expect(renderGraph.stats.externalDownstreamCount).toBe(0);
     });
 });

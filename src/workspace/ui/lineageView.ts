@@ -170,20 +170,14 @@ export class LineageView {
         // Generate SVG
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
 
-        // Calculate node counts by type
-        const nodeCounts = { table: 0, view: 0, cte: 0, external: 0 };
-        for (const node of renderableGraph.nodes) {
-            if (node.type in nodeCounts) {
-                nodeCounts[node.type as keyof typeof nodeCounts]++;
-            }
-        }
-
-        // Build node count badge parts
-        const countParts: string[] = [];
-        if (nodeCounts.table > 0) {countParts.push(`${nodeCounts.table} table${nodeCounts.table !== 1 ? 's' : ''}`);}
-        if (nodeCounts.view > 0) {countParts.push(`${nodeCounts.view} view${nodeCounts.view !== 1 ? 's' : ''}`);}
-        if (nodeCounts.cte > 0) {countParts.push(`${nodeCounts.cte} CTE${nodeCounts.cte !== 1 ? 's' : ''}`);}
-        if (nodeCounts.external > 0) {countParts.push(`${nodeCounts.external} external`);}
+        // Build external count parentheticals
+        const { upstreamCount, downstreamCount, externalUpstreamCount, externalDownstreamCount } = renderableGraph.stats;
+        const upstreamLabel = externalUpstreamCount > 0
+            ? `${upstreamCount} upstream (${externalUpstreamCount} external)`
+            : `${upstreamCount} upstream`;
+        const downstreamLabel = externalDownstreamCount > 0
+            ? `${downstreamCount} downstream (${externalDownstreamCount} external)`
+            : `${downstreamCount} downstream`;
 
         return `
             <div class="lineage-graph-view">
@@ -195,27 +189,18 @@ export class LineageView {
                         <span class="node-type-badge">${centerNode?.type || 'table'}</span>
                     </div>
                     <div class="graph-stats">
-                        <span class="stat node-count" title="Nodes in graph">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                                <rect x="14" y="14" width="7" height="7" rx="1"/>
-                            </svg>
-                            ${countParts.join(', ') || 'No nodes'}
-                        </span>
-                        <span class="stat-divider">|</span>
-                        <span class="stat upstream" title="Upstream tables">
+                        <span class="stat upstream" title="Upstream dependencies">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 19V5M5 12l7-7 7 7"/>
                             </svg>
-                            ${renderableGraph.stats.upstreamCount} upstream
+                            ${upstreamLabel}
                         </span>
-                        <span class="stat downstream" title="Downstream tables">
+                        <span class="stat-divider">|</span>
+                        <span class="stat downstream" title="Downstream consumers">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 5v14M5 12l7 7 7-7"/>
                             </svg>
-                            ${renderableGraph.stats.downstreamCount} downstream
+                            ${downstreamLabel}
                         </span>
                     </div>
                     <div class="cross-link-actions">

@@ -69,6 +69,8 @@ export interface RenderableGraph {
     stats: {
         upstreamCount: number;
         downstreamCount: number;
+        externalUpstreamCount: number;
+        externalDownstreamCount: number;
         totalNodes: number;
     };
 }
@@ -188,6 +190,10 @@ export class LineageGraphRenderer {
                     Array.from(nodeMap.values()).filter(n => n.depth < 0 && this.isDisplayableLineageNode(n.type)).length,
                 downstreamCount: direction === 'upstream' ? 0 :
                     Array.from(nodeMap.values()).filter(n => n.depth > 0 && this.isDisplayableLineageNode(n.type)).length,
+                externalUpstreamCount: direction === 'downstream' ? 0 :
+                    Array.from(nodeMap.values()).filter(n => n.depth < 0 && n.type === 'external').length,
+                externalDownstreamCount: direction === 'upstream' ? 0 :
+                    Array.from(nodeMap.values()).filter(n => n.depth > 0 && n.type === 'external').length,
                 totalNodes: nodeMap.size
             }
         };
@@ -353,6 +359,8 @@ export class LineageGraphRenderer {
             stats: {
                 upstreamCount: 0,
                 downstreamCount: 0,
+                externalUpstreamCount: 0,
+                externalDownstreamCount: 0,
                 totalNodes: 0
             }
         };
@@ -633,7 +641,7 @@ export class LineageGraphRenderer {
     }
 
     private isDisplayableLineageNode(type: GraphNode['type']): boolean {
-        return type === 'table' || type === 'view' || type === 'cte';
+        return type === 'table' || type === 'view' || type === 'cte' || type === 'external';
     }
 
     /**
