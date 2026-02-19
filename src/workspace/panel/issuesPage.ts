@@ -52,14 +52,14 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
 
         ${totalIssues > 0 && detailedStats ? `
         <div class="summary-bar">
-            <div class="summary-card warning">
+            <button type="button" class="summary-card summary-card-jump warning" data-scroll-target="orphaned-definitions-section" aria-label="Jump to Orphaned Definitions section">
                 <div class="summary-card-value">${detailedStats.orphanedDetails.length}</div>
                 <div class="summary-card-label">Orphaned Definitions</div>
-            </div>
-            <div class="summary-card error">
+            </button>
+            <button type="button" class="summary-card summary-card-jump error" data-scroll-target="missing-definitions-section" aria-label="Jump to Missing Definitions section">
                 <div class="summary-card-value">${detailedStats.missingDetails.length}</div>
                 <div class="summary-card-label">Missing Definitions</div>
-            </div>
+            </button>
             ${detailedStats.parseErrorDetails.length > 0 ? `
             <div class="summary-card info">
                 <div class="summary-card-value">${detailedStats.parseErrorDetails.length}</div>
@@ -71,7 +71,7 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
 
         <div class="content">
             ${!detailedStats || detailedStats.orphanedDetails.length === 0 ? '' : `
-            <div class="section">
+            <div class="section issues-section-anchor" id="orphaned-definitions-section" tabindex="-1">
                 <div class="section-header">
                     <div class="section-icon warning">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2">
@@ -104,7 +104,7 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
             `}
 
             ${!detailedStats || detailedStats.missingDetails.length === 0 ? '' : `
-            <div class="section">
+            <div class="section issues-section-anchor" id="missing-definitions-section" tabindex="-1">
                 <div class="section-header">
                     <div class="section-icon error">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="2">
@@ -192,6 +192,18 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
             </div>
             ` : ''}
         </div>
+
+        <button
+            type="button"
+            class="issues-back-to-top"
+            id="issues-back-to-top"
+            aria-label="Back to top"
+            title="Back to top"
+        >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+        </button>
     </div>
 
     ${script}

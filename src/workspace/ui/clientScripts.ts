@@ -147,9 +147,129 @@ export function getWebviewScript(params: WebviewScriptParams): string {
 export function getIssuesScript(nonce: string): string {
     return `<script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
+        const sectionFlashDurationMs = 1200;
+        const backToTopThreshold = 120;
+        const backToTopBtn = document.getElementById('issues-back-to-top');
+
+        function getIssuesScrollElement() {
+            return document.scrollingElement || document.documentElement || document.body;
+        }
+
+        function getIssuesScrollTop() {
+            const content = document.querySelector('.content');
+            const scrollElement = getIssuesScrollElement();
+            const contentTop = content && typeof content.scrollTop === 'number' ? content.scrollTop : 0;
+            return (scrollElement && scrollElement.scrollTop)
+                || contentTop
+                || window.scrollY
+                || document.documentElement.scrollTop
+                || document.body.scrollTop
+                || 0;
+        }
+
+        function scrollIssuesToTop() {
+            const content = document.querySelector('.content');
+            const scrollElement = getIssuesScrollElement();
+
+            // Immediate jump for reliability across webview scroll-root differences.
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            if (content && typeof content.scrollTop === 'number') {
+                content.scrollTop = 0;
+            }
+            if (scrollElement) {
+                scrollElement.scrollTop = 0;
+            }
+
+            // Then apply smooth behavior where supported.
+            if (scrollElement && typeof scrollElement.scrollTo === 'function') {
+                scrollElement.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            // Fallback for environments that ignore smooth scroll on the chosen root.
+            window.setTimeout(() => {
+                if (scrollElement) {
+                    scrollElement.scrollTop = 0;
+                }
+                document.documentElement.scrollTop = 0;
+                document.body.scrollTop = 0;
+                if (content && typeof content.scrollTop === 'number') {
+                    content.scrollTop = 0;
+                }
+                window.scrollTo(0, 0);
+                updateBackToTopVisibility();
+            }, 220);
+        }
+
+        function updateBackToTopVisibility() {
+            if (!backToTopBtn) return;
+            if (getIssuesScrollTop() > backToTopThreshold) {
+                backToTopBtn.classList.add('is-visible');
+            } else {
+                backToTopBtn.classList.remove('is-visible');
+            }
+        }
+
+        function navigateToIssuesSection(targetId, updateHash = true) {
+            if (!targetId) return;
+            const section = document.getElementById(targetId);
+            if (!section) return;
+
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            try {
+                section.focus({ preventScroll: true });
+            } catch (error) {
+                section.focus();
+            }
+
+            section.classList.remove('issues-section-flash');
+            window.requestAnimationFrame(() => {
+                section.classList.add('issues-section-flash');
+            });
+            window.setTimeout(() => {
+                section.classList.remove('issues-section-flash');
+            }, sectionFlashDurationMs);
+
+            if (!updateHash) return;
+            if (window.history && typeof window.history.replaceState === 'function') {
+                window.history.replaceState(null, '', '#' + targetId);
+            } else {
+                window.location.hash = targetId;
+            }
+        }
 
         document.getElementById('btn-back').addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'graph' });
+        });
+
+        if (backToTopBtn) {
+            backToTopBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                scrollIssuesToTop();
+                try {
+                    if (window.history && typeof window.history.replaceState === 'function') {
+                        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+                    } else {
+                        window.location.hash = '';
+                    }
+                } catch (error) {
+                    window.location.hash = '';
+                }
+            });
+            updateBackToTopVisibility();
+            window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
+            document.addEventListener('scroll', updateBackToTopVisibility, { passive: true, capture: true });
+        }
+
+        document.querySelectorAll('[data-scroll-target]').forEach(card => {
+            card.addEventListener('click', () => {
+                const targetId = card.getAttribute('data-scroll-target');
+                if (targetId) {
+                    navigateToIssuesSection(targetId, true);
+                }
+            });
         });
 
         document.querySelectorAll('.list-item, .missing-ref-item').forEach(item => {
@@ -165,6 +285,14 @@ export function getIssuesScript(nonce: string): string {
                 }
             });
         });
+
+        const initialTargetId = window.location.hash ? window.location.hash.slice(1) : '';
+        if (initialTargetId) {
+            window.setTimeout(() => {
+                navigateToIssuesSection(initialTargetId, false);
+                updateBackToTopVisibility();
+            }, 0);
+        }
     </script>`;
 }
 
