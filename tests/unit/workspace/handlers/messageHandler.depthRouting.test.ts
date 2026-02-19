@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import { MessageHandler } from '../../../../src/workspace/handlers/messageHandler';
 
 function createLineageGraph() {
@@ -76,6 +77,10 @@ function createContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('MessageHandler depth and column lineage routing', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
     it('uses tableId fallback when getColumnLineage is invoked without tableName', async () => {
         const { context, columnLineageTracker, postMessage } = createContext();
         const handler = new MessageHandler(context);
@@ -242,5 +247,51 @@ describe('MessageHandler depth and column lineage routing', () => {
         });
 
         expect(context.setLineageLegendVisible).toHaveBeenCalledWith(false);
+    });
+
+    it('exports empty lineage payload when workspace node is missing from lineage graph', async () => {
+        const flowAnalyzer = {
+            getUpstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),
+            getDownstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),
+        };
+        const { context } = createContext({
+            getFlowAnalyzer: jest.fn(() => flowAnalyzer),
+            getLineageGraph: jest.fn(() => ({
+                nodes: new Map([
+                    ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
+                ]),
+                edges: [],
+                columnEdges: [],
+                getUpstream: jest.fn(),
+                getDownstream: jest.fn(),
+                getColumnLineage: jest.fn(),
+            })),
+        });
+
+        (vscode.window as any).showSaveDialog = jest.fn().mockResolvedValue(vscode.Uri.file('/tmp/lineage-so-order-date.json'));
+        const writeFileSpy = vscode.workspace.fs.writeFile as jest.Mock;
+
+        const handler = new MessageHandler(context);
+        await handler.handleMessage({
+            command: 'exportNodeLineage',
+            nodeId: 'external_42',
+            nodeLabel: 'so.order_date',
+            nodeType: 'external',
+        } as any);
+
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(
+            expect.stringContaining('not found in lineage graph')
+        );
+        expect((vscode.window as any).showSaveDialog).toHaveBeenCalled();
+        expect(writeFileSpy).toHaveBeenCalled();
+        expect(flowAnalyzer.getUpstream).not.toHaveBeenCalled();
+        expect(flowAnalyzer.getDownstream).not.toHaveBeenCalled();
+
+        const savedPayload = JSON.parse(Buffer.from(writeFileSpy.mock.calls[0][1]).toString('utf8'));
+        expect(savedPayload.node.name).toBe('so.order_date');
+        expect(savedPayload.node.lineageNodeId).toBeNull();
+        expect(savedPayload.summary.upstreamCount).toBe(0);
+        expect(savedPayload.summary.downstreamCount).toBe(0);
+        expect(savedPayload.summary.lineageNodeResolved).toBe(false);
     });
 });

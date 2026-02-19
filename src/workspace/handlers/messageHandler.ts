@@ -1128,15 +1128,16 @@ export class MessageHandler {
         }
 
         const resolvedId = this.resolveLineageNodeId(lineageGraph, nodeId, nodeLabel, nodeType);
-        if (!resolvedId) {
-            vscode.window.showErrorMessage(`Node "${nodeLabel}" not found in lineage graph. Try refreshing the workspace index.`);
-            return;
-        }
+        const node = resolvedId ? lineageGraph.nodes.get(resolvedId) : undefined;
 
-        const node = lineageGraph.nodes.get(resolvedId)!;
-
-        const upstream = flowAnalyzer.getUpstream(resolvedId, { maxDepth: -1, excludeExternal: false });
-        const downstream = flowAnalyzer.getDownstream(resolvedId, { maxDepth: -1, excludeExternal: false });
+        // Some workspace graph nodes (especially unresolved external refs) may not
+        // exist in the lineage graph. Export should still succeed with an empty flow.
+        const upstream = resolvedId
+            ? flowAnalyzer.getUpstream(resolvedId, { maxDepth: -1, excludeExternal: false })
+            : { nodes: [], edges: [], paths: [], depth: 0 };
+        const downstream = resolvedId
+            ? flowAnalyzer.getDownstream(resolvedId, { maxDepth: -1, excludeExternal: false })
+            : { nodes: [], edges: [], paths: [], depth: 0 };
 
         const safeLabel = nodeLabel
             .toLowerCase()
@@ -1146,14 +1147,21 @@ export class MessageHandler {
 
         const payload = {
             exportedAt: new Date().toISOString(),
-            node: { id: nodeId, name: nodeLabel, type: nodeType, filePath: node.filePath },
+            node: {
+                id: nodeId,
+                lineageNodeId: resolvedId || null,
+                name: nodeLabel,
+                type: nodeType,
+                filePath: node?.filePath
+            },
             upstream: upstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
             downstream: downstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
             summary: {
                 upstreamCount: upstream.nodes.length,
                 downstreamCount: downstream.nodes.length,
                 upstreamDepth: upstream.depth,
-                downstreamDepth: downstream.depth
+                downstreamDepth: downstream.depth,
+                lineageNodeResolved: Boolean(resolvedId)
             }
         };
 
@@ -1165,7 +1173,8 @@ export class MessageHandler {
         if (!uri) { return; }
 
         await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(payload, null, 2)));
-        vscode.window.showInformationMessage(`Exported lineage for "${nodeLabel}" to ${uri.fsPath}`);
+        const resolutionNote = resolvedId ? '' : ' (exported without lineage links)';
+        vscode.window.showInformationMessage(`Exported lineage for "${nodeLabel}" to ${uri.fsPath}${resolutionNote}`);
     }
 
     private dedupeLineageNodes(nodes: LineageNode[]): LineageNode[] {
