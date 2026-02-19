@@ -671,7 +671,7 @@ export class LineageGraphRenderer {
         const nodes: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
 
         for (const [id, node] of this.lineageGraph.nodes) {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+            if (node.type === 'table' || node.type === 'view') {
                 nodes.push({
                     id,
                     name: node.name,

@@ -115,7 +115,7 @@ describe('LineageView curated start content', () => {
         expect(html).toContain('id="lineage-popular-section"');
         expect(html).toContain('id="lineage-popular-grid"');
         expect(html).toContain('id="lineage-show-all-btn"');
-        expect(html).toContain('Show all 3 tables');
+        expect(html).toContain('Show all 2 tables');
         expect(html).toContain('id="lineage-tables-grid" style="display: none;"');
         expect(html).toContain('id="lineage-sort"');
         expect(html).toContain('option value="connected">Most Connected');
