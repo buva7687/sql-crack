@@ -16,6 +16,8 @@ export function getTooltipScriptFragment(): string {
             });
             // Closing tags
             safe = safe.replace(/&lt;\\\/(div|ul|li|strong|span)&gt;/gi, '</$1>');
+            // Restore common HTML entities
+            safe = safe.replace(/&amp;(middot|nbsp|bull|ndash|mdash|amp|lt|gt|quot|#39|#x27);/gi, '&$1;');
             // Safety net: strip any remaining on* event handler attributes
             safe = safe.replace(/\\s+on\\w+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '');
             return safe;
