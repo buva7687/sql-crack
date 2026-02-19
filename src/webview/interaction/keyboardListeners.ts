@@ -30,6 +30,10 @@ export function registerSvgKeyboardListeners(
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
+            if (callbacks.isZeroGravityModeActive()) {
+                callbacks.toggleZeroGravityMode(false);
+                return;
+            }
             if (state.showColumnFlows) {
                 callbacks.toggleColumnFlows(false);
                 return;
@@ -54,6 +58,62 @@ export function registerDocumentKeyboardListeners(
     callbacks: EventListenerCallbacks
 ): void {
     const { state, getCurrentNodes, getSearchBox, documentListeners } = context;
+    const KONAMI_SEQUENCE = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
+    let konamiProgress: string[] = [];
+    const matrixChordKeys = new Set<string>();
+    let matrixLastTriggeredAt = 0;
+
+    function normalizeKey(key: string): string {
+        return (key || '').toLowerCase();
+    }
+
+    function recordKonamiKey(key: string): boolean {
+        const normalized = normalizeKey(key);
+        if (!normalized) {
+            return false;
+        }
+        konamiProgress.push(normalized);
+        if (konamiProgress.length > KONAMI_SEQUENCE.length) {
+            konamiProgress = konamiProgress.slice(-KONAMI_SEQUENCE.length);
+        }
+        const matched = KONAMI_SEQUENCE.every((expected, index) => konamiProgress[index] === expected);
+        if (!matched) {
+            return false;
+        }
+        konamiProgress = [];
+        callbacks.toggleZeroGravityMode();
+        return true;
+    }
+
+    function isMatrixChordActive(): boolean {
+        return matrixChordKeys.has('shift') && matrixChordKeys.has('s') && matrixChordKeys.has('q') && matrixChordKeys.has('l');
+    }
+
+    function handleMatrixChordKeydown(e: KeyboardEvent): 'none' | 'captured' | 'triggered' {
+        const normalized = normalizeKey(e.key);
+        if (!normalized) {
+            return 'none';
+        }
+        const isMatrixChordKey = normalized === 'shift' || normalized === 's' || normalized === 'q' || normalized === 'l';
+        if (!isMatrixChordKey) {
+            return 'none';
+        }
+        if (normalized !== 'shift' && !e.shiftKey) {
+            return 'none';
+        }
+        matrixChordKeys.add(normalized);
+        if (!isMatrixChordActive()) {
+            return 'captured';
+        }
+        const now = Date.now();
+        if (now - matrixLastTriggeredAt < 800) {
+            return 'captured';
+        }
+        matrixLastTriggeredAt = now;
+        callbacks.triggerMatrixRainOverlay();
+        return 'triggered';
+    }
+
     const keydownHandler = (e: KeyboardEvent) => {
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
             document.activeElement?.tagName === 'TEXTAREA';
@@ -87,6 +147,11 @@ export function registerDocumentKeyboardListeners(
         }
 
         if (e.key === 'Escape') {
+            if (callbacks.isZeroGravityModeActive()) {
+                e.preventDefault();
+                callbacks.toggleZeroGravityMode(false);
+                return;
+            }
             if (state.showColumnFlows) {
                 callbacks.toggleColumnFlows(false);
                 return;
@@ -110,6 +175,19 @@ export function registerDocumentKeyboardListeners(
 
         if (e.key === 'Enter' && document.activeElement === getSearchBox()) {
             callbacks.navigateSearch(1);
+            return;
+        }
+
+        if (!isInputFocused) {
+            const matrixChordResult = handleMatrixChordKeydown(e);
+            if (matrixChordResult !== 'none') {
+                e.preventDefault();
+                return;
+            }
+        }
+
+        if (!isInputFocused && recordKonamiKey(e.key)) {
+            e.preventDefault();
             return;
         }
 
@@ -208,6 +286,18 @@ export function registerDocumentKeyboardListeners(
         }
     };
 
+    const keyupHandler = (e: KeyboardEvent) => {
+        const normalized = normalizeKey(e.key);
+        if (!normalized) {
+            return;
+        }
+        if (normalized === 'shift' || normalized === 's' || normalized === 'q' || normalized === 'l') {
+            matrixChordKeys.delete(normalized);
+        }
+    };
+
     document.addEventListener('keydown', keydownHandler);
+    document.addEventListener('keyup', keyupHandler);
     documentListeners.push({ type: 'keydown', handler: keydownHandler as EventListener });
+    documentListeners.push({ type: 'keyup', handler: keyupHandler as EventListener });
 }

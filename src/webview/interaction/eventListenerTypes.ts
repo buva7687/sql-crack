@@ -48,6 +48,9 @@ export interface EventListenerCallbacks {
     setFocusMode: (mode: FocusMode) => void;
     toggleExpandAll: () => void;
     toggleLegend: () => void;
+    triggerMatrixRainOverlay: () => void;
+    toggleZeroGravityMode: (enable?: boolean) => void;
+    isZeroGravityModeActive: () => boolean;
     showKeyboardShortcutsHelp: (shortcuts: KeyboardShortcut[], isDarkTheme: boolean) => void;
     getKeyboardShortcuts: () => KeyboardShortcut[];
     navigateToConnectedNode: (direction: 'upstream' | 'downstream', nodeId: string) => void;

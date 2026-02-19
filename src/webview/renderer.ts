@@ -266,6 +266,30 @@ let cloudViewStates: Map<string, CloudViewState> = new Map();
 let documentListeners: Array<{ type: string; handler: EventListener }> = [];
 let spinnerStyleElement: HTMLStyleElement | null = null;
 let reducedMotionStyleElement: HTMLStyleElement | null = null;
+let zeroGravityModeActive = false;
+let zeroGravityAnimationFrameId: number | null = null;
+let zeroGravityLastFrameAt = 0;
+let zeroGravityFrameCount = 0;
+let zeroGravityOriginalNodePositions: Map<string, { x: number; y: number }> = new Map();
+let zeroGravityVelocities: Map<string, { vx: number; vy: number }> = new Map();
+let zeroGravityBounds: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+let zeroGravityVirtualizationEnabled: boolean | null = null;
+let matrixRainCanvas: HTMLCanvasElement | null = null;
+let matrixRainContext: CanvasRenderingContext2D | null = null;
+let matrixRainDrops: number[] = [];
+let matrixRainAnimationFrameId: number | null = null;
+let matrixRainDismissTimer: ReturnType<typeof setTimeout> | null = null;
+let matrixRainRemoveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const ZERO_GRAVITY_PADDING = 180;
+const ZERO_GRAVITY_MAX_SPEED = 2.8;
+const ZERO_GRAVITY_FRICTION = 0.996;
+const ZERO_GRAVITY_BOUNCE = 0.9;
+const ZERO_GRAVITY_JITTER = 0.04;
+const MATRIX_RAIN_DURATION_MS = 1500;
+const MATRIX_RAIN_FONT_SIZE = 16;
+const MATRIX_RAIN_FADE_MS = 140;
+const MATRIX_RAIN_CHARS = '01SQLCRACKSELECTFROMJOINWHEREGROUPBYHAVINGUNION';
 
 function getRendererContext(): RendererContext {
     return {
@@ -435,6 +459,318 @@ function applyEdgePositionsToDom(): void {
 
         edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
     });
+}
+
+function getZeroGravityBounds(nodes: FlowNode[]): { minX: number; maxX: number; minY: number; maxY: number } | null {
+    if (nodes.length === 0) {
+        return null;
+    }
+
+    const minX = Math.min(...nodes.map(node => node.x)) - ZERO_GRAVITY_PADDING;
+    const maxX = Math.max(...nodes.map(node => node.x + node.width)) + ZERO_GRAVITY_PADDING;
+    const minY = Math.min(...nodes.map(node => node.y)) - ZERO_GRAVITY_PADDING;
+    const maxY = Math.max(...nodes.map(node => node.y + node.height)) + ZERO_GRAVITY_PADDING;
+    return { minX, maxX, minY, maxY };
+}
+
+function seedZeroGravityVelocity(node: FlowNode): { vx: number; vy: number } {
+    let hash = 0;
+    for (let index = 0; index < node.id.length; index += 1) {
+        hash = ((hash << 5) - hash + node.id.charCodeAt(index)) | 0;
+    }
+
+    const angle = ((Math.abs(hash) % 360) * Math.PI) / 180;
+    const speed = 1.2 + (Math.abs(hash) % 11) / 10;
+    return {
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+    };
+}
+
+function animateZeroGravityFrame(timestamp: number): void {
+    if (!zeroGravityModeActive || !mainGroup || currentNodes.length === 0 || !zeroGravityBounds) {
+        zeroGravityAnimationFrameId = null;
+        return;
+    }
+
+    const frameFactor = zeroGravityLastFrameAt === 0
+        ? 1
+        : Math.min(Math.max((timestamp - zeroGravityLastFrameAt) / 16.67, 0.25), 2);
+    zeroGravityLastFrameAt = timestamp;
+
+    for (const node of currentNodes) {
+        const velocity = zeroGravityVelocities.get(node.id) ?? seedZeroGravityVelocity(node);
+        velocity.vx += (Math.random() - 0.5) * ZERO_GRAVITY_JITTER;
+        velocity.vy += (Math.random() - 0.5) * ZERO_GRAVITY_JITTER;
+
+        velocity.vx = Math.max(-ZERO_GRAVITY_MAX_SPEED, Math.min(ZERO_GRAVITY_MAX_SPEED, velocity.vx));
+        velocity.vy = Math.max(-ZERO_GRAVITY_MAX_SPEED, Math.min(ZERO_GRAVITY_MAX_SPEED, velocity.vy));
+
+        let nextX = node.x + velocity.vx * frameFactor;
+        let nextY = node.y + velocity.vy * frameFactor;
+
+        const minX = zeroGravityBounds.minX;
+        const maxX = Math.max(minX, zeroGravityBounds.maxX - node.width);
+        const minY = zeroGravityBounds.minY;
+        const maxY = Math.max(minY, zeroGravityBounds.maxY - node.height);
+
+        if (nextX < minX) {
+            nextX = minX;
+            velocity.vx = Math.abs(velocity.vx) * ZERO_GRAVITY_BOUNCE;
+        } else if (nextX > maxX) {
+            nextX = maxX;
+            velocity.vx = -Math.abs(velocity.vx) * ZERO_GRAVITY_BOUNCE;
+        }
+
+        if (nextY < minY) {
+            nextY = minY;
+            velocity.vy = Math.abs(velocity.vy) * ZERO_GRAVITY_BOUNCE;
+        } else if (nextY > maxY) {
+            nextY = maxY;
+            velocity.vy = -Math.abs(velocity.vy) * ZERO_GRAVITY_BOUNCE;
+        }
+
+        velocity.vx *= ZERO_GRAVITY_FRICTION;
+        velocity.vy *= ZERO_GRAVITY_FRICTION;
+        node.x = nextX;
+        node.y = nextY;
+        zeroGravityVelocities.set(node.id, velocity);
+    }
+
+    applyNodePositionsToDom();
+    applyEdgePositionsToDom();
+    currentNodes.forEach(node => updateCloudAndArrow(node));
+    zeroGravityFrameCount += 1;
+    if (zeroGravityFrameCount % 6 === 0) {
+        updateMinimap();
+    }
+    zeroGravityAnimationFrameId = requestAnimationFrame(animateZeroGravityFrame);
+}
+
+function isZeroGravityModeActive(): boolean {
+    return zeroGravityModeActive;
+}
+
+function stopZeroGravityMode(options?: { silent?: boolean }): void {
+    if (!zeroGravityModeActive) {
+        return;
+    }
+
+    zeroGravityModeActive = false;
+    zeroGravityLastFrameAt = 0;
+    zeroGravityFrameCount = 0;
+    if (zeroGravityAnimationFrameId !== null) {
+        cancelAnimationFrame(zeroGravityAnimationFrameId);
+        zeroGravityAnimationFrameId = null;
+    }
+
+    for (const node of currentNodes) {
+        const original = zeroGravityOriginalNodePositions.get(node.id);
+        if (!original) {
+            continue;
+        }
+        node.x = original.x;
+        node.y = original.y;
+    }
+
+    applyNodePositionsToDom();
+    applyEdgePositionsToDom();
+    currentNodes.forEach(node => updateCloudAndArrow(node));
+    updateMinimap();
+    zeroGravityOriginalNodePositions.clear();
+    zeroGravityVelocities.clear();
+    zeroGravityBounds = null;
+    removeBreadcrumbSegment('zero-gravity-mode');
+
+    if (zeroGravityVirtualizationEnabled !== null && zeroGravityVirtualizationEnabled !== virtualizationEnabled) {
+        setVirtualizationEnabled(zeroGravityVirtualizationEnabled);
+    }
+    zeroGravityVirtualizationEnabled = null;
+
+    if (!options?.silent) {
+        showCopyFeedback('Zero-Gravity Mode OFF');
+    }
+}
+
+function startZeroGravityMode(): void {
+    if (zeroGravityModeActive || !mainGroup || currentNodes.length === 0) {
+        return;
+    }
+    if (prefersReducedMotion()) {
+        showCopyFeedback('Zero-Gravity disabled while reduced motion is enabled');
+        return;
+    }
+
+    zeroGravityBounds = getZeroGravityBounds(currentNodes);
+    if (!zeroGravityBounds) {
+        return;
+    }
+    zeroGravityOriginalNodePositions = new Map(currentNodes.map(node => [node.id, { x: node.x, y: node.y }]));
+    zeroGravityVelocities.clear();
+    currentNodes.forEach(node => {
+        zeroGravityVelocities.set(node.id, seedZeroGravityVelocity(node));
+    });
+
+    zeroGravityVirtualizationEnabled = virtualizationEnabled;
+    if (virtualizationEnabled) {
+        setVirtualizationEnabled(false);
+    }
+
+    zeroGravityModeActive = true;
+    zeroGravityLastFrameAt = 0;
+    zeroGravityFrameCount = 0;
+    addBreadcrumbSegment({
+        id: 'zero-gravity-mode',
+        label: 'Zero-Gravity',
+        icon: '0g',
+        onClear: () => {
+            toggleZeroGravityMode(false);
+        },
+    });
+    showCopyFeedback('Zero-Gravity Mode ON (press Esc to exit)');
+    zeroGravityAnimationFrameId = requestAnimationFrame(animateZeroGravityFrame);
+}
+
+function toggleZeroGravityMode(enable?: boolean): void {
+    const shouldEnable = typeof enable === 'boolean' ? enable : !zeroGravityModeActive;
+    if (shouldEnable) {
+        startZeroGravityMode();
+    } else {
+        stopZeroGravityMode();
+    }
+}
+
+function ensureMatrixRainCanvas(): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+    if (matrixRainCanvas) {
+        return matrixRainCanvas;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'sql-crack-matrix-rain-overlay';
+    canvas.style.cssText = `
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: ${Z_INDEX.firstRunOverlay};
+        opacity: 0;
+        transition: opacity ${MATRIX_RAIN_FADE_MS}ms ease;
+    `;
+    document.body.appendChild(canvas);
+    matrixRainCanvas = canvas;
+    matrixRainContext = canvas.getContext('2d');
+    requestAnimationFrame(() => {
+        if (matrixRainCanvas) {
+            matrixRainCanvas.style.opacity = '1';
+        }
+    });
+    return canvas;
+}
+
+function resizeMatrixRainCanvas(canvas: HTMLCanvasElement): void {
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.innerHeight);
+    const devicePixelRatio = window.devicePixelRatio || 1;
+
+    canvas.width = Math.floor(width * devicePixelRatio);
+    canvas.height = Math.floor(height * devicePixelRatio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    matrixRainContext = canvas.getContext('2d');
+    if (!matrixRainContext) {
+        return;
+    }
+    matrixRainContext.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    matrixRainContext.font = `600 ${MATRIX_RAIN_FONT_SIZE}px ${MONO_FONT_STACK}`;
+    matrixRainDrops = Array.from({ length: Math.ceil(width / MATRIX_RAIN_FONT_SIZE) }, () => -Math.floor(Math.random() * 20));
+}
+
+function drawMatrixRainFrame(): void {
+    if (!matrixRainCanvas || !matrixRainContext) {
+        matrixRainAnimationFrameId = null;
+        return;
+    }
+
+    const width = matrixRainCanvas.width / (window.devicePixelRatio || 1);
+    const height = matrixRainCanvas.height / (window.devicePixelRatio || 1);
+    const fadeFill = state.isDarkTheme ? 'rgba(3, 8, 6, 0.18)' : 'rgba(248, 250, 252, 0.2)';
+    const rainBase = state.isDarkTheme ? '74, 222, 128' : '22, 163, 74';
+
+    matrixRainContext.fillStyle = fadeFill;
+    matrixRainContext.fillRect(0, 0, width, height);
+
+    for (let index = 0; index < matrixRainDrops.length; index += 1) {
+        const char = MATRIX_RAIN_CHARS[Math.floor(Math.random() * MATRIX_RAIN_CHARS.length)];
+        const x = index * MATRIX_RAIN_FONT_SIZE;
+        const y = matrixRainDrops[index] * MATRIX_RAIN_FONT_SIZE;
+        const alpha = state.isDarkTheme ? 0.4 + Math.random() * 0.5 : 0.3 + Math.random() * 0.45;
+        matrixRainContext.fillStyle = `rgba(${rainBase}, ${alpha.toFixed(2)})`;
+        matrixRainContext.fillText(char, x, y);
+
+        if (y > height && Math.random() > 0.975) {
+            matrixRainDrops[index] = 0;
+        } else {
+            matrixRainDrops[index] += 1;
+        }
+    }
+
+    matrixRainAnimationFrameId = requestAnimationFrame(drawMatrixRainFrame);
+}
+
+function clearMatrixRainOverlay(): void {
+    if (matrixRainDismissTimer) {
+        clearTimeout(matrixRainDismissTimer);
+        matrixRainDismissTimer = null;
+    }
+    if (matrixRainAnimationFrameId !== null) {
+        cancelAnimationFrame(matrixRainAnimationFrameId);
+        matrixRainAnimationFrameId = null;
+    }
+    if (matrixRainRemoveTimer) {
+        clearTimeout(matrixRainRemoveTimer);
+        matrixRainRemoveTimer = null;
+    }
+
+    const canvasToRemove = matrixRainCanvas;
+    if (!canvasToRemove) {
+        matrixRainContext = null;
+        matrixRainDrops = [];
+        return;
+    }
+    canvasToRemove.style.opacity = '0';
+    matrixRainRemoveTimer = setTimeout(() => {
+        if (canvasToRemove.isConnected) {
+            canvasToRemove.remove();
+        }
+    }, MATRIX_RAIN_FADE_MS);
+
+    matrixRainCanvas = null;
+    matrixRainContext = null;
+    matrixRainDrops = [];
+}
+
+function triggerMatrixRainOverlay(): void {
+    if (prefersReducedMotion()) {
+        return;
+    }
+    const canvas = ensureMatrixRainCanvas();
+    if (!canvas) {
+        return;
+    }
+    resizeMatrixRainCanvas(canvas);
+
+    if (matrixRainAnimationFrameId === null) {
+        matrixRainAnimationFrameId = requestAnimationFrame(drawMatrixRainFrame);
+    }
+    if (matrixRainDismissTimer) {
+        clearTimeout(matrixRainDismissTimer);
+    }
+    matrixRainDismissTimer = setTimeout(() => {
+        clearMatrixRainOverlay();
+    }, MATRIX_RAIN_DURATION_MS);
 }
 
 function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
@@ -729,6 +1065,9 @@ export function initRenderer(container: HTMLElement): void {
             setFocusMode,
             toggleExpandAll,
             toggleLegend,
+            triggerMatrixRainOverlay,
+            toggleZeroGravityMode,
+            isZeroGravityModeActive,
             showKeyboardShortcutsHelp,
             getKeyboardShortcuts,
             navigateToConnectedNode,
@@ -761,6 +1100,8 @@ export function initRenderer(container: HTMLElement): void {
  * Call this when the renderer is disposed to prevent memory leaks.
  */
 export function cleanupRenderer(): void {
+    stopZeroGravityMode({ silent: true });
+    clearMatrixRainOverlay();
     documentListeners.forEach(({ type, handler }) => {
         document.removeEventListener(type, handler);
     });
@@ -913,6 +1254,7 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
 
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
+    stopZeroGravityMode({ silent: true });
 
     // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
     selectNode(null);
@@ -2174,6 +2516,7 @@ export function switchLayout(layoutType: LayoutType): void {
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
         return;
     }
+    stopZeroGravityMode({ silent: true });
 
     // Show loading for larger graphs
     const showLoadingIndicator = currentNodes.length > 15;

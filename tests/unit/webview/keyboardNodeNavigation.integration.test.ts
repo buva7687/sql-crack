@@ -25,6 +25,16 @@ describe('renderer keyboard node navigation integration', () => {
         expect(nodeDispatcherSource).toContain("navigateToSiblingNode(node, 'prev');");
     });
 
+    it('wires Konami and Shift+S+Q+L easter-egg shortcuts through keyboard callbacks', () => {
+        expect(listenerSource).toContain('const KONAMI_SEQUENCE =');
+        expect(listenerSource).toContain('callbacks.toggleZeroGravityMode();');
+        expect(listenerSource).toContain('callbacks.triggerMatrixRainOverlay();');
+        expect(listenerSource).toContain('const matrixChordResult = handleMatrixChordKeydown(e);');
+        expect(listenerSource).toContain("if (matrixChordResult !== 'none') {");
+        expect(listenerSource).toContain('callbacks.isZeroGravityModeActive()');
+        expect(listenerSource).toContain('callbacks.toggleZeroGravityMode(false);');
+    });
+
     it('maps U/D/A shortcuts to focus direction and enables focus mode from setFocusMode', () => {
         expect(listenerSource).toContain("if (e.key === 'u' || e.key === 'U')");
         expect(listenerSource).toContain("callbacks.setFocusMode('upstream');");
@@ -52,5 +62,15 @@ describe('renderer keyboard node navigation integration', () => {
         expect(nodeDispatcherSource).toContain('UI_COLORS.nodeFocusRingDark');
         expect(nodeDispatcherSource).toContain('UI_COLORS.nodeFocusRingLight');
         expect(nodeDispatcherSource).toContain("group.setAttribute('data-keyboard-focus', 'true');");
+    });
+
+    it('connects zero-gravity and matrix helpers into renderer setup and lifecycle cleanup', () => {
+        expect(rendererSource).toContain('triggerMatrixRainOverlay,');
+        expect(rendererSource).toContain('toggleZeroGravityMode,');
+        expect(rendererSource).toContain('isZeroGravityModeActive,');
+        expect(rendererSource).toContain('function toggleZeroGravityMode(enable?: boolean): void');
+        expect(rendererSource).toContain('function triggerMatrixRainOverlay(): void');
+        expect(rendererSource).toContain('stopZeroGravityMode({ silent: true });');
+        expect(rendererSource).toContain('clearMatrixRainOverlay();');
     });
 });
