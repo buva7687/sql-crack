@@ -72,6 +72,19 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
     });
 
+    it('clears active column trace panel on Escape before graph search/selection handling', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("if (!isTyping && window.__workspaceColumnTraceActive && typeof window.clearWorkspaceColumnTrace === 'function')");
+        expect(script).toContain('window.clearWorkspaceColumnTrace();');
+    });
+
     it('auto-fits graph after sidebar layout changes', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -176,6 +189,19 @@ describe('workspace clientScripts navigation context', () => {
 
         // processLineageGraphResult must call initializeLineageLegendBar after DOM injection
         expect(script).toMatch(/setupMinimap\(\);\s*\n\s*initializeLineageLegendBar\(\);/);
+    });
+
+    it('auto-fit uses responsive padding and allows moderate zoom-in for sparse lineage graphs', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('const padding = Math.max(18, Math.min(36');
+        expect(script).toContain('lineageScale = Math.max(0.3, Math.min(1.4, lineageScale));');
     });
 
     it('synchronizes lineage overlay offsets with clamped legend height values', () => {

@@ -31,7 +31,20 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain("event.key === 'ArrowDown'");
         expect(script).toContain("event.key === 'ArrowUp'");
         expect(script).toContain("event.key === 'Enter' || event.key === ' '");
+        expect(script).toContain('triggerColumnTraceFromRow(nextRow);');
         expect(script).toContain('Press Enter to trace lineage');
+    });
+
+    it('does not trigger lineage keyboard shortcuts when modifier keys are held', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('if (e.metaKey || e.ctrlKey || e.altKey) return;');
     });
 
     it('supports lineage bottom legend visibility controls with L shortcut and dismiss button', () => {
@@ -48,9 +61,9 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('initializeLineageLegendBar');
         expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
         expect(script).toContain("const dismissBtn = document.getElementById('legend-dismiss');");
-        expect(script).toContain("const legendToggleBtn = document.getElementById('lineage-legend-toggle');");
         expect(script).toContain('vscode.postMessage({ command: \'setLineageLegendVisibility\', visible: nextVisible });');
         expect(script).toContain('const showLegend = lineageLegendVisibleFromHost !== false;');
+        expect(script).not.toContain('lineage-legend-toggle');
         expect(script).not.toContain('localStorage.getItem(lineageLegendStorageKey)');
     });
 
@@ -123,5 +136,19 @@ describe('workspace lineage discoverability script', () => {
         expect(script).not.toContain('}, 200);');
         expect(script).toContain('const lineageBounds = lineageContent ? lineageContent.getBoundingClientRect() : null;');
         expect(script).toContain('left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));');
+    });
+
+    it('suppresses node tooltip while column trace panel is active', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('window.__workspaceColumnTraceActive = true;');
+        expect(script).toContain('window.__workspaceColumnTraceActive = false;');
+        expect(script).toContain('if (window.__workspaceColumnTraceActive) return;');
     });
 });

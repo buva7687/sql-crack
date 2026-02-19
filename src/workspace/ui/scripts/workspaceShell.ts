@@ -22,6 +22,15 @@ export function getWorkspaceShellScriptFragment(): string {
 
             // Escape: Clear search first, then clear selection
             if (e.key === 'Escape') {
+                // In lineage graph, prioritize clearing active column trace panel/overlays.
+                if (!isTyping && window.__workspaceColumnTraceActive && typeof window.clearWorkspaceColumnTrace === 'function') {
+                    e.preventDefault();
+                    window.clearWorkspaceColumnTrace();
+                    if (typeof updateWorkspaceBreadcrumb === 'function') {
+                        updateWorkspaceBreadcrumb();
+                    }
+                    return;
+                }
                 // If actively typing in search, blur and clear
                 if (activeEl === searchInput) {
                     searchInput.blur();

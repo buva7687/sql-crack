@@ -542,7 +542,9 @@ export class MessageHandler {
 
         const lineageGraph = this._context.getLineageGraph();
         const graph = lineageGraph || createEmptyLineageGraph();
-        const html = this._context.getLineageView().generateLineageSearchView(graph);
+        const html = this._context.getLineageView().generateLineageSearchView(graph, {
+            depth: this._context.getDefaultLineageDepth()
+        });
 
         this.postMessage({
             command: 'lineageOverviewResult',

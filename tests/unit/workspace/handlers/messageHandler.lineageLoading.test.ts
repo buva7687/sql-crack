@@ -69,10 +69,13 @@ describe('MessageHandler lineage null-state rendering', () => {
 
         expect(context.setCurrentView).toHaveBeenCalledWith('lineage');
         expect(context.buildLineageGraph).toHaveBeenCalled();
-        expect(lineageView.generateLineageSearchView).toHaveBeenCalledWith(expect.objectContaining({
-            nodes: expect.any(Map),
-            edges: [],
-        }));
+        expect(lineageView.generateLineageSearchView).toHaveBeenCalledWith(
+            expect.objectContaining({
+                nodes: expect.any(Map),
+                edges: [],
+            }),
+            { depth: 7 }
+        );
         expect(postMessage).toHaveBeenCalledWith({
             command: 'lineageOverviewResult',
             data: { html: '<div>lineage-empty</div>' },

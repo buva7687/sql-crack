@@ -235,18 +235,19 @@ export function getBaseStyles(): string {
 
         /* ========== Column Expansion Loader ========== */
         .column-expansion-loader {
-            pointer-events: none;
-        }
-        .column-loader-track {
-            fill: none;
-            stroke: var(--border-subtle);
-            stroke-width: 2;
+            position: absolute;
+            bottom: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
         }
         .column-loader-spinner {
-            fill: none;
-            stroke: var(--accent);
-            stroke-width: 2;
-            stroke-linecap: round;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-subtle);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
         }
         .skeleton-circle {
             width: 40px;

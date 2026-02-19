@@ -110,7 +110,7 @@ export function getLineageGraphScriptFragment(): string {
 
                 if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && containerRect.height > 0) {
                     // Work in pixel coordinates (no viewBox transformation)
-                    const padding = 60;
+                    const padding = Math.max(18, Math.min(36, Math.round(Math.min(containerRect.width, containerRect.height) * 0.04)));
                     const availableWidth = containerRect.width - padding * 2;
                     const availableHeight = containerRect.height - padding * 2;
 
@@ -118,8 +118,8 @@ export function getLineageGraphScriptFragment(): string {
                     const scaleY = availableHeight / bbox.height;
 
                     lineageScale = Math.min(scaleX, scaleY);
-                    // Cap auto-fit at 100% to prevent zooming in too much for small graphs
-                    lineageScale = Math.max(0.3, Math.min(1.0, lineageScale));
+                    // Allow moderate zoom-in so sparse graphs use available canvas.
+                    lineageScale = Math.max(0.3, Math.min(1.4, lineageScale));
 
                     // Calculate bbox center
                     const bboxCenterX = bbox.x + bbox.width / 2;
@@ -216,10 +216,13 @@ export function getLineageGraphScriptFragment(): string {
                 const currentIndex = rows.indexOf(fromRow);
                 if (currentIndex === -1) {
                     rows[0].focus();
+                    triggerColumnTraceFromRow(rows[0]);
                     return;
                 }
                 const nextIndex = (currentIndex + delta + rows.length) % rows.length;
-                rows[nextIndex].focus();
+                const nextRow = rows[nextIndex];
+                nextRow.focus();
+                triggerColumnTraceFromRow(nextRow);
             }
 
             const nodes = svg.querySelectorAll('.lineage-node');
@@ -382,10 +385,6 @@ export function getLineageGraphScriptFragment(): string {
             if (!legendPanel) return;
             legendPanel.classList.toggle('is-hidden', !visible);
             legendPanel.setAttribute('aria-hidden', visible ? 'false' : 'true');
-            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
-            if (legendToggleBtn) {
-                legendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
-            }
 
             const container = document.getElementById('lineage-graph-container');
             if (container) {
@@ -422,12 +421,6 @@ export function getLineageGraphScriptFragment(): string {
                 event.preventDefault();
                 event.stopPropagation();
                 toggleLineageLegendBar(false);
-            });
-            const legendToggleBtn = document.getElementById('lineage-legend-toggle');
-            legendToggleBtn?.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleLineageLegendBar();
             });
 
             if (lineageOverlayResizeHandler) {
@@ -506,6 +499,7 @@ export function getLineageGraphScriptFragment(): string {
         function showLineageTooltip(e, node) {
             const tooltip = document.getElementById('lineage-tooltip');
             if (!tooltip) return;
+            if (window.__workspaceColumnTraceActive) return;
 
             const nodeId = node.getAttribute('data-node-id') || '';
             const name = node.getAttribute('data-node-name') || '';
@@ -684,40 +678,9 @@ export function getLineageGraphScriptFragment(): string {
             if (!node) return;
             const existing = node.querySelector('.column-expansion-loader');
             if (existing) return;
-
-            const svgNs = 'http://www.w3.org/2000/svg';
-            const nodeBg = node.querySelector('.node-bg');
-            const width = Number(nodeBg ? nodeBg.getAttribute('width') : 0);
-            const height = Number(nodeBg ? nodeBg.getAttribute('height') : 0);
-            const loaderX = Number.isFinite(width) && width > 0 ? Math.round(width / 2) : 110;
-            const loaderY = Number.isFinite(height) && height > 0 ? Math.max(14, Math.round(height - 10)) : 56;
-
-            const loader = document.createElementNS(svgNs, 'g');
-            loader.setAttribute('class', 'column-expansion-loader');
-            loader.setAttribute('transform', 'translate(' + loaderX + ',' + loaderY + ')');
-
-            const track = document.createElementNS(svgNs, 'circle');
-            track.setAttribute('class', 'column-loader-track');
-            track.setAttribute('cx', '0');
-            track.setAttribute('cy', '0');
-            track.setAttribute('r', '7');
-
-            const spinner = document.createElementNS(svgNs, 'path');
-            spinner.setAttribute('class', 'column-loader-spinner');
-            spinner.setAttribute('d', 'M 0 -7 A 7 7 0 0 1 7 0');
-
-            const spin = document.createElementNS(svgNs, 'animateTransform');
-            spin.setAttribute('attributeName', 'transform');
-            spin.setAttribute('attributeType', 'XML');
-            spin.setAttribute('type', 'rotate');
-            spin.setAttribute('from', '0 0 0');
-            spin.setAttribute('to', '360 0 0');
-            spin.setAttribute('dur', '0.8s');
-            spin.setAttribute('repeatCount', 'indefinite');
-
-            spinner.appendChild(spin);
-            loader.appendChild(track);
-            loader.appendChild(spinner);
+            const loader = document.createElement('div');
+            loader.className = 'column-expansion-loader';
+            loader.innerHTML = '<div class="column-loader-spinner"></div>';
             node.appendChild(loader);
         }
 
@@ -828,6 +791,7 @@ export function getLineageGraphScriptFragment(): string {
             // Only respond if lineage graph is visible
             const lineageContainer = document.getElementById('lineage-graph-container');
             if (!lineageContainer || lineageContainer.offsetParent === null) return;
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             // Ignore if typing in an input/select/textarea
             const target = e.target;
@@ -843,6 +807,7 @@ export function getLineageGraphScriptFragment(): string {
                     if (firstRow) {
                         e.preventDefault();
                         firstRow.focus();
+                        triggerColumnTraceFromRow(firstRow);
                         return;
                     }
                 }

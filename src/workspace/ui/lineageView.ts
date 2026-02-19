@@ -32,9 +32,10 @@ export class LineageView {
         options: {
             selectedNodeId?: string;
             recentSelections?: RecentSelection[];
+            depth?: number;
         } = {}
     ): string {
-        const { selectedNodeId, recentSelections = [] } = options;
+        const { selectedNodeId, recentSelections = [], depth = 5 } = options;
 
         // Get all searchable nodes
         const renderer = new LineageGraphRenderer(graph);
@@ -104,11 +105,11 @@ export class LineageView {
                                 </button>
                             </div>
                             <div class="lineage-popular-grid" id="lineage-popular-grid">
-                                ${this.generatePopularNodes(graph, 6)}
+                                ${this.generatePopularNodes(graph, 6, depth)}
                             </div>
                         </div>
                         <div class="lineage-tables-grid" id="lineage-tables-grid" style="display: none;">
-                            ${this.generateAllNodes(graph)}
+                            ${this.generateAllNodes(graph, depth)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
                             <p>No matching tables found</p>
@@ -297,14 +298,6 @@ export class LineageView {
                                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                             </svg>
                         </button>
-                        <div class="zoom-divider"></div>
-                        <button class="zoom-btn" id="lineage-legend-toggle" title="Toggle legend (L)" aria-label="Toggle lineage legend" aria-pressed="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <rect x="4" y="5" width="16" height="14" rx="2"/>
-                                <line x1="8" y1="10" x2="16" y2="10"/>
-                                <line x1="8" y1="14" x2="12" y2="14"/>
-                            </svg>
-                        </button>
                     </div>
 
                     <!-- Bottom Legend Bar -->
@@ -441,15 +434,14 @@ export class LineageView {
     /**
      * Generate all nodes as filterable grid items
      */
-    private generateAllNodes(graph: LineageGraph): string {
+    private generateAllNodes(graph: LineageGraph, depth: number = 5): string {
         const flowAnalyzer = new FlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {
             if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
-                // Use excludeExternal: false to match what the graph view shows
-                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 5, excludeExternal: false });
-                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 5, excludeExternal: false });
+                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
+                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
                 // Count only tables, views, CTEs (exclude external and column nodes to match graph display)
                 const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
@@ -487,7 +479,7 @@ export class LineageView {
     /**
      * Generate popular/most connected nodes
      */
-    private generatePopularNodes(graph: LineageGraph, limit: number): string {
+    private generatePopularNodes(graph: LineageGraph, limit: number, depth: number = 5): string {
         const flowAnalyzer = new FlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
@@ -495,8 +487,8 @@ export class LineageView {
             if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
                 // Curated "Most Connected" should prioritize internal lineage density.
                 // External endpoints are still visible in full-node exploration views.
-                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
-                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
+                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
+                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
                 // Count only tables, views, CTEs (exclude column nodes to match graph display)
                 const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;

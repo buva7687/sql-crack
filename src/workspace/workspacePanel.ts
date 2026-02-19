@@ -586,17 +586,11 @@ export class WorkspacePanel {
         // Generate graph data JSON for client script
         const graphData = escapeForInlineScriptValue({
             nodes: graph.nodes.map(node => {
-                const columnSet = new Set<string>();
+                const columns: string[] = [];
                 if (node.definitions) {
                     for (const def of node.definitions) {
-                        if (!def || !Array.isArray(def.columns)) {
-                            continue;
-                        }
                         for (const col of def.columns) {
-                            const name = typeof col?.name === 'string' ? col.name : '';
-                            if (name) {
-                                columnSet.add(name);
-                            }
+                            if (!columns.includes(col.name)) { columns.push(col.name); }
                         }
                     }
                 }
@@ -605,7 +599,7 @@ export class WorkspacePanel {
                     label: node.label,
                     type: node.type,
                     filePath: node.filePath,
-                    columns: Array.from(columnSet)
+                    columns
                 };
             })
         });

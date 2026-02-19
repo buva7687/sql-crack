@@ -89,6 +89,24 @@ function createGraphWithColumnNodes(): LineageGraph {
     };
 }
 
+function createDepthGraph(): LineageGraph {
+    return {
+        nodes: new Map([
+            ['table:a', { id: 'table:a', type: 'table', name: 'a', metadata: {} }],
+            ['table:b', { id: 'table:b', type: 'table', name: 'b', metadata: {} }],
+            ['table:c', { id: 'table:c', type: 'table', name: 'c', metadata: {} }],
+        ]),
+        edges: [
+            { id: 'edge:a-b', sourceId: 'table:a', targetId: 'table:b', type: 'direct', metadata: {} },
+            { id: 'edge:b-c', sourceId: 'table:b', targetId: 'table:c', type: 'direct', metadata: {} },
+        ],
+        columnEdges: [],
+        getUpstream: () => [],
+        getDownstream: () => [],
+        getColumnLineage: () => [],
+    };
+}
+
 describe('LineageView curated start content', () => {
     it('renders Most Connected section with show-all control and hidden full grid by default', () => {
         const html = new LineageView().generateLineageSearchView(createGraph());
@@ -144,6 +162,17 @@ describe('LineageView curated start content', () => {
         expect(ordersCard).toContain('class="conn-up">↑1</span>');
         expect(ordersCard).toContain('class="conn-down">↓2</span>');
         expect(ordersCard).toContain('data-total="3"');
+    });
+
+    it('uses requested lineage depth when computing overview connection counts', () => {
+        const shallowHtml = new LineageView().generateLineageSearchView(createDepthGraph(), { depth: 1 });
+        const deepHtml = new LineageView().generateLineageSearchView(createDepthGraph(), { depth: 5 });
+
+        const shallowCard = shallowHtml.match(/<button class="popular-item[\s\S]*?data-node-id="table:a"[\s\S]*?<\/button>/)?.[0] || '';
+        const deepCard = deepHtml.match(/<button class="popular-item[\s\S]*?data-node-id="table:a"[\s\S]*?<\/button>/)?.[0] || '';
+
+        expect(shallowCard).toContain('title="0 upstream, 1 downstream"');
+        expect(deepCard).toContain('title="0 upstream, 2 downstream"');
     });
 
     it('shows no-relationships state when lineage render has nodes but no connecting edges', () => {

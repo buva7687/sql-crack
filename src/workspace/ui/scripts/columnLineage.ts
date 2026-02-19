@@ -6,6 +6,7 @@ export function getColumnLineageScriptFragment(): string {
         // ========== Column Lineage Highlighting ==========
 
         let selectedColumn = null;
+        window.__workspaceColumnTraceActive = false;
 
         function handleColumnLineageResult(data) {
             if (!data) return;
@@ -21,14 +22,17 @@ export function getColumnLineageScriptFragment(): string {
                 return;
             }
 
+            dismissColumnTraceHint();
+            if (typeof hideLineageTooltip === 'function') {
+                hideLineageTooltip();
+            }
+            clearColumnHighlighting();
             selectedColumn = { tableId, columnName };
             window.__workspaceSelectedColumnLabel = columnName;
+            window.__workspaceColumnTraceActive = true;
             if (typeof updateWorkspaceBreadcrumb === 'function') {
                 updateWorkspaceBreadcrumb();
             }
-            dismissColumnTraceHint();
-
-            clearColumnHighlighting();
 
             const svg = document.querySelector('.lineage-graph-svg');
             if (!svg) return;
@@ -236,6 +240,10 @@ export function getColumnLineageScriptFragment(): string {
         function clearColumnHighlighting() {
             selectedColumn = null;
             window.__workspaceSelectedColumnLabel = '';
+            window.__workspaceColumnTraceActive = false;
+            if (typeof hideLineageTooltip === 'function') {
+                hideLineageTooltip();
+            }
 
             const svg = document.querySelector('.lineage-graph-svg');
             if (!svg) return;
