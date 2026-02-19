@@ -367,25 +367,21 @@ export function getLineageGraphStyles(): string {
         .graph-stats .stat.upstream { color: var(--success-light); }
         .graph-stats .stat.downstream { color: var(--accent); }
 
-        /* Direction Controls */
+        /* Direction Controls (inline in header) */
         .direction-controls {
             display: flex;
-            gap: 4px;
-            padding: 8px 16px;
-            background: var(--bg-primary);
-            border-bottom: 1px solid var(--border-subtle);
-            flex-shrink: 0;
+            gap: 3px;
         }
         .direction-btn {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 14px;
-            background: var(--bg-secondary);
+            gap: 4px;
+            padding: 4px 10px;
+            background: var(--bg-primary);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             color: var(--text-secondary);
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
             transition: all 0.15s;
         }
@@ -398,7 +394,7 @@ export function getLineageGraphStyles(): string {
             border-color: var(--accent);
             color: white;
         }
-        .direction-btn svg { width: 16px; height: 16px; }
+        .direction-btn svg { width: 14px; height: 14px; }
 
         /* Graph Container */
         .lineage-graph-container {
