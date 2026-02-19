@@ -282,7 +282,7 @@ export function getGraphViewHtml(
         missingDefinitions: any[];
     }
 ): string {
-    const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length;
+    const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
     
     return `<!DOCTYPE html>
 <html lang="en">

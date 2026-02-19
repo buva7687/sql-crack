@@ -7,17 +7,17 @@ export function getTooltipScriptFragment(): string {
             div.textContent = html;
             var safe = div.innerHTML;
             // Restore only the structural tags used by tooltip content:
-            // <div class="tooltip-*">, <ul class="tooltip-list">, <li>, <strong>, <span>
-            // Opening tags with optional class attribute only (no style — tooltips use CSS classes)
-            safe = safe.replace(/&lt;(div|ul|li|strong|span)(\\s+class=&quot;[^&]*?&quot;)*\\s*&gt;/gi, function(m, tag, attrs) {
+            // <div>, <ul>, <li>, <strong>, <span>, <br> — with optional class/style attributes.
+            // Note: innerHTML escapes < > & but leaves " as literal quotes (not &quot;).
+            safe = safe.replace(/&lt;(div|ul|li|strong|span|br)(\\s+(?:class|style)="[^"]*?")*\\s*\\/?&gt;/gi, function(m, tag, attrs) {
                 var restored = '<' + tag;
-                if (attrs) restored += attrs.replace(/&quot;/g, '"');
+                if (attrs) restored += attrs;
                 return restored + '>';
             });
             // Closing tags
             safe = safe.replace(/&lt;\\\/(div|ul|li|strong|span)&gt;/gi, '</$1>');
             // Safety net: strip any remaining on* event handler attributes
-            safe = safe.replace(/\\s+on\\w+\\s*=\\s*(?:&quot;[^&]*&quot;|'[^']*'|[^\\s>]+)/gi, '');
+            safe = safe.replace(/\\s+on\\w+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '');
             return safe;
         }
         function showTooltip(e, content) {

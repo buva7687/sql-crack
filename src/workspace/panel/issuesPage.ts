@@ -60,6 +60,12 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                 <div class="summary-card-value">${detailedStats.missingDetails.length}</div>
                 <div class="summary-card-label">Missing Definitions</div>
             </div>
+            ${detailedStats.parseErrorDetails.length > 0 ? `
+            <div class="summary-card info">
+                <div class="summary-card-value">${detailedStats.parseErrorDetails.length}</div>
+                <div class="summary-card-label">Unparseable Files</div>
+            </div>
+            ` : ''}
         </div>
         ` : ''}
 
@@ -141,7 +147,39 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
             </div>
             `}
 
-            ${(!detailedStats || (detailedStats.orphanedDetails.length === 0 && detailedStats.missingDetails.length === 0)) ? `
+            ${!detailedStats || detailedStats.parseErrorDetails.length === 0 ? '' : `
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-icon info">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="section-title">Unparseable Files</span>
+                            <span class="section-count">${detailedStats.parseErrorDetails.length}</span>
+                        </div>
+                        <div class="section-desc">Files that could not be parsed — definitions may be incomplete</div>
+                    </div>
+                </div>
+                <div class="list">
+                    ${detailedStats.parseErrorDetails.slice(0, 50).map(item => `
+                    <div class="list-item" data-filepath="${escapeHtml(item.filePath)}">
+                        <span class="item-type file">file</span>
+                        <div class="item-info">
+                            <div class="item-name">${escapeHtml(item.fileName)}</div>
+                            <div class="item-path">${escapeHtml(item.filePath)}</div>
+                            <div class="item-path" style="color: var(--text-muted); font-style: italic;">${escapeHtml(item.error)}</div>
+                        </div>
+                    </div>
+                    `).join('')}
+                    ${detailedStats.parseErrorDetails.length > 50 ? `<div class="list-more">+ ${detailedStats.parseErrorDetails.length - 50} more files</div>` : ''}
+                </div>
+            </div>
+            `}
+
+            ${(!detailedStats || (detailedStats.orphanedDetails.length === 0 && detailedStats.missingDetails.length === 0 && detailedStats.parseErrorDetails.length === 0)) ? `
             <div class="empty-state">
                 <div class="empty-state-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

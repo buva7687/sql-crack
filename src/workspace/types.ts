@@ -92,6 +92,7 @@ export interface WorkspaceStats {
     orphanedDefinitions: string[];  // Tables defined but never referenced
     missingDefinitions: string[];   // Tables referenced but not defined
     circularDependencies: string[]; // Files with circular dependencies
+    parseErrors: number;            // Files that failed to parse
 }
 
 /**
@@ -158,6 +159,7 @@ export interface SearchResult {
 export interface DetailedWorkspaceStats extends WorkspaceStats {
     orphanedDetails: DefinitionDetail[];
     missingDetails: MissingDefinitionDetail[];
+    parseErrorDetails: ParseErrorDetail[];
 }
 
 /**
@@ -178,4 +180,13 @@ export interface MissingDefinitionDetail {
     references: TableReference[];
     referenceCount: number;
     referencingFiles: string[];
+}
+
+/**
+ * Detail for a file that failed to parse
+ */
+export interface ParseErrorDetail {
+    filePath: string;
+    fileName: string;
+    error: string;
 }

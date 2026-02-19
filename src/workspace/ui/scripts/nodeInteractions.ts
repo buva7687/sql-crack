@@ -2,38 +2,22 @@ export function getNodeInteractionsScriptFragment(): string {
     return `
         // ========== Node Interactions ==========
         if (svg) {
-            var nodeClickTimeout = null;
-
             svg.addEventListener('click', (e) => {
                 var node = e.target.closest('.node');
                 if (!node) return;
 
                 updateSelectionPanel(node);
-
-                var filePath = node.getAttribute('data-filepath');
-                if (!filePath) return;
-
-                // Delay single-click so double-click can cancel it
-                nodeClickTimeout = window.setTimeout(function() {
-                    openFile(filePath);
-                    nodeClickTimeout = null;
-                }, 300);
             });
 
             svg.addEventListener('dblclick', (e) => {
                 var node = e.target.closest('.node');
                 if (!node) return;
 
-                if (nodeClickTimeout) {
-                    clearTimeout(nodeClickTimeout);
-                    nodeClickTimeout = null;
-                }
-
                 var filePath = node.getAttribute('data-filepath');
                 if (filePath) {
                     e.preventDefault();
                     e.stopPropagation();
-                    visualizeFile(filePath);
+                    openFile(filePath);
                 }
             });
 

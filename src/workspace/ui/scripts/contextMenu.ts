@@ -40,6 +40,12 @@ export function getContextMenuScriptFragment(): string {
                 }
             }
 
+            // Copy File Path only for nodes with a filePath
+            const copyPathItem = contextMenu.querySelector('[data-action="copyFilePath"]');
+            if (copyPathItem) {
+                copyPathItem.style.display = nodeData.filePath ? '' : 'none';
+            }
+
             // Open File only makes sense for file nodes
             if (openFileItem) {
                 openFileItem.style.display = isFileNode ? '' : 'none';
@@ -140,6 +146,14 @@ export function getContextMenuScriptFragment(): string {
                             tableName: nodeName,
                             nodeId: contextMenuTarget.id || ''
                         });
+                        break;
+                    case 'copyName':
+                        navigator.clipboard.writeText(nodeName).catch(() => {});
+                        break;
+                    case 'copyFilePath':
+                        if (contextMenuTarget.filePath) {
+                            navigator.clipboard.writeText(contextMenuTarget.filePath).catch(() => {});
+                        }
                         break;
                     case 'openFile':
                         if (contextMenuTarget.filePath) {

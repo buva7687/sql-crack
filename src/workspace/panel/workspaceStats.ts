@@ -1,10 +1,12 @@
 import { getDisplayName } from '../identifiers';
 import { formatRelativeTime } from '../../shared/time';
 import { IndexStatus } from './types';
+import * as path from 'path';
 import {
     DefinitionDetail,
     DetailedWorkspaceStats,
     MissingDefinitionDetail,
+    ParseErrorDetail,
     WorkspaceDependencyGraph,
     WorkspaceIndex,
 } from '../types';
@@ -45,6 +47,7 @@ export function buildDetailedWorkspaceStats(
             ...graph.stats,
             orphanedDetails: [],
             missingDetails: [],
+            parseErrorDetails: [],
         };
     }
 
@@ -80,9 +83,21 @@ export function buildDetailedWorkspaceStats(
         });
     }
 
+    const parseErrorDetails: ParseErrorDetail[] = [];
+    for (const [, file] of index.files) {
+        if (file.parseError) {
+            parseErrorDetails.push({
+                filePath: file.filePath,
+                fileName: path.basename(file.filePath),
+                error: file.parseError,
+            });
+        }
+    }
+
     return {
         ...graph.stats,
         orphanedDetails,
         missingDetails,
+        parseErrorDetails,
     };
 }

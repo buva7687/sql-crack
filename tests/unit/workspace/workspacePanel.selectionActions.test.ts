@@ -15,7 +15,7 @@ describe('workspace panel selection sidebar actions', () => {
     it('uses normalized terminology in trace button aria-labels', () => {
         const html = createGraphBodyHtml({
             graph: {
-                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [] },
+                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [], parseErrors: 0 },
             } as any,
             searchFilter: {
                 query: '',
@@ -43,7 +43,7 @@ describe('workspace panel selection sidebar actions', () => {
     it('includes lineage guidance hint in graph mode help tooltip', () => {
         const html = createGraphBodyHtml({
             graph: {
-                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [] },
+                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [], parseErrors: 0 },
             } as any,
             searchFilter: {
                 query: '',
@@ -68,7 +68,7 @@ describe('workspace panel selection sidebar actions', () => {
     it('renders only graph, lineage, and impact tabs in the header', () => {
         const html = createGraphBodyHtml({
             graph: {
-                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [] },
+                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [], parseErrors: 0 },
             } as any,
             searchFilter: {
                 query: '',

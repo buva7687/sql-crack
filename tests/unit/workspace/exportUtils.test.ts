@@ -41,6 +41,7 @@ describe('workspace exportUtils', () => {
             orphanedDefinitions: [],
             missingDefinitions: [],
             circularDependencies: [],
+            parseErrors: 0,
         },
     };
 

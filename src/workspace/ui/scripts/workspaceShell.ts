@@ -51,6 +51,19 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
+            // U: Trace upstream
+            if (e.key === 'u' || e.key === 'U') {
+                e.preventDefault();
+                if (selectedNodeId) { setTraceMode('upstream'); }
+                return;
+            }
+            // D: Trace downstream
+            if (e.key === 'd' || e.key === 'D') {
+                e.preventDefault();
+                if (selectedNodeId) { setTraceMode('downstream'); }
+                return;
+            }
+
             // R: Reset view (fit to screen)
             if (e.key === 'r' || e.key === 'R') {
                 e.preventDefault();

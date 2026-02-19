@@ -22,6 +22,7 @@ function createGraph(nodes: WorkspaceDependencyGraph['nodes']): WorkspaceDepende
             orphanedDefinitions: [],
             missingDefinitions: [],
             circularDependencies: [],
+            parseErrors: 0,
         },
     };
 }

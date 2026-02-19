@@ -486,6 +486,12 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
 
     const circularDependencies = findFileCycleGroups(fileDeps);
 
+    // Count files that failed to parse
+    let parseErrors = 0;
+    for (const file of index.files.values()) {
+        if (file.parseError) { parseErrors++; }
+    }
+
     return {
         totalFiles: index.fileCount,
         totalTables,
@@ -493,7 +499,8 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         totalReferences,
         orphanedDefinitions,
         missingDefinitions,
-        circularDependencies
+        circularDependencies,
+        parseErrors
     };
 }
 

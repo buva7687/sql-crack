@@ -60,7 +60,7 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         const refInfo = node.referenceCount ? `${node.referenceCount} reference${node.referenceCount !== 1 ? 's' : ''}` : '';
         const sublabel = [defInfo, refInfo].filter(Boolean).join(', ');
 
-        const tooltipContent = getNodeTooltipContent(node, escapeHtml);
+        const tooltipContent = getNodeTooltipContent(node, graph, escapeHtml);
 
         return `
                 <g class="node ${typeClass}"
@@ -104,8 +104,15 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         `;
 }
 
-function getNodeTooltipContent(node: WorkspaceNode, escapeHtml: (value: string) => string): string {
+function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGraph, escapeHtml: (value: string) => string): string {
     let content = `<div class="tooltip-title">${escapeHtml(node.label)}</div>`;
+
+    // Connection counts
+    const upstreamCount = graph.edges.filter(e => e.target === node.id).length;
+    const downstreamCount = graph.edges.filter(e => e.source === node.id).length;
+    if (upstreamCount > 0 || downstreamCount > 0) {
+        content += `<div class="tooltip-content">${upstreamCount} upstream &middot; ${downstreamCount} downstream</div>`;
+    }
 
     if (node.type === 'file' && node.filePath) {
         content += `<div class="tooltip-content">${escapeHtml(node.filePath)}</div>`;
@@ -148,7 +155,7 @@ function getNodeTooltipContent(node: WorkspaceNode, escapeHtml: (value: string) 
         content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
     }
 
-    content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to open, double-click to visualize</div>';
+    content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to select, double-click to open</div>';
 
     return content;
 }

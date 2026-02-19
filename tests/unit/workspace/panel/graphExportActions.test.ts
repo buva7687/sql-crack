@@ -29,6 +29,7 @@ function createGraph(overrides: Partial<WorkspaceDependencyGraph> = {}): Workspa
             orphanedDefinitions: [],
             missingDefinitions: [],
             circularDependencies: [],
+            parseErrors: 0,
         },
         ...overrides,
     };

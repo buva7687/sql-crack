@@ -167,12 +167,12 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                         <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
                     </svg>
                 </button>
-                <button class="icon-btn btn-disabled" id="btn-trace-up" title="Trace upstream (all sources)" aria-label="Trace all upstream sources" aria-disabled="true">
+                <button class="icon-btn btn-disabled" id="btn-trace-up" title="Trace upstream (all sources) [U]" aria-label="Trace all upstream sources" aria-disabled="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 19V5M5 12l7-7 7 7"/>
                     </svg>
                 </button>
-                <button class="icon-btn btn-disabled" id="btn-trace-down" title="Trace downstream (all consumers)" aria-label="Trace all downstream consumers" aria-disabled="true">
+                <button class="icon-btn btn-disabled" id="btn-trace-down" title="Trace downstream (all consumers) [D]" aria-label="Trace all downstream consumers" aria-disabled="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 5v14M5 12l7 7 7-7"/>
                     </svg>
@@ -204,9 +204,11 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             </svg>
             <span class="issue-banner-text">
                 <strong>${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found:</strong>
-                ${graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : ''}
-                ${graph.stats.orphanedDefinitions.length > 0 && graph.stats.missingDefinitions.length > 0 ? ', ' : ''}
-                ${graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : ''}
+                ${[
+                    graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : '',
+                    graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : '',
+                    graph.stats.parseErrors > 0 ? `${graph.stats.parseErrors} unparseable` : ''
+                ].filter(Boolean).join(', ')}
             </span>
             <button class="issue-banner-btn" id="btn-view-issues">View Details →</button>
         </div>
@@ -267,6 +269,21 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <path d="M12 5v14M5 12l7 7 7-7"/>
                 </svg>
                 Show Downstream
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="copyName">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                Copy Name
+            </div>
+            <div class="context-menu-item" data-action="copyFilePath">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Copy File Path
             </div>
             <div class="context-menu-divider"></div>
             <div class="context-menu-item" data-action="openFile">
@@ -470,6 +487,12 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
             <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
             <div class="hint-divider"></div>
             <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>F</kbd><span>Focus</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>U</kbd><span>Upstream</span></div>
+            <div class="hint-divider"></div>
+            <div class="hint-item"><kbd>D</kbd><span>Downstream</span></div>
         </div>
 
         <!-- Bottom Legend Bar -->
