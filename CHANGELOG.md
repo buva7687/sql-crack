@@ -7,37 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Large-file refactor completed (Phases 1-6)**: Split major orchestrators into focused modules while preserving behavior and public workflows.
-  - `sharedStyles.ts`: 4,620 -> 68 lines (style assembler + extracted style modules)
-  - `sqlParser.ts`: 6,269 -> 1,071 lines (orchestrator + parser module tree)
-  - `renderer.ts`: 9,686 -> 3,040 lines (orchestrator + extracted rendering/feature/interaction/navigation modules)
-  - `clientScripts.ts`: 4,183 -> 173 lines (script assembler + extracted script fragments)
-  - `workspacePanel.ts`: 2,568 -> 780 lines (orchestrator + extracted panel modules)
-  - `toolbar.ts`: ~2,000 -> 475 lines (orchestrator + extracted toolbar modules)
-- **Workspace message routing hardening**: Typed workspace message protocol and host router now explicitly handle PNG save/error round-trips from webview exports.
-- **Shared escaping helper adoption**: Consolidated additional non-renderer HTML escaping paths to `src/shared/stringUtils.ts`.
-
-### Fixed
-
-- **Cloud node not draggable**: Removed internal pan mousedown/mousemove/mouseup listeners from cloud `nestedSvg` that intercepted whole-cloud drag via the cloud rect. Wheel zoom for internal navigation is preserved.
-- **Cloud arrow disconnects when dragging CTE node**: Removed `updateCloudAndArrow` call from the node drag path — the cloud is a child of the node group, so the group transform already moves it correctly. Calling `updateCloudAndArrow` with absolute coordinates inside the transformed group caused the arrow to overshoot.
-- **Search not clearing when text is deleted**: The search input listener now calls `onClearSearch()` when the input value becomes empty, resetting breadcrumbs and highlights (same as pressing Escape).
-- **R key now triggers full refresh**: Pressing `R` dispatches a `sql-crack-reset-view` event that triggers a full re-parse and re-render (same as the toolbar refresh button), collapsing all expanded cloud nodes and resetting positions.
-
-### Documentation
-
-- Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
-- Updated `AGENTS.md` guidance to reflect post-refactor module ownership and message-contract conventions.
-- Added Cursor installation instructions to `README.md` with Open VSX Registry link and publisher-qualified search name.
-
-### Tests
-
-- Added `UndoManager.getInitial()` unit tests (5 cases: basic, after undo/redo, empty, cleared, max history eviction).
-- Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
-
-## [0.3.8] - 2026-02-17
+> Planned publish date: February 22, 2026.
 
 ### Added
 
@@ -62,16 +32,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GROUPING SETS` rewrite support for parser compatibility.
   - Snowflake deep path collapsing for `:<path>` chains with 3+ levels.
 - **Unrecognized TVF hinting**: FROM-clause function calls that are not recognized as table-valued now emit a low-severity quality hint with guidance to add custom TVFs.
+- **Additional dialect auto-detection coverage**: Added parser auto-detection patterns for Hive, Trino, Athena, Redshift, and SQLite to improve cross-dialect retry selection on mixed SQL corpora.
+- **Workspace lineage discoverability features**:
+  - Filter/search table list in lineage start view.
+  - Export selected node lineage as JSON from the workspace context menu.
+  - Expanded lineage keyboard affordances for node/column navigation and quick actions.
+- **SQL Flow keyboard easter eggs**: Added Matrix and zero-gravity keyboard-triggered modes in the SQL Flow webview.
 
 ### Changed
 
+- **Large-file refactor completed (Phases 1-6)**: Split major orchestrators into focused modules while preserving behavior and public workflows.
+  - `sharedStyles.ts`: 4,620 -> 68 lines (style assembler + extracted style modules)
+  - `sqlParser.ts`: 6,269 -> 1,071 lines (orchestrator + parser module tree)
+  - `renderer.ts`: 9,686 -> 3,040 lines (orchestrator + extracted rendering/feature/interaction/navigation modules)
+  - `clientScripts.ts`: 4,183 -> 173 lines (script assembler + extracted script fragments)
+  - `workspacePanel.ts`: 2,568 -> 780 lines (orchestrator + extracted panel modules)
+  - `toolbar.ts`: ~2,000 -> 475 lines (orchestrator + extracted toolbar modules)
+- **Workspace message routing hardening**: Typed workspace message protocol and host router now explicitly handle PNG save/error round-trips from webview exports.
+- **Shared escaping helper adoption**: Consolidated additional non-renderer HTML escaping paths to `src/shared/stringUtils.ts`.
 - **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
 - **PIVOT detection shared**: Renamed `hasTSqlPivot` → `hasPivot` in dialect detection; PIVOT now scores for both TransactSQL and Oracle.
 - **Toolbar pin affordance refresh**: Replaced the pin glyph with a cleaner pushpin icon and reordered controls to keep pin-related actions grouped (`View location` → `Pin visualization as new tab` → `Pinned tabs`).
 - **Examples compare documentation**: Expanded `examples/README.md` with a dedicated "Compare with Baseline Query" section and updated wording to reference the compare button label (instead of legacy `⇆` symbol text).
+- **Workspace scope behavior**: Workspace analysis/indexing now respects the selected subfolder scope more consistently across scanning and interactive UX flows.
+- **Lineage graph presentation and controls**:
+  - Improved viewport utilization for sparse lineage graphs (layout spacing and auto-fit behavior).
+  - Removed the redundant lineage legend toggle icon near zoom controls while preserving the `L` shortcut and bottom legend controls.
 
 ### Fixed
 
+- **Cloud node not draggable**: Removed internal pan mousedown/mousemove/mouseup listeners from cloud `nestedSvg` that intercepted whole-cloud drag via the cloud rect. Wheel zoom for internal navigation is preserved.
+- **Cloud arrow disconnects when dragging CTE node**: Removed `updateCloudAndArrow` call from the node drag path — the cloud is a child of the node group, so the group transform already moves it correctly. Calling `updateCloudAndArrow` with absolute coordinates inside the transformed group caused the arrow to overshoot.
+- **Search not clearing when text is deleted**: The search input listener now calls `onClearSearch()` when the input value becomes empty, resetting breadcrumbs and highlights (same as pressing Escape).
+- **R key now triggers full refresh**: Pressing `R` dispatches a `sql-crack-reset-view` event that triggers a full re-parse and re-render (same as the toolbar refresh button), collapsing all expanded cloud nodes and resetting positions.
+- **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, and stored parse-error SQL context was expanded (200 → 500 chars) for more reliable source-line extraction.
+- **Cross-dialect retry reliability**: Reduced dialect false positives from time literals like `00:00:00` and ensured dialect auto-retry applies compatibility preprocessing (`AT TIME ZONE`, type-prefixed literals) before regex fallback.
 - **CONNECT BY + ORDER SIBLINGS BY stripping**: The preprocessing regex incorrectly terminated at `ORDER SIBLINGS BY` (treating it as a regular `ORDER BY`). Replaced with a keyword-scanning approach that correctly identifies and strips all three hierarchical clause types.
 - **CONNECT BY inside CTE bodies**: Hierarchical clause stripping now works correctly within CTE subqueries.
 - **T-SQL warning too broad for Oracle**: The T-SQL syntax warning was fully suppressed when Oracle was selected. Now only the ambiguous PIVOT signal is suppressed; T-SQL-only constructs (CROSS APPLY, TOP) still warn on Oracle dialect.
@@ -85,9 +80,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Duplicate repeated-table performance hints**: Prevented overlapping hints for the same table/count pair (for example `scanned 2 times` + `is accessed 2 times`) by deduplicating repeated-scan/access signals across analyzers.
 - **Aggregate detail placeholders in CASE expressions**: Aggregate node details now format `EXTRACT(...)` and CASE `ELSE` branches correctly, eliminating residual `?` placeholders in Query 3-style expressions.
 - **Function usage stats from scalar subqueries**: Query Stats now includes aggregate/scalar functions found inside expression subqueries (for example Query 4 `COUNT(*)` scalar subquery), not just top-level SELECT expressions.
+- **Workspace lineage export reliability**:
+  - Export no longer fails when a workspace node cannot be resolved to a lineage node ID; unresolved nodes now export with empty upstream/downstream arrays and resolution metadata.
+  - Added defensive guards around graph payload column extraction and column-search matching to prevent malformed data from breaking export/search paths.
+- **Workspace lineage parity and shortcut correctness**:
+  - Fixed upstream count mismatch between lineage cards and lineage detail views by aligning internal-node counting and depth usage.
+  - Fixed `Cmd/Ctrl+C` conflicts where copy actions could incorrectly trigger column-lineage shortcuts.
+  - Escape now correctly clears active column trace and returns the lineage view to normal state.
+  - Arrow-key column navigation now auto-updates the column trace panel without requiring Enter.
+  - Suppressed overlapping table tooltip behavior while column trace panel is active.
+- **Workspace export/render guards**:
+  - SVG/PNG export now strips `foreignObject` content and clears pan/zoom transform from the cloned SVG to prevent off-center or failed raster exports.
+  - Restored HTML entity handling in workspace tooltip sanitizer paths.
+- **Workspace lineage/state robustness**: Added null/race guards and state-preservation fixes across lineage loading, minimap/tooltip bounds, and cross-view transitions.
+
+### Documentation
+
+- Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
+- Added Cursor installation instructions to `README.md` with Open VSX Registry link and publisher-qualified search name.
 
 ### Tests
 
+- Added `UndoManager.getInitial()` unit tests (5 cases: basic, after undo/redo, empty, cleared, max history eviction).
+- Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
+- Added regression coverage for parse-error source-line propagation (index → toolbar tooltip → renderer overlay), including absolute-to-relative statement line mapping.
+- Added parser regressions for cross-dialect auto-retry behavior (including `examples/postgres_complex.sql`) and time-literal detection safety.
 - Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
 - Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
 - Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
@@ -109,6 +126,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added compare-view regression coverage for removed ghost-node repositioning to avoid overlap with active nodes and other ghost nodes.
 - Added regression test coverage for repeated-table hint deduplication (`scanned` vs `accessed`) so the same table is not reported twice.
 - Added aggregate extraction regressions for CASE + `EXTRACT(...)` formatting and function-usage tracking from scalar subqueries.
+- Added workspace regressions for:
+  - subfolder-scoped analysis behavior and mode-switch search reset,
+  - lineage keyboard discoverability and navigation behavior,
+  - upstream/downstream count parity for internal lineage nodes,
+  - depth-aware lineage overview counts,
+  - Escape clear-path handling for active column trace,
+  - unresolved-node lineage export payload behavior.
 
 ## [0.3.7] - 2026-02-13
 
