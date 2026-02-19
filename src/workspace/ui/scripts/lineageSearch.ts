@@ -61,7 +61,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 };
             }
 
-            const allowedFilters = new Set(['all', 'table', 'view', 'cte']);
+            const allowedFilters = new Set(['all', 'table', 'view']);
             lineageTypeFilter = allowedFilters.has(lineageSearchState.typeFilter) ? lineageSearchState.typeFilter : 'all';
             showAllTables = lineageSearchState.showAllTables === true;
 

@@ -54,7 +54,7 @@ export class LineageView {
                 <div class="view-compact-header">
                     <span class="view-icon">${ICONS.columns}</span>
                     <h3>Lineage</h3>
-                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views, ${stats.ctes} CTEs, ${stats.relationships} relationships</span>
+                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views, ${stats.relationships} relationships</span>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -63,7 +63,7 @@ export class LineageView {
                     <input type="text"
                            id="lineage-search-input"
                            class="view-search-input"
-                           placeholder="Search tables, views, CTEs..."
+                           placeholder="Search tables and views..."
                            autocomplete="off"
                            value="">
                     <button class="view-search-clear" id="lineage-search-clear">
@@ -78,7 +78,6 @@ export class LineageView {
                         <button class="view-filter-chip active" data-filter="all">All</button>
                         <button class="view-filter-chip" data-filter="table">Tables</button>
                         <button class="view-filter-chip" data-filter="view">Views</button>
-                        <button class="view-filter-chip" data-filter="cte">CTEs</button>
                     </div>
                     <div class="view-sort-group">
                         <label class="view-filter-label" for="lineage-sort">Sort:</label>
@@ -292,7 +291,6 @@ export class LineageView {
                                 <span class="legend-section-title">Nodes</span>
                                 <span class="legend-item"><span class="legend-color legend-table"></span><span class="legend-label">Table</span></span>
                                 <span class="legend-item"><span class="legend-color legend-view"></span><span class="legend-label">View</span></span>
-                                <span class="legend-item"><span class="legend-color legend-cte"></span><span class="legend-label">CTE</span></span>
                                 <span class="legend-item"><span class="legend-color legend-external"></span><span class="legend-label">External</span></span>
                             </div>
                             <div class="legend-divider"></div>
@@ -424,11 +422,11 @@ export class LineageView {
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+            if (node.type === 'table' || node.type === 'view') {
                 const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
                 const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
-                // Count only tables, views, CTEs (exclude external and column nodes to match graph display)
-                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+                // Count only tables and views (exclude external, CTE, and column nodes)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
                 const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
@@ -440,7 +438,7 @@ export class LineageView {
         nodeConnections.sort((a, b) => b.total - a.total);
 
         if (nodeConnections.length === 0) {
-            return '<p class="no-tables">No tables, views, or CTEs found</p>';
+            return '<p class="no-tables">No tables or views found</p>';
         }
 
         return nodeConnections.map(({ node, upstreamCount, downstreamCount, total }) => `
@@ -469,13 +467,13 @@ export class LineageView {
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+            if (node.type === 'table' || node.type === 'view') {
                 // Curated "Most Connected" should prioritize internal lineage density.
                 // External endpoints are still visible in full-node exploration views.
                 const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
                 const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
-                // Count only tables, views, CTEs (exclude column nodes to match graph display)
-                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+                // Count only tables and views (exclude column nodes to match graph display)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
                 const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
@@ -538,7 +536,7 @@ export class LineageView {
                     </svg>
                 </div>
                 <h3>Start Exploring Data Lineage</h3>
-                <p>Discover how your data flows between tables, views, and CTEs.</p>
+                <p>Discover how your data flows between tables and views.</p>
                 <div class="empty-steps">
                     <div class="step">
                         <span class="step-number">1</span>
@@ -631,20 +629,16 @@ export class LineageView {
     /**
      * Collect statistics from graph
      */
-    private collectStats(graph: LineageGraph): { tables: number; views: number; ctes: number; external: number; relationships: number } {
+    private collectStats(graph: LineageGraph): { tables: number; views: number; relationships: number } {
         const stats = {
             tables: 0,
             views: 0,
-            ctes: 0,
-            external: 0,
             relationships: graph.edges.length
         };
 
         graph.nodes.forEach((node) => {
             if (node.type === 'table') {stats.tables++;}
             else if (node.type === 'view') {stats.views++;}
-            else if (node.type === 'cte') {stats.ctes++;}
-            else if (node.type === 'external') {stats.external++;}
         });
 
         return stats;

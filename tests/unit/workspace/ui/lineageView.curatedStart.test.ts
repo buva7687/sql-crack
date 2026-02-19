@@ -153,15 +153,15 @@ describe('LineageView curated start content', () => {
         expect(css).toContain('.popular-item.connection-high');
     });
 
-    it('counts only table/view/cte nodes in Most Connected badges when column nodes are present', () => {
+    it('counts only table/view nodes in Most Connected badges when column and CTE nodes are present', () => {
         const html = new LineageView().generateLineageSearchView(createGraphWithColumnNodes());
         const ordersCard = html.match(/<button class="popular-item[\s\S]*?data-node-id="table:orders"[\s\S]*?<\/button>/)?.[0];
 
         expect(ordersCard).toBeDefined();
-        expect(ordersCard).toContain('title="1 upstream, 2 downstream"');
+        expect(ordersCard).toContain('title="1 upstream, 1 downstream"');
         expect(ordersCard).toContain('class="conn-up">↑1</span>');
-        expect(ordersCard).toContain('class="conn-down">↓2</span>');
-        expect(ordersCard).toContain('data-total="3"');
+        expect(ordersCard).toContain('class="conn-down">↓1</span>');
+        expect(ordersCard).toContain('data-total="2"');
     });
 
     it('uses requested lineage depth when computing overview connection counts', () => {

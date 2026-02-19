@@ -71,8 +71,8 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                         Graph
                     </button>
                     <button class="view-tab" data-view="lineage" 
-                        title="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
-                        aria-label="Data Lineage: Search for any table, view, or CTE to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
+                        title="Data Lineage: Search for any table or view to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used)."
+                        aria-label="Data Lineage: Search for any table or view to trace its data flow. See upstream sources (where data comes from) and downstream consumers (where it's used).">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 12h4l3 9 4-18 3 9h4"/>
                         </svg>
