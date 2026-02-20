@@ -228,7 +228,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("const searchCount = document.getElementById('graph-search-count');");
         expect(script).toContain('function refreshSearchNavigation(query)');
         expect(script).toContain("searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';");
-        expect(script).toContain("searchCount.style.display = '';");
+        expect(script).toContain("searchCount.style.display = 'inline';");
         expect(script).toContain("searchCount.style.display = 'none';");
         expect(script).toContain('function jumpToSearchMatch(direction)');
         expect(script).toContain("searchPrevBtn?.addEventListener('click', () => jumpToSearchMatch(-1));");

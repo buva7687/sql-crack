@@ -948,7 +948,7 @@ export function getGraphInteractionsScriptFragment(): string {
                 const matched = searchMatchNodeIds.length;
                 const pos = activeSearchMatchIndex >= 0 ? (activeSearchMatchIndex + 1) : 0;
                 searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';
-                searchCount.style.display = '';
+                searchCount.style.display = 'inline';
             }
             if (searchPrevBtn) {
                 searchPrevBtn.setAttribute('aria-label', searchMatchNodeIds.length > 0
