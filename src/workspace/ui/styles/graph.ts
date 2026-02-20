@@ -1591,6 +1591,23 @@ export function getGraphStyles(): string {
             gap: 8px;
             flex-wrap: wrap;
         }
+        .selection-path-summary {
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 2px 0;
+        }
+        .selection-path-targets {
+            display: grid;
+            gap: 4px;
+        }
+        .selection-path-target {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         .selection-cross-links {
             display: flex;
             flex-direction: column;
@@ -1607,6 +1624,31 @@ export function getGraphStyles(): string {
             color: var(--text-dim);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+        .selection-edge-ref {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 6px 4px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .selection-edge-ref:last-child {
+            border-bottom: none;
+        }
+        .selection-edge-ref-path {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            word-break: break-all;
+        }
+        .selection-edge-ref-meta {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+        .selection-edge-empty {
+            color: var(--text-dim);
+            font-size: 11px;
+            padding: 4px 2px;
         }
 
         /* ========== Legend Items ========== */
@@ -1760,6 +1802,10 @@ export function getGraphStyles(): string {
         .node-trace-far .node-bg { stroke: var(--success); stroke-width: 2; }
         .node-trace-far { opacity: 0.6; }
         .node-trace-dim { opacity: 0.15; pointer-events: none; }
+        .node-path-highlight .node-bg { stroke: color-mix(in srgb, var(--warning-light) 70%, var(--accent)); stroke-width: 3; }
+        .node-path-origin .node-bg { stroke: var(--accent); stroke-width: 3.5; }
+        .node-path-target .node-bg { stroke: var(--warning-light); stroke-width: 3.5; }
+        .node-path-dim { opacity: 0.14; }
         .node .node-accent { transition: fill 0.15s; }
         .node-file .node-accent { fill: var(--node-file); }
         .node-table .node-accent { fill: var(--node-table); }
@@ -1794,6 +1840,8 @@ export function getGraphStyles(): string {
         .edge-focus-dim path { opacity: 0.1; }
         .edge-trace-highlight path { stroke: var(--success); stroke-width: 3; opacity: 1; }
         .edge-trace-dim path { opacity: 0.1; }
+        .edge-path-highlight path { stroke: color-mix(in srgb, var(--warning-light) 65%, var(--accent)); stroke-width: 3.2; opacity: 1; }
+        .edge-path-dim path { opacity: 0.12; }
 
         /* ========== Tooltip ========== */
         .tooltip {

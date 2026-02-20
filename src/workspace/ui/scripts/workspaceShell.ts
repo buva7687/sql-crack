@@ -323,6 +323,17 @@ export function getWorkspaceShellScriptFragment(): string {
                 case 'clear-search':
                     clearSearch();
                     break;
+                case 'apply-suggestion': {
+                    const suggestion = actionEl.getAttribute('data-suggestion') || '';
+                    if (!suggestion) {
+                        break;
+                    }
+                    if (searchInput) {
+                        searchInput.value = suggestion;
+                    }
+                    performSearch();
+                    break;
+                }
                 case 'refresh':
                     refresh();
                     break;
@@ -365,9 +376,36 @@ export function getWorkspaceShellScriptFragment(): string {
                     if (traceMode) {
                         setTraceMode(traceMode);
                     }
+                    if (typeof clearPathState === 'function') {
+                        clearPathState(true);
+                    }
                     clearSearch();
                     if (typeof trackUxEvent === 'function') {
                         trackUxEvent('graph_state_cleared');
+                    }
+                    break;
+                case 'path-set-start':
+                    if (selectedNodeId && typeof setPathEndpoint === 'function') {
+                        setPathEndpoint('start', selectedNodeId);
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node first, then set it as path start.';
+                    }
+                    break;
+                case 'path-set-end':
+                    if (selectedNodeId && typeof setPathEndpoint === 'function') {
+                        setPathEndpoint('end', selectedNodeId);
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node first, then set it as path end.';
+                    }
+                    break;
+                case 'path-show':
+                    if (typeof showPathBetweenEndpoints === 'function') {
+                        showPathBetweenEndpoints();
+                    }
+                    break;
+                case 'path-clear':
+                    if (typeof clearPathState === 'function') {
+                        clearPathState(true);
                     }
                     break;
                 case 'clear-selection':
@@ -459,6 +497,14 @@ export function getWorkspaceShellScriptFragment(): string {
                             trackUxEvent('graph_open_file', { nodeType: actionEl.getAttribute('data-node-type') || 'unknown' });
                         }
                         openFile(filePath);
+                    }
+                    break;
+                }
+                case 'open-edge-reference': {
+                    const filePath = actionEl.getAttribute('data-file-path') || '';
+                    const lineNumber = Number(actionEl.getAttribute('data-line-number') || '1');
+                    if (filePath) {
+                        openFileAtLine(filePath, Number.isFinite(lineNumber) && lineNumber > 0 ? lineNumber : 1);
                     }
                     break;
                 }

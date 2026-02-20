@@ -95,6 +95,13 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                             <div class="item-name">${escapeHtml(item.name)}</div>
                             <div class="item-path">${escapeHtml(item.filePath)}</div>
                         </div>
+                        <button
+                            type="button"
+                            class="issue-inline-action show-in-graph-btn"
+                            data-show-graph-query="${escapeHtml(item.name)}"
+                            data-show-graph-type="${item.type}"
+                            aria-label="Show ${escapeHtml(item.name)} in graph"
+                        >Show in graph</button>
                         <span class="item-line">line ${item.lineNumber}</span>
                     </div>
                     `).join('')}
@@ -130,6 +137,13 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                             </div>
                             <span class="missing-card-name">${escapeHtml(item.tableName)}</span>
                             <span class="missing-card-count">${item.referenceCount} ref${item.referenceCount !== 1 ? 's' : ''}</span>
+                            <button
+                                type="button"
+                                class="issue-inline-action show-in-graph-btn"
+                                data-show-graph-query="${escapeHtml(item.tableName)}"
+                                data-show-graph-type="external"
+                                aria-label="Show ${escapeHtml(item.tableName)} in graph"
+                            >Show in graph</button>
                         </div>
                         <div class="missing-card-refs">
                             ${item.references.slice(0, 4).map(ref => `

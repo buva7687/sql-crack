@@ -6,6 +6,7 @@ import {
     WorkspaceDependencyGraph,
     WorkspaceNode,
     WorkspaceEdge,
+    WorkspaceEdgeReference,
     WorkspaceStats,
     GraphMode,
     TableReference,
@@ -102,7 +103,7 @@ function buildFileGraph(
     }
 
     // Create edges between files
-    const edgeMap = new Map<string, { count: number; types: Set<string>; tables: Set<string> }>();
+    const edgeMap = new Map<string, { count: number; types: Set<string>; tables: Set<string>; references: WorkspaceEdgeReference[] }>();
 
     for (const [filePath, analysis] of index.files.entries()) {
         const sourceId = nodeIdMap.get(filePath);
@@ -124,12 +125,13 @@ function buildFileGraph(
 
                 const edgeKey = `${sourceId}->${targetId}`;
                 if (!edgeMap.has(edgeKey)) {
-                    edgeMap.set(edgeKey, { count: 0, types: new Set(), tables: new Set() });
+                    edgeMap.set(edgeKey, { count: 0, types: new Set(), tables: new Set(), references: [] });
                 }
                 const edgeData = edgeMap.get(edgeKey)!;
                 edgeData.count++;
                 edgeData.types.add(ref.referenceType);
                 edgeData.tables.add(getDisplayName(ref.tableName, ref.schema));
+                appendEdgeReference(edgeData.references, ref);
             }
         }
     }
@@ -143,7 +145,8 @@ function buildFileGraph(
             target,
             referenceType: getPrimaryReferenceType([...data.types] as TableReference['referenceType'][]),
             count: data.count,
-            tables: [...data.tables]
+            tables: [...data.tables],
+            references: data.references
         });
     }
 }
@@ -214,8 +217,24 @@ function buildTableGraph(
             });
     }
 
-    // Create edges based on view/query dependencies
-    // Views reference tables, so create edges from views to their source tables
+    const edgeMap = new Map<string, { count: number; types: Set<string>; tables: Set<string>; references: WorkspaceEdgeReference[] }>();
+    const pushEdge = (sourceId: string, targetId: string, ref: TableReference): void => {
+        if (!sourceId || !targetId || sourceId === targetId) {
+            return;
+        }
+        const key = `${sourceId}->${targetId}`;
+        if (!edgeMap.has(key)) {
+            edgeMap.set(key, { count: 0, types: new Set(), tables: new Set(), references: [] });
+        }
+        const edgeData = edgeMap.get(key)!;
+        edgeData.count += 1;
+        edgeData.types.add(ref.referenceType);
+        edgeData.tables.add(getDisplayName(ref.tableName, ref.schema));
+        appendEdgeReference(edgeData.references, ref);
+    };
+
+    // Create edges based on view/query dependencies.
+    // Views reference tables, so create edges from views to their source tables.
     for (const analysis of index.files.values()) {
         // Get tables defined in this file
         const definedHere = new Set(
@@ -238,33 +257,32 @@ function buildTableGraph(
                     if (targets.length > 0) {
                         for (const targetDef of targets) {
                             const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
-                            if (sourceId && targetId && sourceId !== targetId) {
-                                edges.push({
-                                    id: `edge_${edges.length}`,
-                                    source: sourceId,
-                                    target: targetId,
-                                    referenceType: ref.referenceType,
-                                    count: 1,
-                                    tables: [getDisplayName(ref.tableName, ref.schema)]
-                                });
+                            if (sourceId && targetId) {
+                                pushEdge(sourceId, targetId, ref);
                             }
                         }
                     } else {
                         const externalId = nodeIdMap.get(refKey);
-                        if (sourceId && externalId && sourceId !== externalId) {
-                            edges.push({
-                                id: `edge_${edges.length}`,
-                                source: sourceId,
-                                target: externalId,
-                                referenceType: ref.referenceType,
-                                count: 1,
-                                tables: [getDisplayName(ref.tableName, ref.schema)]
-                            });
+                        if (sourceId && externalId) {
+                            pushEdge(sourceId, externalId, ref);
                         }
                     }
                 }
             }
         }
+    }
+
+    for (const [key, data] of edgeMap.entries()) {
+        const [source, target] = key.split('->');
+        edges.push({
+            id: `edge_${edges.length}`,
+            source,
+            target,
+            referenceType: getPrimaryReferenceType([...data.types] as TableReference['referenceType'][]),
+            count: data.count,
+            tables: [...data.tables],
+            references: data.references
+        });
     }
 }
 
@@ -469,6 +487,25 @@ function getPrimaryReferenceType(types: TableReference['referenceType'][]): Tabl
     if (types.includes('delete')) {return 'delete';}
     if (types.includes('join')) {return 'join';}
     return 'select';
+}
+
+function appendEdgeReference(target: WorkspaceEdgeReference[], ref: TableReference): void {
+    if (target.length >= 12) {
+        return;
+    }
+    const reference: WorkspaceEdgeReference = {
+        filePath: ref.filePath,
+        lineNumber: ref.lineNumber,
+        context: ref.context,
+        tableName: getDisplayName(ref.tableName, ref.schema)
+    };
+    const signature = `${reference.filePath}:${reference.lineNumber}:${reference.context}:${reference.tableName}`;
+    const alreadyIncluded = target.some((entry) =>
+        `${entry.filePath}:${entry.lineNumber}:${entry.context}:${entry.tableName}` === signature
+    );
+    if (!alreadyIncluded) {
+        target.push(reference);
+    }
 }
 
 /**

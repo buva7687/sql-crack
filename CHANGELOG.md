@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selection panel actions were streamlined to task language: `Trace in Lineage`, `Analyze in Impact`, `Show tables in file`, `Open file`.
   - Added context actions in the Selection area for graph-level exploration controls: `Focus neighbors`, `Trace upstream`, `Trace downstream`, `Clear graph state`.
   - Introduced local opt-in Workspace UX instrumentation hooks for key graph actions/events (no server dependency required).
+- **Workspace dependency-debugging flow improvements**:
+  - Edge selection now exposes a "Why this edge?" drilldown with sampled file/line/context references and quick-open for the first reference.
+  - Issues view now includes `Show in graph` actions that route directly back to Graph with prefilled query context.
+  - Graph search no-result state now offers fuzzy suggestions for likely table/view labels.
+  - Selection panel now includes a two-endpoint shortest-path flow: `Set as start`, `Set as end`, `Show path`, and `Clear path`.
 
 ### Fixed
 
@@ -115,6 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Threaded node metadata (`nodeLabel`, `nodeType`) through `getLineageGraph` messaging to support deterministic host-side resolution.
 - **Workspace export dropdown consistency**:
   - Normalized advanced export option styling so `SVG` onward uses the same left alignment and text contrast as `Copy to clipboard (PNG)` and `Save as PNG`.
+- **Workspace graph interaction runtime regression**:
+  - Removed stale `focusBtn` references from graph scripts that could break interaction flows after moving focus actions to the Selection panel.
 
 ### Documentation
 
@@ -159,7 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - first-load overlay/toolbar overlap prevention behavior,
   - graph action routing and context button availability in Selection actions,
   - host-side graph-node -> lineage-node ID resolution for `getLineageGraph` requests,
-  - export dropdown advanced-option alignment/contrast parity.
+  - export dropdown advanced-option alignment/contrast parity,
+  - issues-page `Show in graph` routing and query handoff,
+  - edge metadata serialization for graph SVG and edge-selection rendering,
+  - shortest-path action wiring and Selection panel path-controls presence.
 
 ## [0.3.7] - 2026-02-13
 

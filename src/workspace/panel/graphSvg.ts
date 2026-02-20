@@ -36,12 +36,20 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         const edgeId = edge.id || `edge_${edge.source}_${edge.target}`;
         const tooltipContent = `<div class="tooltip-title">${edge.count} reference${edge.count > 1 ? 's' : ''}</div><div class="tooltip-content">Tables: ${edge.tables.map(table => escapeHtml(table)).join(', ')}</div>`;
         const tooltipBase64 = Buffer.from(tooltipContent).toString('base64');
+        const edgeReferencesBase64 = Buffer.from(JSON.stringify(edge.references || [])).toString('base64');
+        const sourceLabel = source.label || edge.source;
+        const targetLabel = target.label || edge.target;
 
         return `
                 <g class="edge edge-${edge.referenceType}" data-edge-id="${escapeHtml(edgeId)}"
                    data-source="${escapeHtml(edge.source)}"
                    data-target="${escapeHtml(edge.target)}"
+                   data-source-label="${escapeHtml(sourceLabel)}"
+                   data-target-label="${escapeHtml(targetLabel)}"
                    data-reference-type="${edge.referenceType}"
+                   data-reference-count="${edge.count}"
+                   data-tables="${escapeHtml(edge.tables.join(', '))}"
+                   data-reference-samples="${escapeHtml(edgeReferencesBase64)}"
                    data-tooltip="${tooltipBase64}">
                     <path d="${path}"
                           fill="none"

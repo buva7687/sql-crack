@@ -298,7 +298,6 @@ export function getViewModeScriptFragment(): string {
                 vscode.postMessage({ command: 'switchView', view: 'graph' });
                 lineagePanel?.classList.remove('visible');
                 if (graphArea) graphArea.style.display = '';
-                if (focusBtn) focusBtn.style.display = '';
                 if (graphModeSwitcher) {
                     // Use visibility (not display) so switcher always reserves space in layout.
                     // This prevents main tabs (Graph|Lineage|Impact) from shifting position
@@ -323,7 +322,6 @@ export function getViewModeScriptFragment(): string {
                 }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
-                if (focusBtn) focusBtn.style.display = 'none';
                 if (graphModeSwitcher) {
                     // Hide switcher but keep it in layout (visibility: hidden) so main tabs don't shift.
                     // pointer-events: none prevents clicks when hidden.
@@ -491,10 +489,6 @@ export function getViewModeScriptFragment(): string {
                 graphModeSwitcher.style.pointerEvents = 'none';
             }
         }
-        if (focusBtn) {
-            focusBtn.style.display = currentViewMode === 'graph' ? '' : 'none';
-        }
-
         // Restore initial view if not graph (e.g., after theme change)
         if (typeof initialViewMode !== 'undefined' && initialViewMode !== 'graph') {
             // Use setTimeout to ensure DOM is ready and to avoid blocking

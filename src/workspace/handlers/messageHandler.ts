@@ -290,6 +290,10 @@ export class MessageHandler {
                     await this.handleOpenFileAtLine(message.filePath, message.line);
                     break;
 
+                case 'showInGraph':
+                    this.handleShowInGraph(message.query, message.nodeType);
+                    break;
+
                 case 'visualizeFile':
                     await this.handleVisualizeFile(message.filePath);
                     break;
@@ -424,6 +428,30 @@ export class MessageHandler {
 
     private handleSwitchView(view: ViewMode | 'graph' | 'issues'): void {
         this._context.setCurrentView(view);
+        this._context.renderCurrentView();
+    }
+
+    private handleShowInGraph(query: string, nodeType?: 'table' | 'view' | 'external' | 'file'): void {
+        const trimmedQuery = (query || '').trim();
+        const filter: SearchFilter = {
+            query: trimmedQuery,
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        };
+
+        this._context.setCurrentSearchFilter(filter);
+        this._context.setCurrentView('graph');
+        this._context.trackUxEvent('workspace_show_in_graph', {
+            queryLength: trimmedQuery.length,
+            nodeType: nodeType || 'unknown'
+        });
+
+        const graph = this._context.getCurrentGraph();
+        if (graph) {
+            this._context.panel.webview.html = this._context.getWebviewHtml(graph, filter);
+            return;
+        }
         this._context.renderCurrentView();
     }
 

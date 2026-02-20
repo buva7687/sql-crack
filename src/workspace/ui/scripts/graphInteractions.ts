@@ -218,6 +218,226 @@ export function getGraphInteractionsScriptFragment(): string {
             return nodeEl.getAttribute('data-label') || nodeId;
         }
 
+        let pathStartNodeId = null;
+        let pathEndNodeId = null;
+        let activePathNodeIds = [];
+        let pathStatusMessage = '';
+
+        function clearPathHighlight() {
+            document.querySelectorAll('.node-path-highlight').forEach((node) => node.classList.remove('node-path-highlight'));
+            document.querySelectorAll('.node-path-origin').forEach((node) => node.classList.remove('node-path-origin'));
+            document.querySelectorAll('.node-path-target').forEach((node) => node.classList.remove('node-path-target'));
+            document.querySelectorAll('.node-path-dim').forEach((node) => node.classList.remove('node-path-dim'));
+            document.querySelectorAll('.edge-path-highlight').forEach((edge) => edge.classList.remove('edge-path-highlight'));
+            document.querySelectorAll('.edge-path-dim').forEach((edge) => edge.classList.remove('edge-path-dim'));
+            activePathNodeIds = [];
+        }
+
+        function findShortestPath(sourceId, targetId) {
+            if (!sourceId || !targetId) {
+                return null;
+            }
+            if (sourceId === targetId) {
+                return [sourceId];
+            }
+
+            const queue = [sourceId];
+            const visited = new Set([sourceId]);
+            const parentMap = new Map();
+            let found = false;
+
+            while (queue.length > 0 && !found) {
+                const currentId = queue.shift();
+                const nextEdges = Array.from(document.querySelectorAll('.edge'))
+                    .filter((edge) => edge.getAttribute('data-source') === currentId);
+
+                for (const edge of nextEdges) {
+                    const target = edge.getAttribute('data-target');
+                    if (!target || visited.has(target)) {
+                        continue;
+                    }
+                    visited.add(target);
+                    parentMap.set(target, currentId);
+                    if (target === targetId) {
+                        found = true;
+                        break;
+                    }
+                    queue.push(target);
+                }
+            }
+
+            if (!found) {
+                return null;
+            }
+
+            const path = [targetId];
+            let cursor = targetId;
+            while (cursor !== sourceId) {
+                const parent = parentMap.get(cursor);
+                if (!parent) {
+                    return null;
+                }
+                path.unshift(parent);
+                cursor = parent;
+            }
+            return path;
+        }
+
+        function applyPathHighlight(pathNodeIds) {
+            clearPathHighlight();
+            if (!Array.isArray(pathNodeIds) || pathNodeIds.length === 0) {
+                return;
+            }
+
+            const pathSet = new Set(pathNodeIds);
+            const edgeSet = new Set();
+            for (let i = 0; i < pathNodeIds.length - 1; i++) {
+                edgeSet.add(pathNodeIds[i] + '->' + pathNodeIds[i + 1]);
+            }
+
+            document.querySelectorAll('.node').forEach((node) => {
+                const nodeId = node.getAttribute('data-id');
+                if (!nodeId) {
+                    return;
+                }
+                if (pathSet.has(nodeId)) {
+                    node.classList.add('node-path-highlight');
+                } else {
+                    node.classList.add('node-path-dim');
+                }
+            });
+
+            const sourceId = pathNodeIds[0];
+            const targetId = pathNodeIds[pathNodeIds.length - 1];
+            if (sourceId) {
+                const sourceNode = document.querySelector('.node[data-id="' + CSS.escape(sourceId) + '"]');
+                sourceNode?.classList.add('node-path-origin');
+            }
+            if (targetId) {
+                const targetNode = document.querySelector('.node[data-id="' + CSS.escape(targetId) + '"]');
+                targetNode?.classList.add('node-path-target');
+            }
+
+            document.querySelectorAll('.edge').forEach((edge) => {
+                const source = edge.getAttribute('data-source');
+                const target = edge.getAttribute('data-target');
+                if (!source || !target) {
+                    return;
+                }
+                if (edgeSet.has(source + '->' + target)) {
+                    edge.classList.add('edge-path-highlight');
+                } else {
+                    edge.classList.add('edge-path-dim');
+                }
+            });
+
+            activePathNodeIds = pathNodeIds.slice();
+        }
+
+        function updatePathBuilderUi() {
+            const startLabel = pathStartNodeId ? getNodeLabel(pathStartNodeId) : '—';
+            const endLabel = pathEndNodeId ? getNodeLabel(pathEndNodeId) : '—';
+
+            if (selectionPathStartLabel) {
+                selectionPathStartLabel.textContent = 'Start: ' + startLabel;
+            }
+            if (selectionPathEndLabel) {
+                selectionPathEndLabel.textContent = 'End: ' + endLabel;
+            }
+
+            if (selectionPathSummary) {
+                if (pathStatusMessage) {
+                    selectionPathSummary.textContent = pathStatusMessage;
+                } else if (activePathNodeIds.length > 0) {
+                    const hops = Math.max(0, activePathNodeIds.length - 1);
+                    selectionPathSummary.textContent = 'Showing shortest path (' + hops + ' hop' + (hops === 1 ? '' : 's') + ').';
+                } else if (pathStartNodeId && pathEndNodeId) {
+                    selectionPathSummary.textContent = 'Ready to show path from ' + startLabel + ' to ' + endLabel + '.';
+                } else {
+                    selectionPathSummary.textContent = 'Set a start and end node, then show the shortest path.';
+                }
+            }
+        }
+
+        function setPathActionEnabled(button, enabled) {
+            if (!button) {
+                return;
+            }
+            button.classList.toggle('btn-disabled', !enabled);
+            button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+        }
+
+        function setPathEndpoint(kind, nodeId) {
+            if (!nodeId) {
+                return;
+            }
+            if (kind === 'start') {
+                pathStartNodeId = nodeId;
+            } else {
+                pathEndNodeId = nodeId;
+            }
+            pathStatusMessage = '';
+            clearPathHighlight();
+            updatePathBuilderUi();
+            updateGraphActionButtons();
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_path_endpoint_set', { endpoint: kind });
+            }
+        }
+
+        function showPathBetweenEndpoints() {
+            if (!pathStartNodeId || !pathEndNodeId) {
+                pathStatusMessage = 'Set both start and end nodes first.';
+                updatePathBuilderUi();
+                updateGraphActionButtons();
+                return;
+            }
+
+            if (focusModeEnabled) {
+                setFocusMode(false);
+            }
+            if (traceMode) {
+                traceMode = null;
+                applyTraceMode();
+            }
+
+            const pathNodeIds = findShortestPath(pathStartNodeId, pathEndNodeId);
+            if (!pathNodeIds || pathNodeIds.length === 0) {
+                clearPathHighlight();
+                pathStatusMessage = 'No directed path found from ' + getNodeLabel(pathStartNodeId) + ' to ' + getNodeLabel(pathEndNodeId) + '.';
+            } else {
+                applyPathHighlight(pathNodeIds);
+                pathStatusMessage = '';
+                const firstNode = document.querySelector('.node[data-id="' + CSS.escape(pathNodeIds[0]) + '"]');
+                if (firstNode && typeof scrollNodeIntoView === 'function') {
+                    scrollNodeIntoView(firstNode);
+                }
+            }
+
+            updatePathBuilderUi();
+            updateGraphActionButtons();
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_path_shown', {
+                    found: !!pathNodeIds && pathNodeIds.length > 0,
+                    hops: pathNodeIds && pathNodeIds.length > 0 ? (pathNodeIds.length - 1) : 0
+                });
+            }
+        }
+
+        function clearPathState(clearEndpoints = true) {
+            clearPathHighlight();
+            if (clearEndpoints) {
+                pathStartNodeId = null;
+                pathEndNodeId = null;
+            }
+            pathStatusMessage = '';
+            updatePathBuilderUi();
+            updateGraphActionButtons();
+            syncGraphContextUi();
+        }
+
         function applyFocusMode() {
             if (!focusModeEnabled || !selectedNodeId) {
                 clearFocusMode();
@@ -244,6 +464,11 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         function setFocusMode(enabled) {
+            if (enabled && activePathNodeIds.length > 0) {
+                clearPathHighlight();
+                pathStatusMessage = '';
+                updatePathBuilderUi();
+            }
             focusModeEnabled = enabled;
             updateFocusButton();
             applyFocusMode();
@@ -340,6 +565,11 @@ export function getGraphInteractionsScriptFragment(): string {
             if (traceMode && focusModeEnabled) {
                 setFocusMode(false);
             }
+            if (traceMode && activePathNodeIds.length > 0) {
+                clearPathHighlight();
+                pathStatusMessage = '';
+                updatePathBuilderUi();
+            }
             applyTraceMode();
             syncGraphContextUi();
             if (typeof trackUxEvent === 'function') {
@@ -361,6 +591,7 @@ export function getGraphInteractionsScriptFragment(): string {
                 updateTraceButtons();
             }
             if (selectionDetails) selectionDetails.style.display = 'none';
+            if (selectionEdgeDetails) selectionEdgeDetails.style.display = 'none';
             if (selectionEmpty) {
                 selectionEmpty.textContent = selectionEmptyText;
                 selectionEmpty.style.display = '';
@@ -368,6 +599,7 @@ export function getGraphInteractionsScriptFragment(): string {
             if (selectionCrossLinks) {
                 selectionCrossLinks.style.display = 'none';
             }
+            updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
         }
@@ -379,6 +611,11 @@ export function getGraphInteractionsScriptFragment(): string {
                 btn.classList.toggle('btn-disabled', !hasSelection);
                 btn.setAttribute('aria-disabled', hasSelection ? 'false' : 'true');
             });
+            setPathActionEnabled(graphPathSetStartAction, hasSelection);
+            setPathActionEnabled(graphPathSetEndAction, hasSelection);
+            setPathActionEnabled(graphPathShowAction, !!pathStartNodeId && !!pathEndNodeId);
+            const canClearPath = !!pathStartNodeId || !!pathEndNodeId || activePathNodeIds.length > 0 || !!pathStatusMessage;
+            setPathActionEnabled(graphPathClearAction, canClearPath);
         }
 
         function updateSelectionPanel(node) {
@@ -390,6 +627,7 @@ export function getGraphInteractionsScriptFragment(): string {
             node.classList.add('node-selected');
 
             if (selectionDetails) selectionDetails.style.display = '';
+            if (selectionEdgeDetails) selectionEdgeDetails.style.display = 'none';
             if (selectionEmpty) selectionEmpty.style.display = 'none';
 
             const label = node.getAttribute('data-label') || nodeId;
@@ -499,12 +737,106 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             if (focusModeEnabled) applyFocusMode();
+            if (traceMode) applyTraceMode();
+            updatePathBuilderUi();
             updateGraphActionButtons();
             const query = searchInput ? searchInput.value.trim() : '';
             if (query) {
                 refreshSearchNavigation(query);
                 applySearchHighlight();
             }
+        }
+
+        function decodeEdgeReferences(base64Value) {
+            if (!base64Value) {
+                return [];
+            }
+            try {
+                const parsed = JSON.parse(atob(base64Value));
+                if (!Array.isArray(parsed)) {
+                    return [];
+                }
+                return parsed
+                    .filter((item) => item && typeof item === 'object')
+                    .map((item) => ({
+                        filePath: typeof item.filePath === 'string' ? item.filePath : '',
+                        lineNumber: Number(item.lineNumber) || 0,
+                        context: typeof item.context === 'string' ? item.context : '',
+                        tableName: typeof item.tableName === 'string' ? item.tableName : ''
+                    }))
+                    .filter((item) => item.filePath.length > 0);
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function updateEdgeSelectionPanel(edge) {
+            if (!edge) {
+                return;
+            }
+
+            selectedNodeId = null;
+            document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
+            if (selectionDetails) selectionDetails.style.display = 'none';
+            if (selectionCrossLinks) selectionCrossLinks.style.display = 'none';
+            if (selectionEdgeDetails) selectionEdgeDetails.style.display = '';
+            if (selectionEmpty) selectionEmpty.style.display = 'none';
+
+            const sourceLabel = edge.getAttribute('data-source-label') || '';
+            const targetLabel = edge.getAttribute('data-target-label') || '';
+            const refType = (edge.getAttribute('data-reference-type') || 'select').toUpperCase();
+            const count = Number(edge.getAttribute('data-reference-count') || '0');
+            const tableSummary = edge.getAttribute('data-tables') || '';
+            const references = decodeEdgeReferences(edge.getAttribute('data-reference-samples'));
+
+            if (selectionEdgeTitle) {
+                selectionEdgeTitle.textContent = sourceLabel && targetLabel
+                    ? (sourceLabel + ' -> ' + targetLabel)
+                    : 'Selected edge';
+            }
+            if (selectionEdgeMeta) {
+                selectionEdgeMeta.textContent = refType + ' • ' + count + ' reference' + (count === 1 ? '' : 's');
+            }
+            if (selectionEdgeWhy) {
+                selectionEdgeWhy.textContent = tableSummary
+                    ? ('Why this edge? Shared references: ' + tableSummary)
+                    : 'Why this edge? This dependency was inferred from parsed SQL references.';
+            }
+            if (selectionEdgeRefs) {
+                if (references.length === 0) {
+                    selectionEdgeRefs.innerHTML = '<div class="selection-edge-empty">No file/line samples available for this edge yet.</div>';
+                } else {
+                    const maxVisible = 6;
+                    selectionEdgeRefs.innerHTML = references.slice(0, maxVisible).map((reference) => {
+                        const lineText = reference.lineNumber > 0 ? (':' + reference.lineNumber) : '';
+                        const contextText = reference.context ? (' (' + reference.context + ')') : '';
+                        return '<div class="selection-edge-ref">' +
+                            '<span class="selection-edge-ref-path">' + escapeHtml(reference.filePath) + lineText + '</span>' +
+                            '<span class="selection-edge-ref-meta">' + escapeHtml(reference.tableName + contextText) + '</span>' +
+                            '</div>';
+                    }).join('');
+                    if (references.length > maxVisible) {
+                        selectionEdgeRefs.innerHTML += '<div class="selection-edge-empty">+' + (references.length - maxVisible) + ' more references</div>';
+                    }
+                }
+            }
+            if (selectionEdgeOpenRef) {
+                const firstReference = references[0];
+                if (firstReference) {
+                    selectionEdgeOpenRef.classList.remove('btn-disabled');
+                    selectionEdgeOpenRef.setAttribute('aria-disabled', 'false');
+                    selectionEdgeOpenRef.setAttribute('data-file-path', firstReference.filePath || '');
+                    selectionEdgeOpenRef.setAttribute('data-line-number', String(firstReference.lineNumber || 1));
+                } else {
+                    selectionEdgeOpenRef.classList.add('btn-disabled');
+                    selectionEdgeOpenRef.setAttribute('aria-disabled', 'true');
+                    selectionEdgeOpenRef.setAttribute('data-file-path', '');
+                    selectionEdgeOpenRef.setAttribute('data-line-number', '1');
+                }
+            }
+
+            updateGraphActionButtons();
+            syncGraphContextUi();
         }
 
         function markWelcomeSeen() {
@@ -613,12 +945,70 @@ export function getGraphInteractionsScriptFragment(): string {
             updateSearchNavigationButtons();
 
             if (searchCount) {
-                const total = graphData?.nodes?.length || document.querySelectorAll('.node').length || 0;
                 const matched = searchMatchNodeIds.length;
                 const pos = activeSearchMatchIndex >= 0 ? (activeSearchMatchIndex + 1) : 0;
-                searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : ('0 of ' + total);
+                searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';
                 searchCount.style.display = '';
             }
+            if (searchPrevBtn) {
+                searchPrevBtn.setAttribute('aria-label', searchMatchNodeIds.length > 0
+                    ? ('Previous match (' + (activeSearchMatchIndex + 1) + ' of ' + searchMatchNodeIds.length + ')')
+                    : 'Previous search result');
+            }
+            if (searchNextBtn) {
+                searchNextBtn.setAttribute('aria-label', searchMatchNodeIds.length > 0
+                    ? ('Next match (' + (activeSearchMatchIndex + 1) + ' of ' + searchMatchNodeIds.length + ')')
+                    : 'Next search result');
+            }
+        }
+
+        function levenshteinDistance(a, b) {
+            if (a === b) return 0;
+            if (!a) return b.length;
+            if (!b) return a.length;
+            const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+            for (let i = 1; i <= a.length; i++) {
+                let diagonal = prev[0];
+                prev[0] = i;
+                for (let j = 1; j <= b.length; j++) {
+                    const temp = prev[j];
+                    if (a.charCodeAt(i - 1) === b.charCodeAt(j - 1)) {
+                        prev[j] = diagonal;
+                    } else {
+                        prev[j] = Math.min(diagonal + 1, prev[j] + 1, prev[j - 1] + 1);
+                    }
+                    diagonal = temp;
+                }
+            }
+            return prev[b.length];
+        }
+
+        function getFuzzySuggestions(query, limit = 3) {
+            const q = (query || '').trim().toLowerCase();
+            if (!q) {
+                return [];
+            }
+            const labels = Array.from(document.querySelectorAll('.node'))
+                .map((node) => (node.getAttribute('data-label') || '').trim())
+                .filter((label) => label.length > 0);
+            const uniqueLabels = Array.from(new Set(labels));
+            const suggestions = uniqueLabels
+                .map((label) => {
+                    const lower = label.toLowerCase();
+                    const includes = lower.includes(q) || q.includes(lower);
+                    const distance = includes ? 0 : levenshteinDistance(q, lower);
+                    return { label, distance, includes };
+                })
+                .filter((entry) => entry.includes || entry.distance <= Math.max(2, Math.ceil(q.length * 0.45)))
+                .sort((a, b) => {
+                    if (a.distance !== b.distance) {
+                        return a.distance - b.distance;
+                    }
+                    return a.label.localeCompare(b.label);
+                })
+                .slice(0, limit)
+                .map((entry) => entry.label);
+            return suggestions;
         }
 
         function jumpToSearchMatch(direction) {
@@ -680,12 +1070,21 @@ export function getGraphInteractionsScriptFragment(): string {
             if (searchActive) {
                 const matchCount = getSearchMatchCount(query);
                 if (matchCount === 0) {
+                    const suggestions = getFuzzySuggestions(query, 3);
+                    const suggestionActions = suggestions.map((label) =>
+                        '<button class="action-chip action-chip-small" data-graph-action="apply-suggestion" data-suggestion="' + escapeHtmlAttr(label) + '">' +
+                        escapeHtml(label) +
+                        '</button>'
+                    ).join('');
                     setGraphEmptyState({
                         id: 'no-matches',
                         title: 'No matches for this search',
-                        description: 'Try clearing search or changing your terms.',
+                        description: suggestions.length > 0
+                            ? ('Try one of these suggestions: ' + suggestions.join(', '))
+                            : 'Try clearing search or changing your terms.',
                         actionsHtml: '<button class="action-chip" data-graph-action="clear-search">Clear search</button>' +
-                            '<button class="action-chip" data-graph-action="focus-search">Search again</button>'
+                            '<button class="action-chip" data-graph-action="focus-search">Search again</button>' +
+                            suggestionActions
                     });
                     return;
                 }
@@ -742,6 +1141,7 @@ export function getGraphInteractionsScriptFragment(): string {
             if (focusModeEnabled) reasons.push('focus neighbors is active');
             if (traceMode === 'upstream') reasons.push('trace upstream is active');
             if (traceMode === 'downstream') reasons.push('trace downstream is active');
+            if (activePathNodeIds.length > 0) reasons.push('path highlight is active');
             graphStateReason.textContent = reasons.length > 0
                 ? 'Graph is reduced because ' + reasons.join(', ') + '.'
                 : 'Showing full graph for current mode.';
@@ -760,6 +1160,9 @@ export function getGraphInteractionsScriptFragment(): string {
             }
             if (traceMode === 'upstream' || traceMode === 'downstream') {
                 chips.push({ key: 'trace', label: traceMode === 'upstream' ? 'Trace: upstream' : 'Trace: downstream' });
+            }
+            if (activePathNodeIds.length > 0 && pathStartNodeId && pathEndNodeId) {
+                chips.push({ key: 'path', label: 'Path: ' + getNodeLabel(pathStartNodeId) + ' -> ' + getNodeLabel(pathEndNodeId) });
             }
 
             chips.forEach((chip) => {
@@ -790,6 +1193,10 @@ export function getGraphInteractionsScriptFragment(): string {
                             traceMode = null;
                             applyTraceMode();
                             syncGraphContextUi();
+                            return;
+                        }
+                        if (chip.key === 'path') {
+                            clearPathState(true);
                         }
                     });
                     chipEl.appendChild(clearBtn);
@@ -822,6 +1229,7 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         updateFocusButton();
+        updatePathBuilderUi();
         syncGraphContextUi();
         if (graphExplainPanel) {
             const state = vscode.getState() || {};
@@ -1002,6 +1410,9 @@ export function getGraphInteractionsScriptFragment(): string {
         updateGraphEmptyState();
         refreshSearchNavigation(searchInput ? searchInput.value.trim() : '');
         applySearchHighlight();
+        if (initialSearchQuery && !selectedNodeId) {
+            jumpToSearchMatch(0);
+        }
 
     `;
 }

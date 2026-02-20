@@ -52,5 +52,8 @@ describe('issues page in-page navigation wiring', () => {
         expect(html).toContain('class="section issues-section-anchor"');
         expect(html).toContain('id="issues-back-to-top"');
         expect(html).toContain('aria-label="Back to top"');
+        expect(html).toContain('class="issue-inline-action show-in-graph-btn"');
+        expect(html).toContain('data-show-graph-query="stale_table"');
+        expect(html).toContain('data-show-graph-query="missing_table"');
     });
 });

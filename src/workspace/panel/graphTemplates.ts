@@ -133,7 +133,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                             <path d="M9 18l6-6-6-6"/>
                         </svg>
                     </button>
-                    <span class="search-count" id="graph-search-count"></span>
+                    <span class="search-count" id="graph-search-count" aria-live="polite"></span>
                 </div>
                 <button class="icon-btn" id="btn-sidebar" title="Toggle panel" aria-label="Toggle sidebar panel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -349,7 +349,7 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
                     <span class="section-toggle">▼</span>
                 </div>
                 <div class="section-content">
-                    <div id="selection-empty" class="selection-empty">Click a node to see details and paths.</div>
+                    <div id="selection-empty" class="selection-empty">Click a node or edge to see details and paths.</div>
                     <div id="selection-details" class="selection-details" style="display: none;">
                         <div class="selection-title" id="selection-title">—</div>
                         <div class="selection-meta" id="selection-meta">—</div>
@@ -370,6 +370,19 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
                             <button class="action-chip action-chip-small btn-disabled" id="graph-context-trace-down" data-graph-action="trace-downstream" aria-disabled="true">Trace downstream</button>
                             <button class="action-chip action-chip-small" id="graph-context-clear-state" data-graph-action="clear-graph-state">Clear graph state</button>
                         </div>
+                        <div class="selection-divider"></div>
+                        <div class="selection-actions-label">Path finder</div>
+                        <div class="selection-path-summary" id="selection-path-summary">Set a start and end node, then show the shortest path.</div>
+                        <div class="selection-path-targets">
+                            <div class="selection-path-target" id="selection-path-start-label">Start: —</div>
+                            <div class="selection-path-target" id="selection-path-end-label">End: —</div>
+                        </div>
+                        <div class="selection-actions">
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-path-set-start" data-graph-action="path-set-start" aria-disabled="true">Set as start</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-path-set-end" data-graph-action="path-set-end" aria-disabled="true">Set as end</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-path-show" data-graph-action="path-show" aria-disabled="true">Show path</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-path-clear" data-graph-action="path-clear" aria-disabled="true">Clear path</button>
+                        </div>
                         <div class="selection-cross-links" id="selection-cross-links" style="display: none;">
                             <div class="selection-divider"></div>
                             <div class="selection-actions-label">Actions</div>
@@ -379,6 +392,16 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
                                 <button class="action-chip action-chip-small" data-graph-action="show-file-tables" style="display: none;">Show tables in file</button>
                                 <button class="action-chip action-chip-small" data-graph-action="open-file">Open file</button>
                             </div>
+                        </div>
+                    </div>
+                    <div id="selection-edge-details" class="selection-details" style="display: none;">
+                        <div class="selection-title" id="selection-edge-title">—</div>
+                        <div class="selection-meta" id="selection-edge-meta">—</div>
+                        <div class="selection-file" id="selection-edge-why">—</div>
+                        <div class="selection-path" id="selection-edge-refs"></div>
+                        <div class="selection-actions">
+                            <button class="action-chip action-chip-small btn-disabled" id="selection-edge-open-ref" data-graph-action="open-edge-reference" aria-disabled="true">Open first reference</button>
+                            <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear selection</button>
                         </div>
                     </div>
                 </div>

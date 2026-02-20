@@ -774,6 +774,26 @@ export function getIssuesPanelStyles(): string {
             padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
             font-family: var(--font-mono); background: var(--bg-primary); color: var(--text-dim);
         }
+        .issue-inline-action {
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 11px;
+            border-radius: var(--radius-sm);
+            padding: 6px 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .issue-inline-action:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+        .issue-inline-action:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
 
         /* Missing Item Card */
         .missing-card {

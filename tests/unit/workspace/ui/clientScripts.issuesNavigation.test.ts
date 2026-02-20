@@ -36,4 +36,13 @@ describe('issues view script navigation', () => {
         expect(script).toContain('navigateToIssuesSection(initialTargetId, false);');
         expect(script).toContain('updateBackToTopVisibility();');
     });
+
+    it('wires "show in graph" buttons to route back to graph with a prefilled query', () => {
+        const script = getIssuesScript('test');
+
+        expect(script).toContain("document.querySelectorAll('.show-in-graph-btn')");
+        expect(script).toContain("const query = btn.getAttribute('data-show-graph-query') || '';");
+        expect(script).toContain("const nodeType = btn.getAttribute('data-show-graph-type') || undefined;");
+        expect(script).toContain("vscode.postMessage({ command: 'showInGraph', query, nodeType });");
+    });
 });

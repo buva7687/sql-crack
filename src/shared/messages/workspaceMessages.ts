@@ -59,6 +59,7 @@ export type WorkspaceWebviewMessage =
     // File operations
     | { command: 'openFile'; filePath: string }
     | { command: 'openFileAtLine'; filePath: string; line: number }
+    | { command: 'showInGraph'; query: string; nodeType?: 'table' | 'view' | 'external' | 'file' }
     | { command: 'visualizeFile'; filePath: string }
     // Lineage view switching
     | { command: 'switchToLineageView' }

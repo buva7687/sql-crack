@@ -53,6 +53,7 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const vscode = acquireVsCodeApi();
         const graphData = ${graphData};
         const initialViewMode = '${initialView}';
+        const initialSearchQuery = ${JSON.stringify(searchFilterQuery || '')};
         let currentGraphMode = '${currentGraphMode}';
         let lineageDepth = ${normalizedLineageDepth};
         let lineageLegendVisibleFromHost = ${lineageLegendVisible ? 'true' : 'false'};
@@ -100,6 +101,19 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const selectionUpstream = document.getElementById('selection-upstream');
         const selectionDownstream = document.getElementById('selection-downstream');
         const selectionCrossLinks = document.getElementById('selection-cross-links');
+        const selectionEdgeDetails = document.getElementById('selection-edge-details');
+        const selectionEdgeTitle = document.getElementById('selection-edge-title');
+        const selectionEdgeMeta = document.getElementById('selection-edge-meta');
+        const selectionEdgeWhy = document.getElementById('selection-edge-why');
+        const selectionEdgeRefs = document.getElementById('selection-edge-refs');
+        const selectionEdgeOpenRef = document.getElementById('selection-edge-open-ref');
+        const selectionPathSummary = document.getElementById('selection-path-summary');
+        const selectionPathStartLabel = document.getElementById('selection-path-start-label');
+        const selectionPathEndLabel = document.getElementById('selection-path-end-label');
+        const graphPathSetStartAction = document.getElementById('graph-path-set-start');
+        const graphPathSetEndAction = document.getElementById('graph-path-set-end');
+        const graphPathShowAction = document.getElementById('graph-path-show');
+        const graphPathClearAction = document.getElementById('graph-path-clear');
         const graphEmptyOverlay = document.getElementById('graph-empty-overlay');
         const graphEmptyTitle = document.getElementById('graph-empty-title');
         const graphEmptyDesc = document.getElementById('graph-empty-desc');
@@ -289,6 +303,16 @@ export function getIssuesScript(nonce: string): string {
                         line: parseInt(line) || 0
                     });
                 }
+            });
+        });
+
+        document.querySelectorAll('.show-in-graph-btn').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const query = btn.getAttribute('data-show-graph-query') || '';
+                const nodeType = btn.getAttribute('data-show-graph-type') || undefined;
+                vscode.postMessage({ command: 'showInGraph', query, nodeType });
             });
         });
 

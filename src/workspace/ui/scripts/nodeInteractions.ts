@@ -91,6 +91,9 @@ export function getNodeInteractionsScriptFragment(): string {
                     e.stopPropagation();
                     clearEdgeHighlight();
                     edge.classList.add('edge-highlighted');
+                    if (typeof updateEdgeSelectionPanel === 'function') {
+                        updateEdgeSelectionPanel(edge);
+                    }
                     var path = edge.querySelector('path');
                     if (path) {
                         path.style.opacity = '1';

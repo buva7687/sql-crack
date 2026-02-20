@@ -155,6 +155,19 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("command: 'getLineageGraph'");
         expect(script).toContain("command: 'getUpstream'");
         expect(script).toContain("nodeType: 'file'");
+        expect(script).toContain("const selectionEdgeDetails = document.getElementById('selection-edge-details');");
+        expect(script).toContain("function updateEdgeSelectionPanel(edge)");
+        expect(script).toContain("case 'open-edge-reference':");
+        expect(script).toContain("data-reference-samples");
+        expect(script).toContain("const selectionPathSummary = document.getElementById('selection-path-summary');");
+        expect(script).toContain('function findShortestPath(sourceId, targetId)');
+        expect(script).toContain('function applyPathHighlight(pathNodeIds)');
+        expect(script).toContain("case 'path-set-start':");
+        expect(script).toContain("case 'path-set-end':");
+        expect(script).toContain("case 'path-show':");
+        expect(script).toContain("case 'path-clear':");
+        expect(script).toContain("trackUxEvent('graph_path_shown'");
+        expect(script).toContain("clearPathState(true);");
     });
 
     it('wires graph onboarding helper actions and explain panel toggle state', () => {
@@ -214,7 +227,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("const searchNextBtn = document.getElementById('btn-search-next');");
         expect(script).toContain("const searchCount = document.getElementById('graph-search-count');");
         expect(script).toContain('function refreshSearchNavigation(query)');
-        expect(script).toContain("searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : ('0 of ' + total);");
+        expect(script).toContain("searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';");
         expect(script).toContain("searchCount.style.display = '';");
         expect(script).toContain("searchCount.style.display = 'none';");
         expect(script).toContain('function jumpToSearchMatch(direction)');
@@ -242,6 +255,20 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('function updateSearchNavigationButtons()');
         expect(script).toContain("searchPrevBtn.classList.toggle('btn-disabled', !hasMatches);");
         expect(script).toContain("searchNextBtn.classList.toggle('btn-disabled', !hasMatches);");
+    });
+
+    it('exposes fuzzy suggestions for no-match searches and routes suggestion chips', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function getFuzzySuggestions(query, limit = 3)');
+        expect(script).toContain("data-graph-action=\"apply-suggestion\"");
+        expect(script).toContain("case 'apply-suggestion':");
     });
 
     it('toggles btn-disabled class on focus/trace buttons via updateGraphActionButtons', () => {
@@ -329,6 +356,48 @@ describe('workspace clientScripts navigation context', () => {
         expect(passiveWheelListeners.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('suppresses welcome overlay when graph has fewer than 3 nodes', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        // Welcome overlay gate: only shown when nodeCount >= 3
+        expect(script).toContain('nodeCount >= 3');
+        expect(script).toContain("id: 'welcome'");
+        expect(script).toContain('workspaceDepsWelcomeSeen');
+    });
+
+    it('switches search placeholder text based on current graph mode', () => {
+        const tablesScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        const filesScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'files',
+        });
+
+        // Client-side mode context sets different placeholders
+        expect(tablesScript).toContain("placeholder: 'Search table/view names...'");
+        expect(tablesScript).toContain("placeholder: 'Search file names...'");
+        expect(tablesScript).toContain('searchInput.placeholder = context.placeholder');
+
+        // Server-side initial placeholder differs by mode
+        expect(tablesScript).toContain('Search table/view names...');
+        expect(filesScript).toContain('Search file names...');
+    });
+
     it('restores non-graph scroll state after lineage and impact HTML re-renders', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -342,5 +411,18 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'impactFormResult':");
         expect(script).toContain("case 'impactResult':");
         expect(script).toContain('restoreViewState(currentViewMode);');
+    });
+
+    it('does not reference removed header focus button bindings', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).not.toContain('focusBtn');
+        expect(script).not.toContain('btn-focus');
     });
 });

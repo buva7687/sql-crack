@@ -15,6 +15,16 @@ describe('workspace panel selection sidebar actions', () => {
         expect(html).toContain('data-graph-action="trace-upstream"');
         expect(html).toContain('data-graph-action="trace-downstream"');
         expect(html).toContain('data-graph-action="clear-graph-state"');
+        expect(html).toContain('id="selection-edge-details"');
+        expect(html).toContain('id="selection-edge-open-ref"');
+        expect(html).toContain('data-graph-action="open-edge-reference"');
+        expect(html).toContain('id="selection-path-summary"');
+        expect(html).toContain('id="selection-path-start-label"');
+        expect(html).toContain('id="selection-path-end-label"');
+        expect(html).toContain('data-graph-action="path-set-start"');
+        expect(html).toContain('data-graph-action="path-set-end"');
+        expect(html).toContain('data-graph-action="path-show"');
+        expect(html).toContain('data-graph-action="path-clear"');
         expect(html).toContain('Trace in Lineage');
         expect(html).toContain('Analyze in Impact');
         expect(html).toContain('Show tables in file');

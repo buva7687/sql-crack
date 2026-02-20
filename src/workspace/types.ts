@@ -79,6 +79,14 @@ export interface WorkspaceEdge {
     referenceType: TableReference['referenceType'];
     count: number;             // Number of references
     tables: string[];          // Table names involved
+    references?: WorkspaceEdgeReference[]; // Sample references explaining why this edge exists
+}
+
+export interface WorkspaceEdgeReference {
+    filePath: string;
+    lineNumber: number;
+    context: string;
+    tableName: string;
 }
 
 /**
