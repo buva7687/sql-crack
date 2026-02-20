@@ -138,6 +138,8 @@ describe('workspace panel selection sidebar actions', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(successHtml).toContain('All clear</strong> — Fresh and no issues found');
+        // Success banner removed to reduce vertical noise — only warning banners shown
+        expect(successHtml).not.toContain('All clear');
+        expect(successHtml).not.toContain('issue-banner success');
     });
 });

@@ -597,7 +597,8 @@ export function getGraphInteractionsScriptFragment(): string {
             if (searchCount) {
                 const total = graphData?.nodes?.length || document.querySelectorAll('.node').length || 0;
                 const matched = searchMatchNodeIds.length;
-                searchCount.textContent = matched + ' / ' + total;
+                const pos = activeSearchMatchIndex >= 0 ? (activeSearchMatchIndex + 1) : 0;
+                searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : ('0 of ' + total);
                 searchCount.style.display = '';
             }
         }
@@ -673,7 +674,8 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             const state = vscode.getState() || {};
-            if (!searchActive && !state.workspaceDepsWelcomeSeen) {
+            const nodeCount = graphData?.nodes?.length || 0;
+            if (!searchActive && !state.workspaceDepsWelcomeSeen && nodeCount >= 3) {
                 setGraphEmptyState({
                     id: 'welcome',
                     title: 'Workspace dependencies at a glance',
@@ -695,13 +697,13 @@ export function getGraphInteractionsScriptFragment(): string {
         function getGraphModeContext(mode) {
             if (mode === 'files') {
                 return {
-                    title: 'Files Mode: Which files depend on each other',
-                    description: 'Each node is a SQL file. Edges show file-level dependency handoffs.'
+                    title: 'Files Mode: Which SQL files depend on each other',
+                    placeholder: 'Search file names...'
                 };
             }
             return {
                 title: 'Tables Mode: Which tables and views feed into which',
-                description: 'Each node is a table or view. Edges show workspace-level data flow dependencies.'
+                placeholder: 'Search table/view names...'
             };
         }
 
@@ -710,8 +712,8 @@ export function getGraphInteractionsScriptFragment(): string {
             if (graphContextTitle) {
                 graphContextTitle.textContent = context.title;
             }
-            if (graphContextDesc) {
-                graphContextDesc.textContent = context.description;
+            if (searchInput && context.placeholder) {
+                searchInput.placeholder = context.placeholder;
             }
         }
 

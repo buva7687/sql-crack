@@ -109,7 +109,6 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
         const searchCount = document.getElementById('graph-search-count');
         const graphContextTitle = document.getElementById('graph-context-title');
-        const graphContextDesc = document.getElementById('graph-context-desc');
         const graphStateChips = document.getElementById('graph-state-chips');
         const graphStateReason = document.getElementById('graph-state-reason');
         const graphContextFocusAction = document.getElementById('graph-context-focus');

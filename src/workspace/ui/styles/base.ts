@@ -179,10 +179,6 @@ export function getBaseStyles(): string {
             font-weight: 600;
             margin-bottom: 3px;
         }
-        .graph-context-desc {
-            color: var(--text-muted);
-            font-size: 12px;
-        }
         .graph-context-state {
             display: flex;
             flex-direction: column;
@@ -218,14 +214,21 @@ export function getBaseStyles(): string {
             border: none;
             background: transparent;
             color: var(--text-muted);
-            padding: 0;
+            padding: 4px 6px;
             margin-left: 1px;
             cursor: pointer;
             font-size: 11px;
             line-height: 1;
+            min-width: 24px;
+            min-height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-sm);
         }
         .graph-state-chip-clear:hover {
             color: var(--text-primary);
+            background: rgba(127, 127, 127, 0.15);
         }
         .graph-state-reason {
             color: var(--text-muted);

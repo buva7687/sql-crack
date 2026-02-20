@@ -48,11 +48,8 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
     const tablesActive = currentGraphMode === 'tables';
     const graphModeLabel = filesActive ? 'files' : 'tables';
     const graphModeContextTitle = filesActive
-        ? 'Files Mode: Which files depend on each other'
+        ? 'Files Mode: Which SQL files depend on each other'
         : 'Tables Mode: Which tables and views feed into which';
-    const graphModeContextDesc = filesActive
-        ? 'Use this mode to locate file-level ownership and dependency handoffs.'
-        : 'Use this mode to understand workspace data flow dependencies across tables and views.';
 
     return `<body>
     <div id="app">
@@ -120,7 +117,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
                         <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                     </svg>
-                    <input type="text" class="search-input" id="search-input" placeholder="Search current mode..." value="${escapeHtml(searchFilter.query)}">
+                    <input type="text" class="search-input" id="search-input" placeholder="${filesActive ? 'Search file names...' : 'Search table/view names...'}" value="${escapeHtml(searchFilter.query)}">
                     <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear search">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6L6 18M6 6l12 12"/>
@@ -188,7 +185,6 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
         <div class="graph-context-strip" id="graph-context-strip">
             <div class="graph-context-copy">
                 <div class="graph-context-title" id="graph-context-title">${escapeHtml(graphModeContextTitle)}</div>
-                <div class="graph-context-desc" id="graph-context-desc">${escapeHtml(graphModeContextDesc)}</div>
             </div>
             <div class="graph-context-state">
                 <div class="graph-state-chips" id="graph-state-chips">
@@ -243,15 +239,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             </span>
             <button class="issue-banner-btn" id="btn-view-issues">View Details →</button>
         </div>
-        ` : `
-        <div class="issue-banner success">
-            <svg class="issue-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-            </svg>
-            <span class="issue-banner-text"><strong>All clear</strong> — ${escapeHtml(indexStatus.text)} and no issues found</span>
-        </div>
-        `}
+        ` : ''}
 
         <!-- Main Layout -->
         <div class="main-layout">
