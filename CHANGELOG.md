@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Filter/search table list in lineage start view.
   - Export selected node lineage as JSON from the workspace context menu.
   - Expanded lineage keyboard affordances for node/column navigation and quick actions.
+- **Workspace graph context-menu productivity action**:
+  - Added `Copy Connections` action to copy a formatted upstream/downstream dependency summary for the selected node.
 - **SQL Flow keyboard easter eggs**: Added Matrix and zero-gravity keyboard-triggered modes in the SQL Flow webview.
 
 ### Changed
@@ -73,6 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Issues view now includes `Show in graph` actions that route directly back to Graph with prefilled query context.
   - Graph search no-result state now offers fuzzy suggestions for likely table/view labels.
   - Selection panel now includes a two-endpoint shortest-path flow: `Set as start`, `Set as end`, `Show path`, and `Clear path`.
+- **Workspace graph polish and discoverability updates**:
+  - Merged keyboard hints into a collapsible `Shortcuts` panel inside the bottom legend bar.
+  - Removed the redundant Graph-mode `?` help affordance to reduce competing help surfaces.
+  - Context menu actions now gray out unavailable upstream/downstream actions in Files mode with explicit affordance text.
+  - Graph empty-state copy is now mode-specific (`No files match this search` / `No tables/views match this search`).
+  - Graph search debounce aligned to SQL Flow timing for more consistent typing behavior.
+  - Graph search clear now provides visual flash feedback in the search control to explain why results changed.
+  - Removed visible `L` keyboard legend hint from the primary rail while retaining the `L` keybinding.
 
 ### Fixed
 
@@ -122,6 +132,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Normalized advanced export option styling so `SVG` onward uses the same left alignment and text contrast as `Copy to clipboard (PNG)` and `Save as PNG`.
 - **Workspace graph interaction runtime regression**:
   - Removed stale `focusBtn` references from graph scripts that could break interaction flows after moving focus actions to the Selection panel.
+- **Workspace graph search count visibility**:
+  - Fixed search-count rendering by explicitly using inline display state so `X of Y` feedback is visible when matches exist.
+- **Aggregate window function parser compatibility (`FILTER ... OVER`)**:
+  - Added preprocessing support to strip `FILTER (WHERE ...)` clauses before parsing, preventing failures on valid SQL patterns like `max(col) FILTER (WHERE ...) OVER (...)`.
+- **CTE hoisting with quoted CTE names**:
+  - Fixed nested CTE hoisting when CTE names are quoted (`"name"`, `` `name` ``, `[name]`) so multi-block nested `WITH` queries hoist reliably.
+- **Snowflake syntax preprocessing compatibility**:
+  - Added Snowflake compatibility rewrites for parser ingestion: `QUALIFY` stripping, `IFF()` rewrite to `CASE`, trailing-comma cleanup before `FROM/WHERE`, and `::TYPE` cast suffix stripping.
 
 ### Documentation
 
@@ -170,6 +188,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - issues-page `Show in graph` routing and query handoff,
   - edge metadata serialization for graph SVG and edge-selection rendering,
   - shortest-path action wiring and Selection panel path-controls presence.
+- Added parser regressions for:
+  - aggregate window expressions using `FILTER (WHERE ...) OVER (...)`,
+  - `stripFilterClauses()` behavior boundaries (presence, absence, string-literal safety),
+  - quoted-name nested CTE hoisting,
+  - Snowflake syntax preprocessing transforms (`QUALIFY`, `IFF`, trailing commas, `::TYPE` casts).
 
 ## [0.3.7] - 2026-02-13
 
