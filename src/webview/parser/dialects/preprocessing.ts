@@ -835,7 +835,7 @@ function hoistOneNestedCte(sql: string, masked: string): string | null {
         let newSql: string;
         if (topLevelWithMatch) {
             const rewrittenMasked = maskStringsAndComments(rewrittenSubquery);
-            const mergePoint = findTopLevelCteEnd(rewrittenMasked);
+            const mergePoint = findTopLevelCteEnd(rewrittenSubquery, rewrittenMasked);
             if (mergePoint === -1) {
                 continue;
             }
@@ -858,7 +858,7 @@ function extractCteDefinitions(
     masked: string,
     withKeywordStart: number
 ): { cteBlock: string; innerSelectStart: number } | null {
-    const withMatch = masked.substring(withKeywordStart).match(/^(\s*WITH\s+)/i);
+    const withMatch = masked.substring(withKeywordStart).match(/^(\s*WITH)\b/i);
     if (!withMatch) {
         return null;
     }
@@ -866,8 +866,12 @@ function extractCteDefinitions(
     let pos = withKeywordStart + withMatch[0].length;
     const cteStartPos = withKeywordStart;
 
+    // Skip whitespace after WITH, but stop at quoted names in original sql
+    while (pos < masked.length && /\s/.test(masked[pos]) && sql[pos] !== '"' && sql[pos] !== '`' && sql[pos] !== '[') { pos++; }
+
     while (pos < masked.length) {
-        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
+        // Skip whitespace before CTE name, but stop at quoted names in original sql
+        while (pos < masked.length && /\s/.test(masked[pos]) && sql[pos] !== '"' && sql[pos] !== '`' && sql[pos] !== '[') { pos++; }
 
         const nameStart = pos;
         if (sql[pos] === '"' || sql[pos] === '`' || sql[pos] === '[') {
@@ -982,16 +986,34 @@ export function findMatchingParen(sql: string, openPos: number): number {
     return -1;
 }
 
-function findTopLevelCteEnd(masked: string): number {
-    const withMatch = masked.match(/^\s*WITH\s+/i);
+function findTopLevelCteEnd(sql: string, masked: string): number {
+    const withMatch = masked.match(/^\s*WITH\b/i);
     if (!withMatch) {
         return -1;
     }
 
     let pos = withMatch[0].length;
+    // Skip whitespace after WITH, but stop at quoted names in original sql
+    while (pos < masked.length && /\s/.test(masked[pos]) && sql[pos] !== '"' && sql[pos] !== '`' && sql[pos] !== '[') { pos++; }
+
     while (pos < masked.length) {
-        while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
-        while (pos < masked.length && /\w/.test(masked[pos])) { pos++; }
+        // Skip whitespace before CTE name, but stop at quoted names in original sql
+        while (pos < masked.length && /\s/.test(masked[pos]) && sql[pos] !== '"' && sql[pos] !== '`' && sql[pos] !== '[') { pos++; }
+
+        // Handle quoted CTE names — masking blanks out quotes, so check original sql
+        const nameStart = pos;
+        if (pos < sql.length && (sql[pos] === '"' || sql[pos] === '`' || sql[pos] === '[')) {
+            const closeChar = sql[pos] === '[' ? ']' : sql[pos];
+            pos++;
+            while (pos < sql.length && sql[pos] !== closeChar) { pos++; }
+            if (pos < sql.length) { pos++; }
+        } else {
+            while (pos < masked.length && /\w/.test(masked[pos])) { pos++; }
+        }
+        if (pos === nameStart) {
+            return -1;
+        }
+
         while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
         if (masked.substring(pos, pos + 2).toUpperCase() !== 'AS') {
@@ -1030,6 +1052,214 @@ export function hasOracleHints(sql: string): boolean {
 }
 
 /**
+ * Preprocess Snowflake-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. QUALIFY clause — stripped (post-filter on window functions, doesn't affect structure)
+ * 2. IFF(cond, a, b) → CASE WHEN cond THEN a ELSE b END
+ * 3. Trailing commas before FROM/WHERE — removed
+ * 4. expr::TYPE casts — cast suffix stripped (doesn't affect structural visualization)
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessSnowflakeSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Snowflake') {
+        return null;
+    }
+
+    let result = sql;
+    let changed = false;
+
+    // 1. Strip QUALIFY clauses
+    const qualifyResult = stripQualifyClauses(result);
+    if (qualifyResult !== null) {
+        result = qualifyResult;
+        changed = true;
+    }
+
+    // 2. Rewrite IFF(cond, a, b) → CASE WHEN cond THEN a ELSE b END
+    const iffResult = rewriteIffExpressions(result);
+    if (iffResult !== null) {
+        result = iffResult;
+        changed = true;
+    }
+
+    // 3. Remove trailing commas before FROM/WHERE
+    const trailingCommaResult = removeTrailingCommas(result);
+    if (trailingCommaResult !== null) {
+        result = trailingCommaResult;
+        changed = true;
+    }
+
+    // 4. Strip ::TYPE cast suffixes
+    const castResult = stripDoubleColonCasts(result);
+    if (castResult !== null) {
+        result = castResult;
+        changed = true;
+    }
+
+    return changed ? result : null;
+}
+
+function stripQualifyClauses(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const qualifyRegex = /\bQUALIFY\b/gi;
+    const terminators = /\b(ORDER\s+BY|LIMIT|FETCH|OFFSET|UNION|INTERSECT|EXCEPT)\b/gi;
+    const ranges: { start: number; end: number }[] = [];
+
+    let match;
+    while ((match = qualifyRegex.exec(masked)) !== null) {
+        const start = match.index;
+        // Find the end: next top-level keyword, semicolon, or EOF
+        let end = masked.length;
+        terminators.lastIndex = start + match[0].length;
+        const termMatch = terminators.exec(masked);
+        if (termMatch) {
+            end = termMatch.index;
+        }
+        // Also check for semicolons
+        const semiPos = masked.indexOf(';', start + match[0].length);
+        if (semiPos !== -1 && semiPos < end) {
+            end = semiPos;
+        }
+        // Also check for closing paren at depth 0 (subquery boundary)
+        let depth = 0;
+        for (let i = start + match[0].length; i < end; i++) {
+            if (masked[i] === '(') { depth++; }
+            else if (masked[i] === ')') {
+                if (depth === 0) { end = i; break; }
+                depth--;
+            }
+        }
+        ranges.push({ start, end });
+    }
+
+    if (ranges.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = ranges.length - 1; i >= 0; i--) {
+        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
+    }
+    return result;
+}
+
+function rewriteIffExpressions(sql: string): string | null {
+    let result = sql;
+    let changed = false;
+
+    // Iteratively rewrite IFF from innermost to outermost
+    for (let iteration = 0; iteration < 50; iteration++) {
+        const masked = maskStringsAndComments(result);
+        const iffRegex = /\bIFF\s*\(/gi;
+        const match = iffRegex.exec(masked);
+        if (!match) { break; }
+
+        const iffStart = match.index;
+        const openParen = match.index + match[0].length - 1;
+
+        // Split the args by top-level commas (respecting nested parens)
+        const args = splitTopLevelArgs(result, openParen);
+        if (args === null || args.length !== 3) {
+            break; // Not a valid 3-arg IFF, stop
+        }
+
+        const closeParen = findMatchingParen(result, openParen);
+        if (closeParen === -1) { break; }
+
+        const caseExpr = `CASE WHEN ${args[0].trim()} THEN ${args[1].trim()} ELSE ${args[2].trim()} END`;
+        result = result.substring(0, iffStart) + caseExpr + result.substring(closeParen + 1);
+        changed = true;
+    }
+
+    return changed ? result : null;
+}
+
+/**
+ * Split the arguments of a function call at the given open-paren position.
+ * Returns array of argument strings, or null if parens don't balance.
+ */
+function splitTopLevelArgs(sql: string, openParenPos: number): string[] | null {
+    if (sql[openParenPos] !== '(') { return null; }
+    const closeParen = findMatchingParen(sql, openParenPos);
+    if (closeParen === -1) { return null; }
+
+    const inner = sql.substring(openParenPos + 1, closeParen);
+    const args: string[] = [];
+    let depth = 0;
+    let start = 0;
+
+    for (let i = 0; i < inner.length; i++) {
+        const ch = inner[i];
+        if (ch === '\'') {
+            i++;
+            while (i < inner.length) {
+                if (inner[i] === '\'' && i + 1 < inner.length && inner[i + 1] === '\'') { i += 2; continue; }
+                if (inner[i] === '\'') { break; }
+                i++;
+            }
+        } else if (ch === '"') {
+            i++;
+            while (i < inner.length && inner[i] !== '"') { i++; }
+        } else if (ch === '(') {
+            depth++;
+        } else if (ch === ')') {
+            depth--;
+        } else if (ch === ',' && depth === 0) {
+            args.push(inner.substring(start, i));
+            start = i + 1;
+        }
+    }
+    args.push(inner.substring(start));
+    return args;
+}
+
+function removeTrailingCommas(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const trailingCommaRegex = /,(\s*)(FROM|WHERE)\b/gi;
+    const ranges: { start: number; end: number }[] = [];
+
+    let match;
+    while ((match = trailingCommaRegex.exec(masked)) !== null) {
+        // Remove just the comma, keep the whitespace and keyword
+        ranges.push({ start: match.index, end: match.index + 1 });
+    }
+
+    if (ranges.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = ranges.length - 1; i >= 0; i--) {
+        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
+    }
+    return result;
+}
+
+function stripDoubleColonCasts(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    // Match ::TYPE where TYPE is an identifier (possibly with parens for precision)
+    const castRegex = /::[A-Za-z_]\w*(?:\s*\([^)]*\))?/g;
+    const ranges: { start: number; end: number }[] = [];
+
+    let match;
+    while ((match = castRegex.exec(masked)) !== null) {
+        ranges.push({ start: match.index, end: match.index + match[0].length });
+    }
+
+    if (ranges.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = ranges.length - 1; i >= 0; i--) {
+        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
+    }
+    return result;
+}
+
+/**
  * Apply all dialect-aware preprocessing transforms to SQL before parsing.
  * This is the single entry point for workspace extractors and other callers
  * that need the same transforms the webview parser applies.
@@ -1055,6 +1285,9 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
 
     const oracle = preprocessOracleSyntax(result, dialect);
     if (oracle !== null) { result = oracle; }
+
+    const snowflakeSyntax = preprocessSnowflakeSyntax(result, dialect);
+    if (snowflakeSyntax !== null) { result = snowflakeSyntax; }
 
     const snowflake = collapseSnowflakePaths(result, dialect);
     if (snowflake !== null) { result = snowflake; }

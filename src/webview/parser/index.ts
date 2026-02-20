@@ -19,6 +19,7 @@ export {
     hoistNestedCtes,
     preprocessPostgresSyntax,
     preprocessOracleSyntax,
+    preprocessSnowflakeSyntax,
     rewriteGroupingSets,
     collapseSnowflakePaths
 } from './dialects/preprocessing';

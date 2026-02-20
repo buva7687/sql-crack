@@ -1,4 +1,4 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessForParsing } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
 
 describe('parser preprocessing transforms', () => {
     describe('rewriteGroupingSets', () => {
@@ -328,6 +328,140 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).toMatch(/\bRETURNING\b/i);
             expect(rewritten).toContain('employee_id, salary');
             expect(rewritten).not.toMatch(/INTO\s+:id/);
+        });
+    });
+
+    describe('hoistNestedCtes — quoted CTE names', () => {
+        it('hoists two nested ( WITH ... ) blocks with unquoted names', () => {
+            const sql = `SELECT * FROM (WITH cte1 AS (SELECT 1 AS x) SELECT * FROM cte1) a JOIN (WITH cte2 AS (SELECT 2 AS y) SELECT * FROM cte2) b ON a.x = b.y`;
+            const result = hoistNestedCtes(sql);
+
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/^\s*WITH\b/i);
+            expect(result).toContain('cte1');
+            expect(result).toContain('cte2');
+            // Both should be hoisted — no nested WITH remaining
+            const masked = result!.replace(/'[^']*'/g, '');
+            expect(masked).not.toMatch(/\(\s*WITH\b/i);
+        });
+
+        it('hoists two nested ( WITH ... ) blocks with quoted CTE names', () => {
+            const sql = `SELECT * FROM (WITH "my_cte" AS (SELECT 1 AS x) SELECT * FROM "my_cte") a JOIN (WITH "other_cte" AS (SELECT 2 AS y) SELECT * FROM "other_cte") b ON a.x = b.y`;
+            const result = hoistNestedCtes(sql);
+
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/^\s*WITH\b/i);
+            expect(result).toContain('"my_cte"');
+            expect(result).toContain('"other_cte"');
+        });
+
+        it('merges nested ( WITH ... ) with existing top-level WITH when CTEs are quoted', () => {
+            const sql = `WITH "top_cte" AS (SELECT 1 AS a) SELECT * FROM "top_cte" JOIN (WITH "nested_cte" AS (SELECT 2 AS b) SELECT * FROM "nested_cte") t ON "top_cte".a = t.b`;
+            const result = hoistNestedCtes(sql);
+
+            expect(result).not.toBeNull();
+            expect(result).toContain('"top_cte"');
+            expect(result).toContain('"nested_cte"');
+            // Should have a single top-level WITH
+            const withCount = (result!.match(/\bWITH\b/gi) || []).length;
+            // One WITH at top level (the nested one is merged)
+            expect(withCount).toBe(1);
+        });
+    });
+
+    describe('preprocessSnowflakeSyntax', () => {
+        it('returns null for non-Snowflake dialects', () => {
+            const sql = 'SELECT IFF(x > 0, 1, 0) FROM t QUALIFY ROW_NUMBER() OVER (ORDER BY x) = 1';
+            expect(preprocessSnowflakeSyntax(sql, 'PostgreSQL')).toBeNull();
+        });
+
+        it('returns null when no Snowflake syntax present', () => {
+            const sql = 'SELECT id, name FROM employees WHERE active = 1';
+            expect(preprocessSnowflakeSyntax(sql, 'Snowflake')).toBeNull();
+        });
+
+        it('strips QUALIFY clause', () => {
+            const sql = 'SELECT id, name FROM employees QUALIFY ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) = 1';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bQUALIFY\b/i);
+            expect(result).toContain('SELECT id, name FROM employees');
+        });
+
+        it('strips QUALIFY clause before ORDER BY', () => {
+            const sql = 'SELECT * FROM t QUALIFY ROW_NUMBER() OVER (ORDER BY x) = 1 ORDER BY id';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bQUALIFY\b/i);
+            expect(result).toContain('ORDER BY id');
+        });
+
+        it('rewrites IFF(cond, a, b) to CASE WHEN ... END', () => {
+            const sql = 'SELECT IFF(x > 0, 1, 0) AS flag FROM t';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bIFF\s*\(/i);
+            expect(result).toMatch(/CASE\s+WHEN\s+x > 0\s+THEN\s+1\s+ELSE\s+0\s+END/i);
+        });
+
+        it('rewrites nested IFF expressions', () => {
+            const sql = 'SELECT IFF(a > 0, IFF(b > 0, 1, 2), 3) FROM t';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bIFF\s*\(/i);
+            // Should have two CASE/END pairs
+            const caseCount = (result!.match(/\bCASE\b/gi) || []).length;
+            const endCount = (result!.match(/\bEND\b/gi) || []).length;
+            expect(caseCount).toBe(2);
+            expect(endCount).toBe(2);
+        });
+
+        it('removes trailing comma before FROM', () => {
+            const sql = 'SELECT a, b, FROM t';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).toContain('SELECT a, b FROM t');
+        });
+
+        it('removes trailing comma before WHERE', () => {
+            const sql = 'SELECT a, WHERE x = 1';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/SELECT a\s+WHERE/);
+        });
+
+        it('strips ::TYPE cast suffixes', () => {
+            const sql = 'SELECT col::VARCHAR, num::INTEGER FROM t';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toContain('::');
+            expect(result).toContain('SELECT col, num FROM t');
+        });
+
+        it('strips ::TYPE with precision', () => {
+            const sql = 'SELECT col::NUMBER(10,2) FROM t';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toContain('::');
+            expect(result).toContain('SELECT col FROM t');
+        });
+
+        it('handles IFF + QUALIFY in same query', () => {
+            const sql = 'SELECT IFF(status = 1, \'active\', \'inactive\') AS label FROM users QUALIFY ROW_NUMBER() OVER (ORDER BY id) = 1';
+            const result = preprocessSnowflakeSyntax(sql, 'Snowflake');
+
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bIFF\s*\(/i);
+            expect(result).not.toMatch(/\bQUALIFY\b/i);
+            expect(result).toMatch(/\bCASE\b/i);
         });
     });
 

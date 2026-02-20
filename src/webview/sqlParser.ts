@@ -13,6 +13,7 @@ import {
     preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
+    preprocessSnowflakeSyntax,
     rewriteGroupingSets,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
@@ -106,7 +107,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -740,6 +741,18 @@ function applyParserCompatibilityPreprocessing(
             type: 'info',
             message: 'Stripped FILTER (WHERE ...) clauses for parser compatibility',
             suggestion: 'FILTER clauses on aggregate/window functions are valid SQL but unsupported by the parser. They were removed for visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const snowflakePreprocessedSql = preprocessSnowflakeSyntax(transformedSql, dialect);
+    if (snowflakePreprocessedSql !== null) {
+        transformedSql = snowflakePreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote Snowflake-specific syntax (QUALIFY, IFF, trailing commas, :: casts) for parser compatibility',
+            suggestion: 'Snowflake-specific constructs were automatically simplified for visualization.',
             category: 'best-practice',
             severity: 'low',
         });
