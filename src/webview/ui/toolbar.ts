@@ -71,8 +71,45 @@ let hintsSummaryBtn: HTMLButtonElement | null = null;
 let toolbarAbortController: AbortController | null = null;
 const HELP_PULSE_STYLE_ID = 'sql-crack-help-pulse-style';
 
+interface DialectOption {
+    value: SqlDialect;
+    label: string;
+}
+
+const DIALECT_OPTIONS: DialectOption[] = [
+    { value: 'MySQL', label: 'MySQL' },
+    { value: 'PostgreSQL', label: 'PostgreSQL' },
+    { value: 'TransactSQL', label: 'SQL Server' },
+    { value: 'Snowflake', label: 'Snowflake' },
+    { value: 'BigQuery', label: 'BigQuery' },
+    { value: 'Redshift', label: 'Redshift' },
+    { value: 'Hive', label: 'Hive / Databricks' },
+    { value: 'Athena', label: 'Athena' },
+    { value: 'Trino', label: 'Trino' },
+    { value: 'MariaDB', label: 'MariaDB' },
+    { value: 'SQLite', label: 'SQLite' },
+    { value: 'Oracle', label: 'Oracle' },
+    { value: 'Teradata', label: 'Teradata' },
+];
+
 function getToolbarListenerOptions(): AddEventListenerOptions | undefined {
     return toolbarAbortController ? { signal: toolbarAbortController.signal } : undefined;
+}
+
+function getCircularDialectOptions(currentDialect: SqlDialect): DialectOption[] {
+    const currentIndex = DIALECT_OPTIONS.findIndex(option => option.value === currentDialect);
+    if (currentIndex === -1) {
+        return DIALECT_OPTIONS;
+    }
+    return DIALECT_OPTIONS.slice(currentIndex).concat(DIALECT_OPTIONS.slice(0, currentIndex));
+}
+
+function renderDialectOptions(selectEl: HTMLSelectElement, currentDialect: SqlDialect): void {
+    const options = getCircularDialectOptions(currentDialect);
+    selectEl.innerHTML = options
+        .map(option => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+        .join('');
+    selectEl.value = currentDialect;
 }
 
 function createHintsBadgeMarkup(label: string): string {
@@ -217,6 +254,10 @@ export function createToolbar(
     const selectBg = isDark ? '#1e293b' : '#f1f5f9';
     const selectColor = isDark ? '#f1f5f9' : '#1e293b';
 
+    const dialectOptionsHtml = getCircularDialectOptions(options.currentDialect)
+        .map(option => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+        .join('');
+
     title.innerHTML = `
         <span>SQL Flow</span>
         <select id="dialect-select" title="SQL dialect for parsing" style="
@@ -229,19 +270,7 @@ export function createToolbar(
             cursor: pointer;
             outline: none;
         ">
-            <option value="MySQL">MySQL</option>
-            <option value="PostgreSQL">PostgreSQL</option>
-            <option value="TransactSQL">SQL Server</option>
-            <option value="Snowflake">Snowflake</option>
-            <option value="BigQuery">BigQuery</option>
-            <option value="Redshift">Redshift</option>
-            <option value="Hive">Hive / Databricks</option>
-            <option value="Athena">Athena</option>
-            <option value="Trino">Trino</option>
-            <option value="MariaDB">MariaDB</option>
-            <option value="SQLite">SQLite</option>
-            <option value="Oracle">Oracle</option>
-            <option value="Teradata">Teradata</option>
+            ${dialectOptionsHtml}
         </select>
         <span id="dialect-auto-indicator" style="
             display: none;
@@ -298,7 +327,9 @@ export function createToolbar(
     if (dialectSelect) {
         dialectSelect.value = options.currentDialect;
         dialectSelect.addEventListener('change', (e) => {
-            callbacks.onDialectChange((e.target as HTMLSelectElement).value as SqlDialect);
+            const selectedDialect = (e.target as HTMLSelectElement).value as SqlDialect;
+            renderDialectOptions(dialectSelect, selectedDialect);
+            callbacks.onDialectChange(selectedDialect);
         }, listenerOptions);
     }
 
