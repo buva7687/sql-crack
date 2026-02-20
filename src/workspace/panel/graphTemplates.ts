@@ -27,6 +27,7 @@ export interface StatsPanelHtmlOptions {
 export interface GraphAreaHtmlOptions {
     graph: WorkspaceDependencyGraph;
     searchFilter: SearchFilter;
+    currentGraphMode: GraphMode;
     renderGraph: (graph: WorkspaceDependencyGraph) => string;
 }
 
@@ -101,15 +102,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
                         title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
                         aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
-                    <button class="graph-mode-help" id="graph-mode-help-btn" type="button" aria-label="Help: Click to learn about graph modes">?</button>
                 </div>
-            </div>
-            <!-- Help tooltip (outside switcher to avoid clipping) -->
-            <div class="graph-mode-help-tooltip" id="graph-mode-help-tooltip">
-                <div class="help-tooltip-title">Graph Display Modes</div>
-                <div class="help-tooltip-item"><strong>Files:</strong> Which files depend on each other</div>
-                <div class="help-tooltip-item"><strong>Tables:</strong> Which tables/views feed into which</div>
-                <div class="help-tooltip-hint">Tip: To trace data flow from a specific table, use the Lineage tab.</div>
             </div>
 
             <div class="header-right">
@@ -288,6 +281,13 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 </svg>
                 Copy File Path
             </div>
+            <div class="context-menu-item" data-action="copyConnections">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                </svg>
+                Copy Connections
+            </div>
             <div class="context-menu-divider"></div>
             <div class="context-menu-item" data-action="openFile">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -438,7 +438,8 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
 }
 
 export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
-    const { graph, searchFilter, renderGraph } = options;
+    const { graph, searchFilter, currentGraphMode, renderGraph } = options;
+    const filesActive = currentGraphMode === 'files';
 
     return `
         <div id="graph-container" style="width: 100%; height: 100%; position: relative;">
@@ -467,7 +468,7 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
-                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? 'No matches for this search' : 'Workspace dependencies at a glance'}</div>
+                <div class="empty-state-title">${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0) ? (filesActive ? 'No files match this search' : 'No tables/views match this search') : 'Workspace dependencies at a glance'}</div>
                 <div class="empty-state-desc">
                     ${searchFilter.query || (searchFilter.nodeTypes && searchFilter.nodeTypes.length > 0)
                         ? 'Try clearing filters or changing your search terms.'
@@ -509,30 +510,7 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
             </button>
         </div>
 
-        <!-- Keyboard Shortcuts Hint -->
-        <div class="keyboard-hints" id="graph-keyboard-hints">
-            <div class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Drag</kbd><span>Pan</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Right-click</kbd><span>Menu</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>F</kbd><span>Focus</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>U</kbd><span>Upstream</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>D</kbd><span>Downstream</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Tab</kbd><span>Cycle nodes</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>↑↓←→</kbd><span>Navigate</span></div>
-            <div class="hint-divider"></div>
-            <div class="hint-item"><kbd>Enter</kbd><span>Open file</span></div>
-        </div>
-
-        <!-- Bottom Legend Bar -->
+        <!-- Bottom Legend Bar (includes keyboard shortcuts) -->
         <div class="workspace-legend-bar" id="workspace-legend-bar" role="complementary" aria-label="Workspace graph legend" aria-hidden="false">
             <div class="legend-scroll">
                 <div class="legend-inline-group">
@@ -550,8 +528,20 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                     <span class="legend-inline-item"><span class="legend-inline-edge delete"></span><span>DELETE</span></span>
                 </div>
                 <span class="legend-divider"></span>
-                <div class="legend-inline-group">
-                    <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
+                <div class="legend-inline-group legend-shortcuts-group">
+                    <button class="legend-shortcuts-toggle" id="legend-shortcuts-toggle" type="button" aria-expanded="false" title="Show keyboard shortcuts">Shortcuts ▸</button>
+                    <div class="legend-shortcuts-panel" id="legend-shortcuts-panel" style="display: none;">
+                        <span class="hint-item"><kbd>Scroll</kbd><span>Zoom</span></span>
+                        <span class="hint-item"><kbd>Drag</kbd><span>Pan</span></span>
+                        <span class="hint-item"><kbd>Click</kbd><span>Node/Edge</span></span>
+                        <span class="hint-item"><kbd>Right-click</kbd><span>Menu</span></span>
+                        <span class="hint-item"><kbd>F</kbd><span>Focus</span></span>
+                        <span class="hint-item"><kbd>U</kbd><span>Upstream</span></span>
+                        <span class="hint-item"><kbd>D</kbd><span>Downstream</span></span>
+                        <span class="hint-item"><kbd>Tab</kbd><span>Cycle</span></span>
+                        <span class="hint-item"><kbd>↑↓←→</kbd><span>Navigate</span></span>
+                        <span class="hint-item"><kbd>Enter</kbd><span>Open file</span></span>
+                    </div>
                 </div>
             </div>
             <button class="legend-dismiss" id="workspace-legend-dismiss" title="Dismiss legend (L)" aria-label="Dismiss workspace legend">×</button>

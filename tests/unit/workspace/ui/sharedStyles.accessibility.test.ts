@@ -49,7 +49,7 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('bottom: calc(18px + clamp(0px, var(--lineage-legend-height), 96px));');
         expect(css).toContain('bottom: calc(22px + clamp(0px, var(--lineage-legend-height), 96px));');
         expect(css).toContain('.workspace-legend-bar');
-        expect(css).toContain('.graph-area.graph-legend-visible .keyboard-hints');
+        expect(css).toContain('.legend-shortcuts-panel');
         expect(css).not.toContain('.workspace-legend-bar,\n        .legend-inline');
     });
 

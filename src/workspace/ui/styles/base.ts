@@ -147,6 +147,13 @@ export function getBaseStyles(): string {
             height: 12px;
         }
         .search-count { font-size: 11px; color: var(--text-dim); white-space: nowrap; display: none; }
+        @keyframes search-clear-flash {
+            0% { border-color: var(--accent); background: rgba(99, 102, 241, 0.08); }
+            100% { border-color: var(--border-subtle); background: var(--bg-primary); }
+        }
+        .search-box.search-cleared {
+            animation: search-clear-flash 0.5s ease-out;
+        }
         @media (max-width: 1600px) {
             .search-box { max-width: min(360px, 30vw); }
         }
@@ -514,7 +521,10 @@ export function getContextMenuStyles(): string {
             height: 1px; background: var(--border-subtle); margin: 4px 0;
         }
         .context-menu-item.disabled {
-            opacity: 0.5; pointer-events: none;
+            opacity: 0.5; pointer-events: none; cursor: default;
+        }
+        .context-menu-item.disabled:hover {
+            background: transparent; color: var(--text-secondary);
         }
     `;
 }

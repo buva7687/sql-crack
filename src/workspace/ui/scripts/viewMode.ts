@@ -457,26 +457,7 @@ export function getViewModeScriptFragment(): string {
 
         updateSidebarSectionsForView();
 
-        // Graph mode help tooltip
-        const helpBtn = document.getElementById('graph-mode-help-btn');
-        const helpTooltip = document.getElementById('graph-mode-help-tooltip');
-        if (helpBtn && helpTooltip) {
-            helpBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isVisible = helpTooltip.classList.contains('visible');
-                if (!isVisible) {
-                    const rect = helpBtn.getBoundingClientRect();
-                    helpTooltip.style.top = (rect.bottom + 8) + 'px';
-                    helpTooltip.style.right = (window.innerWidth - rect.right) + 'px';
-                }
-                helpTooltip.classList.toggle('visible');
-            });
-            document.addEventListener('click', (e) => {
-                if (!helpBtn.contains(e.target) && !helpTooltip.contains(e.target)) {
-                    helpTooltip.classList.remove('visible');
-                }
-            });
-        }
+        // Help tooltip removed — context strip provides sufficient mode description.
 
         // Set initial graph-mode-switcher visibility (always in layout; visibility reserves space).
         // This ensures main tabs are in the same position on initial load regardless of active tab.

@@ -1437,8 +1437,39 @@ export function getGraphStyles(): string {
             font-weight: 600;
             font-family: inherit;
         }
-        .graph-area.graph-legend-visible .keyboard-hints {
-            bottom: 70px;
+        .legend-shortcuts-group {
+            position: relative;
+        }
+        .legend-shortcuts-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .legend-shortcuts-toggle:hover {
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+        .legend-shortcuts-panel {
+            position: fixed;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            white-space: nowrap;
+            z-index: 1000;
         }
 
         /* ========== Issue Banner ========== */

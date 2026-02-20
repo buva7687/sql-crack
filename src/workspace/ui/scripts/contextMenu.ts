@@ -28,32 +28,58 @@ export function getContextMenuScriptFragment(): string {
             const openFileItem = contextMenu.querySelector('[data-action="openFile"]');
             const visualizeItem = contextMenu.querySelector('[data-action="visualize"]');
 
-            // In Files mode, hide upstream/downstream for file nodes (graph already shows file dependencies)
+            // In Files mode, grey out upstream/downstream for file nodes (graph already shows file deps)
             // In Tables mode, show upstream/downstream for table nodes
             if (upstreamItem && downstreamItem) {
                 if (graphMode === 'files' && isFileNode) {
-                    upstreamItem.style.display = 'none';
-                    downstreamItem.style.display = 'none';
+                    upstreamItem.classList.add('disabled');
+                    upstreamItem.setAttribute('aria-disabled', 'true');
+                    upstreamItem.title = 'Available in Tables mode';
+                    downstreamItem.classList.add('disabled');
+                    downstreamItem.setAttribute('aria-disabled', 'true');
+                    downstreamItem.title = 'Available in Tables mode';
                 } else {
-                    upstreamItem.style.display = '';
-                    downstreamItem.style.display = '';
+                    upstreamItem.classList.remove('disabled');
+                    upstreamItem.removeAttribute('aria-disabled');
+                    upstreamItem.title = '';
+                    downstreamItem.classList.remove('disabled');
+                    downstreamItem.removeAttribute('aria-disabled');
+                    downstreamItem.title = '';
                 }
             }
 
-            // Copy File Path only for nodes with a filePath
+            // Copy File Path — grey out when no filePath
             const copyPathItem = contextMenu.querySelector('[data-action="copyFilePath"]');
             if (copyPathItem) {
-                copyPathItem.style.display = nodeData.filePath ? '' : 'none';
+                if (nodeData.filePath) {
+                    copyPathItem.classList.remove('disabled');
+                    copyPathItem.removeAttribute('aria-disabled');
+                    copyPathItem.style.display = '';
+                } else {
+                    copyPathItem.style.display = 'none';
+                }
             }
 
             // Open File only makes sense for file nodes
             if (openFileItem) {
-                openFileItem.style.display = isFileNode ? '' : 'none';
+                if (isFileNode) {
+                    openFileItem.classList.remove('disabled');
+                    openFileItem.removeAttribute('aria-disabled');
+                    openFileItem.style.display = '';
+                } else {
+                    openFileItem.style.display = 'none';
+                }
             }
 
             // Visualize Dependencies only makes sense for file nodes
             if (visualizeItem) {
-                visualizeItem.style.display = isFileNode ? '' : 'none';
+                if (isFileNode) {
+                    visualizeItem.classList.remove('disabled');
+                    visualizeItem.removeAttribute('aria-disabled');
+                    visualizeItem.style.display = '';
+                } else {
+                    visualizeItem.style.display = 'none';
+                }
             }
         }
 
@@ -155,6 +181,25 @@ export function getContextMenuScriptFragment(): string {
                             navigator.clipboard.writeText(contextMenuTarget.filePath).catch(() => {});
                         }
                         break;
+                    case 'copyConnections': {
+                        const nodeId = contextMenuTarget.id || '';
+                        const neighbors = typeof getNeighbors === 'function' ? getNeighbors(nodeId) : { upstream: new Set(), downstream: new Set() };
+                        const upLabels = Array.from(neighbors.upstream).map(id => typeof getNodeLabel === 'function' ? getNodeLabel(id) : id);
+                        const downLabels = Array.from(neighbors.downstream).map(id => typeof getNodeLabel === 'function' ? getNodeLabel(id) : id);
+                        const parts = [nodeName];
+                        if (upLabels.length > 0) {
+                            parts.push(upLabels.length + ' upstream: [' + upLabels.join(', ') + ']');
+                        } else {
+                            parts.push('0 upstream');
+                        }
+                        if (downLabels.length > 0) {
+                            parts.push(downLabels.length + ' downstream: [' + downLabels.join(', ') + ']');
+                        } else {
+                            parts.push('0 downstream');
+                        }
+                        navigator.clipboard.writeText(parts.join(' → ')).catch(() => {});
+                        break;
+                    }
                     case 'openFile':
                         if (contextMenuTarget.filePath) {
                             openFile(contextMenuTarget.filePath);

@@ -80,8 +80,8 @@ describe('workspace panel selection sidebar actions', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(html).toContain('help-tooltip-hint');
-        expect(html).toContain('use the Lineage tab');
+        // Help tooltip was removed (#19) — context strip provides sufficient mode description.
+        expect(html).toContain('graph-mode-btn');
     });
 
     it('renders only graph, lineage, and impact tabs in the header', () => {

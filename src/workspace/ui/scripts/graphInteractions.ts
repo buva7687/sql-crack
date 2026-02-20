@@ -1070,6 +1070,7 @@ export function getGraphInteractionsScriptFragment(): string {
             if (searchActive) {
                 const matchCount = getSearchMatchCount(query);
                 if (matchCount === 0) {
+                    const modeNoun = currentGraphMode === 'files' ? 'files' : 'tables/views';
                     const suggestions = getFuzzySuggestions(query, 3);
                     const suggestionActions = suggestions.map((label) =>
                         '<button class="action-chip action-chip-small" data-graph-action="apply-suggestion" data-suggestion="' + escapeHtmlAttr(label) + '">' +
@@ -1078,7 +1079,7 @@ export function getGraphInteractionsScriptFragment(): string {
                     ).join('');
                     setGraphEmptyState({
                         id: 'no-matches',
-                        title: 'No matches for this search',
+                        title: 'No ' + modeNoun + ' match this search',
                         description: suggestions.length > 0
                             ? ('Try one of these suggestions: ' + suggestions.join(', '))
                             : 'Try clearing search or changing your terms.',
@@ -1255,6 +1256,34 @@ export function getGraphInteractionsScriptFragment(): string {
                 event.stopPropagation();
                 toggleGraphLegend(false);
             });
+
+            // Shortcuts toggle inside legend bar
+            const shortcutsToggle = document.getElementById('legend-shortcuts-toggle');
+            const shortcutsPanel = document.getElementById('legend-shortcuts-panel');
+            if (shortcutsToggle && shortcutsPanel) {
+                function positionShortcutsPanel() {
+                    const rect = shortcutsToggle.getBoundingClientRect();
+                    shortcutsPanel.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+                    shortcutsPanel.style.right = (window.innerWidth - rect.right) + 'px';
+                }
+                shortcutsToggle.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    const isOpen = shortcutsPanel.style.display !== 'none';
+                    if (!isOpen) {
+                        positionShortcutsPanel();
+                    }
+                    shortcutsPanel.style.display = isOpen ? 'none' : 'flex';
+                    shortcutsToggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+                    shortcutsToggle.textContent = isOpen ? 'Shortcuts ▸' : 'Shortcuts ▾';
+                });
+                document.addEventListener('click', (event) => {
+                    if (!shortcutsToggle.contains(event.target) && !shortcutsPanel.contains(event.target)) {
+                        shortcutsPanel.style.display = 'none';
+                        shortcutsToggle.setAttribute('aria-expanded', 'false');
+                        shortcutsToggle.textContent = 'Shortcuts ▸';
+                    }
+                });
+            }
         }
 
         // ========== Pan/Zoom Setup ==========
@@ -1386,15 +1415,27 @@ export function getGraphInteractionsScriptFragment(): string {
             refreshSearchNavigation('');
             applySearchHighlight();
             syncGraphContextUi();
-            if (hadQuery && typeof trackUxEvent === 'function') {
-                trackUxEvent('graph_search_cleared', { mode: currentGraphMode });
+            if (hadQuery) {
+                // Flash the search box to visually indicate the search was cleared
+                const searchBox = searchInput.closest('.search-box');
+                if (searchBox) {
+                    searchBox.classList.remove('search-cleared');
+                    void searchBox.offsetWidth; // force reflow to restart animation
+                    searchBox.classList.add('search-cleared');
+                    searchBox.addEventListener('animationend', () => {
+                        searchBox.classList.remove('search-cleared');
+                    }, { once: true });
+                }
+                if (typeof trackUxEvent === 'function') {
+                    trackUxEvent('graph_search_cleared', { mode: currentGraphMode });
+                }
             }
         }
 
         let searchTimeout;
         function debouncedSearch() {
             clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(performSearch, 500); // 500ms delay for smoother typing
+            searchTimeout = setTimeout(performSearch, 600); // 600ms delay to match SQL Flow
         }
 
         searchInput?.addEventListener('input', debouncedSearch);

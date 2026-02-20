@@ -655,6 +655,7 @@ export class WorkspacePanel {
             graphHtml: createGraphAreaHtml({
                 graph,
                 searchFilter,
+                currentGraphMode: this._currentGraphMode,
                 renderGraph: (currentGraph) => this.renderGraph(currentGraph),
             }),
             escapeHtml: escapeHtmlText,
