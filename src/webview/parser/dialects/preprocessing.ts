@@ -1321,17 +1321,17 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     let result = sql;
     let changed = false;
 
-    // 1. Rewrite SEL → SELECT (only at statement start, not inside identifiers)
+    // 1. Rewrite SEL → SELECT (at statement start — possibly indented — or after semicolons)
     let masked = maskStringsAndComments(result);
-    const selRegex = /(?:^|(?<=;\s*))SEL\b/gim;
+    const selRegex = /\bSEL\b/gim;
     const selRewrites: Array<{ start: number; end: number }> = [];
     let match: RegExpExecArray | null;
     while ((match = selRegex.exec(masked)) !== null) {
-        // Make sure we're matching the actual word SEL, not part of another word
-        if (match.index > 0) {
-            const prevChar = masked[match.index - 1];
-            if (/\w/.test(prevChar)) { continue; }
-        }
+        // Only match SEL at statement-level positions: beginning of text, after newline/whitespace, or after semicollon
+        const before = masked.substring(0, match.index);
+        const trimmedBefore = before.trimEnd();
+        // Must be at start of input, or preceded only by whitespace/newline, or after semicolon
+        if (trimmedBefore.length > 0 && !trimmedBefore.endsWith(';')) { continue; }
         selRewrites.push({ start: match.index, end: match.index + 3 });
     }
     for (let i = selRewrites.length - 1; i >= 0; i--) {
@@ -1360,9 +1360,10 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         changed = true;
     }
 
-    // 2. Strip LOCKING ROW/TABLE/DATABASE/VIEW FOR ACCESS/READ/WRITE/EXCLUSIVE
+    // 2. Strip LOCKING ROW/TABLE/DATABASE/VIEW [<object>] FOR ACCESS/READ/WRITE/EXCLUSIVE
+    //    Object name is optional: LOCKING ROW FOR ACCESS, LOCKING TABLE customers FOR ACCESS
     masked = changed ? maskStringsAndComments(result) : masked;
-    const lockingRegex = /\bLOCKING\s+(?:ROW|TABLE|DATABASE|VIEW)\s+FOR\s+(?:ACCESS|READ|WRITE|EXCLUSIVE)\b/gi;
+    const lockingRegex = /\bLOCKING\s+(?:ROW|TABLE|DATABASE|VIEW)(?:\s+\S+)?\s+FOR\s+(?:ACCESS|READ|WRITE|EXCLUSIVE)\b/gi;
     const lockingRewrites: Array<{ start: number; end: number }> = [];
     while ((match = lockingRegex.exec(masked)) !== null) {
         lockingRewrites.push({ start: match.index, end: match.index + match[0].length });

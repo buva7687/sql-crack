@@ -54,7 +54,10 @@ const SQL_RESERVED_WORDS = new Set([
     'begin', 'commit', 'rollback', 'transaction', 'savepoint',
     // Permissions
     'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger',
-    // Teradata-specific
+]);
+
+// Teradata-specific reserved words — only applied when dialect is Teradata
+const TERADATA_RESERVED_WORDS = new Set([
     'sel', 'multiset', 'volatile', 'locking', 'qualify', 'sample', 'normalize',
     'hashrow', 'hashbucket', 'hashamp'
 ]);
@@ -82,10 +85,13 @@ export class ReferenceExtractor {
     }
 
     /**
-     * Check if a name is a SQL reserved word
+     * Check if a name is a SQL reserved word (dialect-scoped for Teradata-only keywords)
      */
     private isReservedWord(name: string): boolean {
-        return SQL_RESERVED_WORDS.has(name.toLowerCase());
+        const lower = name.toLowerCase();
+        if (SQL_RESERVED_WORDS.has(lower)) { return true; }
+        if (this.options.dialect === 'Teradata' && TERADATA_RESERVED_WORDS.has(lower)) { return true; }
+        return false;
     }
 
     /**

@@ -741,5 +741,28 @@ QUALIFY ROW_NUMBER() OVER (ORDER BY customer_id) <= 10`;
             expect(result).toContain('ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW');
             expect(result).not.toMatch(/RANGE\s+BETWEEN\s+INTERVAL/i);
         });
+
+        it('rewrites indented SEL to SELECT', () => {
+            const sql = '  SEL id FROM t';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('SELECT');
+            expect(result).not.toMatch(/\bSEL\b/);
+        });
+
+        it('strips LOCKING TABLE <object> FOR ACCESS', () => {
+            const sql = 'LOCKING TABLE customers FOR ACCESS SELECT * FROM customers';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/LOCKING/i);
+            expect(result).toContain('SELECT * FROM customers');
+        });
+
+        it('strips LOCKING DATABASE <object> FOR READ', () => {
+            const sql = 'LOCKING DATABASE mydb FOR READ SELECT * FROM emp';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/LOCKING/i);
+        });
     });
 });

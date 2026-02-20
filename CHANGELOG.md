@@ -147,6 +147,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added preprocessing support to strip `FILTER (WHERE ...)` clauses before parsing, preventing failures on valid SQL patterns like `max(col) FILTER (WHERE ...) OVER (...)`.
 - **CTE hoisting with quoted CTE names**:
   - Fixed nested CTE hoisting when CTE names are quoted (`"name"`, `` `name` ``, `[name]`) so multi-block nested `WITH` queries hoist reliably.
+- **Indented `SEL` not detected or preprocessed**: Both detection and preprocessing regexes only matched `SEL` at absolute line start or after `;`. Indented Teradata queries (`  SEL id FROM t`) now correctly detected and rewritten.
+- **`LOCKING TABLE <object> FOR ACCESS` not stripped**: The LOCKING regex only handled the bare `LOCKING TABLE FOR ACCESS` form without an object name. Object-qualified forms like `LOCKING TABLE customers FOR ACCESS` are now stripped correctly.
+- **Teradata reserved words leaked into global scope**: Words like `sample`, `normalize`, `locking` were added to the global `SQL_RESERVED_WORDS` set, causing `SELECT * FROM sample` to return no table references in MySQL mode. Teradata-specific reserved words are now dialect-scoped.
 - **QUALIFY clause stripping depth-awareness**:
   - `stripQualifyClauses()` now uses depth-aware scanning (`findQualifyClauseEnd()`) instead of flat regex terminator matching. Previously, `ORDER BY` inside `OVER()` parentheses was incorrectly treated as a clause boundary, breaking queries like `QUALIFY ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) <= 3`.
 - **Snowflake syntax preprocessing compatibility**:

@@ -347,4 +347,14 @@ describe('detectDialect', () => {
         expect(result.scores.Snowflake).toBeGreaterThan(0);
         expect(result.scores.BigQuery).toBeGreaterThan(0);
     });
+
+    it('detects indented SEL as Teradata', () => {
+        const result = detectDialect('  SEL id, name FROM employees');
+        expect(result.dialect).toBe('Teradata');
+    });
+
+    it('detects LOCKING TABLE <object> FOR ACCESS as Teradata', () => {
+        const result = detectDialect('LOCKING TABLE customers FOR ACCESS SELECT * FROM customers');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+    });
 });
