@@ -1321,24 +1321,11 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     let result = sql;
     let changed = false;
 
-    // 1. Rewrite SEL → SELECT (at statement start — possibly indented — or after semicolons)
+    // 1. Rewrite REPLACE VIEW → CREATE OR REPLACE VIEW (Teradata shorthand)
+    //    (must run before SEL rewrite so "REPLACE VIEW v AS SEL" becomes
+    //     "CREATE OR REPLACE VIEW v AS SEL" then SEL→SELECT)
     let masked = maskStringsAndComments(result);
-    const selRegex = /\bSEL\b/gim;
-    const selRewrites: Array<{ start: number; end: number }> = [];
     let match: RegExpExecArray | null;
-    while ((match = selRegex.exec(masked)) !== null) {
-        // Only match SEL at statement-level positions: beginning of text, after newline/whitespace, or after semicollon
-        const before = masked.substring(0, match.index);
-        const trimmedBefore = before.trimEnd();
-        // Must be at start of input, or preceded only by whitespace/newline, or after semicolon
-        if (trimmedBefore.length > 0 && !trimmedBefore.endsWith(';')) { continue; }
-        selRewrites.push({ start: match.index, end: match.index + 3 });
-    }
-    for (let i = selRewrites.length - 1; i >= 0; i--) {
-        const m = selRewrites[i];
-        result = result.substring(0, m.start) + 'SELECT' + result.substring(m.end);
-        changed = true;
-    }
 
     // 1b. Rewrite REPLACE VIEW → CREATE OR REPLACE VIEW (Teradata shorthand)
     masked = changed ? maskStringsAndComments(result) : masked;
@@ -1371,6 +1358,27 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     for (let i = lockingRewrites.length - 1; i >= 0; i--) {
         const m = lockingRewrites[i];
         result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 2b. Rewrite SEL → SELECT (runs AFTER LOCKING stripping and REPLACE VIEW rewrite
+    //     so that "LOCKING ROW FOR ACCESS\nSEL ..." and "REPLACE VIEW v AS\nSEL ..." work)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const selRegex = /\bSEL\b/gim;
+    const selRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = selRegex.exec(masked)) !== null) {
+        const before = masked.substring(0, match.index);
+        const trimmedBefore = before.trimEnd();
+        // Valid contexts: start of input, after ;, after AS (view body), after ( (subquery), or all-whitespace (LOCKING stripped)
+        if (trimmedBefore.length > 0
+            && !trimmedBefore.endsWith(';')
+            && !trimmedBefore.endsWith('(')
+            && !/\bAS$/i.test(trimmedBefore)) { continue; }
+        selRewrites.push({ start: match.index, end: match.index + 3 });
+    }
+    for (let i = selRewrites.length - 1; i >= 0; i--) {
+        const m = selRewrites[i];
+        result = result.substring(0, m.start) + 'SELECT' + result.substring(m.end);
         changed = true;
     }
 

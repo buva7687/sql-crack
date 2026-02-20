@@ -70,6 +70,7 @@ export class ReferenceExtractor {
     private options: ExtractionOptions;
     private columnExtractor: ColumnExtractor;
     private globalCteNames: Set<string> = new Set(); // Track CTE names across the entire file
+    private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -90,7 +91,7 @@ export class ReferenceExtractor {
     private isReservedWord(name: string): boolean {
         const lower = name.toLowerCase();
         if (SQL_RESERVED_WORDS.has(lower)) { return true; }
-        if (this.options.dialect === 'Teradata' && TERADATA_RESERVED_WORDS.has(lower)) { return true; }
+        if (this._activeDialect === 'Teradata' && TERADATA_RESERVED_WORDS.has(lower)) { return true; }
         return false;
     }
 
@@ -114,6 +115,7 @@ export class ReferenceExtractor {
         filePath: string,
         dialect: SqlDialect = this.options.dialect
     ): TableReference[] {
+        this._activeDialect = dialect;
         const references: TableReference[] = [];
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
