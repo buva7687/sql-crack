@@ -9,7 +9,7 @@
  * - SQL Server (TransactSQL) specific features
  */
 
-import { parseSql, preprocessPostgresSyntax, preprocessOracleSyntax } from '../../../src/webview/sqlParser';
+import { parseSql, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
 
 describe('Dialect Support', () => {
   describe('MySQL', () => {
@@ -124,7 +124,20 @@ describe('Dialect Support', () => {
 
     it('parses window function with FILTER', () => {
       const result = parseSql('SELECT COUNT(*) FILTER (WHERE active = true) FROM users', dialect);
-      // May or may not parse depending on node-sql-parser version
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses aggregate FILTER combined with OVER window clause (issue #48)', () => {
+      const sql = `SELECT
+        day_start_ct,
+        swim_grp,
+        max(distance_m) filter (where distance_m <> 0) over (
+            partition by day_start_ct, swim_grp
+        ) as last_swim_distance_m
+      FROM swim_data`;
+      const result = parseSql(sql, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThanOrEqual(1);
     });
 
     describe('preprocessPostgresSyntax', () => {
@@ -202,6 +215,45 @@ describe('Dialect Support', () => {
           "SELECT 'AT TIME ZONE test' FROM t",
           'PostgreSQL'
         );
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('stripFilterClauses', () => {
+      it('strips FILTER (WHERE ...) from aggregate function', () => {
+        const result = stripFilterClauses(
+          'SELECT COUNT(*) FILTER (WHERE active = true) FROM users'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('FILTER');
+        expect(result).toContain('COUNT(*)');
+        expect(result).toContain('FROM users');
+      });
+
+      it('strips FILTER combined with OVER window clause', () => {
+        const sql = `SELECT max(distance_m) filter (where distance_m <> 0) over (
+            partition by day_start_ct, swim_grp
+        ) as last_swim_distance_m FROM swim_data`;
+        const result = stripFilterClauses(sql);
+        expect(result).not.toBeNull();
+        expect(result!).not.toMatch(/\bfilter\b/i);
+        expect(result).toContain('max(distance_m)');
+        expect(result).toContain('over');
+        expect(result).toContain('FROM swim_data');
+      });
+
+      it('returns null when no FILTER clauses present', () => {
+        const result = stripFilterClauses('SELECT COUNT(*) FROM users');
+        expect(result).toBeNull();
+      });
+
+      it('does not strip FILTER inside string literals', () => {
+        const result = stripFilterClauses("SELECT 'FILTER (WHERE x)' FROM t");
+        expect(result).toBeNull();
+      });
+
+      it('does not strip FILTER without WHERE keyword', () => {
+        const result = stripFilterClauses('SELECT filter FROM t');
         expect(result).toBeNull();
       });
     });

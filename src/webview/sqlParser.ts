@@ -13,7 +13,8 @@ import {
     preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
-    rewriteGroupingSets
+    rewriteGroupingSets,
+    stripFilterClauses
 } from './parser/dialects/preprocessing';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
 import {
@@ -105,7 +106,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -727,6 +728,18 @@ function applyParserCompatibilityPreprocessing(
             type: 'info',
             message: 'Oracle optimizer hints detected',
             suggestion: 'Optimizer hints (/*+ ... */) are preserved in the SQL but do not affect the visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const filterStrippedSql = stripFilterClauses(transformedSql);
+    if (filterStrippedSql !== null) {
+        transformedSql = filterStrippedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Stripped FILTER (WHERE ...) clauses for parser compatibility',
+            suggestion: 'FILTER clauses on aggregate/window functions are valid SQL but unsupported by the parser. They were removed for visualization.',
             category: 'best-practice',
             severity: 'low',
         });

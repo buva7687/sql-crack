@@ -76,6 +76,49 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
 }
 
 /**
+ * Strip `FILTER (WHERE ...)` clauses from aggregate/window functions.
+ *
+ * FILTER is valid SQL:2003 syntax supported by PostgreSQL, SQLite, and others,
+ * but node-sql-parser fails when FILTER is combined with OVER (window functions).
+ * Stripping it preserves the structural visualization while avoiding parse errors.
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function stripFilterClauses(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const filterRegex = /\bFILTER\s*\(/gi;
+    const matches: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = filterRegex.exec(masked)) !== null) {
+        // Verify the opening paren is part of FILTER(WHERE ...) — find the '(' position
+        const parenPos = masked.indexOf('(', match.index + 6);
+        if (parenPos === -1) { continue; }
+
+        // Check that the content after '(' starts with WHERE (skip whitespace)
+        let checkPos = parenPos + 1;
+        while (checkPos < masked.length && /\s/.test(masked[checkPos])) { checkPos++; }
+        if (!/^WHERE\b/i.test(masked.substring(checkPos))) { continue; }
+
+        const closePos = findMatchingParen(sql, parenPos);
+        if (closePos === -1) { continue; }
+
+        matches.push({ start: match.index, end: closePos + 1 });
+    }
+
+    if (matches.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const m = matches[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    }
+    return result;
+}
+
+/**
  * Preprocess Oracle-specific syntax that node-sql-parser doesn't support.
  *
  * Rewrites:
