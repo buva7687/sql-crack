@@ -31,7 +31,6 @@ describe('phase 2.1 dark surface blue-tint cleanup', () => {
         expect(toolbar).toContain('rgba(17, 17, 17, 0.95)');
         expect(toolbar).toContain('rgba(17, 17, 17, 0.98)');
         expect(batchTabs).toContain('rgba(17, 17, 17, 0.95)');
-        expect(batchTabs).toContain('rgba(17, 17, 17, 0.98)');
         expect(compareView).toContain('rgba(17,17,17,0.96)');
         expect(pinnedTabs).toContain('rgba(17, 17, 17, 0.95)');
     });

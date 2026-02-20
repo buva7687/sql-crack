@@ -59,6 +59,7 @@ import {
     setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
+    getScopedAdjacentQueryIndex,
     switchToTab,
     getActiveTabId,
     showFirstRunOverlay,
@@ -320,15 +321,17 @@ function init(): void {
         // [ for previous query
         if (e.key === '[') {
             e.preventDefault();
-            if (batchResult && currentQueryIndex > 0) {
-                switchToQueryIndex(currentQueryIndex - 1);
+            const prevIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'prev');
+            if (prevIndex !== null) {
+                switchToQueryIndex(prevIndex);
             }
         }
         // ] for next query
         if (e.key === ']') {
             e.preventDefault();
-            if (batchResult && currentQueryIndex < batchResult.queries.length - 1) {
-                switchToQueryIndex(currentQueryIndex + 1);
+            const nextIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'next');
+            if (nextIndex !== null) {
+                switchToQueryIndex(nextIndex);
             }
         }
     });

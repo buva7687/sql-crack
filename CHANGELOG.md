@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Graph search debounce aligned to SQL Flow timing for more consistent typing behavior.
   - Graph search clear now provides visual flash feedback in the search control to explain why results changed.
   - Removed visible `L` keyboard legend hint from the primary rail while retaining the `L` keybinding.
+- **SQL Flow batch result navigation UX**:
+  - Replaced the failed-only dropdown summary with compact inline status chips (`ok`, `failed`, `partial`) in the existing batch-tabs row (no new panel/row).
+  - Added scoped navigation state so batch controls (`⏮`, `◀`, `▶`, `⏭`) and keyboard shortcuts (`[` and `]`) navigate within the active status scope.
+  - Batch tab card rendering now honors active scope (show only matching query cards), including auto-jump into scope when current selection is outside the selected status set.
+  - Retained disabled zero-count chips for status visibility without adding extra UI footprint.
 
 ### Fixed
 
@@ -154,6 +159,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `stripQualifyClauses()` now uses depth-aware scanning (`findQualifyClauseEnd()`) instead of flat regex terminator matching. Previously, `ORDER BY` inside `OVER()` parentheses was incorrectly treated as a clause boundary, breaking queries like `QUALIFY ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) <= 3`.
 - **Snowflake syntax preprocessing compatibility**:
   - Added Snowflake compatibility rewrites for parser ingestion: `QUALIFY` stripping, `IFF()` rewrite to `CASE`, trailing-comma cleanup before `FROM/WHERE`, and `::TYPE` cast suffix stripping.
+- **Teradata advanced query partial parsing in SQL Flow**:
+  - Eliminated partial fallbacks for Teradata MERGE statements in `examples/teradata-advanced.sql` (Q1/Q2) by adding a Teradata MERGE compatibility parse path that preserves source/target/branch structure without setting `partial`.
+  - Eliminated partial fallback for Teradata XML aggregation query patterns (Q23) by extending Teradata preprocessing with:
+    - `XMLAGG(... ORDER BY ...)` argument rewrite (ORDER BY stripped at depth 0 inside XMLAGG),
+    - XML method-chain stripping for `.RETREIVE(...)` / `.RETRIEVE(...)`.
+  - Result: `examples/teradata-advanced.sql` now parses as `35/35` non-partial statements under Teradata dialect.
 
 ### Documentation
 
@@ -210,6 +221,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `stripFilterClauses()` behavior boundaries (presence, absence, string-literal safety),
   - quoted-name nested CTE hoisting,
   - Snowflake syntax preprocessing transforms (`QUALIFY`, `IFF`, trailing commas, `::TYPE` casts).
+- Added SQL Flow batch navigation regressions for scoped status navigation:
+  - `[` / `]` wiring through scoped adjacency helpers,
+  - compact `ok/failed/partial` chip rendering and scope toggling in batch tabs.
+- Added Teradata regression coverage for:
+  - MERGE compatibility parsing without `partial`,
+  - XMLAGG ORDER BY + `.RETREIVE(...)` preprocessing,
+  - dialect support guard ensuring Teradata MERGE no longer degrades to partial parse.
 
 ## [0.3.7] - 2026-02-13
 

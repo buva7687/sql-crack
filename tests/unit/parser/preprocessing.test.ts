@@ -770,5 +770,21 @@ QUALIFY ROW_NUMBER() OVER (ORDER BY customer_id) <= 10`;
             expect(result).not.toBeNull();
             expect(result).not.toMatch(/LOCKING/i);
         });
+
+        it('strips ORDER BY inside XMLAGG argument list', () => {
+            const sql = `SELECT XMLAGG(XMLELEMENT(E, employee_name || ',') ORDER BY employee_name) FROM employees`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/XMLAGG\s*\(/i);
+            expect(result).not.toMatch(/XMLAGG[\s\S]*ORDER\s+BY/i);
+        });
+
+        it('strips .RETREIVE/.RETRIEVE XML chain methods', () => {
+            const sql = `SELECT XMLAGG(XMLELEMENT(E, employee_name || ',')).RETREIVE('/:E[1]/text()' VARCHAR(10000)) FROM employees`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\.RETREI?VE\s*\(/i);
+            expect(result).toContain('FROM employees');
+        });
     });
 });

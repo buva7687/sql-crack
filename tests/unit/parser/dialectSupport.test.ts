@@ -814,6 +814,7 @@ describe('Dialect Support', () => {
         WHEN NOT MATCHED THEN INSERT (id, value) VALUES (s.id, s.value)
       `, dialect);
       expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
     });
 
     it('parses QUALIFY with ROW_NUMBER (nested OVER with ORDER BY)', () => {

@@ -1644,6 +1644,53 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         changed = true;
     }
 
+    // 17. Strip ORDER BY inside XMLAGG(...) arguments.
+    //     MySQL proxy parser rejects ordered XMLAGG forms used in Teradata.
+    //     Example: XMLAGG(XMLELEMENT(... ) ORDER BY col) -> XMLAGG(XMLELEMENT(... ))
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const xmlAggRegex = /\bXMLAGG\s*\(/gi;
+    const xmlAggOrderByRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = xmlAggRegex.exec(masked)) !== null) {
+        const openParen = masked.indexOf('(', match.index + match[0].length - 1);
+        if (openParen === -1) { continue; }
+        const closeParen = findMatchingParen(result, openParen);
+        if (closeParen === -1) { continue; }
+
+        const innerStart = openParen + 1;
+        const innerEnd = closeParen;
+        const innerMasked = maskStringsAndComments(result.substring(innerStart, innerEnd));
+        const orderByRel = findOrderByAtDepth0(innerMasked);
+        if (orderByRel === -1) { continue; }
+
+        xmlAggOrderByRewrites.push({
+            start: innerStart + orderByRel,
+            end: innerEnd
+        });
+    }
+    for (let i = xmlAggOrderByRewrites.length - 1; i >= 0; i--) {
+        const m = xmlAggOrderByRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 18. Strip XML method chaining .RETREIVE(...) / .RETRIEVE(...).
+    //     The proxy parser cannot parse this Teradata XML extraction syntax.
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const retrieveChainRegex = /\.\s*RETREI?VE\s*\(/gi;
+    const retrieveChainRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = retrieveChainRegex.exec(masked)) !== null) {
+        const openParen = masked.indexOf('(', match.index + match[0].length - 1);
+        if (openParen === -1) { continue; }
+        const closeParen = findMatchingParen(result, openParen);
+        if (closeParen === -1) { continue; }
+        retrieveChainRewrites.push({ start: match.index, end: closeParen + 1 });
+    }
+    for (let i = retrieveChainRewrites.length - 1; i >= 0; i--) {
+        const m = retrieveChainRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
     return changed ? result : null;
 }
 
@@ -1697,6 +1744,35 @@ function findKeywordAtDepth0(masked: string, keyword: string, pos: number): numb
             }
         }
     }
+    return -1;
+}
+
+function findOrderByAtDepth0(maskedSegment: string): number {
+    const upper = maskedSegment.toUpperCase();
+    let depth = 0;
+
+    for (let i = 0; i < maskedSegment.length; i++) {
+        const ch = maskedSegment[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth > 0) { depth--; }
+            continue;
+        }
+        if (depth !== 0) { continue; }
+
+        if (!upper.startsWith('ORDER', i)) { continue; }
+        const before = i > 0 ? maskedSegment[i - 1] : ' ';
+        if (!/[\s(,;]/.test(before)) { continue; }
+
+        let j = i + 'ORDER'.length;
+        while (j < maskedSegment.length && /\s/.test(maskedSegment[j])) { j++; }
+        if (!upper.startsWith('BY', j)) { continue; }
+
+        const after = maskedSegment[j + 2] || ' ';
+        if (!/[\s(,;]/.test(after)) { continue; }
+        return i;
+    }
+
     return -1;
 }
 

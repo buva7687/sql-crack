@@ -20,6 +20,9 @@ export {
     createBatchTabs,
     updateBatchTabs,
     disposeBatchTabs,
+    getBatchNavigationScope,
+    getScopedAdjacentQueryIndex,
+    BatchNavigationScope,
     BatchTabsCallbacks
 } from './batchTabs';
 

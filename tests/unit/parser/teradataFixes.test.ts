@@ -1,4 +1,4 @@
-import { parseSql, preprocessTeradataSyntax } from '../../../src/webview/sqlParser';
+import { parseSql, parseSqlBatch, preprocessTeradataSyntax } from '../../../src/webview/sqlParser';
 import { detectDialect } from '../../../src/webview/parser/dialects/detection';
 import { ReferenceExtractor } from '../../../src/workspace/extraction/referenceExtractor';
 
@@ -115,5 +115,65 @@ describe('Teradata bug fixes', () => {
         const refs = extractor.extractReferences('SELECT * FROM sample', 'test.sql', 'MySQL');
         const tables = refs.map(r => r.tableName.toLowerCase());
         expect(tables).toContain('sample');
+    });
+
+    it('[Fix 4] Teradata MERGE uses compatibility parser without partial flag', () => {
+        const sql = `MERGE INTO target_customers AS t
+USING source_updates AS s
+ON t.customer_id = s.customer_id
+WHEN MATCHED THEN
+  UPDATE SET t.customer_name = s.customer_name
+WHEN NOT MATCHED THEN
+  INSERT (customer_id, customer_name)
+  VALUES (s.customer_id, s.customer_name)`;
+        const result = parseSql(sql, 'Teradata');
+        expect(result.partial).toBeUndefined();
+        expect(result.error).toBeUndefined();
+        expect(result.nodes.length).toBeGreaterThan(0);
+        expect(result.hints.some(h => h.message.includes('Teradata MERGE using compatibility parser'))).toBe(true);
+        expect(result.hints.some(h => h.message.includes('Partial visualization - SQL parser could not parse this query'))).toBe(false);
+    });
+
+    it('[Fix 4] XMLAGG with ORDER BY and RETREIVE parses without partial', () => {
+        const sql = `SELECT
+  department_id,
+  TRIM(TRAILING ',' FROM (
+    XMLAGG(XMLELEMENT(E, employee_name || ',') ORDER BY employee_name)
+    .RETREIVE('/:E[1]/text()' VARCHAR(10000))
+  )) AS employee_list
+FROM employees
+GROUP BY department_id`;
+        const result = parseSql(sql, 'Teradata');
+        expect(result.partial).toBeUndefined();
+        expect(result.error).toBeUndefined();
+        expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('[Fix 4] teradata-advanced sample has no partial statements', () => {
+        const sampleSql = `MERGE INTO target_customers AS t
+USING source_updates AS s
+ON t.customer_id = s.customer_id
+WHEN MATCHED THEN UPDATE SET t.customer_name = s.customer_name
+WHEN NOT MATCHED THEN INSERT (customer_id, customer_name) VALUES (s.customer_id, s.customer_name);
+
+MERGE INTO product_inventory AS target
+USING daily_sales AS source
+ON target.product_id = source.product_id
+WHEN MATCHED AND target.quantity - source.sold_qty >= 0 THEN UPDATE SET target.quantity = target.quantity - source.sold_qty
+WHEN MATCHED AND target.quantity - source.sold_qty < 0 THEN UPDATE SET target.quantity = 0, target.stock_status = 'OUT_OF_STOCK'
+WHEN NOT MATCHED THEN INSERT (product_id, quantity, stock_status) VALUES (source.product_id, 0, 'NEEDS_INVENTORY');
+
+SELECT
+  department_id,
+  TRIM(TRAILING ',' FROM (
+    XMLAGG(XMLELEMENT(E, employee_name || ',') ORDER BY employee_name)
+    .RETREIVE('/:E[1]/text()' VARCHAR(10000))
+  )) AS employee_list
+FROM employees
+GROUP BY department_id;`;
+        const result = parseSqlBatch(sampleSql, 'Teradata');
+        const partialCount = result.queries.filter(q => q.partial).length;
+        expect(result.queries.length).toBe(3);
+        expect(partialCount).toBe(0);
     });
 });
