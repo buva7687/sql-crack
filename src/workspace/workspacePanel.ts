@@ -44,6 +44,7 @@ import {
     buildImpactReportExportData as buildImpactReportExportPayload,
     generateImpactReportMarkdown as renderImpactReportMarkdown,
 } from './panel/impactExport';
+import { WorkspaceUxMetrics } from './panel/uxMetrics';
 import {
     createLoadingHtml,
     createManualIndexHtml,
@@ -70,7 +71,7 @@ import { buildDetailedWorkspaceStats, buildIndexStatus } from './panel/workspace
 // Shared theme
 import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
 
-const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables', 'hybrid'];
+const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables'];
 const LINEAGE_LEGEND_VISIBILITY_STATE_KEY = 'sqlCrack.workspace.lineageLegendVisible';
 
 /**
@@ -98,7 +99,7 @@ export class WorkspacePanel {
     private _indexManager: IndexManager;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
-    /** Current graph mode (files/tables/hybrid) - persists across refresh, initialized from settings */
+    /** Current graph mode (files/tables) - persists across refresh, initialized from settings */
     private _currentGraphMode: GraphMode = 'tables';
     private _currentSearchFilter: SearchFilter = {
         query: '',
@@ -130,6 +131,7 @@ export class WorkspacePanel {
 
     // Message handler
     private _messageHandler: MessageHandler | null = null;
+    private _workspaceUxMetrics: WorkspaceUxMetrics = new WorkspaceUxMetrics();
 
     // Theme state
     private _isDarkTheme: boolean = true;
@@ -137,6 +139,20 @@ export class WorkspacePanel {
 
     private _postMessage(msg: WorkspaceHostMessage): void {
         this._panel.webview.postMessage(msg);
+    }
+
+    public getWorkspaceUxMetricsSummaryLine(): string {
+        const snapshot = this._workspaceUxMetrics.getSnapshot();
+        const top = snapshot.topEvents.map(({ event, count }) => `${event}:${count}`).join(', ') || 'none';
+        return `events=${snapshot.totalEvents}, elapsed=${snapshot.elapsedSeconds}s, top=[${top}]`;
+    }
+
+    public isWorkspaceUxInstrumentationEnabled(): boolean {
+        return this._workspaceUxMetrics.isInstrumentationEnabled();
+    }
+
+    public resetWorkspaceUxMetrics(): void {
+        this._workspaceUxMetrics.reset();
     }
 
     /**
@@ -451,6 +467,7 @@ export class WorkspacePanel {
             buildLineageGraph: () => this.buildLineageGraph(),
             handleExport: (format) => this.handleExport(format),
             savePngToFile: (base64Data, suggestedFilename) => this.savePngToFile(base64Data, suggestedFilename),
+            trackUxEvent: (event, metadata) => this._workspaceUxMetrics.record(event, metadata),
         };
 
         this._messageHandler = new MessageHandler(context);

@@ -102,6 +102,14 @@ describe('workspace sharedStyles accessibility rules', () => {
     it('includes search-count, typeahead-loading, and btn-disabled styles', () => {
         const css = getWebviewStyles(true);
         expect(css).toContain('.search-count');
+        expect(css).toContain('.search-nav-btn');
+        expect(css).toContain('.node-search-current .node-bg');
+        expect(css).toContain('.graph-explain-panel');
+        expect(css).toContain('.keyboard-hints.is-hidden');
+        expect(css).toContain('.zoom-toolbar.is-hidden');
+        expect(css).toContain('max-width: min(420px, 34vw);');
+        expect(css).toContain('@media (max-width: 1600px)');
+        expect(css).toContain('.search-nav-btn');
         expect(css).toContain('.typeahead-loading');
         expect(css).toContain('.loading-spinner-small');
         expect(css).toContain('.icon-btn.btn-disabled');
@@ -112,6 +120,12 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.selection-cross-links');
         expect(css).toContain('.selection-divider');
         expect(css).toContain('.selection-actions-label');
+    });
+
+    it('keeps advanced export options aligned and same contrast as other options', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.export-option-advanced { padding-left: 10px; color: var(--text-secondary); }');
+        expect(css).not.toContain('.export-option-advanced { padding-left: 16px; color: var(--text-muted); }');
     });
 
     it('renders theme-aware borders for workspace view tabs', () => {

@@ -272,17 +272,24 @@ export function getVisualLineageSearchScriptFragment(): string {
             scheduleLineageFilter(true);
         }
 
-        function selectLineageNode(nodeId) {
+        function selectLineageNode(nodeId, nodeLabel, nodeType) {
             captureLineageSearchState();
             if (lineageContent) {
                 lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
             }
-            vscode.postMessage({
+            const request = {
                 command: 'getLineageGraph',
                 nodeId: nodeId,
                 depth: lineageDepth,
                 direction: lineageCurrentDirection
-            });
+            };
+            if (nodeLabel) {
+                request.nodeLabel = nodeLabel;
+            }
+            if (nodeType) {
+                request.nodeType = nodeType;
+            }
+            vscode.postMessage(request);
         }
     `;
 }

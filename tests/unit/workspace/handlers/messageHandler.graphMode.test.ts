@@ -1,7 +1,7 @@
 /**
  * MessageHandler Graph Mode Switch Tests
  *
- * Verifies that switching graph modes (Files/Tables/Hybrid) properly
+ * Verifies that switching graph modes (Files/Tables) properly
  * clears the search filter to avoid stale/empty results.
  */
 
@@ -57,6 +57,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
         rebuildAndRenderGraph: jest.fn().mockResolvedValue(undefined),
         buildLineageGraph: jest.fn().mockResolvedValue(undefined),
         handleExport: jest.fn().mockResolvedValue(undefined),
+        trackUxEvent: jest.fn(),
     };
 
     return { context: { ...base, ...overrides } as any, postMessage };
@@ -87,10 +88,10 @@ describe('MessageHandler - graph mode switching', () => {
 
         await handler.handleMessage({
             command: 'switchGraphMode',
-            mode: 'hybrid',
+            mode: 'tables',
         } as any);
 
-        expect(context.setCurrentGraphMode).toHaveBeenCalledWith('hybrid');
+        expect(context.setCurrentGraphMode).toHaveBeenCalledWith('tables');
         expect(context.setCurrentView).toHaveBeenCalledWith('graph');
         expect(context.rebuildAndRenderGraph).toHaveBeenCalled();
     });
@@ -125,5 +126,21 @@ describe('MessageHandler - graph mode switching', () => {
         } as any);
 
         expect(context.setCurrentGraphMode).toHaveBeenCalledWith('tables');
+    });
+
+    it('should route trackUxEvent messages to context instrumentation callback', async () => {
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'trackUxEvent',
+            event: 'graph_trace_in_lineage',
+            metadata: { nodeType: 'table' }
+        } as any);
+
+        expect(context.trackUxEvent).toHaveBeenCalledWith(
+            'graph_trace_in_lineage',
+            { nodeType: 'table' }
+        );
     });
 });

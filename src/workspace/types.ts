@@ -107,7 +107,7 @@ export interface WorkspaceDependencyGraph {
 /**
  * Graph visualization mode
  */
-export type GraphMode = 'files' | 'tables' | 'hybrid';
+export type GraphMode = 'files' | 'tables';
 
 /**
  * Options for workspace analysis

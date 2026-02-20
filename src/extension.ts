@@ -261,6 +261,42 @@ export function activate(context: vscode.ExtensionContext) {
         );
     });
 
+    let workspaceUxMetricsCommand = vscode.commands.registerCommand('sql-crack.showWorkspaceUxMetrics', async () => {
+        const panel = WorkspacePanel.currentPanel;
+        if (!panel) {
+            vscode.window.showInformationMessage('Open Workspace Dependencies first to capture Graph UX metrics.');
+            return;
+        }
+
+        const summaryLine = panel.getWorkspaceUxMetricsSummaryLine();
+        logger.info(`[Workspace UX] manual snapshot ${summaryLine}`);
+
+        const enabled = panel.isWorkspaceUxInstrumentationEnabled();
+        const baseMessage = enabled
+            ? `Workspace Graph UX metrics: ${summaryLine}`
+            : `Workspace Graph UX instrumentation is disabled. Current counters: ${summaryLine}`;
+
+        const actions = enabled
+            ? ['Open SQL Crack Output', 'Reset Session Metrics']
+            : ['Open SQL Crack Output', 'Enable Setting'];
+        const selectedAction = await vscode.window.showInformationMessage(baseMessage, ...actions);
+        if (selectedAction === 'Open SQL Crack Output') {
+            logger.show();
+            return;
+        }
+        if (selectedAction === 'Reset Session Metrics') {
+            panel.resetWorkspaceUxMetrics();
+            vscode.window.showInformationMessage('Workspace Graph UX session metrics reset.');
+            return;
+        }
+        if (selectedAction === 'Enable Setting') {
+            await vscode.commands.executeCommand(
+                'workbench.action.openSettings',
+                'sqlCrack.advanced.workspaceUxInstrumentation'
+            );
+        }
+    });
+
     const diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
         [
             { language: 'sql', scheme: 'file' },
@@ -274,6 +310,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(activeEditorListener);
     context.subscriptions.push(workspaceCommand);
+    context.subscriptions.push(workspaceUxMetricsCommand);
     context.subscriptions.push(diagnosticCodeActionProvider);
 
     // Listen for cursor position changes in SQL files

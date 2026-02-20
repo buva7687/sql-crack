@@ -174,13 +174,6 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
                     </svg>
                 </button>
             </div>
-            <select id="filter-type" class="search-select">
-                <option value="all" ${searchFilter.nodeTypes === undefined ? 'selected' : ''}>All Types</option>
-                <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files Only</option>
-                <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables Only</option>
-                <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views Only</option>
-                <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External Only</option>
-            </select>
             ${searchFilter.useRegex ? '<span class="regex-badge">Regex</span>' : ''}
             ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
         </div>

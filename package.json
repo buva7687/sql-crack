@@ -29,7 +29,8 @@
   "activationEvents": [
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
-    "onCommand:sql-crack.analyzeWorkspace"
+    "onCommand:sql-crack.analyzeWorkspace",
+    "onCommand:sql-crack.showWorkspaceUxMetrics"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -46,6 +47,11 @@
         "command": "sql-crack.analyzeWorkspace",
         "title": "SQL Crack: Analyze Workspace Dependencies",
         "icon": "$(references)"
+      },
+      {
+        "command": "sql-crack.showWorkspaceUxMetrics",
+        "title": "SQL Crack: Show Workspace UX Metrics",
+        "icon": "$(graph-line)"
       }
     ],
     "menus": {
@@ -84,6 +90,10 @@
         },
         {
           "command": "sql-crack.analyzeWorkspace",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "sql-crack.showWorkspaceUxMetrics",
           "when": "workspaceFolderCount > 0"
         }
       ]
@@ -215,13 +225,11 @@
           "default": "tables",
           "enum": [
             "files",
-            "tables",
-            "hybrid"
+            "tables"
           ],
           "enumDescriptions": [
             "File-level dependency graph. Nodes are SQL files; edges show which files reference tables defined in other files.",
-            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.).",
-            "Files plus prominent tables (referenced 3+ times). Mix of file and table nodes."
+            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.)."
           ],
           "description": "Default mode for the Workspace Dependencies Graph tab. Used when the panel loads or when you refresh the index."
         },
@@ -352,6 +360,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Enable verbose debug logging to the SQL Crack output channel. Useful for troubleshooting. (Advanced)"
+        },
+        "sqlCrack.advanced.workspaceUxInstrumentation": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable local-only Workspace Graph UX interaction metrics in the SQL Crack output channel. No external telemetry is sent. (Advanced)"
         },
         "sqlCrack.customAggregateFunctions": {
           "type": "array",

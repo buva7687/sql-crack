@@ -125,6 +125,44 @@ describe('MessageHandler depth and column lineage routing', () => {
         );
     });
 
+    it('resolves workspace graph node ids to lineage ids for getLineageGraph when node metadata is provided', async () => {
+        const lineageGraph = {
+            nodes: new Map([
+                ['table:customer_summary_2024', { id: 'table:customer_summary_2024', type: 'table', name: 'customer_summary_2024', metadata: {} }],
+            ]),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        };
+        const { context, lineageView, postMessage } = createContext({
+            getLineageGraph: jest.fn(() => lineageGraph),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getLineageGraph',
+            nodeId: 'table_0',
+            nodeLabel: 'customer_summary_2024',
+            nodeType: 'table',
+            depth: 5,
+            direction: 'both',
+        } as any);
+
+        expect(lineageView.generateLineageGraphView).toHaveBeenCalledWith(
+            lineageGraph,
+            'table:customer_summary_2024',
+            expect.objectContaining({ depth: 5, direction: 'both' })
+        );
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'lineageGraphResult',
+            data: expect.objectContaining({
+                nodeId: 'table:customer_summary_2024',
+            }),
+        }));
+    });
+
     it('uses configured default depth for setLineageDirection rerenders', async () => {
         const { context, lineageView } = createContext({
             getDefaultLineageDepth: jest.fn(() => 11),

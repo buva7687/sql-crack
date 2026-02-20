@@ -95,6 +95,7 @@ export function getViewModeScriptFragment(): string {
         const workspaceBreadcrumb = document.getElementById('workspace-breadcrumb');
         const graphArea = document.querySelector('.graph-area');
         const graphModeSwitcher = document.getElementById('graph-mode-switcher');
+        const graphContextStrip = document.getElementById('graph-context-strip');
 
         const viewTitles = {
             lineage: 'Data Lineage',
@@ -218,6 +219,7 @@ export function getViewModeScriptFragment(): string {
 
         function switchToView(view, skipMessage = false, originLabel = '', originType = '') {
             if (view === currentViewMode) return;
+            const previousView = currentViewMode;
 
             // Clear column trace when leaving a lineage-related view to prevent stale state
             if (typeof clearColumnHighlighting === 'function') {
@@ -274,6 +276,9 @@ export function getViewModeScriptFragment(): string {
             }
 
             currentViewMode = view;
+            if (!skipMessage && typeof trackUxEvent === 'function') {
+                trackUxEvent('workspace_view_switched', { from: previousView, to: view });
+            }
             if (view === 'graph') {
                 navigationOriginLabel = '';
                 navigationOriginType = '';
@@ -283,6 +288,9 @@ export function getViewModeScriptFragment(): string {
             const headerSearchBox = document.querySelector('.header-right .search-box');
             if (headerSearchBox) {
                 headerSearchBox.style.display = view === 'graph' ? '' : 'none';
+            }
+            if (graphContextStrip) {
+                graphContextStrip.style.display = view === 'graph' ? '' : 'none';
             }
 
             if (view === 'graph') {
@@ -309,6 +317,9 @@ export function getViewModeScriptFragment(): string {
                             fitToScreen();
                         }, prefersReducedMotion ? 0 : 100);
                     });
+                }
+                if (typeof syncGraphContextUi === 'function') {
+                    syncGraphContextUi();
                 }
             } else {
                 if (graphArea) graphArea.style.display = 'none';
@@ -397,7 +408,7 @@ export function getViewModeScriptFragment(): string {
         });
 
         /**
-         * Graph mode switcher (Files / Tables / Hybrid)
+         * Graph mode switcher (Files / Tables)
          * Uses event delegation on the switcher container to handle button clicks.
          * This prevents duplicate listeners and ensures buttons work after tab switches.
          * 
@@ -421,6 +432,9 @@ export function getViewModeScriptFragment(): string {
                     setTimeout(() => {
                         const mode = btn.getAttribute('data-mode');
                         if (mode && mode !== currentGraphMode) {
+                            if (typeof trackUxEvent === 'function') {
+                                trackUxEvent('graph_mode_switched', { mode, fromView: currentViewMode });
+                            }
                             currentGraphMode = mode;
                             vscode.postMessage({ command: 'switchGraphMode', mode });
                         }
@@ -431,7 +445,13 @@ export function getViewModeScriptFragment(): string {
                 const mode = btn.getAttribute('data-mode');
                 // Don't do anything if clicking the already-active mode (prevents bug where it navigated to Lineage)
                 if (mode && mode !== currentGraphMode) {
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_mode_switched', { mode, fromView: currentViewMode });
+                    }
                     currentGraphMode = mode;
+                    if (typeof syncGraphContextUi === 'function') {
+                        syncGraphContextUi();
+                    }
                     vscode.postMessage({ command: 'switchGraphMode', mode });
                 }
             });

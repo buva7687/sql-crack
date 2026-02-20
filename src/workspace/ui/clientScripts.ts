@@ -26,7 +26,7 @@ export interface WebviewScriptParams {
     graphData: string;
     searchFilterQuery: string;
     initialView?: string;
-    currentGraphMode?: 'files' | 'tables' | 'hybrid';
+    currentGraphMode?: 'files' | 'tables';
     lineageDefaultDepth?: number;
     lineageLegendVisible?: boolean;
 }
@@ -86,8 +86,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const svg = document.getElementById('graph-svg');
         const mainGroup = document.getElementById('main-group');
         const searchInput = document.getElementById('search-input');
-        const filterType = document.getElementById('filter-type');
         const btnClearSearch = document.getElementById('btn-clear-search');
+        const searchPrevBtn = document.getElementById('btn-search-prev');
+        const searchNextBtn = document.getElementById('btn-search-next');
         const sidebar = document.getElementById('sidebar');
         const zoomLevel = document.getElementById('zoom-level');
         const tooltip = document.getElementById('tooltip');
@@ -106,8 +107,17 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const graphEmptyActions = document.getElementById('graph-empty-actions');
         const graphLegendBar = document.getElementById('workspace-legend-bar');
         const graphLegendDismiss = document.getElementById('workspace-legend-dismiss');
-        const graphLegendToggleBtn = document.getElementById('btn-legend-toggle');
         const searchCount = document.getElementById('graph-search-count');
+        const graphContextTitle = document.getElementById('graph-context-title');
+        const graphContextDesc = document.getElementById('graph-context-desc');
+        const graphStateChips = document.getElementById('graph-state-chips');
+        const graphStateReason = document.getElementById('graph-state-reason');
+        const graphContextFocusAction = document.getElementById('graph-context-focus');
+        const graphContextTraceUpAction = document.getElementById('graph-context-trace-up');
+        const graphContextTraceDownAction = document.getElementById('graph-context-trace-down');
+        const graphExplainPanel = document.getElementById('graph-explain-panel');
+        const graphKeyboardHints = document.getElementById('graph-keyboard-hints');
+        const graphZoomToolbar = document.querySelector('.zoom-toolbar');
         const selectionEmptyText = (selectionEmpty && selectionEmpty.textContent) ? selectionEmpty.textContent : 'Click a node to see details and paths.';
 
         // ========== Selection & Focus State ==========

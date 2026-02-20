@@ -27,10 +27,8 @@ export function buildDependencyGraph(
     // Build graph based on mode
     if (mode === 'files') {
         buildFileGraph(index, nodes, edges, nodeIdMap);
-    } else if (mode === 'tables') {
-        buildTableGraph(index, nodes, edges, nodeIdMap);
     } else {
-        buildHybridGraph(index, nodes, edges, nodeIdMap);
+        buildTableGraph(index, nodes, edges, nodeIdMap);
     }
 
     // Calculate statistics
@@ -267,110 +265,6 @@ function buildTableGraph(
                 }
             }
         }
-    }
-}
-
-/**
- * Build hybrid graph (files + prominent tables)
- */
-function buildHybridGraph(
-    index: WorkspaceIndex,
-    nodes: WorkspaceNode[],
-    edges: WorkspaceEdge[],
-    nodeIdMap: Map<string, string>
-): void {
-    // Count references per table
-    const referenceCount = new Map<string, number>();
-    for (const refs of index.referenceMap.values()) {
-        for (const ref of refs) {
-            const key = getQualifiedKey(ref.tableName, ref.schema);
-            referenceCount.set(key, (referenceCount.get(key) || 0) + 1);
-        }
-    }
-
-    // Create file nodes
-    for (const [filePath, analysis] of index.files.entries()) {
-        const nodeId = `file_${nodes.length}`;
-        nodeIdMap.set(filePath, nodeId);
-
-        const height = 80 + Math.min(analysis.definitions.length * 15, 60);
-
-        nodes.push({
-            id: nodeId,
-            type: 'file',
-            label: path.basename(filePath),
-            filePath,
-            definitions: analysis.definitions,
-            references: analysis.references,
-            definitionCount: analysis.definitions.length,
-            referenceCount: analysis.references.length,
-            x: 0,
-            y: 0,
-            width: 200,
-            height
-        });
-    }
-
-    // Create separate nodes for highly-referenced tables (referenced 3+ times from different files)
-    const prominentTables = new Set<string>();
-    for (const [key, count] of referenceCount.entries()) {
-        if (count >= 3) {
-            const def = index.definitionMap.get(key)?.[0];
-            if (def) {
-                prominentTables.add(key);
-                const nodeId = `table_${nodes.length}`;
-                nodeIdMap.set(`prominent:${key}`, nodeId);
-
-                nodes.push({
-                    id: nodeId,
-                    type: def.type,
-                    label: getDisplayName(def.name, def.schema),
-                    filePath: def.filePath,
-                    definitions: [def],
-                    referenceCount: count,
-                    x: 0,
-                    y: 0,
-                    width: 160,
-                    height: 60
-                });
-            }
-        }
-    }
-
-    // Create file-to-file edges
-    const edgeMap = new Map<string, { count: number; type: TableReference['referenceType']; tables: Set<string> }>();
-
-    for (const [filePath, analysis] of index.files.entries()) {
-        const sourceId = nodeIdMap.get(filePath);
-        if (!sourceId) {continue;}
-
-        for (const ref of analysis.references) {
-            const defs = getDefinitionCandidates(index, ref);
-            for (const def of defs) {
-                if (def.filePath === filePath) {continue;}
-                const targetId = nodeIdMap.get(def.filePath);
-                if (targetId) {
-                    const edgeKey = `${sourceId}->${targetId}`;
-                    if (!edgeMap.has(edgeKey)) {
-                        edgeMap.set(edgeKey, { count: 0, type: ref.referenceType, tables: new Set() });
-                    }
-                    edgeMap.get(edgeKey)!.count++;
-                    edgeMap.get(edgeKey)!.tables.add(getDisplayName(ref.tableName, ref.schema));
-                }
-            }
-        }
-    }
-
-    for (const [key, data] of edgeMap.entries()) {
-        const [source, target] = key.split('->');
-        edges.push({
-            id: `edge_${edges.length}`,
-            source,
-            target,
-            referenceType: data.type,
-            count: data.count,
-            tables: [...data.tables]
-        });
     }
 }
 

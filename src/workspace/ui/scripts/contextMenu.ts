@@ -29,7 +29,7 @@ export function getContextMenuScriptFragment(): string {
             const visualizeItem = contextMenu.querySelector('[data-action="visualize"]');
 
             // In Files mode, hide upstream/downstream for file nodes (graph already shows file dependencies)
-            // In Tables/Hybrid mode, show upstream/downstream for table nodes
+            // In Tables mode, show upstream/downstream for table nodes
             if (upstreamItem && downstreamItem) {
                 if (graphMode === 'files' && isFileNode) {
                     upstreamItem.style.display = 'none';
@@ -183,4 +183,3 @@ export function getContextMenuScriptFragment(): string {
         });
     `;
 }
-

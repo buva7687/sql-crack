@@ -46,7 +46,13 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
 
     const filesActive = currentGraphMode === 'files';
     const tablesActive = currentGraphMode === 'tables';
-    const hybridActive = currentGraphMode === 'hybrid';
+    const graphModeLabel = filesActive ? 'files' : 'tables';
+    const graphModeContextTitle = filesActive
+        ? 'Files Mode: Which files depend on each other'
+        : 'Tables Mode: Which tables and views feed into which';
+    const graphModeContextDesc = filesActive
+        ? 'Use this mode to locate file-level ownership and dependency handoffs.'
+        : 'Use this mode to understand workspace data flow dependencies across tables and views.';
 
     return `<body>
     <div id="app">
@@ -62,8 +68,8 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 <!-- View Mode Tabs -->
                 <div class="view-tabs">
                     <button class="view-tab active" data-view="graph" 
-                        title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables."
-                        aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files/Tables/Hybrid modes to change what nodes represent. Shows relationships between files and tables.">
+                        title="Dependency Graph: Visual overview of workspace dependencies. Switch between Files and Tables modes to change what nodes represent."
+                        aria-label="Dependency Graph: Visual overview of workspace dependencies. Switch between Files and Tables modes to change what nodes represent.">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
                             <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
@@ -90,26 +96,22 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
 
                 <!-- Graph mode switcher (visible only when Graph tab is active, appears below view tabs) -->
                 <div id="graph-mode-switcher" class="graph-mode-switcher" 
-                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table relationships, Hybrid shows both files and frequently-referenced tables (3+)."
-                    aria-label="Graph mode switcher: Switch between Files, Tables, or Hybrid display modes">
+                    title="Switch graph display mode: Files shows file-to-file dependencies, Tables shows table/view relationships."
+                    aria-label="Graph mode switcher: Switch between Files and Tables display modes">
                     <button class="graph-mode-btn ${filesActive ? 'active' : ''}" data-mode="files" 
                         title="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files."
                         aria-label="Files Mode: SQL files as nodes showing file-to-file dependencies. Best for understanding project structure and which files depend on tables from other files.">Files</button>
                     <button class="graph-mode-btn ${tablesActive ? 'active' : ''}" data-mode="tables" 
                         title="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace."
                         aria-label="Tables Mode: Tables and views as nodes showing table-to-table relationships. Best for understanding data model and how tables connect across your workspace.">Tables</button>
-                    <button class="graph-mode-btn ${hybridActive ? 'active' : ''}" data-mode="hybrid" 
-                        title="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies."
-                        aria-label="Hybrid Mode: Shows both files and frequently-referenced tables (3+ references). Balanced view of file organization and key data dependencies.">Hybrid</button>
                     <button class="graph-mode-help" id="graph-mode-help-btn" type="button" aria-label="Help: Click to learn about graph modes">?</button>
                 </div>
             </div>
             <!-- Help tooltip (outside switcher to avoid clipping) -->
             <div class="graph-mode-help-tooltip" id="graph-mode-help-tooltip">
                 <div class="help-tooltip-title">Graph Display Modes</div>
-                <div class="help-tooltip-item"><strong>Files:</strong> File-to-file dependencies</div>
-                <div class="help-tooltip-item"><strong>Tables:</strong> Table-to-table relationships</div>
-                <div class="help-tooltip-item"><strong>Hybrid:</strong> Files + tables referenced 3+ times</div>
+                <div class="help-tooltip-item"><strong>Files:</strong> Which files depend on each other</div>
+                <div class="help-tooltip-item"><strong>Tables:</strong> Which tables/views feed into which</div>
                 <div class="help-tooltip-hint">Tip: To trace data flow from a specific table, use the Lineage tab.</div>
             </div>
 
@@ -118,18 +120,20 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
                         <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                     </svg>
-                    <input type="text" class="search-input" id="search-input" placeholder="Search nodes..." value="${escapeHtml(searchFilter.query)}">
-                    <select class="search-select" id="filter-type">
-                        <option value="all">All</option>
-                        <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files</option>
-                        <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables</option>
-                        <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views</option>
-                        <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External</option>
-                        <option value="column">Columns</option>
-                    </select>
+                    <input type="text" class="search-input" id="search-input" placeholder="Search current mode..." value="${escapeHtml(searchFilter.query)}">
                     <button class="search-clear ${searchFilter.query ? 'visible' : ''}" id="btn-clear-search" title="Clear search">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                    <button class="search-nav-btn btn-disabled" id="btn-search-prev" title="Previous result (Shift+Enter)" aria-label="Previous search result" type="button">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 18l-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <button class="search-nav-btn btn-disabled" id="btn-search-next" title="Next result (Enter)" aria-label="Next search result" type="button">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18l6-6-6-6"/>
                         </svg>
                     </button>
                     <span class="search-count" id="graph-search-count"></span>
@@ -181,6 +185,32 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             </div>
         </header>
 
+        <div class="graph-context-strip" id="graph-context-strip">
+            <div class="graph-context-copy">
+                <div class="graph-context-title" id="graph-context-title">${escapeHtml(graphModeContextTitle)}</div>
+                <div class="graph-context-desc" id="graph-context-desc">${escapeHtml(graphModeContextDesc)}</div>
+            </div>
+            <div class="graph-context-state">
+                <div class="graph-state-chips" id="graph-state-chips">
+                    <span class="graph-state-chip graph-state-chip-fixed">Mode: ${graphModeLabel}</span>
+                </div>
+                <div class="graph-state-reason" id="graph-state-reason">Showing full graph for current mode.</div>
+            </div>
+        </div>
+        <div class="graph-explain-panel is-hidden" id="graph-explain-panel" aria-hidden="true">
+            <div class="graph-explain-title">Why am I seeing this graph?</div>
+            <div class="graph-explain-body">
+                <div>Graph is a navigation surface: map dependencies here, then use Lineage/Impact for deeper analysis.</div>
+                <div>Files mode: which SQL files depend on each other.</div>
+                <div>Tables mode: which tables/views feed into which.</div>
+                <div>If graph looks reduced, check state chips for active search/focus/trace filters.</div>
+            </div>
+            <div class="graph-explain-actions">
+                <button class="action-chip action-chip-small" data-graph-action="focus-search">Try search</button>
+                <button class="action-chip action-chip-small" data-graph-action="dismiss-why">Got it</button>
+            </div>
+        </div>
+
         <!-- Stats Bar -->
         <div class="stats-bar">
             <span class="stat"><span class="stat-value">${graph.stats.totalFiles}</span> files</span>
@@ -204,7 +234,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
             <span class="issue-banner-text">
-                <strong>${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found:</strong>
+                <strong>Graph may be partial (${totalIssues} issue${totalIssues !== 1 ? 's' : ''}):</strong>
                 ${[
                     graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : '',
                     graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : '',
@@ -219,7 +249,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                 <polyline points="22 4 12 14.01 9 11.01"/>
             </svg>
-            <span class="issue-banner-text"><strong>All clear</strong> — no issues found</span>
+            <span class="issue-banner-text"><strong>All clear</strong> — ${escapeHtml(indexStatus.text)} and no issues found</span>
         </div>
         `}
 
@@ -363,16 +393,19 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
                             </div>
                         </div>
                         <div class="selection-actions">
-                            <button class="action-chip action-chip-small" data-graph-action="focus-selection">Focus neighbors</button>
-                            <button class="action-chip action-chip-small" data-graph-action="clear-selection">Clear</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-context-focus" data-graph-action="focus-selection" aria-disabled="true">Focus neighbors</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-context-trace-up" data-graph-action="trace-upstream" aria-disabled="true">Trace upstream</button>
+                            <button class="action-chip action-chip-small btn-disabled" id="graph-context-trace-down" data-graph-action="trace-downstream" aria-disabled="true">Trace downstream</button>
+                            <button class="action-chip action-chip-small" id="graph-context-clear-state" data-graph-action="clear-graph-state">Clear graph state</button>
                         </div>
                         <div class="selection-cross-links" id="selection-cross-links" style="display: none;">
                             <div class="selection-divider"></div>
                             <div class="selection-actions-label">Actions</div>
                             <div class="selection-actions">
-                                <button class="action-chip action-chip-small" data-graph-action="view-lineage">View Lineage</button>
-                                <button class="action-chip action-chip-small" data-graph-action="analyze-impact">Analyze Impact</button>
-                                <button class="action-chip action-chip-small" data-graph-action="open-file">Open File</button>
+                                <button class="action-chip action-chip-small" data-graph-action="view-lineage">Trace in Lineage</button>
+                                <button class="action-chip action-chip-small" data-graph-action="analyze-impact">Analyze in Impact</button>
+                                <button class="action-chip action-chip-small" data-graph-action="show-file-tables" style="display: none;">Show tables in file</button>
+                                <button class="action-chip action-chip-small" data-graph-action="open-file">Open file</button>
                             </div>
                         </div>
                     </div>
@@ -427,6 +460,7 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                             <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
                             <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
                             <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                            <button class="action-chip" data-graph-action="why-this-graph">Why am I seeing this?</button>
                             <button class="action-chip" data-graph-action="view-issues">View issues</button>
                             <button class="action-chip" data-graph-action="refresh">Refresh index</button>
                             <button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>
@@ -452,6 +486,7 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                         <button class="action-chip" data-graph-action="focus-search">Search for a table</button>
                         <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>
                         <button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>
+                        <button class="action-chip" data-graph-action="why-this-graph">Why am I seeing this?</button>
                         <button class="action-chip" data-graph-action="view-issues">View issues</button>
                         <button class="action-chip" data-graph-action="refresh">Refresh index</button>
                     `}
@@ -476,14 +511,6 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
             </button>
             <button class="zoom-btn" id="btn-zoom-fit" title="Fit to screen" aria-label="Fit graph to screen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-            </button>
-            <div class="zoom-divider"></div>
-            <button class="zoom-btn" id="btn-legend-toggle" title="Toggle legend (L)" aria-label="Toggle workspace legend" aria-pressed="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <rect x="4" y="5" width="16" height="14" rx="2"/>
-                    <line x1="8" y1="10" x2="16" y2="10"/>
-                    <line x1="8" y1="14" x2="12" y2="14"/>
-                </svg>
             </button>
         </div>
 

@@ -9,7 +9,15 @@ describe('workspace panel selection sidebar actions', () => {
         expect(html).toContain('id="selection-cross-links"');
         expect(html).toContain('data-graph-action="view-lineage"');
         expect(html).toContain('data-graph-action="analyze-impact"');
+        expect(html).toContain('data-graph-action="show-file-tables"');
         expect(html).toContain('data-graph-action="open-file"');
+        expect(html).toContain('id="graph-context-focus"');
+        expect(html).toContain('data-graph-action="trace-upstream"');
+        expect(html).toContain('data-graph-action="trace-downstream"');
+        expect(html).toContain('data-graph-action="clear-graph-state"');
+        expect(html).toContain('Trace in Lineage');
+        expect(html).toContain('Analyze in Impact');
+        expect(html).toContain('Show tables in file');
     });
 
     it('uses normalized terminology in trace button aria-labels', () => {
@@ -37,6 +45,8 @@ describe('workspace panel selection sidebar actions', () => {
         expect(html).toContain('aria-label="Trace all downstream consumers"');
         expect(html).not.toContain('aria-label="Trace all upstream dependencies"');
         expect(html).not.toContain('aria-label="Trace all downstream dependents"');
+        expect(html).toContain('id="btn-search-prev"');
+        expect(html).toContain('id="btn-search-next"');
         expect(html).toContain('id="graph-search-count"');
     });
 
@@ -90,5 +100,44 @@ describe('workspace panel selection sidebar actions', () => {
         expect(html).toContain('data-view="lineage"');
         expect(html).toContain('data-view="impact"');
         expect(html).not.toContain('data-view="tableExplorer"');
+    });
+
+    it('includes graph explain panel actions and partial/freshness trust copy', () => {
+        const warningHtml = createGraphBodyHtml({
+            graph: {
+                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: ['x'], missingDefinitions: [], circularDependencies: [], parseErrors: 0 },
+            } as any,
+            searchFilter: { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false },
+            isDarkTheme: true,
+            escapeHtml: (value: string) => value,
+            statsHtml: '<div>stats</div>',
+            graphHtml: '<div>graph</div>',
+            indexStatus: { level: 'stale', title: 'Index may be stale', text: 'Stale' },
+            totalIssues: 1,
+            script: '<script>noop</script>',
+            currentGraphMode: 'tables',
+        });
+
+        expect(warningHtml).toContain('id="graph-explain-panel"');
+        expect(warningHtml).toContain('data-graph-action="dismiss-why"');
+        expect(warningHtml).toContain('Why am I seeing this graph?');
+        expect(warningHtml).toContain('Graph may be partial (1 issue):');
+
+        const successHtml = createGraphBodyHtml({
+            graph: {
+                stats: { totalFiles: 1, totalTables: 2, totalViews: 1, totalReferences: 0, orphanedDefinitions: [], missingDefinitions: [], circularDependencies: [], parseErrors: 0 },
+            } as any,
+            searchFilter: { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false },
+            isDarkTheme: true,
+            escapeHtml: (value: string) => value,
+            statsHtml: '<div>stats</div>',
+            graphHtml: '<div>graph</div>',
+            indexStatus: { level: 'fresh', title: 'Index is fresh', text: 'Fresh' },
+            totalIssues: 0,
+            script: '<script>noop</script>',
+            currentGraphMode: 'tables',
+        });
+
+        expect(successHtml).toContain('All clear</strong> — Fresh and no issues found');
     });
 });

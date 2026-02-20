@@ -1077,6 +1077,9 @@ export function getLineageNodeStyles(): string {
         .keyboard-hints:hover {
             opacity: 1;
         }
+        .keyboard-hints.is-hidden {
+            display: none;
+        }
         .keyboard-hints .hint-item {
             display: flex;
             align-items: center;
@@ -1487,6 +1490,8 @@ export function getGraphStyles(): string {
             font-size: 12px; cursor: pointer; transition: all 0.15s;
         }
         .action-chip:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-primary); }
+        .action-chip.active { border-color: var(--accent); color: var(--accent); background: var(--bg-primary); }
+        .action-chip.btn-disabled { opacity: 0.45; pointer-events: none; }
         .action-chip-small { font-size: 11px; padding: 4px 10px; }
 
         /* ========== Sidebar ========== */
@@ -1688,7 +1693,7 @@ export function getGraphStyles(): string {
         }
         .export-option:hover { background: var(--bg-hover); color: var(--text-primary); }
         .export-option:last-child { border-bottom: none; }
-        .export-option-advanced { padding-left: 16px; color: var(--text-muted); }
+        .export-option-advanced { padding-left: 10px; color: var(--text-secondary); }
 
         /* ========== Zoom Toolbar ========== */
         /* Positioned top-right to match common UI patterns and avoid content overlap */
@@ -1707,6 +1712,9 @@ export function getGraphStyles(): string {
         }
         .zoom-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
         .zoom-btn svg { width: 14px; height: 14px; }
+        .zoom-toolbar.is-hidden {
+            display: none;
+        }
         .zoom-divider { width: 1px; height: 20px; background: var(--border-subtle); margin: 0 4px; }
         .zoom-level {
             font-size: 11px; color: var(--text-muted); min-width: 40px;
@@ -1741,6 +1749,8 @@ export function getGraphStyles(): string {
         .node.dimmed { opacity: 0.25; }
         .node-search-match .node-bg { stroke: var(--accent); stroke-width: 3; }
         .node-search-match.node-focus-dim { opacity: 0.6; pointer-events: auto; }
+        .node-search-current .node-bg { stroke: var(--warning-light); stroke-width: 3.5; }
+        .node-search-current.node-focus-dim { opacity: 0.7; pointer-events: auto; }
         .node-search-dim { opacity: 0.18; }
         .node-selected .node-bg { stroke: var(--accent); stroke-width: 2; }
         .node-focus-dim { opacity: 0.12; pointer-events: none; }

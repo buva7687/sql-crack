@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Simplified lineage stats: removed redundant node count badge and relationship count; upstream/downstream counts now include external nodes with a parenthetical annotation.
   - Removed CTEs from lineage list view — CTEs are query-scoped and their referenced tables/views already appear as lineage nodes.
   - Moved direction filter buttons (Upstream/Both/Downstream) into the graph header row to save vertical space.
+- **Workspace Dependencies Graph UX refresh (navigation-first model)**:
+  - Graph header now keeps only Graph/Lineage/Impact tabs and two explicit graph modes (Files/Tables) with mode-specific context copy.
+  - Added persistent graph state chips/reason text so users can see when search/focus/trace filters are reducing visibility.
+  - Added search next/previous navigation controls with match count feedback and current-match highlighting.
+  - Selection panel actions were streamlined to task language: `Trace in Lineage`, `Analyze in Impact`, `Show tables in file`, `Open file`.
+  - Added context actions in the Selection area for graph-level exploration controls: `Focus neighbors`, `Trace upstream`, `Trace downstream`, `Clear graph state`.
+  - Introduced local opt-in Workspace UX instrumentation hooks for key graph actions/events (no server dependency required).
 
 ### Fixed
 
@@ -96,6 +103,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SVG/PNG export now strips `foreignObject` content and clears pan/zoom transform from the cloned SVG to prevent off-center or failed raster exports.
   - Restored HTML entity handling in workspace tooltip sanitizer paths.
 - **Workspace lineage/state robustness**: Added null/race guards and state-preservation fixes across lineage loading, minimap/tooltip bounds, and cross-view transitions.
+- **Workspace Graph onboarding overlap on first load**:
+  - Prevented stacked first-load surfaces by default-hiding the explain panel unless explicitly opened.
+  - Hid graph overlay chrome (keyboard hints and zoom toolbar) while empty/welcome overlays are active.
+  - Updated the welcome-card `Why am I seeing this?` action to transition cleanly (dismiss welcome -> open explain) instead of rendering both states simultaneously.
+- **Workspace Graph header search collisions**:
+  - Reworked graph search sizing to be shrink-safe under dense header controls.
+  - Removed ambiguous `Scope: current mode` suffix to avoid a “double search field” impression and compacted control sizing.
+- **Graph->Lineage node routing (`table_0` fallback issue)**:
+  - Fixed graph-to-lineage handoff so workspace graph IDs (for example `table_0`) are resolved to lineage IDs (for example `table:customer_summary_2024`) before rendering lineage graph views.
+  - Threaded node metadata (`nodeLabel`, `nodeType`) through `getLineageGraph` messaging to support deterministic host-side resolution.
+- **Workspace export dropdown consistency**:
+  - Normalized advanced export option styling so `SVG` onward uses the same left alignment and text contrast as `Copy to clipboard (PNG)` and `Save as PNG`.
 
 ### Documentation
 
@@ -136,6 +155,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - depth-aware lineage overview counts,
   - Escape clear-path handling for active column trace,
   - unresolved-node lineage export payload behavior.
+- Added Workspace Graph UX regression coverage for:
+  - first-load overlay/toolbar overlap prevention behavior,
+  - graph action routing and context button availability in Selection actions,
+  - host-side graph-node -> lineage-node ID resolution for `getLineageGraph` requests,
+  - export dropdown advanced-option alignment/contrast parity.
 
 ## [0.3.7] - 2026-02-13
 

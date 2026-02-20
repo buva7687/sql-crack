@@ -67,8 +67,8 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('graphLegendStorageKey');
         expect(script).toContain('toggleGraphLegend');
         expect(script).toContain('workspace-legend-dismiss');
-        expect(script).toContain('btn-legend-toggle');
-        expect(script).toContain('graphLegendToggleBtn?.addEventListener(\'click\'');
+        expect(script).not.toContain('btn-legend-toggle');
+        expect(script).not.toContain('graphLegendToggleBtn?.addEventListener(\'click\'');
         expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
     });
 
@@ -126,8 +126,8 @@ describe('workspace clientScripts navigation context', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(script).toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*lineageCurrentDirection/);
-        expect(script).not.toMatch(/function selectLineageNode\(nodeId\) {[\s\S]*direction:\s*'both'/);
+        expect(script).toMatch(/function selectLineageNode\(nodeId,\s*nodeLabel,\s*nodeType\) {[\s\S]*direction:\s*lineageCurrentDirection/);
+        expect(script).not.toMatch(/function selectLineageNode\(nodeId,\s*nodeLabel,\s*nodeType\) {[\s\S]*direction:\s*'both'/);
         expect(script).toContain('window.captureLineageSearchState = captureLineageSearchState;');
         expect(script).toContain('captureLineageSearchState();');
     });
@@ -144,9 +144,61 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("const selectionCrossLinks = document.getElementById('selection-cross-links');");
         expect(script).toContain("case 'view-lineage':");
         expect(script).toContain("case 'analyze-impact':");
+        expect(script).toContain("case 'show-file-tables':");
         expect(script).toContain("case 'open-file':");
+        expect(script).toContain("case 'trace-upstream':");
+        expect(script).toContain("case 'trace-downstream':");
+        expect(script).toContain("case 'clear-graph-state':");
         expect(script).toContain("button.setAttribute('data-node-id', nodeId);");
         expect(script).toContain("button.setAttribute('data-file-path', filePath || '');");
+        expect(script).toContain("lineageTitle.textContent = 'Data Lineage';");
+        expect(script).toContain('selectLineageNode(nodeId, nodeLabel, nodeType);');
+        expect(script).toContain("command: 'getUpstream'");
+        expect(script).toContain("nodeType: 'file'");
+    });
+
+    it('wires graph onboarding helper actions and explain panel toggle state', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const graphExplainPanel = document.getElementById('graph-explain-panel');");
+        expect(script).toContain("const graphKeyboardHints = document.getElementById('graph-keyboard-hints');");
+        expect(script).toContain("const graphZoomToolbar = document.querySelector('.zoom-toolbar');");
+        expect(script).toContain('function setGraphExplainPanelVisible(visible)');
+        expect(script).toContain('function toggleGraphExplainPanel()');
+        expect(script).toContain('function syncGraphOverlayChrome()');
+        expect(script).toContain("graphKeyboardHints.classList.toggle('is-hidden', overlayActive);");
+        expect(script).toContain("graphZoomToolbar.classList.toggle('is-hidden', overlayActive);");
+        expect(script).toContain("state.workspaceDepsWhyPanelDismissed = !visible;");
+        expect(script).toContain("const hasSavedDismissedPreference = Object.prototype.hasOwnProperty.call(state, 'workspaceDepsWhyPanelDismissed');");
+        expect(script).toContain("case 'why-this-graph':");
+        expect(script).toContain("if (activeEmptyState === 'welcome')");
+        expect(script).toContain('setGraphExplainPanelVisible(true);');
+        expect(script).toContain("case 'dismiss-why':");
+    });
+
+    it('wires opt-in workspace UX instrumentation hooks for core graph actions', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function trackUxEvent(eventName, metadata)');
+        expect(script).toContain("command: 'trackUxEvent'");
+        expect(script).toContain("trackUxEvent('workspace_view_switched'");
+        expect(script).toContain("trackUxEvent('graph_mode_switched'");
+        expect(script).toContain("trackUxEvent('graph_trace_in_lineage'");
+        expect(script).toContain("trackUxEvent('graph_analyze_in_impact'");
+        expect(script).toContain("trackUxEvent('graph_search_submitted'");
+        expect(script).toContain("trackUxEvent('graph_search_jump'");
     });
 
     it('captures graph-search-count element and updates it in performSearch/clearSearch', () => {
@@ -158,9 +210,38 @@ describe('workspace clientScripts navigation context', () => {
             currentGraphMode: 'tables',
         });
 
+        expect(script).toContain("const searchPrevBtn = document.getElementById('btn-search-prev');");
+        expect(script).toContain("const searchNextBtn = document.getElementById('btn-search-next');");
         expect(script).toContain("const searchCount = document.getElementById('graph-search-count');");
+        expect(script).toContain('function refreshSearchNavigation(query)');
         expect(script).toContain("searchCount.textContent = matched + ' / ' + total;");
+        expect(script).toContain("searchCount.style.display = '';");
         expect(script).toContain("searchCount.style.display = 'none';");
+        expect(script).toContain('function jumpToSearchMatch(direction)');
+        expect(script).toContain("searchPrevBtn?.addEventListener('click', () => jumpToSearchMatch(-1));");
+        expect(script).toContain("searchNextBtn?.addEventListener('click', () => jumpToSearchMatch(1));");
+        expect(script).toContain("if (event.key === 'Enter')");
+        expect(script).toContain("jumpToSearchMatch(event.shiftKey ? -1 : 1);");
+        expect(script).toContain("if (typeof scrollNodeIntoView === 'function')");
+    });
+
+    it('marks current search match distinctly while keeping matched nodes highlighted', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("let searchMatchNodeIds = [];");
+        expect(script).toContain("let activeSearchMatchIndex = -1;");
+        expect(script).toContain("node.classList.remove('node-search-match', 'node-search-dim', 'node-search-current');");
+        expect(script).toContain("node.classList.add('node-search-match');");
+        expect(script).toContain("node.classList.add('node-search-current');");
+        expect(script).toContain('function updateSearchNavigationButtons()');
+        expect(script).toContain("searchPrevBtn.classList.toggle('btn-disabled', !hasMatches);");
+        expect(script).toContain("searchNextBtn.classList.toggle('btn-disabled', !hasMatches);");
     });
 
     it('toggles btn-disabled class on focus/trace buttons via updateGraphActionButtons', () => {

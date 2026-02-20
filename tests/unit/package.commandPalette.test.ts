@@ -25,6 +25,18 @@ describe('package command palette entries', () => {
         );
     });
 
+    it('includes workspace UX metrics command in command palette', () => {
+        const entries = packageJson?.contributes?.menus?.commandPalette ?? [];
+        expect(entries).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    command: 'sql-crack.showWorkspaceUxMetrics',
+                    when: 'workspaceFolderCount > 0',
+                }),
+            ])
+        );
+    });
+
     it('includes marketplace keywords for SQL discovery', () => {
         const keywords: string[] = packageJson?.keywords ?? [];
         expect(keywords).toEqual(expect.arrayContaining(['sql', 'visualization', 'lineage', 'database']));

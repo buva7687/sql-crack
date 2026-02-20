@@ -17,9 +17,6 @@ export function getGraphInteractionsScriptFragment(): string {
             if (!graphLegendBar) return;
             graphLegendBar.classList.toggle('is-hidden', !visible);
             graphLegendBar.setAttribute('aria-hidden', visible ? 'false' : 'true');
-            if (graphLegendToggleBtn) {
-                graphLegendToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
-            }
             const graphAreaEl = document.getElementById('graph-area') || document.querySelector('.graph-area');
             if (graphAreaEl) {
                 graphAreaEl.classList.toggle('graph-legend-visible', visible);
@@ -196,9 +193,14 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         function updateFocusButton() {
-            if (!focusBtn) return;
-            focusBtn.classList.toggle('active', focusModeEnabled);
-            focusBtn.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
+            if (focusBtn) {
+                focusBtn.classList.toggle('active', focusModeEnabled);
+                focusBtn.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
+            }
+            if (graphContextFocusAction) {
+                graphContextFocusAction.classList.toggle('active', focusModeEnabled);
+                graphContextFocusAction.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
+            }
         }
 
         function getNeighbors(nodeId) {
@@ -249,6 +251,10 @@ export function getGraphInteractionsScriptFragment(): string {
             focusModeEnabled = enabled;
             updateFocusButton();
             applyFocusMode();
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_focus_mode_toggled', { enabled: !!enabled });
+            }
         }
 
         // ========== Trace Mode (Full Lineage) ==========
@@ -280,9 +286,17 @@ export function getGraphInteractionsScriptFragment(): string {
                 traceUpBtn.classList.toggle('active', traceMode === 'upstream');
                 traceUpBtn.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
             }
+            if (graphContextTraceUpAction) {
+                graphContextTraceUpAction.classList.toggle('active', traceMode === 'upstream');
+                graphContextTraceUpAction.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
+            }
             if (traceDownBtn) {
                 traceDownBtn.classList.toggle('active', traceMode === 'downstream');
                 traceDownBtn.setAttribute('aria-pressed', traceMode === 'downstream' ? 'true' : 'false');
+            }
+            if (graphContextTraceDownAction) {
+                graphContextTraceDownAction.classList.toggle('active', traceMode === 'downstream');
+                graphContextTraceDownAction.setAttribute('aria-pressed', traceMode === 'downstream' ? 'true' : 'false');
             }
         }
 
@@ -328,6 +342,10 @@ export function getGraphInteractionsScriptFragment(): string {
                 setFocusMode(false);
             }
             applyTraceMode();
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_trace_mode_changed', { mode: traceMode || 'none' });
+            }
         }
 
         function clearSelection() {
@@ -352,11 +370,12 @@ export function getGraphInteractionsScriptFragment(): string {
                 selectionCrossLinks.style.display = 'none';
             }
             updateGraphActionButtons();
+            syncGraphContextUi();
         }
 
         function updateGraphActionButtons() {
             const hasSelection = !!selectedNodeId;
-            [focusBtn, traceUpBtn, traceDownBtn].forEach(btn => {
+            [focusBtn, traceUpBtn, traceDownBtn, graphContextFocusAction, graphContextTraceUpAction, graphContextTraceDownAction].forEach(btn => {
                 if (!btn) return;
                 btn.classList.toggle('btn-disabled', !hasSelection);
                 btn.setAttribute('aria-disabled', hasSelection ? 'false' : 'true');
@@ -413,7 +432,7 @@ export function getGraphInteractionsScriptFragment(): string {
             if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
 
             if (selectionCrossLinks) {
-                const showCrossLinks = type === 'table' || type === 'view' || type === 'cte';
+                const showCrossLinks = type === 'table' || type === 'view' || type === 'cte' || type === 'file' || type === 'external';
                 selectionCrossLinks.style.display = showCrossLinks ? '' : 'none';
 
                 selectionCrossLinks.querySelectorAll('[data-graph-action]').forEach(button => {
@@ -424,6 +443,38 @@ export function getGraphInteractionsScriptFragment(): string {
                 });
 
                 const openFileAction = selectionCrossLinks.querySelector('[data-graph-action="open-file"]');
+                const lineageAction = selectionCrossLinks.querySelector('[data-graph-action="view-lineage"]');
+                const impactAction = selectionCrossLinks.querySelector('[data-graph-action="analyze-impact"]');
+                const fileTablesAction = selectionCrossLinks.querySelector('[data-graph-action="show-file-tables"]');
+
+                if (lineageAction) {
+                    lineageAction.textContent = 'Trace in Lineage';
+                    lineageAction.style.display = '';
+                }
+
+                if (impactAction) {
+                    impactAction.textContent = 'Analyze in Impact';
+                }
+
+                if (fileTablesAction) {
+                    fileTablesAction.style.display = 'none';
+                }
+
+                if (type === 'file') {
+                    if (impactAction) {
+                        impactAction.style.display = 'none';
+                    }
+                    if (fileTablesAction) {
+                        fileTablesAction.style.display = '';
+                    }
+                } else if (type === 'external') {
+                    if (impactAction) {
+                        impactAction.style.display = 'none';
+                    }
+                } else if (impactAction) {
+                    impactAction.style.display = '';
+                }
+
                 if (openFileAction) {
                     openFileAction.style.display = filePath ? '' : 'none';
                 }
@@ -431,6 +482,11 @@ export function getGraphInteractionsScriptFragment(): string {
 
             if (focusModeEnabled) applyFocusMode();
             updateGraphActionButtons();
+            const query = searchInput ? searchInput.value.trim() : '';
+            if (query) {
+                refreshSearchNavigation(query);
+                applySearchHighlight();
+            }
         }
 
         function markWelcomeSeen() {
@@ -447,6 +503,7 @@ export function getGraphInteractionsScriptFragment(): string {
                 graphEmptyOverlay.classList.add('is-hidden');
                 graphEmptyOverlay.setAttribute('aria-hidden', 'true');
                 activeEmptyState = null;
+                syncGraphOverlayChrome();
                 return;
             }
 
@@ -457,48 +514,138 @@ export function getGraphInteractionsScriptFragment(): string {
             graphEmptyOverlay.classList.remove('is-hidden');
             graphEmptyOverlay.setAttribute('aria-hidden', 'false');
             activeEmptyState = state.id;
+            syncGraphOverlayChrome();
         }
 
-        function nodeMatchesColumnSearch(node, queryLower) {
-            if (!node.columns || !Array.isArray(node.columns)) return false;
-            return node.columns.some(function(col) {
-                return typeof col === 'string' && col.toLowerCase().includes(queryLower);
-            });
+        function syncGraphOverlayChrome() {
+            const overlayActive = Boolean(activeEmptyState);
+            if (graphKeyboardHints) {
+                graphKeyboardHints.classList.toggle('is-hidden', overlayActive);
+            }
+            if (graphZoomToolbar) {
+                graphZoomToolbar.classList.toggle('is-hidden', overlayActive);
+            }
         }
 
-        function getSearchMatchCount(query, typeFilter) {
-            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return 0;
+        let searchMatchNodeIds = [];
+        let activeSearchMatchIndex = -1;
+
+        function isNodeMatchingQuery(node, queryLower) {
+            const label = node.getAttribute('data-label') || '';
+            const filePath = node.getAttribute('data-filepath') || '';
+            const haystack = (label + ' ' + filePath).toLowerCase();
+            return haystack.includes(queryLower);
+        }
+
+        function getSearchMatchNodes(query) {
             const trimmedQuery = (query || '').trim();
-            const hasQuery = trimmedQuery.length > 0;
-            const queryLower = trimmedQuery.toLowerCase();
-            const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;
-            const isColumnSearch = normalizedTypeFilter === 'column';
-            let count = 0;
-
-            for (const node of graphData.nodes) {
-                if (!node) continue;
-                if (normalizedTypeFilter && normalizedTypeFilter !== 'all' && !isColumnSearch && node.type !== normalizedTypeFilter) continue;
-                if (!hasQuery && !isColumnSearch) {
-                    count += 1;
-                    continue;
-                }
-
-                if (isColumnSearch) {
-                    if (hasQuery && nodeMatchesColumnSearch(node, queryLower)) {
-                        count += 1;
-                    }
-                    continue;
-                }
-
-                const label = (node.label || node.id || '').toString();
-                const filePath = (node.filePath || '').toString();
-                const haystack = (label + ' ' + filePath).toLowerCase();
-                if (haystack.includes(queryLower)) {
-                    count += 1;
-                }
+            if (!trimmedQuery) {
+                return [];
             }
 
-            return count;
+            const queryLower = trimmedQuery.toLowerCase();
+            const nodes = typeof getNodesSortedByPosition === 'function'
+                ? getNodesSortedByPosition()
+                : Array.from(document.querySelectorAll('.node'));
+
+            return nodes.filter((node) => isNodeMatchingQuery(node, queryLower));
+        }
+
+        function getSearchMatchCount(query) {
+            return getSearchMatchNodes(query).length;
+        }
+
+        function updateSearchNavigationButtons() {
+            const hasMatches = searchMatchNodeIds.length > 0;
+            if (searchPrevBtn) {
+                searchPrevBtn.classList.toggle('btn-disabled', !hasMatches);
+                searchPrevBtn.setAttribute('aria-disabled', hasMatches ? 'false' : 'true');
+            }
+            if (searchNextBtn) {
+                searchNextBtn.classList.toggle('btn-disabled', !hasMatches);
+                searchNextBtn.setAttribute('aria-disabled', hasMatches ? 'false' : 'true');
+            }
+        }
+
+        function refreshSearchNavigation(query) {
+            const trimmedQuery = (query || '').trim();
+            if (!trimmedQuery) {
+                searchMatchNodeIds = [];
+                activeSearchMatchIndex = -1;
+                updateSearchNavigationButtons();
+                if (searchCount) {
+                    searchCount.textContent = '';
+                    searchCount.style.display = 'none';
+                }
+                return;
+            }
+
+            const matchNodes = getSearchMatchNodes(trimmedQuery);
+            searchMatchNodeIds = matchNodes
+                .map((node) => node.getAttribute('data-id') || '')
+                .filter((id) => id.length > 0);
+
+            const selectedIndex = selectedNodeId ? searchMatchNodeIds.indexOf(selectedNodeId) : -1;
+            if (selectedIndex >= 0) {
+                activeSearchMatchIndex = selectedIndex;
+            } else if (activeSearchMatchIndex < 0 || activeSearchMatchIndex >= searchMatchNodeIds.length) {
+                activeSearchMatchIndex = searchMatchNodeIds.length > 0 ? 0 : -1;
+            }
+
+            updateSearchNavigationButtons();
+
+            if (searchCount) {
+                const total = graphData?.nodes?.length || document.querySelectorAll('.node').length || 0;
+                const matched = searchMatchNodeIds.length;
+                searchCount.textContent = matched + ' / ' + total;
+                searchCount.style.display = '';
+            }
+        }
+
+        function jumpToSearchMatch(direction) {
+            const query = searchInput ? searchInput.value.trim() : '';
+            if (!query) {
+                return;
+            }
+
+            refreshSearchNavigation(query);
+            if (searchMatchNodeIds.length === 0) {
+                return;
+            }
+
+            if (direction > 0) {
+                activeSearchMatchIndex = (activeSearchMatchIndex + 1) % searchMatchNodeIds.length;
+            } else if (direction < 0) {
+                activeSearchMatchIndex = (activeSearchMatchIndex - 1 + searchMatchNodeIds.length) % searchMatchNodeIds.length;
+            }
+
+            const targetNodeId = searchMatchNodeIds[activeSearchMatchIndex];
+            if (!targetNodeId) {
+                return;
+            }
+
+            const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                ? CSS.escape(targetNodeId)
+                : targetNodeId.replace(/"/g, '\\"');
+            const targetNode = document.querySelector('.node[data-id="' + escapedNodeId + '"]');
+            if (!targetNode) {
+                return;
+            }
+
+            updateSelectionPanel(targetNode);
+            if (typeof scrollNodeIntoView === 'function') {
+                scrollNodeIntoView(targetNode);
+            }
+            refreshSearchNavigation(query);
+            applySearchHighlight();
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_search_jump', {
+                    direction: direction > 0 ? 'next' : 'prev',
+                    index: activeSearchMatchIndex + 1,
+                    total: searchMatchNodeIds.length
+                });
+            }
         }
 
         function updateGraphEmptyState() {
@@ -509,16 +656,15 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             const query = searchInput ? searchInput.value.trim() : '';
-            const typeFilter = filterType ? filterType.value : 'all';
-            const searchActive = Boolean(query) || typeFilter !== 'all';
+            const searchActive = Boolean(query);
 
             if (searchActive) {
-                const matchCount = getSearchMatchCount(query, typeFilter);
+                const matchCount = getSearchMatchCount(query);
                 if (matchCount === 0) {
                     setGraphEmptyState({
                         id: 'no-matches',
                         title: 'No matches for this search',
-                        description: 'Try clearing filters or changing your search terms.',
+                        description: 'Try clearing search or changing your terms.',
                         actionsHtml: '<button class="action-chip" data-graph-action="clear-search">Clear search</button>' +
                             '<button class="action-chip" data-graph-action="focus-search">Search again</button>'
                     });
@@ -535,6 +681,7 @@ export function getGraphInteractionsScriptFragment(): string {
                     actionsHtml: '<button class="action-chip" data-graph-action="focus-search">Search for a table</button>' +
                         '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="tables">Show tables</button>' +
                         '<button class="action-chip" data-graph-action="switch-graph-mode" data-mode="files">Show files</button>' +
+                        '<button class="action-chip" data-graph-action="why-this-graph">Why am I seeing this?</button>' +
                         '<button class="action-chip" data-graph-action="view-issues">View issues</button>' +
                         '<button class="action-chip" data-graph-action="refresh">Refresh index</button>' +
                         '<button class="action-chip" data-graph-action="dismiss-welcome">Dismiss</button>'
@@ -545,7 +692,124 @@ export function getGraphInteractionsScriptFragment(): string {
             setGraphEmptyState(null);
         }
 
+        function getGraphModeContext(mode) {
+            if (mode === 'files') {
+                return {
+                    title: 'Files Mode: Which files depend on each other',
+                    description: 'Each node is a SQL file. Edges show file-level dependency handoffs.'
+                };
+            }
+            return {
+                title: 'Tables Mode: Which tables and views feed into which',
+                description: 'Each node is a table or view. Edges show workspace-level data flow dependencies.'
+            };
+        }
+
+        function updateGraphContextCopy() {
+            const context = getGraphModeContext(currentGraphMode);
+            if (graphContextTitle) {
+                graphContextTitle.textContent = context.title;
+            }
+            if (graphContextDesc) {
+                graphContextDesc.textContent = context.description;
+            }
+        }
+
+        function updateGraphStateReason(query) {
+            if (!graphStateReason) return;
+            const reasons = [];
+            if (query) reasons.push('search is active');
+            if (focusModeEnabled) reasons.push('focus neighbors is active');
+            if (traceMode === 'upstream') reasons.push('trace upstream is active');
+            if (traceMode === 'downstream') reasons.push('trace downstream is active');
+            graphStateReason.textContent = reasons.length > 0
+                ? 'Graph is reduced because ' + reasons.join(', ') + '.'
+                : 'Showing full graph for current mode.';
+        }
+
+        function renderGraphStateChips(query) {
+            if (!graphStateChips) return;
+            graphStateChips.innerHTML = '';
+
+            const chips = [{ key: 'mode', label: 'Mode: ' + currentGraphMode, fixed: true }];
+            if (query) {
+                chips.push({ key: 'search', label: 'Search: "' + query + '"' });
+            }
+            if (focusModeEnabled) {
+                chips.push({ key: 'focus', label: 'Focus neighbors' });
+            }
+            if (traceMode === 'upstream' || traceMode === 'downstream') {
+                chips.push({ key: 'trace', label: traceMode === 'upstream' ? 'Trace: upstream' : 'Trace: downstream' });
+            }
+
+            chips.forEach((chip) => {
+                const chipEl = document.createElement('span');
+                chipEl.className = chip.fixed
+                    ? 'graph-state-chip graph-state-chip-fixed'
+                    : 'graph-state-chip';
+                chipEl.textContent = chip.label;
+
+                if (!chip.fixed) {
+                    const clearBtn = document.createElement('button');
+                    clearBtn.className = 'graph-state-chip-clear';
+                    clearBtn.type = 'button';
+                    clearBtn.setAttribute('aria-label', 'Clear ' + chip.label);
+                    clearBtn.textContent = 'x';
+                    clearBtn.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (chip.key === 'search') {
+                            clearSearch();
+                            return;
+                        }
+                        if (chip.key === 'focus') {
+                            setFocusMode(false);
+                            return;
+                        }
+                        if (chip.key === 'trace') {
+                            traceMode = null;
+                            applyTraceMode();
+                            syncGraphContextUi();
+                        }
+                    });
+                    chipEl.appendChild(clearBtn);
+                }
+
+                graphStateChips.appendChild(chipEl);
+            });
+        }
+
+        function syncGraphContextUi() {
+            const query = searchInput ? searchInput.value.trim() : '';
+            updateGraphContextCopy();
+            renderGraphStateChips(query);
+            updateGraphStateReason(query);
+        }
+
+        function setGraphExplainPanelVisible(visible) {
+            if (!graphExplainPanel) return;
+            graphExplainPanel.classList.toggle('is-hidden', !visible);
+            graphExplainPanel.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            const state = vscode.getState() || {};
+            state.workspaceDepsWhyPanelDismissed = !visible;
+            vscode.setState(state);
+        }
+
+        function toggleGraphExplainPanel() {
+            if (!graphExplainPanel) return;
+            const hidden = graphExplainPanel.classList.contains('is-hidden');
+            setGraphExplainPanelVisible(hidden);
+        }
+
         updateFocusButton();
+        syncGraphContextUi();
+        if (graphExplainPanel) {
+            const state = vscode.getState() || {};
+            const hasSavedDismissedPreference = Object.prototype.hasOwnProperty.call(state, 'workspaceDepsWhyPanelDismissed');
+            const dismissed = hasSavedDismissedPreference ? !!state.workspaceDepsWhyPanelDismissed : true;
+            graphExplainPanel.classList.toggle('is-hidden', dismissed);
+            graphExplainPanel.setAttribute('aria-hidden', dismissed ? 'true' : 'false');
+        }
 
         if (graphLegendBar) {
             let showGraphLegend = true;
@@ -562,11 +826,6 @@ export function getGraphInteractionsScriptFragment(): string {
                 event.preventDefault();
                 event.stopPropagation();
                 toggleGraphLegend(false);
-            });
-            graphLegendToggleBtn?.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleGraphLegend();
             });
         }
 
@@ -638,53 +897,25 @@ export function getGraphInteractionsScriptFragment(): string {
         function applySearchHighlight() {
             if (!svg) return;
             const query = searchInput ? searchInput.value.trim() : '';
-            const typeFilter = filterType ? filterType.value : 'all';
-            const isColumnSearch = typeFilter === 'column';
-            const searchActive = Boolean(query) || (typeFilter !== 'all' && !isColumnSearch);
+            const searchActive = Boolean(query);
             const queryLower = query.toLowerCase();
-
-            // Build a set of node IDs that match column search for quick lookup
-            let columnMatchIds = null;
-            if (isColumnSearch && query && graphData && graphData.nodes) {
-                columnMatchIds = new Set();
-                for (const gNode of graphData.nodes) {
-                    if (gNode && nodeMatchesColumnSearch(gNode, queryLower)) {
-                        columnMatchIds.add(gNode.id);
-                    }
-                }
-            }
+            const currentMatchId = activeSearchMatchIndex >= 0 ? searchMatchNodeIds[activeSearchMatchIndex] : '';
 
             document.querySelectorAll('.node').forEach(node => {
-                node.classList.remove('node-search-match', 'node-search-dim');
-                if (!searchActive && !isColumnSearch) return;
-
-                if (isColumnSearch) {
-                    if (!query) return;
-                    const nodeId = node.getAttribute('data-id') || '';
-                    if (columnMatchIds && columnMatchIds.has(nodeId)) {
-                        node.classList.add('node-search-match');
-                    } else {
-                        node.classList.add('node-search-dim');
-                    }
-                    return;
-                }
-
-                const nodeType = node.getAttribute('data-type') || '';
-                if (typeFilter !== 'all' && nodeType !== typeFilter) {
-                    node.classList.add('node-search-dim');
-                    return;
-                }
+                node.classList.remove('node-search-match', 'node-search-dim', 'node-search-current');
+                if (!searchActive) return;
 
                 if (!query) {
                     node.classList.add('node-search-match');
                     return;
                 }
 
-                const label = node.getAttribute('data-label') || '';
-                const filePath = node.getAttribute('data-filepath') || '';
-                const haystack = (label + ' ' + filePath).toLowerCase();
-                if (haystack.includes(queryLower)) {
+                if (isNodeMatchingQuery(node, queryLower)) {
                     node.classList.add('node-search-match');
+                    const nodeId = node.getAttribute('data-id') || '';
+                    if (nodeId && nodeId === currentMatchId) {
+                        node.classList.add('node-search-current');
+                    }
                 } else {
                     node.classList.add('node-search-dim');
                 }
@@ -693,42 +924,43 @@ export function getGraphInteractionsScriptFragment(): string {
 
         function performSearch() {
             const query = searchInput.value.trim();
-            const typeFilter = filterType.value;
 
-            if (!query && typeFilter === 'all') {
+            if (!query) {
                 clearSearch();
                 return;
             }
 
-            let nodeTypes = undefined;
-            if (typeFilter !== 'all') {
-                nodeTypes = [typeFilter];
-            }
-
             vscode.postMessage({
                 command: 'search',
-                filter: { query, nodeTypes, useRegex: false, caseSensitive: false }
+                filter: { query, nodeTypes: undefined, useRegex: false, caseSensitive: false }
             });
 
-            btnClearSearch.classList.toggle('visible', query || typeFilter !== 'all');
+            btnClearSearch.classList.toggle('visible', query.length > 0);
             updateGraphEmptyState();
+            refreshSearchNavigation(query);
             applySearchHighlight();
-            if (searchCount) {
-                const total = graphData?.nodes?.length || 0;
-                const matched = getSearchMatchCount(query, typeFilter);
-                searchCount.textContent = matched + ' / ' + total;
-                searchCount.style.display = '';
+            syncGraphContextUi();
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_search_submitted', {
+                    queryLength: query.length,
+                    matches: searchMatchNodeIds.length,
+                    mode: currentGraphMode
+                });
             }
         }
 
         function clearSearch() {
+            const hadQuery = searchInput.value.trim().length > 0;
             searchInput.value = '';
-            filterType.value = 'all';
             btnClearSearch.classList.remove('visible');
             vscode.postMessage({ command: 'clearSearch' });
             updateGraphEmptyState();
+            refreshSearchNavigation('');
             applySearchHighlight();
-            if (searchCount) { searchCount.textContent = ''; searchCount.style.display = 'none'; }
+            syncGraphContextUi();
+            if (hadQuery && typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_search_cleared', { mode: currentGraphMode });
+            }
         }
 
         let searchTimeout;
@@ -738,9 +970,17 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         searchInput?.addEventListener('input', debouncedSearch);
-        filterType?.addEventListener('change', performSearch);
+        searchInput?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                jumpToSearchMatch(event.shiftKey ? -1 : 1);
+            }
+        });
         btnClearSearch?.addEventListener('click', clearSearch);
+        searchPrevBtn?.addEventListener('click', () => jumpToSearchMatch(-1));
+        searchNextBtn?.addEventListener('click', () => jumpToSearchMatch(1));
         updateGraphEmptyState();
+        refreshSearchNavigation(searchInput ? searchInput.value.trim() : '');
         applySearchHighlight();
 
     `;

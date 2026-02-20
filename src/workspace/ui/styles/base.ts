@@ -57,7 +57,15 @@ export function getBaseStyles(): string {
             display: flex; align-items: center; gap: 12px;
             height: 100%; /* Match header height */
         }
-        .header-right { display: flex; align-items: center; gap: 8px; position: relative; z-index: 1; }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            z-index: 1;
+            margin-left: auto;
+            min-width: 0;
+        }
 
         /* ========== Icon Button ========== */
         .icon-btn {
@@ -73,19 +81,31 @@ export function getBaseStyles(): string {
 
         /* ========== Search Box ========== */
         .search-box {
-            display: flex; align-items: center; gap: 8px;
-            background: var(--bg-primary); padding: 6px 12px;
-            border-radius: var(--radius-lg); border: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-primary);
+            padding: 5px 10px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
             transition: all 0.2s;
+            min-width: 0;
+            max-width: min(420px, 34vw);
         }
         .search-box:focus-within { border-color: var(--accent); }
         .search-box svg { flex-shrink: 0; }
         .search-input {
-            background: transparent; border: none; color: var(--text-secondary);
-            font-size: 13px; width: 160px; outline: none;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            outline: none;
+            width: auto;
+            flex: 1 1 150px;
+            min-width: 100px;
         }
         .search-input::placeholder { color: var(--text-dim); }
-        .search-input:focus { width: 200px; }
+        .search-input:focus { flex-basis: 180px; }
         .search-select {
             background: var(--bg-secondary); border: 1px solid var(--border-subtle);
             color: var(--text-secondary); font-size: 12px; padding: 4px 8px;
@@ -98,7 +118,149 @@ export function getBaseStyles(): string {
         }
         .search-clear:hover { color: var(--error-light); background: rgba(239, 68, 68, 0.1); }
         .search-clear.visible { display: flex; }
-        .search-count { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+        .search-nav-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s;
+            padding: 0;
+            flex-shrink: 0;
+        }
+        .search-nav-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        .search-nav-btn.btn-disabled {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+        .search-nav-btn svg {
+            width: 12px;
+            height: 12px;
+        }
+        .search-count { font-size: 11px; color: var(--text-dim); white-space: nowrap; display: none; }
+        @media (max-width: 1600px) {
+            .search-box { max-width: min(360px, 30vw); }
+        }
+        @media (max-width: 1400px) {
+            .search-box { max-width: min(280px, 26vw); }
+            .search-input {
+                flex-basis: 120px;
+                min-width: 88px;
+            }
+            .search-input:focus { flex-basis: 145px; }
+        }
+
+        .graph-context-strip {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            background: var(--bg-secondary);
+        }
+        .graph-context-copy {
+            min-width: 0;
+        }
+        .graph-context-title {
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+        .graph-context-desc {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        .graph-context-state {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            min-width: 220px;
+        }
+        .graph-state-chips {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        .graph-state-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            border-radius: 999px;
+            padding: 4px 8px;
+            line-height: 1.3;
+        }
+        .graph-state-chip-fixed {
+            color: var(--success);
+            border-color: var(--success);
+            background: var(--bg-secondary);
+            font-weight: 600;
+        }
+        .graph-state-chip-clear {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            padding: 0;
+            margin-left: 1px;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1;
+        }
+        .graph-state-chip-clear:hover {
+            color: var(--text-primary);
+        }
+        .graph-state-reason {
+            color: var(--text-muted);
+            font-size: 11px;
+            text-align: right;
+        }
+        .graph-explain-panel {
+            margin-top: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            background: var(--bg-secondary);
+            padding: 10px 12px;
+        }
+        .graph-explain-panel.is-hidden {
+            display: none;
+        }
+        .graph-explain-title {
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .graph-explain-body {
+            display: grid;
+            gap: 4px;
+            color: var(--text-muted);
+            font-size: 11px;
+            line-height: 1.45;
+        }
+        .graph-explain-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
 
         /* ========== View Mode Tabs ========== */
         .view-tabs {
@@ -119,7 +281,7 @@ export function getBaseStyles(): string {
         .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
 
         /* ========== Graph Mode Switcher ========== */
-        /* Segmented control for switching between Files/Tables/Hybrid graph modes */
+        /* Segmented control for switching between Files/Tables graph modes */
         .graph-mode-switcher {
             display: flex; align-items: center; gap: 2px;
             background: var(--bg-primary); padding: 3px; border-radius: var(--radius-lg);

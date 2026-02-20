@@ -42,11 +42,6 @@ export function getWorkspaceShellScriptFragment(): string {
                     clearSearch();
                     return;
                 }
-                // If filter is active, reset it
-                if (!isTyping && filterType && filterType.value !== 'all') {
-                    clearSearch();
-                    return;
-                }
                 // Otherwise clear selection
                 if (!isTyping && selectedNodeId) {
                     clearSelection();
@@ -243,6 +238,9 @@ export function getWorkspaceShellScriptFragment(): string {
         // ========== Commands ==========
         function refresh() {
             document.body.style.cursor = 'wait';
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_refresh_requested', { view: currentViewMode });
+            }
             vscode.postMessage({ command: 'refresh' });
         }
         function openFile(filePath) { vscode.postMessage({ command: 'openFile', filePath }); }
@@ -358,6 +356,9 @@ export function getWorkspaceShellScriptFragment(): string {
                     refresh();
                     break;
                 case 'view-issues':
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_view_issues_opened', { source: activeEmptyState || 'action' });
+                    }
                     vscode.postMessage({ command: 'switchView', view: 'issues' });
                     break;
                 case 'switch-graph-mode': {
@@ -372,6 +373,32 @@ export function getWorkspaceShellScriptFragment(): string {
                         selectionEmpty.textContent = 'Select a node to focus on its neighbors.';
                     }
                     break;
+                case 'trace-upstream':
+                    if (selectedNodeId) {
+                        setTraceMode('upstream');
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node to trace its upstream sources.';
+                    }
+                    break;
+                case 'trace-downstream':
+                    if (selectedNodeId) {
+                        setTraceMode('downstream');
+                    } else if (selectionEmpty) {
+                        selectionEmpty.textContent = 'Select a node to trace its downstream consumers.';
+                    }
+                    break;
+                case 'clear-graph-state':
+                    if (focusModeEnabled) {
+                        setFocusMode(false);
+                    }
+                    if (traceMode) {
+                        setTraceMode(traceMode);
+                    }
+                    clearSearch();
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_state_cleared');
+                    }
+                    break;
                 case 'clear-selection':
                     clearSelection();
                     break;
@@ -379,18 +406,34 @@ export function getWorkspaceShellScriptFragment(): string {
                     const nodeId = actionEl.getAttribute('data-node-id') || selectedNodeId;
                     const nodeLabel = actionEl.getAttribute('data-node-label') || '';
                     const nodeType = actionEl.getAttribute('data-node-type') || '';
+                    const filePath = actionEl.getAttribute('data-file-path') || '';
                     if (!nodeId) {
                         break;
                     }
                     switchToView('lineage', false, nodeLabel, nodeType);
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_trace_in_lineage', { nodeType: nodeType || 'unknown' });
+                    }
                     if (lineageTitle) {
                         lineageTitle.textContent = 'Data Lineage';
                     }
-                    setTimeout(() => {
-                        if (typeof selectLineageNode === 'function') {
-                            selectLineageNode(nodeId);
+                    if (nodeType === 'file' && filePath) {
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Tracing file dependencies...</div></div>';
                         }
-                    }, 120);
+                        vscode.postMessage({
+                            command: 'getUpstream',
+                            nodeType: 'file',
+                            filePath,
+                            depth: lineageDepth
+                        });
+                    } else {
+                        setTimeout(() => {
+                            if (typeof selectLineageNode === 'function') {
+                                selectLineageNode(nodeId, nodeLabel, nodeType);
+                            }
+                        }, 120);
+                    }
                     break;
                 }
                 case 'analyze-impact': {
@@ -401,20 +444,75 @@ export function getWorkspaceShellScriptFragment(): string {
                         break;
                     }
                     switchToView('impact', false, nodeLabel, nodeType);
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_analyze_in_impact', { nodeType: nodeType || 'unknown' });
+                    }
                     if (lineageTitle) {
                         lineageTitle.textContent = 'Impact Analysis';
                     }
                     scheduleImpactSelectionPrefill(nodeLabel, nodeId, nodeType);
                     break;
                 }
+                case 'show-file-tables': {
+                    const filePath = actionEl.getAttribute('data-file-path') || '';
+                    if (!filePath) {
+                        break;
+                    }
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_show_file_tables', { fromMode: currentGraphMode });
+                    }
+                    const queryValue = basenameFromPath(filePath) || filePath;
+                    switchGraphModeFromAction('tables');
+                    setTimeout(() => {
+                        if (searchInput) {
+                            searchInput.value = queryValue;
+                            if (typeof performSearch === 'function') {
+                                performSearch();
+                            } else {
+                                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        }
+                    }, 140);
+                    break;
+                }
                 case 'open-file': {
                     const filePath = actionEl.getAttribute('data-file-path') || '';
                     if (filePath) {
+                        if (typeof trackUxEvent === 'function') {
+                            trackUxEvent('graph_open_file', { nodeType: actionEl.getAttribute('data-node-type') || 'unknown' });
+                        }
                         openFile(filePath);
                     }
                     break;
                 }
+                case 'why-this-graph':
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_why_panel_toggled');
+                    }
+                    if (activeEmptyState === 'welcome') {
+                        markWelcomeSeen();
+                        if (typeof updateGraphEmptyState === 'function') {
+                            updateGraphEmptyState();
+                        }
+                        if (typeof setGraphExplainPanelVisible === 'function') {
+                            setGraphExplainPanelVisible(true);
+                        }
+                    } else if (typeof toggleGraphExplainPanel === 'function') {
+                        toggleGraphExplainPanel();
+                    }
+                    break;
+                case 'dismiss-why':
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_why_panel_dismissed');
+                    }
+                    if (typeof setGraphExplainPanelVisible === 'function') {
+                        setGraphExplainPanelVisible(false);
+                    }
+                    break;
                 case 'dismiss-welcome':
+                    if (typeof trackUxEvent === 'function') {
+                        trackUxEvent('graph_welcome_dismissed');
+                    }
                     markWelcomeSeen();
                     updateGraphEmptyState();
                     break;

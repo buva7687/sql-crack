@@ -40,6 +40,9 @@ export interface SearchResultEntry {
     filePath?: string;
 }
 
+export type WorkspaceUxMetricValue = string | number | boolean | null;
+export type WorkspaceUxMetricMetadata = Record<string, WorkspaceUxMetricValue>;
+
 // ─── Webview → Host messages ───
 
 export type WorkspaceWebviewMessage =
@@ -49,6 +52,7 @@ export type WorkspaceWebviewMessage =
     | { command: 'switchGraphMode'; mode: string }
     | { command: 'search'; filter: SearchFilter }
     | { command: 'clearSearch' }
+    | { command: 'trackUxEvent'; event: string; metadata?: WorkspaceUxMetricMetadata }
     | { command: 'toggleHelp' }
     | { command: 'toggleTheme' }
     | { command: 'export'; format: string }
@@ -69,7 +73,7 @@ export type WorkspaceWebviewMessage =
     | { command: 'getDownstream'; nodeId?: string; depth?: number; nodeType?: string; filePath?: string }
     // Visual lineage graph
     | { command: 'searchLineageTables'; query: string; typeFilter?: string }
-    | { command: 'getLineageGraph'; nodeId: string; depth?: number; direction?: 'both' | 'upstream' | 'downstream'; expandedNodes?: string[] }
+    | { command: 'getLineageGraph'; nodeId: string; nodeLabel?: string; nodeType?: string; depth?: number; direction?: 'both' | 'upstream' | 'downstream'; expandedNodes?: string[] }
     | { command: 'expandNodeColumns'; nodeId: string }
     | { command: 'setLineageDirection'; nodeId: string; direction: 'both' | 'upstream' | 'downstream' }
     | { command: 'collapseNodeColumns'; nodeId: string }

@@ -21,7 +21,11 @@ import { LineageView } from '../ui/lineageView';
 import { ImpactView } from '../ui/impactView';
 import { ViewMode } from '../ui/types';
 import { logger } from '../../logger';
-import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../../shared/messages';
+import type {
+    WorkspaceWebviewMessage,
+    WorkspaceHostMessage,
+    WorkspaceUxMetricMetadata
+} from '../../shared/messages';
 
 /**
  * Context interface for message handler
@@ -85,6 +89,7 @@ export interface MessageHandlerContext {
     buildLineageGraph: () => Promise<void>;
     handleExport: (format: string) => Promise<void>;
     savePngToFile: (base64Data: string, suggestedFilename: string) => Promise<void>;
+    trackUxEvent: (event: string, metadata?: WorkspaceUxMetricMetadata) => void;
 }
 
 /**
@@ -261,6 +266,10 @@ export class MessageHandler {
                     this.handleClearSearch();
                     break;
 
+                case 'trackUxEvent':
+                    this.handleTrackUxEvent(message.event, message.metadata);
+                    break;
+
                 case 'toggleHelp':
                     this.handleToggleHelp();
                     break;
@@ -356,7 +365,9 @@ export class MessageHandler {
                         message.nodeId,
                         this.resolveRequestedDepth(message.depth),
                         message.direction || 'both',
-                        message.expandedNodes
+                        message.expandedNodes,
+                        message.nodeLabel,
+                        message.nodeType
                     );
                     break;
 
@@ -422,12 +433,12 @@ export class MessageHandler {
     }
 
     /**
-     * Handle graph mode switch (Files/Tables/Hybrid).
+     * Handle graph mode switch (Files/Tables).
      * Validates mode and rebuilds graph with new mode.
      * Ensures view stays on Graph tab (not Lineage/Tables/Impact).
      */
     private async handleSwitchGraphMode(mode: string): Promise<void> {
-        const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
+        const valid: GraphMode[] = ['files', 'tables'];
         const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
         this._context.setCurrentGraphMode(m);
         // Clear search filter — previous search terms may not apply to the new mode
@@ -462,6 +473,13 @@ export class MessageHandler {
         if (graph) {
             this._context.panel.webview.html = this._context.getWebviewHtml(graph, clearFilter);
         }
+    }
+
+    private handleTrackUxEvent(event: string, metadata?: WorkspaceUxMetricMetadata): void {
+        if (typeof event !== 'string' || event.trim().length === 0) {
+            return;
+        }
+        this._context.trackUxEvent(event, metadata);
     }
 
     private handleToggleHelp(): void {
@@ -961,7 +979,9 @@ export class MessageHandler {
         nodeId: string,
         depth: number,
         direction: 'both' | 'upstream' | 'downstream',
-        expandedNodes?: string[]
+        expandedNodes?: string[],
+        nodeLabel?: string,
+        nodeType?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
@@ -974,10 +994,17 @@ export class MessageHandler {
             return;
         }
 
+        const resolvedNodeId = this.resolveRequestedLineageNodeId(
+            lineageGraph,
+            nodeId,
+            nodeLabel,
+            nodeType
+        );
+
         // Generate HTML using the lineage view
         const html = this._context.getLineageView().generateLineageGraphView(
             lineageGraph,
-            nodeId,
+            resolvedNodeId,
             {
                 depth,
                 direction,
@@ -987,8 +1014,30 @@ export class MessageHandler {
 
         this.postMessage({
             command: 'lineageGraphResult',
-            data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
+            data: { html, nodeId: resolvedNodeId, direction, expandedNodes: expandedNodes || [] }
         });
+    }
+
+    private resolveRequestedLineageNodeId(
+        lineageGraph: LineageGraph,
+        requestedNodeId: string,
+        nodeLabel?: string,
+        nodeType?: string
+    ): string {
+        if (lineageGraph.nodes.has(requestedNodeId)) {
+            return requestedNodeId;
+        }
+
+        const label = nodeLabel?.trim() || '';
+        const type = nodeType?.trim() || '';
+        if (label && type) {
+            const resolved = this.resolveLineageNodeId(lineageGraph, requestedNodeId, label, type);
+            if (resolved) {
+                return resolved;
+            }
+        }
+
+        return requestedNodeId;
     }
 
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
