@@ -639,6 +639,12 @@ describe('parser preprocessing transforms', () => {
             expect(result).toMatch(/CREATE OR REPLACE VIEW/i);
         });
 
+        it('does not rewrite alias AS SEL to AS SELECT', () => {
+            const sql = 'SELECT 1 AS SEL FROM t';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).toBeNull();
+        });
+
         it('does not double-rewrite existing CREATE OR REPLACE VIEW', () => {
             const sql = 'CREATE OR REPLACE VIEW emp_v AS SELECT * FROM emp;';
             const result = preprocessTeradataSyntax(sql, 'Teradata');

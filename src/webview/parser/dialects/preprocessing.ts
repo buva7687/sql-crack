@@ -1369,11 +1369,20 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     while ((match = selRegex.exec(masked)) !== null) {
         const before = masked.substring(0, match.index);
         const trimmedBefore = before.trimEnd();
-        // Valid contexts: start of input, after ;, after AS (view body), after ( (subquery), or all-whitespace (LOCKING stripped)
+        // Valid contexts:
+        // - start of input
+        // - after ';' (new statement)
+        // - after '(' (subquery/derived statement start)
+        // - view body start "CREATE OR REPLACE VIEW ... AS\nSEL ..." (line-start + CREATE...AS context)
+        // - all-whitespace (LOCKING stripped)
+        const lineBreakPos = Math.max(before.lastIndexOf('\n'), before.lastIndexOf('\r'));
+        const linePrefix = before.substring(lineBreakPos + 1);
+        const atLineStart = /^[ \t]*$/.test(linePrefix);
+        const createObjectAsContext = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:VIEW|MACRO|PROCEDURE|FUNCTION)\s+\S+\s+AS$/i.test(trimmedBefore);
         if (trimmedBefore.length > 0
             && !trimmedBefore.endsWith(';')
             && !trimmedBefore.endsWith('(')
-            && !/\bAS$/i.test(trimmedBefore)) { continue; }
+            && !(atLineStart && createObjectAsContext)) { continue; }
         selRewrites.push({ start: match.index, end: match.index + 3 });
     }
     for (let i = selRewrites.length - 1; i >= 0; i--) {

@@ -55,6 +55,19 @@ describe('Teradata bug fixes', () => {
         expect(result.partial).toBeUndefined();
     });
 
+    it('[Fix 1] does not rewrite alias AS SEL', () => {
+        const sql = 'SELECT 1 AS SEL FROM emp';
+        const pp = preprocessTeradataSyntax(sql, 'Teradata');
+        expect(pp).toBeNull();
+    });
+
+    it('[Fix 1] alias AS SEL parses without partial', () => {
+        const sql = 'SELECT 1 AS SEL FROM emp';
+        const result = parseSql(sql, 'Teradata');
+        expect(result.nodes.length).toBeGreaterThan(0);
+        expect(result.partial).toBeUndefined();
+    });
+
     it('[Fix 2] LOCKING TABLE <object> FOR ACCESS is stripped', () => {
         const sql = 'LOCKING TABLE customers FOR ACCESS SELECT * FROM customers';
         const pp = preprocessTeradataSyntax(sql, 'Teradata');
