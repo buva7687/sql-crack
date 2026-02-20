@@ -1,4 +1,4 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
 
 describe('parser preprocessing transforms', () => {
     describe('rewriteGroupingSets', () => {
@@ -511,6 +511,235 @@ describe('parser preprocessing transforms', () => {
             const result = preprocessForParsing(sql, 'MySQL');
 
             expect(result).toBe(sql);
+        });
+    });
+
+    describe('preprocessTeradataSyntax', () => {
+        it('returns null for non-Teradata dialect', () => {
+            const sql = 'SEL * FROM orders';
+            expect(preprocessTeradataSyntax(sql, 'MySQL')).toBeNull();
+        });
+
+        it('rewrites SEL to SELECT', () => {
+            const sql = 'SEL customer_id, customer_name FROM customers';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('SELECT customer_id');
+            expect(result).not.toMatch(/\bSEL\b/);
+        });
+
+        it('does not rewrite SEL inside string literals', () => {
+            const sql = "SELECT 'SEL is shorthand' AS note FROM dual";
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            // No SEL keyword outside strings, so no change
+            expect(result).toBeNull();
+        });
+
+        it('strips LOCKING ROW FOR ACCESS', () => {
+            const sql = 'SELECT * FROM customers LOCKING ROW FOR ACCESS WHERE id = 1';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/LOCKING/i);
+            expect(result).toContain('WHERE id = 1');
+        });
+
+        it('strips VOLATILE and MULTISET from CREATE statements', () => {
+            const sql = 'CREATE VOLATILE MULTISET TABLE temp_orders (id INTEGER)';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/CREATE\s+TABLE\b/i);
+            expect(result).not.toMatch(/VOLATILE/i);
+            expect(result).not.toMatch(/MULTISET/i);
+        });
+
+        it('strips SET from CREATE SET TABLE', () => {
+            const sql = 'CREATE SET TABLE unique_customers (id INTEGER)';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/CREATE\s+TABLE\b/i);
+        });
+
+        it('strips PRIMARY INDEX (...)', () => {
+            const sql = 'CREATE TABLE orders (id INTEGER) PRIMARY INDEX (id)';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/PRIMARY\s+INDEX/i);
+        });
+
+        it('strips UNIQUE PRIMARY INDEX (...)', () => {
+            const sql = 'CREATE TABLE orders (id INTEGER) UNIQUE PRIMARY INDEX (id)';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/PRIMARY\s+INDEX/i);
+        });
+
+        it('strips ON COMMIT PRESERVE ROWS', () => {
+            const sql = 'CREATE TABLE temp (id INTEGER) ON COMMIT PRESERVE ROWS';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/ON\s+COMMIT/i);
+        });
+
+        it('strips SAMPLE clause', () => {
+            const sql = 'SELECT * FROM customers SAMPLE 1000';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/SAMPLE/i);
+        });
+
+        it('strips SAMPLE with fractional value', () => {
+            const sql = 'SELECT * FROM products SAMPLE .25';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/SAMPLE/i);
+        });
+
+        it('strips SAMPLE with multiple fractions', () => {
+            const sql = 'SELECT * FROM employees SAMPLE .1, .2, .3';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/SAMPLE/i);
+        });
+
+        it('strips NORMALIZE after SELECT', () => {
+            const sql = 'SELECT NORMALIZE employee_id, job_title FROM job_history';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/NORMALIZE/i);
+            expect(result).toContain('SELECT');
+            expect(result).toContain('employee_id');
+        });
+
+        it('strips NORMALIZE ON MEETS OR OVERLAPS', () => {
+            const sql = 'SELECT NORMALIZE ON MEETS OR OVERLAPS policy_id FROM policies';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/NORMALIZE/i);
+            expect(result).toContain('policy_id');
+        });
+
+        it('strips WITH DATA from CTAS', () => {
+            const sql = 'CREATE TABLE t AS (SELECT * FROM orders) WITH DATA';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/WITH\s+DATA/i);
+        });
+
+        it('strips QUALIFY clause', () => {
+            const sql = 'SELECT * FROM orders QUALIFY ROW_NUMBER() OVER (ORDER BY id) = 1';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/QUALIFY/i);
+        });
+
+        it('rewrites REPLACE VIEW to CREATE OR REPLACE VIEW', () => {
+            const sql = 'REPLACE VIEW emp_v AS SELECT * FROM emp;';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toMatch(/CREATE OR REPLACE VIEW/i);
+        });
+
+        it('does not double-rewrite existing CREATE OR REPLACE VIEW', () => {
+            const sql = 'CREATE OR REPLACE VIEW emp_v AS SELECT * FROM emp;';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            if (result !== null) {
+                expect(result).not.toMatch(/CREATE OR CREATE OR REPLACE/i);
+            }
+        });
+
+        it('strips TOP n after SELECT', () => {
+            const sql = 'SELECT TOP 10 * FROM large_table';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/TOP\s+\d+/i);
+            expect(result).toContain('SELECT');
+            expect(result).toContain('large_table');
+        });
+
+        it('strips QUALIFY with nested OVER(ORDER BY) correctly', () => {
+            const sql = 'SELECT id FROM t QUALIFY ROW_NUMBER() OVER (ORDER BY id DESC) <= 3';
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/QUALIFY/i);
+            expect(result).not.toContain('<= 3');
+            expect(result).toContain('FROM t');
+        });
+
+        it('strips QUALIFY inside subquery without consuming closing paren', () => {
+            const sql = `SELECT * FROM t WHERE id IN (
+                SELECT id FROM s
+                QUALIFY ROW_NUMBER() OVER (ORDER BY x) = 1
+            )`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/QUALIFY/i);
+            // The outer closing paren should still be intact
+            const openParens = (result!.match(/\(/g) || []).length;
+            const closeParens = (result!.match(/\)/g) || []).length;
+            expect(openParens).toBe(closeParens);
+        });
+
+        it('handles combined Teradata constructs', () => {
+            const sql = `SEL customer_id, customer_name
+FROM customers
+LOCKING ROW FOR ACCESS
+SAMPLE 100
+QUALIFY ROW_NUMBER() OVER (ORDER BY customer_id) <= 10`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('SELECT');
+            expect(result).not.toMatch(/\bSEL\b/);
+            expect(result).not.toMatch(/LOCKING/i);
+            expect(result).not.toMatch(/SAMPLE/i);
+            expect(result).not.toMatch(/QUALIFY/i);
+        });
+
+        it('rewrites UPDATE FROM to comma-join syntax', () => {
+            const sql = `UPDATE target_sales t FROM source_daily s SET t.revenue = s.revenue WHERE t.id = s.id`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('UPDATE target_sales t, source_daily s');
+            expect(result).toContain('SET');
+            expect(result).not.toMatch(/\bFROM\b/);
+        });
+
+        it('rewrites bare DATE to CURRENT_DATE', () => {
+            const sql = `SELECT DATE AS system_date`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('CURRENT_DATE');
+            expect(result).not.toMatch(/(?<!CURRENT_)\bDATE\b/);
+        });
+
+        it('does not rewrite DATE function call or DATE literal', () => {
+            const sql = `SELECT DATE '2024-01-01' AS d, CAST(col AS DATE) AS d2`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            // DATE followed by string literal or in CAST AS context should not be rewritten
+            expect(result).toBeNull();
+        });
+
+        it('backtick-quotes reserved word aliases', () => {
+            const sql = `SELECT CURRENT_TIME AS current_time, CURRENT_TIMESTAMP AS current_timestamp`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('AS `current_time`');
+            expect(result).toContain('AS `current_timestamp`');
+        });
+
+        it('strips WITHIN GROUP from ordered-set aggregates', () => {
+            const sql = `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) FROM emp`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/WITHIN\s+GROUP/i);
+            expect(result).toContain('PERCENTILE_CONT(0.5)');
+        });
+
+        it('replaces RANGE BETWEEN INTERVAL with safe window frame', () => {
+            const sql = `SELECT SUM(amount) OVER (ORDER BY dt RANGE BETWEEN INTERVAL '30' DAY PRECEDING AND CURRENT ROW) FROM t`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).toContain('ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW');
+            expect(result).not.toMatch(/RANGE\s+BETWEEN\s+INTERVAL/i);
         });
     });
 });

@@ -69,6 +69,20 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasSqliteAutoincrement: boolean;
     hasSqliteGlob: boolean;
     hasSqlitePragma: boolean;
+    // Teradata
+    hasTeradataVolatileTable: boolean;
+    hasTeradataMultisetOrSetTable: boolean;
+    hasTeradataPrimaryIndex: boolean;
+    hasTeradataHashFunctions: boolean;
+    hasTeradataCollectStats: boolean;
+    hasTeradataMacro: boolean;
+    hasTeradataJoinIndex: boolean;
+    hasTeradataLocking: boolean;
+    hasTeradataSample: boolean;
+    hasTeradataSelShorthand: boolean;
+    hasTeradataRangeN: boolean;
+    hasTeradataNormalize: boolean;
+    hasTeradataRenameTable: boolean;
 } {
     const maskedSql = maskStringsAndComments(sql);
     return {
@@ -127,6 +141,20 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasSqliteAutoincrement: /\bAUTOINCREMENT\b/i.test(maskedSql),
         hasSqliteGlob: /\bGLOB\b/i.test(maskedSql),
         hasSqlitePragma: /\bPRAGMA\s+/i.test(maskedSql),
+        // Teradata
+        hasTeradataVolatileTable: /\bCREATE\s+VOLATILE\b/i.test(maskedSql),
+        hasTeradataMultisetOrSetTable: /\bCREATE\s+(MULTISET|SET)\s+TABLE\b/i.test(maskedSql),
+        hasTeradataPrimaryIndex: /\bPRIMARY\s+INDEX\s*\(/i.test(maskedSql),
+        hasTeradataHashFunctions: /\b(HASHROW|HASHBUCKET|HASHAMP)\s*\(/i.test(maskedSql),
+        hasTeradataCollectStats: /\bCOLLECT\s+STATISTICS?\s+ON\b/i.test(maskedSql),
+        hasTeradataMacro: /\b(CREATE|REPLACE)\s+MACRO\b/i.test(maskedSql),
+        hasTeradataJoinIndex: /\bCREATE\s+JOIN\s+INDEX\b/i.test(maskedSql),
+        hasTeradataLocking: /\bLOCKING\s+(ROW|TABLE|DATABASE|VIEW)\s+FOR\b/i.test(maskedSql),
+        hasTeradataSample: /\bSAMPLE\s+(\d+|\.\d+)/i.test(maskedSql),
+        hasTeradataSelShorthand: /(?:^|;\s*)SEL\s+\w/im.test(maskedSql),
+        hasTeradataRangeN: /\b(RANGE_N|CASE_N)\s*\(/i.test(maskedSql),
+        hasTeradataNormalize: /\bSELECT\s+NORMALIZE\b/i.test(maskedSql),
+        hasTeradataRenameTable: /\bRENAME\s+(TABLE|VIEW)\b/i.test(maskedSql),
     };
 }
 
@@ -220,6 +248,24 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasSqliteAutoincrement) { addScore('SQLite', 3); }
     if (syntax.hasSqliteGlob) { addScore('SQLite', 2); }
     if (syntax.hasSqlitePragma) { addScore('SQLite', 3); }
+
+    // Teradata — high-confidence (unique syntax)
+    if (syntax.hasTeradataVolatileTable) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataMultisetOrSetTable) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataPrimaryIndex) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataHashFunctions) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataCollectStats) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataMacro) { addScore('Teradata', 3); }
+    if (syntax.hasTeradataJoinIndex) { addScore('Teradata', 3); }
+    // Teradata — medium-confidence
+    if (syntax.hasTeradataLocking) { addScore('Teradata', 2); }
+    if (syntax.hasTeradataSample) { addScore('Teradata', 2); }
+    if (syntax.hasTeradataSelShorthand) { addScore('Teradata', 2); }
+    if (syntax.hasTeradataRangeN) { addScore('Teradata', 2); }
+    if (syntax.hasTeradataNormalize) { addScore('Teradata', 2); }
+    if (syntax.hasTeradataRenameTable) { addScore('Teradata', 2); }
+    // QUALIFY is shared with Snowflake/BigQuery — low-confidence for Teradata
+    if (syntax.hasQualify) { addScore('Teradata'); }
 
     const matchedDialects = rankDialectScores(scores);
     if (matchedDialects.length === 0) {

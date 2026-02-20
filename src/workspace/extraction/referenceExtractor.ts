@@ -53,7 +53,10 @@ const SQL_RESERVED_WORDS = new Set([
     // Transaction keywords
     'begin', 'commit', 'rollback', 'transaction', 'savepoint',
     // Permissions
-    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger'
+    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger',
+    // Teradata-specific
+    'sel', 'multiset', 'volatile', 'locking', 'qualify', 'sample', 'normalize',
+    'hashrow', 'hashbucket', 'hashamp'
 ]);
 
 /**
@@ -299,7 +302,8 @@ export class ReferenceExtractor {
             'Redshift': 'redshift',
             'Athena': 'athena',
             'Trino': 'trino',
-            'Oracle': 'postgresql'
+            'Oracle': 'postgresql',
+            'Teradata': 'mysql'
         };
         return dialectMap[dialect] || 'mysql';
     }

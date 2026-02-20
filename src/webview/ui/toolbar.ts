@@ -241,6 +241,7 @@ export function createToolbar(
             <option value="MariaDB">MariaDB</option>
             <option value="SQLite">SQLite</option>
             <option value="Oracle">Oracle</option>
+            <option value="Teradata">Teradata</option>
         </select>
         <span id="dialect-auto-indicator" style="
             display: none;

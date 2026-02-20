@@ -125,7 +125,8 @@
             "Trino",
             "MariaDB",
             "SQLite",
-            "Oracle"
+            "Oracle",
+            "Teradata"
           ],
           "enumDescriptions": [
             "MySQL dialect",
@@ -140,7 +141,8 @@
             "Trino (formerly Presto) dialect",
             "MariaDB dialect",
             "SQLite dialect",
-            "Oracle Database dialect"
+            "Oracle Database dialect",
+            "Teradata dialect"
           ],
           "description": "Default SQL dialect for parsing queries"
         },

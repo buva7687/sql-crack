@@ -724,4 +724,195 @@ describe('Dialect Support', () => {
       expect(result.hints.some(h => h.message.includes('Oracle optimizer hints'))).toBe(true);
     });
   });
+
+  describe('Teradata', () => {
+    const dialect = 'Teradata';
+
+    it('parses basic SELECT via MySQL proxy', () => {
+      const result = parseSql('SELECT * FROM employees', dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses SELECT with WHERE clause', () => {
+      const result = parseSql('SELECT id, name FROM employees WHERE department_id = 10', dialect);
+      expect(result.error).toBeUndefined();
+      const tableLabels = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tableLabels).toContain('employees');
+    });
+
+    it('parses CTE queries', () => {
+      const result = parseSql(`
+        WITH dept_summary AS (
+          SELECT department_id, COUNT(*) AS cnt
+          FROM employees
+          GROUP BY department_id
+        )
+        SELECT * FROM dept_summary
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses JOINs', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e
+        JOIN departments d ON e.department_id = d.department_id
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.tables).toBeGreaterThanOrEqual(2);
+    });
+
+    it('preprocesses SEL shorthand to SELECT', () => {
+      const result = parseSql('SEL customer_id, customer_name FROM customers', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Teradata-specific syntax'))).toBe(true);
+    });
+
+    it('strips LOCKING ROW FOR ACCESS via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, customer_name
+        FROM customers
+        LOCKING ROW FOR ACCESS
+        WHERE customer_id = 1001
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Teradata-specific syntax'))).toBe(true);
+    });
+
+    it('strips QUALIFY clause via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, order_date,
+          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) AS rn
+        FROM customer_orders
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) <= 3
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('strips SAMPLE clause via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, customer_name FROM customers SAMPLE 1000
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses window functions', () => {
+      const result = parseSql(`
+        SELECT employee_id, salary,
+          ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rn
+        FROM employees
+      `, dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses MERGE INTO', () => {
+      const result = parseSql(`
+        MERGE INTO target_table t
+        USING source_table s ON t.id = s.id
+        WHEN MATCHED THEN UPDATE SET t.value = s.value
+        WHEN NOT MATCHED THEN INSERT (id, value) VALUES (s.id, s.value)
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses QUALIFY with ROW_NUMBER (nested OVER with ORDER BY)', () => {
+      const result = parseSql(`
+        SELECT customer_id, order_date,
+          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) AS rn
+        FROM customer_orders
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) <= 3
+      `, dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses subquery with QUALIFY inside IN clause', () => {
+      const result = parseSql(`
+        SELECT * FROM customers
+        WHERE customer_id IN (
+          SELECT customer_id FROM orders
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) = 1
+        )
+      `, dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses TOP n with SAMPLE', () => {
+      const result = parseSql('SELECT TOP 10 * FROM large_table SAMPLE 1000', dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('handles DATABASE command as session command', () => {
+      const result = parseSql('database random;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('DATABASE'))).toBe(true);
+    });
+
+    it('handles COMMENT ON as session command', () => {
+      const result = parseSql("comment on view emp is 'test abc xyz';", dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('COMMENT ON'))).toBe(true);
+    });
+
+    it('handles COLLECT STATISTICS as session command', () => {
+      const result = parseSql('COLLECT STATISTICS ON orders COLUMN (order_id);', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('COLLECT STATISTICS'))).toBe(true);
+    });
+
+    it('rewrites REPLACE VIEW and parses with LOCKING+SEL', () => {
+      const result = parseSql(`replace view emp_v
+as
+/***
+* some comments
+* some more
+***/
+locking row for access
+sel * from emp
+where id=1;`, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses LOCKING before SELECT', () => {
+      const result = parseSql('locking row for access\nselect * from emp;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses LOCKING before SEL', () => {
+      const result = parseSql('locking row for access\nsel * from emp;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses bare DATE as CURRENT_DATE', () => {
+      const result = parseSql('SELECT DATE AS system_date', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses SELECT with DATE and reserved word aliases', () => {
+      const result = parseSql('SELECT CURRENT_DATE AS today, CURRENT_TIME AS current_time, DATE AS system_date', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses UPDATE FROM with comma-join rewrite', () => {
+      const result = parseSql('UPDATE target t FROM source s SET t.col = s.col WHERE t.id = s.id', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses PERCENTILE_CONT with WITHIN GROUP stripped', () => {
+      const result = parseSql('SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) FROM emp', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+  });
 });

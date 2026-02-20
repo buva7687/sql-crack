@@ -90,7 +90,8 @@ export class SchemaExtractor {
             'Redshift': 'redshift',
             'Athena': 'athena',
             'Trino': 'trino',
-            'Oracle': 'postgresql'
+            'Oracle': 'postgresql',
+            'Teradata': 'mysql'
         };
         return dialectMap[dialect] || 'mysql';
     }

@@ -280,4 +280,71 @@ describe('detectDialect', () => {
         expect(result.dialect).toBe('Hive');
         expect(result.confidence).toBe('high');
     });
+
+    // Teradata detection
+    it('detects Teradata CREATE VOLATILE TABLE with high confidence', () => {
+        const result = detectDialect('CREATE VOLATILE TABLE temp_orders AS (SELECT * FROM orders) WITH DATA PRIMARY INDEX (order_id)');
+        expect(result.dialect).toBe('Teradata');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Teradata CREATE MULTISET TABLE with high confidence', () => {
+        const result = detectDialect('CREATE MULTISET TABLE customer_sales (customer_id INTEGER, sale_amount DECIMAL(10,2)) PRIMARY INDEX (customer_id)');
+        expect(result.dialect).toBe('Teradata');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(6);
+    });
+
+    it('detects Teradata PRIMARY INDEX with high confidence', () => {
+        const result = detectDialect('CREATE TABLE orders (id INTEGER) PRIMARY INDEX (id)');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Teradata HASHROW function with high confidence', () => {
+        const result = detectDialect('SELECT HASHROW(customer_id) AS hash_val FROM customers');
+        expect(result.dialect).toBe('Teradata');
+        expect(result.confidence).toBe('high');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(3);
+    });
+
+    it('detects Teradata COLLECT STATISTICS with high confidence', () => {
+        const result = detectDialect('COLLECT STATISTICS ON orders COLUMN (order_id)');
+        expect(result.dialect).toBe('Teradata');
+        expect(result.confidence).toBe('high');
+    });
+
+    it('detects Teradata LOCKING syntax as medium-confidence', () => {
+        const result = detectDialect('SELECT * FROM customers LOCKING ROW FOR ACCESS WHERE customer_id = 1');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+    });
+
+    it('detects Teradata SEL shorthand as medium-confidence', () => {
+        const result = detectDialect('SEL customer_id, customer_name FROM customers');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+    });
+
+    it('detects Teradata SAMPLE clause as medium-confidence', () => {
+        const result = detectDialect('SELECT * FROM customers SAMPLE 1000');
+        expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does not false-positive SEL inside identifiers', () => {
+        const result = detectDialect('SELECT selected_count FROM metrics');
+        expect(result.scores.Teradata || 0).toBe(0);
+    });
+
+    it('ignores Teradata-like syntax inside comments', () => {
+        const result = detectDialect('-- CREATE VOLATILE TABLE temp AS\nSELECT 1');
+        expect(result.scores.Teradata || 0).toBe(0);
+    });
+
+    it('QUALIFY alone does not high-confidence detect Teradata over Snowflake/BigQuery', () => {
+        const result = detectDialect('SELECT * FROM orders QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY dt DESC) = 1');
+        // All three get QUALIFY signal, none should be high confidence alone
+        expect(result.confidence).toBe('low');
+        expect(result.scores.Teradata).toBeGreaterThan(0);
+        expect(result.scores.Snowflake).toBeGreaterThan(0);
+        expect(result.scores.BigQuery).toBeGreaterThan(0);
+    });
 });

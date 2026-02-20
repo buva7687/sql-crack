@@ -24,5 +24,6 @@ describe('normalizeDialect', () => {
         expect(normalizeDialect('Trino')).toBe('Trino');
         expect(normalizeDialect('MariaDB')).toBe('MariaDB');
         expect(normalizeDialect('SQLite')).toBe('SQLite');
+        expect(normalizeDialect('Teradata')).toBe('Teradata');
     });
 });

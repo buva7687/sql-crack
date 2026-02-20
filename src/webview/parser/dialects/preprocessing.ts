@@ -1104,33 +1104,14 @@ export function preprocessSnowflakeSyntax(sql: string, dialect: SqlDialect): str
 function stripQualifyClauses(sql: string): string | null {
     const masked = maskStringsAndComments(sql);
     const qualifyRegex = /\bQUALIFY\b/gi;
-    const terminators = /\b(ORDER\s+BY|LIMIT|FETCH|OFFSET|UNION|INTERSECT|EXCEPT)\b/gi;
     const ranges: { start: number; end: number }[] = [];
 
     let match;
     while ((match = qualifyRegex.exec(masked)) !== null) {
         const start = match.index;
-        // Find the end: next top-level keyword, semicolon, or EOF
-        let end = masked.length;
-        terminators.lastIndex = start + match[0].length;
-        const termMatch = terminators.exec(masked);
-        if (termMatch) {
-            end = termMatch.index;
-        }
-        // Also check for semicolons
-        const semiPos = masked.indexOf(';', start + match[0].length);
-        if (semiPos !== -1 && semiPos < end) {
-            end = semiPos;
-        }
-        // Also check for closing paren at depth 0 (subquery boundary)
-        let depth = 0;
-        for (let i = start + match[0].length; i < end; i++) {
-            if (masked[i] === '(') { depth++; }
-            else if (masked[i] === ')') {
-                if (depth === 0) { end = i; break; }
-                depth--;
-            }
-        }
+        // Scan forward from after QUALIFY, respecting paren depth.
+        // Stop at depth-0 terminators, semicolons, closing paren at depth 0, or EOF.
+        const end = findQualifyClauseEnd(masked, start + match[0].length);
         ranges.push({ start, end });
     }
 
@@ -1143,6 +1124,50 @@ function stripQualifyClauses(sql: string): string | null {
         result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
     }
     return result;
+}
+
+/**
+ * Find where a QUALIFY clause ends. Scans forward from `pos` respecting paren
+ * depth — only matches terminator keywords (ORDER BY, LIMIT, FETCH, OFFSET,
+ * UNION, INTERSECT, EXCEPT) when at depth 0.
+ */
+function findQualifyClauseEnd(masked: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth === 0) { return i; }
+            depth--;
+            continue;
+        }
+        if (ch === ';') { return i; }
+
+        if (depth !== 0) { continue; }
+
+        // Only check for keyword terminators at depth 0 and at word boundaries
+        if (!/\s/.test(ch)) { continue; }
+        let keyStart = i;
+        while (keyStart < masked.length && /\s/.test(masked[keyStart])) { keyStart++; }
+        if (keyStart >= masked.length) { return masked.length; }
+
+        const terminators = ['ORDER BY', 'LIMIT', 'FETCH', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT'];
+        for (const kw of terminators) {
+            if (upper.startsWith(kw, keyStart)) {
+                const afterKw = keyStart + kw.length;
+                const nextCh = masked[afterKw];
+                if (!nextCh || /[\s();,]/.test(nextCh)) {
+                    return keyStart;
+                }
+            }
+        }
+
+        i = keyStart - 1;
+    }
+
+    return masked.length;
 }
 
 function rewriteIffExpressions(sql: string): string | null {
@@ -1271,6 +1296,392 @@ function stripDoubleColonCasts(sql: string): string | null {
  * 4. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
  * 5. Snowflake deep path collapse
  */
+/**
+ * Preprocess Teradata-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. `SEL` shorthand → `SELECT`
+ * 2. `LOCKING ROW/TABLE/DATABASE/VIEW FOR ACCESS/READ/WRITE/EXCLUSIVE` — stripped
+ * 3. `VOLATILE` from CREATE VOLATILE TABLE — stripped
+ * 4. `MULTISET`/`SET` from CREATE MULTISET/SET TABLE — stripped
+ * 5. `PRIMARY INDEX (...)` / `UNIQUE PRIMARY INDEX (...)` / `INDEX (...)` — stripped
+ * 6. `ON COMMIT PRESERVE ROWS` / `ON COMMIT DELETE ROWS` — stripped
+ * 7. `SAMPLE n` / `SAMPLE .fraction` — stripped
+ * 8. `NORMALIZE` / `NORMALIZE ON MEETS OR OVERLAPS` — stripped
+ * 9. `WITH DATA` / `WITH NO DATA` from CTAS — stripped
+ * 10. QUALIFY — delegated to existing stripQualifyClauses logic
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Teradata') {
+        return null;
+    }
+
+    let result = sql;
+    let changed = false;
+
+    // 1. Rewrite SEL → SELECT (only at statement start, not inside identifiers)
+    let masked = maskStringsAndComments(result);
+    const selRegex = /(?:^|(?<=;\s*))SEL\b/gim;
+    const selRewrites: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+    while ((match = selRegex.exec(masked)) !== null) {
+        // Make sure we're matching the actual word SEL, not part of another word
+        if (match.index > 0) {
+            const prevChar = masked[match.index - 1];
+            if (/\w/.test(prevChar)) { continue; }
+        }
+        selRewrites.push({ start: match.index, end: match.index + 3 });
+    }
+    for (let i = selRewrites.length - 1; i >= 0; i--) {
+        const m = selRewrites[i];
+        result = result.substring(0, m.start) + 'SELECT' + result.substring(m.end);
+        changed = true;
+    }
+
+    // 1b. Rewrite REPLACE VIEW → CREATE OR REPLACE VIEW (Teradata shorthand)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const replaceViewRegex = /\bREPLACE\s+(VIEW|MACRO|PROCEDURE|FUNCTION)\b/gi;
+    const replaceViewRewrites: Array<{ start: number; end: number; replacement: string }> = [];
+    while ((match = replaceViewRegex.exec(masked)) !== null) {
+        // Make sure it's not already CREATE OR REPLACE
+        const before = masked.substring(Math.max(0, match.index - 20), match.index).trimEnd();
+        if (/\bCREATE\s+OR$/i.test(before) || /\bOR$/i.test(before)) { continue; }
+        replaceViewRewrites.push({
+            start: match.index,
+            end: match.index + 'REPLACE'.length,
+            replacement: 'CREATE OR REPLACE'
+        });
+    }
+    for (let i = replaceViewRewrites.length - 1; i >= 0; i--) {
+        const m = replaceViewRewrites[i];
+        result = result.substring(0, m.start) + m.replacement + result.substring(m.end);
+        changed = true;
+    }
+
+    // 2. Strip LOCKING ROW/TABLE/DATABASE/VIEW FOR ACCESS/READ/WRITE/EXCLUSIVE
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const lockingRegex = /\bLOCKING\s+(?:ROW|TABLE|DATABASE|VIEW)\s+FOR\s+(?:ACCESS|READ|WRITE|EXCLUSIVE)\b/gi;
+    const lockingRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = lockingRegex.exec(masked)) !== null) {
+        lockingRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = lockingRewrites.length - 1; i >= 0; i--) {
+        const m = lockingRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 3 & 4. Strip VOLATILE, MULTISET, SET from CREATE statements
+    //    "CREATE VOLATILE MULTISET TABLE" → "CREATE TABLE"
+    //    "CREATE SET TABLE" → "CREATE TABLE"
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const createTableRegex = /\bCREATE\s+((?:(?:VOLATILE|GLOBAL\s+TEMPORARY|MULTISET|SET)\s+)*)(TABLE)\b/gi;
+    const createRewrites: Array<{ start: number; end: number; replacement: string }> = [];
+    while ((match = createTableRegex.exec(masked)) !== null) {
+        const modifiers = match[1];
+        if (modifiers && modifiers.trim().length > 0) {
+            // Replace "CREATE <modifiers> TABLE" with "CREATE TABLE"
+            const modStart = match.index + 'CREATE'.length;
+            const modEnd = match.index + match[0].length - 'TABLE'.length;
+            createRewrites.push({ start: modStart, end: modEnd, replacement: ' ' });
+        }
+    }
+    for (let i = createRewrites.length - 1; i >= 0; i--) {
+        const m = createRewrites[i];
+        result = result.substring(0, m.start) + m.replacement + result.substring(m.end);
+        changed = true;
+    }
+
+    // 5. Strip PRIMARY INDEX (...) / UNIQUE PRIMARY INDEX (...) / INDEX (...) at end of DDL
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const primaryIndexRegex = /\b(?:UNIQUE\s+)?PRIMARY\s+INDEX\s*\(/gi;
+    const indexRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = primaryIndexRegex.exec(masked)) !== null) {
+        const parenPos = masked.indexOf('(', match.index + match[0].length - 1);
+        if (parenPos === -1) { continue; }
+        const closePos = findMatchingParen(result, parenPos);
+        if (closePos === -1) { continue; }
+        indexRewrites.push({ start: match.index, end: closePos + 1 });
+    }
+    // Also strip standalone INDEX (...) in DDL context
+    const secondaryIndexRegex = /\bINDEX\s*\(/gi;
+    while ((match = secondaryIndexRegex.exec(masked)) !== null) {
+        // Make sure it's not part of PRIMARY INDEX (already handled)
+        const before = masked.substring(Math.max(0, match.index - 20), match.index);
+        if (/PRIMARY\s*$/i.test(before)) { continue; }
+        const parenPos = masked.indexOf('(', match.index + match[0].length - 1);
+        if (parenPos === -1) { continue; }
+        const closePos = findMatchingParen(result, parenPos);
+        if (closePos === -1) { continue; }
+        indexRewrites.push({ start: match.index, end: closePos + 1 });
+    }
+    // Sort by start descending to replace from end to start
+    indexRewrites.sort((a, b) => b.start - a.start);
+    for (const m of indexRewrites) {
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 6. Strip ON COMMIT PRESERVE ROWS / ON COMMIT DELETE ROWS
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const onCommitRegex = /\bON\s+COMMIT\s+(?:PRESERVE|DELETE)\s+ROWS\b/gi;
+    const onCommitRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = onCommitRegex.exec(masked)) !== null) {
+        onCommitRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = onCommitRewrites.length - 1; i >= 0; i--) {
+        const m = onCommitRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 7. Strip SAMPLE n / SAMPLE .fraction (possibly with multiple fractions: SAMPLE .1, .2, .3)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const sampleRegex = /\bSAMPLE\s+(\d+|\.\d+)(\s*,\s*(\.\d+|\d+))*/gi;
+    const sampleRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = sampleRegex.exec(masked)) !== null) {
+        sampleRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    for (let i = sampleRewrites.length - 1; i >= 0; i--) {
+        const m = sampleRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 7b. Strip TOP n after SELECT (MySQL proxy doesn't support TOP)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const topRegex = /\b(SELECT\s+)(TOP\s+\d+\s+)/gi;
+    const topRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = topRegex.exec(masked)) !== null) {
+        const topStart = match.index + match[1].length;
+        const topEnd = match.index + match[0].length;
+        topRewrites.push({ start: topStart, end: topEnd });
+    }
+    for (let i = topRewrites.length - 1; i >= 0; i--) {
+        const m = topRewrites[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 8. Strip NORMALIZE / NORMALIZE ON MEETS OR OVERLAPS after SELECT
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const normalizeRegex = /\b(SELECT\s+)(NORMALIZE(?:\s+ON\s+MEETS\s+OR\s+OVERLAPS)?)\s+/gi;
+    const normalizeRewrites: Array<{ start: number; end: number; replacement: string }> = [];
+    while ((match = normalizeRegex.exec(masked)) !== null) {
+        const selectPart = match[1];
+        const normStart = match.index + selectPart.length;
+        const normEnd = match.index + match[0].length;
+        normalizeRewrites.push({ start: normStart, end: normEnd, replacement: '' });
+    }
+    for (let i = normalizeRewrites.length - 1; i >= 0; i--) {
+        const m = normalizeRewrites[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 9. Strip WITH DATA / WITH NO DATA from CTAS
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const withDataRegex = /\bWITH\s+(?:NO\s+)?DATA\b/gi;
+    const withDataRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = withDataRegex.exec(masked)) !== null) {
+        // Make sure this is not a CTE "WITH" by checking context
+        // WITH DATA typically follows a closing paren in CTAS
+        const before = masked.substring(Math.max(0, match.index - 10), match.index).trimEnd();
+        if (before.endsWith(')')) {
+            withDataRewrites.push({ start: match.index, end: match.index + match[0].length });
+        }
+    }
+    for (let i = withDataRewrites.length - 1; i >= 0; i--) {
+        const m = withDataRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 10. Strip QUALIFY clauses (reuse existing logic from Snowflake)
+    const qualifyResult = stripQualifyClauses(result);
+    if (qualifyResult !== null) {
+        result = qualifyResult;
+        changed = true;
+    }
+
+    // 11. Rewrite UPDATE t FROM s SET ... WHERE ... → UPDATE t, s SET ... WHERE ...
+    //     Teradata puts FROM before SET; MySQL supports comma-join UPDATE syntax.
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const updateFromRegex = /\bUPDATE\s+(\S+(?:\s+\S+)?)\s+FROM\s+/gi;
+    while ((match = updateFromRegex.exec(masked)) !== null) {
+        // Find the SET keyword after FROM
+        const setPos = findKeywordAtDepth0(masked, 'SET', match.index + match[0].length);
+        if (setPos === -1) { continue; }
+        // Extract the source table(s) between FROM and SET
+        const fromStart = match.index + match[0].length;
+        const sourceTable = result.substring(fromStart, setPos).trim();
+        // Extract the target (UPDATE <target>)
+        const targetEnd = masked.substring(match.index).search(/\bFROM\b/i) + match.index;
+        const updateTarget = result.substring(match.index, targetEnd).trimEnd();
+        const rest = result.substring(setPos);
+        // Rebuild: UPDATE target, source SET ... WHERE ...
+        const newStmt = `${updateTarget}, ${sourceTable} ${rest}`;
+        result = result.substring(0, match.index) + newStmt;
+        changed = true;
+        break; // Only handle one UPDATE FROM per call
+    }
+
+    // 12. Strip WITHIN GROUP (...) from ordered-set aggregate functions
+    //     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) → PERCENTILE_CONT(0.5)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const withinGroupRegex = /\bWITHIN\s+GROUP\s*\(/gi;
+    const withinGroupRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = withinGroupRegex.exec(masked)) !== null) {
+        const parenPos = masked.lastIndexOf('(', match.index + match[0].length);
+        const closePos = findMatchingParen(result, parenPos);
+        if (closePos === -1) { continue; }
+        withinGroupRewrites.push({ start: match.index, end: closePos + 1 });
+    }
+    for (let i = withinGroupRewrites.length - 1; i >= 0; i--) {
+        const m = withinGroupRewrites[i];
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 13. Strip RANGE BETWEEN INTERVAL '...' in window frames (MySQL doesn't support INTERVAL in frames)
+    //     Replace with ROWS BETWEEN equivalent or just strip the problematic frame
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const rangeIntervalRegex = /\bRANGE\s+BETWEEN\s+INTERVAL\b/gi;
+    while ((match = rangeIntervalRegex.exec(masked)) !== null) {
+        // Find the end of the window frame clause (AND CURRENT ROW, AND ... FOLLOWING, etc.)
+        const frameEnd = findWindowFrameEnd(masked, match.index + match[0].length);
+        // Replace with ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW as safe fallback
+        const replacement = 'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW';
+        result = result.substring(0, match.index) + replacement + result.substring(frameEnd);
+        masked = maskStringsAndComments(result);
+        changed = true;
+        break; // Re-scan after replacement
+    }
+
+    // 14. Rewrite bare DATE keyword (not DATE(...) or DATE '...') to CURRENT_DATE
+    //     In Teradata, DATE alone means CURRENT_DATE
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const bareDateRegex = /\bDATE\b/gi;
+    const bareDateRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = bareDateRegex.exec(masked)) !== null) {
+        const afterDate = masked[match.index + 4];
+        // Skip if followed by '(' (function call) or if part of CURRENT_DATE or data type usage
+        if (afterDate === '(') { continue; }
+        // Skip if preceded by CURRENT_ or a type context
+        const before = masked.substring(Math.max(0, match.index - 10), match.index);
+        if (/CURRENT_$/i.test(before)) { continue; }
+        // Skip if it's in a column definition context (preceded by a column name or comma+type)
+        if (/\b(CREATE|TABLE|COLUMN|CAST|AS)\s*$/i.test(before.trim())) { continue; }
+        // Skip if followed by a string literal (DATE '2024-01-01') — check original SQL
+        let pos = match.index + 4;
+        while (pos < result.length && /\s/.test(result[pos])) { pos++; }
+        if (pos < result.length && result[pos] === '\'') { continue; }
+        // Only rewrite if it looks like a standalone column reference (after comma or SELECT)
+        const trimmedBefore = before.trimEnd();
+        if (trimmedBefore.endsWith(',') || /\bSELECT$/i.test(trimmedBefore) || trimmedBefore.endsWith('(')) {
+            bareDateRewrites.push({ start: match.index, end: match.index + 4 });
+        }
+    }
+    for (let i = bareDateRewrites.length - 1; i >= 0; i--) {
+        const m = bareDateRewrites[i];
+        result = result.substring(0, m.start) + 'CURRENT_DATE' + result.substring(m.end);
+        changed = true;
+    }
+
+    // 15. Strip WHEN MATCHED AND <condition> → WHEN MATCHED (conditional MERGE not supported by MySQL)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const whenMatchedAndRegex = /\bWHEN\s+MATCHED\s+AND\b/gi;
+    const whenMatchedRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = whenMatchedAndRegex.exec(masked)) !== null) {
+        // Find the THEN keyword after the condition
+        const thenPos = findKeywordAtDepth0(masked, 'THEN', match.index + match[0].length);
+        if (thenPos === -1) { continue; }
+        // Replace "WHEN MATCHED AND <condition> THEN" with "WHEN MATCHED THEN"
+        whenMatchedRewrites.push({
+            start: match.index,
+            end: thenPos + 4 // include THEN
+        });
+    }
+    for (let i = whenMatchedRewrites.length - 1; i >= 0; i--) {
+        const m = whenMatchedRewrites[i];
+        result = result.substring(0, m.start) + 'WHEN MATCHED THEN' + result.substring(m.end);
+        changed = true;
+    }
+
+    // 16. Backtick-quote aliases that are MySQL reserved words
+    //     Teradata allows `AS current_time` but MySQL treats current_time as a function keyword
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const reservedAliases = /\bAS\s+(CURRENT_TIME|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_USER|LOCALTIME|LOCALTIMESTAMP)\b/gi;
+    const aliasRewrites: Array<{ start: number; end: number; alias: string }> = [];
+    while ((match = reservedAliases.exec(masked)) !== null) {
+        const aliasStart = match.index + match[0].length - match[1].length;
+        const aliasEnd = match.index + match[0].length;
+        aliasRewrites.push({ start: aliasStart, end: aliasEnd, alias: match[1] });
+    }
+    for (let i = aliasRewrites.length - 1; i >= 0; i--) {
+        const m = aliasRewrites[i];
+        result = result.substring(0, m.start) + '`' + m.alias + '`' + result.substring(m.end);
+        changed = true;
+    }
+
+    return changed ? result : null;
+}
+
+/**
+ * Find the end of a window frame clause starting after RANGE BETWEEN INTERVAL.
+ * Scans until `AND CURRENT ROW`, `AND ... FOLLOWING`, closing paren, or semicolon.
+ */
+function findWindowFrameEnd(masked: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth === 0) { return i; }
+            depth--;
+            continue;
+        }
+        if (ch === ';') { return i; }
+        if (depth !== 0) { continue; }
+        // Check for end of frame: CURRENT ROW, FOLLOWING, PRECEDING after AND
+        if (upper.startsWith('CURRENT ROW', i)) {
+            return i + 'CURRENT ROW'.length;
+        }
+        if (upper.startsWith('FOLLOWING', i)) {
+            return i + 'FOLLOWING'.length;
+        }
+    }
+    return masked.length;
+}
+
+/**
+ * Find a keyword at paren depth 0 starting from `pos`.
+ */
+function findKeywordAtDepth0(masked: string, keyword: string, pos: number): number {
+    const upper = masked.toUpperCase();
+    let depth = 0;
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth > 0) { depth--; }
+            continue;
+        }
+        if (depth === 0 && upper.startsWith(keyword, i)) {
+            // Verify word boundary
+            const before = i > 0 ? masked[i - 1] : ' ';
+            const after = masked[i + keyword.length] || ' ';
+            if (/[\s(,;]/.test(before) && /[\s(,;]/.test(after)) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
 export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
     let result = sql;
 
@@ -1291,6 +1702,9 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
 
     const snowflake = collapseSnowflakePaths(result, dialect);
     if (snowflake !== null) { result = snowflake; }
+
+    const teradata = preprocessTeradataSyntax(result, dialect);
+    if (teradata !== null) { result = teradata; }
 
     return result;
 }

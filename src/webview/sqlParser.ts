@@ -14,6 +14,7 @@ import {
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
     preprocessSnowflakeSyntax,
+    preprocessTeradataSyntax,
     rewriteGroupingSets,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
@@ -107,7 +108,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -770,6 +771,18 @@ function applyParserCompatibilityPreprocessing(
         });
     }
 
+    const teradataPreprocessedSql = preprocessTeradataSyntax(transformedSql, dialect);
+    if (teradataPreprocessedSql !== null) {
+        transformedSql = teradataPreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote Teradata-specific syntax (SEL, VOLATILE, MULTISET/SET, PRIMARY INDEX, QUALIFY, SAMPLE, LOCKING) for parser compatibility',
+            suggestion: 'Teradata-specific constructs were automatically simplified for visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     return transformedSql;
 }
 
@@ -811,8 +824,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         let effectiveDialect = dialect;
 
         const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
-            // Oracle is not supported by node-sql-parser; use PostgreSQL as the closest proxy
-            const parserDialect = targetDialect === 'Oracle' ? 'PostgreSQL' : targetDialect;
+            // Oracle and Teradata are not supported by node-sql-parser; use proxy dialects
+            const parserDialect = targetDialect === 'Oracle' ? 'PostgreSQL'
+                : targetDialect === 'Teradata' ? 'MySQL'
+                : targetDialect;
             try {
                 return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {

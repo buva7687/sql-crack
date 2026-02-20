@@ -101,9 +101,25 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
         });
     }
 
+    // Teradata-specific syntax warning
+    const hasTeradataVolatile = syntax.hasTeradataVolatileTable;
+    const hasTeradataPrimaryIndex = syntax.hasTeradataPrimaryIndex;
+    const hasTeradataHash = syntax.hasTeradataHashFunctions;
+    const hasTeradataMultiset = syntax.hasTeradataMultisetOrSetTable;
+    if ((hasTeradataVolatile || hasTeradataPrimaryIndex || hasTeradataHash || hasTeradataMultiset)
+        && currentDialect !== 'Teradata') {
+        context.hints.push({
+            type: 'warning',
+            message: 'Teradata-specific syntax detected',
+            suggestion: 'This query uses Teradata syntax (e.g., VOLATILE TABLE, PRIMARY INDEX, MULTISET, HASHROW). Try Teradata dialect for full support.',
+            category: 'best-practice',
+            severity: 'medium'
+        });
+    }
+
     const hasMerge = /\bMERGE\s+INTO\b/i.test(strippedSql);
     if (hasMerge) {
-        const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery'];
+        const dialectsWithMerge = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery', 'Teradata'];
         if (!dialectsWithMerge.includes(currentDialect)) {
             context.hints.push({
                 type: 'warning',

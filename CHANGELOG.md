@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Teradata SQL dialect support**: Teradata is now a first-class dialect in SQL Crack.
+  - Added `Teradata` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
+  - Teradata-specific function registry: aggregates (XMLAGG, KURTOSIS, SKEWNESS, CORR, STDDEV family, REGR family, APPROX_COUNT_DISTINCT), window functions (CUME_DIST, PERCENT_RANK, PERCENTILE_CONT, PERCENTILE_DISC), and TVFs (TABLE, XMLTABLE, STRTOK_SPLIT_TO_TABLE).
+  - Dialect auto-detection with 13 Teradata-specific patterns: `VOLATILE TABLE`, `MULTISET/SET TABLE`, `PRIMARY INDEX`, hash functions (`HASHROW`, `HASHBUCKET`), `COLLECT STATISTICS`, `CREATE MACRO`, `JOIN INDEX`, `LOCKING ... FOR ACCESS`, `SAMPLE`, `SEL` shorthand, `RANGE_N`/`HASHBAKAMP`, `NORMALIZE`, `RENAME TABLE/VIEW`.
+  - Teradata preprocessing (15 rewrite steps): `SEL` → `SELECT`, `REPLACE VIEW` → `CREATE OR REPLACE VIEW`, `LOCKING ... FOR ACCESS` stripping, `VOLATILE`/`MULTISET`/`SET`/`GLOBAL TEMPORARY` stripping, `PRIMARY INDEX(...)` stripping, `ON COMMIT PRESERVE/DELETE ROWS` stripping, `SAMPLE`/`TOP n` stripping, `NORMALIZE` stripping, `WITH DATA`/`WITH NO DATA` stripping, `QUALIFY` stripping (shared depth-aware scanner), `UPDATE t FROM s` → comma-join rewrite, `WITHIN GROUP(...)` stripping, `RANGE BETWEEN INTERVAL` safe fallback, bare `DATE` → `CURRENT_DATE`, `WHEN MATCHED AND` conditional stripping, reserved-word alias backtick quoting.
+  - Teradata session commands: `DATABASE`, `COMMENT ON`, `COLLECT STATISTICS`, `RENAME TABLE/VIEW`.
+  - Teradata-specific syntax warnings when Teradata patterns are used in non-Teradata dialects.
+  - Teradata → MySQL proxy mapping for AST parsing.
+  - Added Teradata example files (`examples/teradata-basic.sql`, `examples/teradata-advanced.sql`, `examples/teradata-ddl.sql`).
 - **Oracle SQL dialect support**: Oracle is now a first-class dialect in SQL Crack.
   - Added `Oracle` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
   - Oracle-specific function registry: aggregates (LISTAGG, COLLECT, XMLAGG, MEDIAN, STATS_MODE), window functions (RATIO_TO_REPORT, CUME_DIST, PERCENT_RANK, PERCENTILE_CONT, PERCENTILE_DISC), and TVFs (XMLTABLE, JSON_TABLE, TABLE, XMLSEQUENCE).
@@ -138,6 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added preprocessing support to strip `FILTER (WHERE ...)` clauses before parsing, preventing failures on valid SQL patterns like `max(col) FILTER (WHERE ...) OVER (...)`.
 - **CTE hoisting with quoted CTE names**:
   - Fixed nested CTE hoisting when CTE names are quoted (`"name"`, `` `name` ``, `[name]`) so multi-block nested `WITH` queries hoist reliably.
+- **QUALIFY clause stripping depth-awareness**:
+  - `stripQualifyClauses()` now uses depth-aware scanning (`findQualifyClauseEnd()`) instead of flat regex terminator matching. Previously, `ORDER BY` inside `OVER()` parentheses was incorrectly treated as a clause boundary, breaking queries like `QUALIFY ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) <= 3`.
 - **Snowflake syntax preprocessing compatibility**:
   - Added Snowflake compatibility rewrites for parser ingestion: `QUALIFY` stripping, `IFF()` rewrite to `CASE`, trailing-comma cleanup before `FROM/WHERE`, and `::TYPE` cast suffix stripping.
 
@@ -152,6 +163,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
 - Added regression coverage for parse-error source-line propagation (index → toolbar tooltip → renderer overlay), including absolute-to-relative statement line mapping.
 - Added parser regressions for cross-dialect auto-retry behavior (including `examples/postgres_complex.sql`) and time-literal detection safety.
+- Added Teradata dialect detection tests (VOLATILE TABLE, MULTISET, PRIMARY INDEX, LOCKING, SAMPLE, SEL shorthand, hash functions, COLLECT STATS, macros, JOIN INDEX, RANGE_N, NORMALIZE, RENAME).
+- Added Teradata preprocessing tests (SEL rewrite, LOCKING stripping, VOLATILE/MULTISET/SET stripping, PRIMARY INDEX stripping, SAMPLE/TOP stripping, QUALIFY depth-aware stripping, REPLACE VIEW rewrite, UPDATE FROM comma-join rewrite, bare DATE → CURRENT_DATE, reserved-word alias quoting, WITHIN GROUP stripping, RANGE BETWEEN INTERVAL fallback, combined constructs).
+- Added Teradata end-to-end parsing tests (basic SELECT, JOINs, CTEs, window functions, MERGE, DML, QUALIFY, UPDATE FROM, DATE keyword, PERCENTILE_CONT with WITHIN GROUP).
 - Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
 - Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
 - Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
