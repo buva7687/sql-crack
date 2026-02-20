@@ -158,6 +158,15 @@ export function getBaseStyles(): string {
             }
             .search-input:focus { flex-basis: 145px; }
         }
+        @media (max-width: 1100px) {
+            .header { gap: 8px; padding: 8px 12px; }
+            .header-center { position: static; transform: none; }
+            .header-right { gap: 4px; }
+            .search-box { max-width: min(200px, 22vw); }
+            .search-input { min-width: 60px; flex-basis: 80px; }
+            .search-nav-btn { display: none; }
+            .graph-mode-help { display: none; }
+        }
 
         .graph-context-strip {
             margin-top: 10px;

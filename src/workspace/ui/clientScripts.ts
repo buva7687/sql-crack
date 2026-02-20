@@ -92,7 +92,6 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         const sidebar = document.getElementById('sidebar');
         const zoomLevel = document.getElementById('zoom-level');
         const tooltip = document.getElementById('tooltip');
-        const focusBtn = document.getElementById('btn-focus');
         const selectionEmpty = document.getElementById('selection-empty');
         const selectionDetails = document.getElementById('selection-details');
         const selectionTitle = document.getElementById('selection-title');
@@ -124,8 +123,6 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let focusModeEnabled = false;
         let traceMode = null; // null, 'upstream', 'downstream'
         let activeEmptyState = null;
-        const traceUpBtn = document.getElementById('btn-trace-up');
-        const traceDownBtn = document.getElementById('btn-trace-down');
         const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
 
         ${getGraphInteractionsScriptFragment()}

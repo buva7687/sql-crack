@@ -1755,6 +1755,10 @@ export function getGraphStyles(): string {
         .node-selected .node-bg { stroke: var(--accent); stroke-width: 2; }
         .node-focus-dim { opacity: 0.12; pointer-events: none; }
         .node-trace-highlight .node-bg { stroke: var(--success); stroke-width: 3; }
+        .node-trace-origin .node-bg { stroke: var(--accent); stroke-width: 3.5; }
+        .node-trace-near .node-bg { stroke: var(--success); stroke-width: 2.5; opacity: 1; }
+        .node-trace-far .node-bg { stroke: var(--success); stroke-width: 2; }
+        .node-trace-far { opacity: 0.6; }
         .node-trace-dim { opacity: 0.15; pointer-events: none; }
         .node .node-accent { transition: fill 0.15s; }
         .node-file .node-accent { fill: var(--node-file); }

@@ -41,10 +41,9 @@ describe('workspace panel selection sidebar actions', () => {
             currentGraphMode: 'tables',
         });
 
-        expect(html).toContain('aria-label="Trace all upstream sources"');
-        expect(html).toContain('aria-label="Trace all downstream consumers"');
-        expect(html).not.toContain('aria-label="Trace all upstream dependencies"');
-        expect(html).not.toContain('aria-label="Trace all downstream dependents"');
+        // Trace buttons moved to selection panel only (removed from header)
+        expect(html).not.toContain('id="btn-trace-up"');
+        expect(html).not.toContain('id="btn-trace-down"');
         expect(html).toContain('id="btn-search-prev"');
         expect(html).toContain('id="btn-search-next"');
         expect(html).toContain('id="graph-search-count"');

@@ -193,10 +193,6 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         function updateFocusButton() {
-            if (focusBtn) {
-                focusBtn.classList.toggle('active', focusModeEnabled);
-                focusBtn.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
-            }
             if (graphContextFocusAction) {
                 graphContextFocusAction.classList.toggle('active', focusModeEnabled);
                 graphContextFocusAction.setAttribute('aria-pressed', focusModeEnabled ? 'true' : 'false');
@@ -258,41 +254,36 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         // ========== Trace Mode (Full Lineage) ==========
-        function traceAllUpstream(nodeId, visited = new Set()) {
+        function traceAllUpstream(nodeId, visited = new Map(), distance = 0) {
             if (visited.has(nodeId)) return visited;
-            visited.add(nodeId);
+            visited.set(nodeId, distance);
             const { upstream } = getNeighbors(nodeId);
-            upstream.forEach(id => traceAllUpstream(id, visited));
+            upstream.forEach(id => traceAllUpstream(id, visited, distance + 1));
             return visited;
         }
 
-        function traceAllDownstream(nodeId, visited = new Set()) {
+        function traceAllDownstream(nodeId, visited = new Map(), distance = 0) {
             if (visited.has(nodeId)) return visited;
-            visited.add(nodeId);
+            visited.set(nodeId, distance);
             const { downstream } = getNeighbors(nodeId);
-            downstream.forEach(id => traceAllDownstream(id, visited));
+            downstream.forEach(id => traceAllDownstream(id, visited, distance + 1));
             return visited;
         }
 
         function clearTraceMode() {
             document.querySelectorAll('.node-trace-highlight').forEach(n => n.classList.remove('node-trace-highlight'));
+            document.querySelectorAll('.node-trace-origin').forEach(n => n.classList.remove('node-trace-origin'));
+            document.querySelectorAll('.node-trace-near').forEach(n => n.classList.remove('node-trace-near'));
+            document.querySelectorAll('.node-trace-far').forEach(n => n.classList.remove('node-trace-far'));
             document.querySelectorAll('.node-trace-dim').forEach(n => n.classList.remove('node-trace-dim'));
             document.querySelectorAll('.edge-trace-highlight').forEach(e => e.classList.remove('edge-trace-highlight'));
             document.querySelectorAll('.edge-trace-dim').forEach(e => e.classList.remove('edge-trace-dim'));
         }
 
         function updateTraceButtons() {
-            if (traceUpBtn) {
-                traceUpBtn.classList.toggle('active', traceMode === 'upstream');
-                traceUpBtn.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
-            }
             if (graphContextTraceUpAction) {
                 graphContextTraceUpAction.classList.toggle('active', traceMode === 'upstream');
                 graphContextTraceUpAction.setAttribute('aria-pressed', traceMode === 'upstream' ? 'true' : 'false');
-            }
-            if (traceDownBtn) {
-                traceDownBtn.classList.toggle('active', traceMode === 'downstream');
-                traceDownBtn.setAttribute('aria-pressed', traceMode === 'downstream' ? 'true' : 'false');
             }
             if (graphContextTraceDownAction) {
                 graphContextTraceDownAction.classList.toggle('active', traceMode === 'downstream');
@@ -315,7 +306,15 @@ export function getGraphInteractionsScriptFragment(): string {
                 const nodeId = node.getAttribute('data-id');
                 if (!nodeId) return;
                 if (traced.has(nodeId)) {
+                    const dist = traced.get(nodeId);
                     node.classList.add('node-trace-highlight');
+                    if (dist === 0) {
+                        node.classList.add('node-trace-origin');
+                    } else if (dist === 1) {
+                        node.classList.add('node-trace-near');
+                    } else {
+                        node.classList.add('node-trace-far');
+                    }
                 } else {
                     node.classList.add('node-trace-dim');
                 }
@@ -375,7 +374,7 @@ export function getGraphInteractionsScriptFragment(): string {
 
         function updateGraphActionButtons() {
             const hasSelection = !!selectedNodeId;
-            [focusBtn, traceUpBtn, traceDownBtn, graphContextFocusAction, graphContextTraceUpAction, graphContextTraceDownAction].forEach(btn => {
+            [graphContextFocusAction, graphContextTraceUpAction, graphContextTraceDownAction].forEach(btn => {
                 if (!btn) return;
                 btn.classList.toggle('btn-disabled', !hasSelection);
                 btn.setAttribute('aria-disabled', hasSelection ? 'false' : 'true');
@@ -427,9 +426,28 @@ export function getGraphInteractionsScriptFragment(): string {
 
             const upstreamList = Array.from(upstream).map(getNodeLabel);
             const downstreamList = Array.from(downstream).map(getNodeLabel);
+            const maxVisible = 5;
 
-            if (selectionUpstream) selectionUpstream.textContent = upstreamList.length ? upstreamList.join(', ') : 'None';
-            if (selectionDownstream) selectionDownstream.textContent = downstreamList.length ? downstreamList.join(', ') : 'None';
+            if (selectionUpstream) {
+                if (upstreamList.length === 0) {
+                    selectionUpstream.textContent = 'None';
+                } else if (upstreamList.length <= maxVisible) {
+                    selectionUpstream.textContent = upstreamList.join(', ');
+                } else {
+                    selectionUpstream.textContent = upstreamList.slice(0, maxVisible).join(', ') + ' and ' + (upstreamList.length - maxVisible) + ' more';
+                }
+                selectionUpstream.title = upstreamList.join(', ');
+            }
+            if (selectionDownstream) {
+                if (downstreamList.length === 0) {
+                    selectionDownstream.textContent = 'None';
+                } else if (downstreamList.length <= maxVisible) {
+                    selectionDownstream.textContent = downstreamList.join(', ');
+                } else {
+                    selectionDownstream.textContent = downstreamList.slice(0, maxVisible).join(', ') + ' and ' + (downstreamList.length - maxVisible) + ' more';
+                }
+                selectionDownstream.title = downstreamList.join(', ');
+            }
 
             if (selectionCrossLinks) {
                 const showCrossLinks = type === 'table' || type === 'view' || type === 'cte' || type === 'file' || type === 'external';

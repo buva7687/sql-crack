@@ -152,7 +152,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("button.setAttribute('data-node-id', nodeId);");
         expect(script).toContain("button.setAttribute('data-file-path', filePath || '');");
         expect(script).toContain("lineageTitle.textContent = 'Data Lineage';");
-        expect(script).toContain('selectLineageNode(nodeId, nodeLabel, nodeType);');
+        expect(script).toContain("command: 'getLineageGraph'");
         expect(script).toContain("command: 'getUpstream'");
         expect(script).toContain("nodeType: 'file'");
     });

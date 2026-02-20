@@ -297,35 +297,6 @@ export function getWorkspaceShellScriptFragment(): string {
         }
 
         document.getElementById('btn-refresh')?.addEventListener('click', refresh);
-        focusBtn?.addEventListener('click', () => {
-            const nextState = !focusModeEnabled;
-            // Focus mode is mutually exclusive with trace mode
-            if (nextState && traceMode) {
-                traceMode = null;
-                clearTraceMode();
-                updateTraceButtons();
-            }
-            setFocusMode(nextState);
-            if (selectionEmpty) {
-                selectionEmpty.textContent = nextState && !selectedNodeId
-                    ? 'Select a node to focus on its neighbors.'
-                    : selectionEmptyText;
-            }
-        });
-        traceUpBtn?.addEventListener('click', () => {
-            if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its upstream sources.';
-                return;
-            }
-            setTraceMode('upstream');
-        });
-        traceDownBtn?.addEventListener('click', () => {
-            if (!selectedNodeId) {
-                if (selectionEmpty) selectionEmpty.textContent = 'Select a node to trace its downstream consumers.';
-                return;
-            }
-            setTraceMode('downstream');
-        });
         updateGraphActionButtons();
         document.getElementById('btn-view-issues')?.addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'issues' });
@@ -428,11 +399,17 @@ export function getWorkspaceShellScriptFragment(): string {
                             depth: lineageDepth
                         });
                     } else {
-                        setTimeout(() => {
-                            if (typeof selectLineageNode === 'function') {
-                                selectLineageNode(nodeId, nodeLabel, nodeType);
-                            }
-                        }, 120);
+                        if (lineageContent) {
+                            lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading lineage...</div></div>';
+                        }
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            nodeLabel: nodeLabel,
+                            nodeType: nodeType,
+                            direction: 'both',
+                            depth: lineageDepth
+                        });
                     }
                     break;
                 }
