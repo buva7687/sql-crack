@@ -1570,9 +1570,14 @@ export function getGraphStyles(): string {
         }
         .section-header.expanded .section-toggle { transform: rotate(180deg); }
         .section-content {
-            max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
         }
-        .section-header.expanded + .section-content { max-height: 400px; overflow-y: auto; }
+        .section-header.expanded + .section-content {
+            max-height: 1400px;
+            overflow: visible;
+        }
         .selection-empty {
             color: var(--text-muted);
             font-size: 12px;
