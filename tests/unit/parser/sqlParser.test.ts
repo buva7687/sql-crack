@@ -593,6 +593,29 @@ SELECT * FROM t3;`;
       expect(result.error).toBeUndefined();
     });
 
+    it('includes IN-subquery source tables from expr_list AST shape', () => {
+      const sql = `
+        SELECT
+          e.employee_id,
+          e.name,
+          e.salary
+        FROM employees e
+        WHERE e.dept_id IN (
+          SELECT id
+          FROM departments
+          WHERE location = 'New York'
+        )
+      `;
+      const result = parseSql(sql, 'MySQL');
+      const tableLabels = result.nodes
+        .filter(n => n.type === 'table')
+        .map(n => n.label.toLowerCase());
+
+      expect(result.error).toBeUndefined();
+      expect(tableLabels).toContain('employees');
+      expect(tableLabels).toContain('departments');
+    });
+
     it('parses correlated subquery', () => {
       const sql = `
         SELECT * FROM employees e
