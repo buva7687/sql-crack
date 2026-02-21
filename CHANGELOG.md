@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Graph search debounce aligned to SQL Flow timing for more consistent typing behavior.
   - Graph search clear now provides visual flash feedback in the search control to explain why results changed.
   - Removed visible `L` keyboard legend hint from the primary rail while retaining the `L` keybinding.
+  - Added a small top offset to the Graph sidebar `Export` section for cleaner separation from Selection actions when the Selection panel expands.
 - **SQL Flow batch result navigation UX**:
   - Replaced the failed-only dropdown summary with compact inline status chips (`ok`, `failed`, `partial`) in the existing batch-tabs row (no new panel/row).
   - Added scoped navigation state so batch controls (`⏮`, `◀`, `▶`, `⏭`) and keyboard shortcuts (`[` and `]`) navigate within the active status scope.
