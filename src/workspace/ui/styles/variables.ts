@@ -49,6 +49,7 @@ function getDarkThemeVariables(): string {
             --success-light: #34d399;
             --warning: #f59e0b;
             --warning-light: #fbbf24;
+            --warning-muted: rgba(251, 191, 36, 0.15);
             --error: #ef4444;
             --error-light: #f87171;
             --node-file: #60a5fa;
@@ -130,6 +131,7 @@ function getLightThemeVariables(): string {
             --success-light: #10b981;
             --warning: #d97706;
             --warning-light: #f59e0b;
+            --warning-muted: rgba(217, 119, 6, 0.1);
             --error: #dc2626;
             --error-light: #ef4444;
             --node-file: #3b82f6;

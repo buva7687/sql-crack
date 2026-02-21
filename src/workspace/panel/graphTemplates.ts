@@ -514,10 +514,10 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
         <div class="workspace-legend-bar" id="workspace-legend-bar" role="complementary" aria-label="Workspace graph legend" aria-hidden="false">
             <div class="legend-scroll">
                 <div class="legend-inline-group">
-                    <span class="legend-inline-item"><span class="legend-inline-node file"></span><span>SQL Files</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node table"></span><span>Tables</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node view"></span><span>Views</span></span>
-                    <span class="legend-inline-item"><span class="legend-inline-node external"></span><span>External</span></span>
+                    <span class="legend-inline-item" data-node-kind="file"><span class="legend-inline-node file"></span><span>SQL Files</span></span>
+                    <span class="legend-inline-item" data-node-kind="table"><span class="legend-inline-node table"></span><span>Tables</span></span>
+                    <span class="legend-inline-item" data-node-kind="view"><span class="legend-inline-node view"></span><span>Views</span></span>
+                    <span class="legend-inline-item" data-node-kind="external"><span class="legend-inline-node external"></span><span>External</span></span>
                 </div>
                 <span class="legend-divider"></span>
                 <div class="legend-inline-group">
@@ -538,8 +538,13 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                         <span class="hint-item"><kbd>F</kbd><span>Focus</span></span>
                         <span class="hint-item"><kbd>U</kbd><span>Upstream</span></span>
                         <span class="hint-item"><kbd>D</kbd><span>Downstream</span></span>
+                        <span class="hint-item"><kbd>R</kbd><span>Reset view</span></span>
+                        <span class="hint-item"><kbd>L</kbd><span>Legend</span></span>
+                        <span class="hint-item"><kbd>?</kbd><span>Shortcuts</span></span>
                         <span class="hint-item"><kbd>Tab</kbd><span>Cycle</span></span>
                         <span class="hint-item"><kbd>↑↓←→</kbd><span>Navigate</span></span>
+                        <span class="hint-item"><kbd>Ctrl+F</kbd><span>Search</span></span>
+                        <span class="hint-item"><kbd>Esc</kbd><span>Clear</span></span>
                         <span class="hint-item"><kbd>Enter</kbd><span>Open file</span></span>
                     </div>
                 </div>

@@ -82,6 +82,7 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
                     <rect class="node-accent" x="0" y="0" width="4" height="${node.height}" rx="4" ry="4" clip-path="inset(0 0 0 0 round 8px 0 0 8px)"/>
                     <text x="${node.width / 2}" y="28" class="node-label" text-anchor="middle">${escapeHtml(node.label)}</text>
                     ${sublabel ? `<text x="${node.width / 2}" y="46" class="node-sublabel" text-anchor="middle">${sublabel}</text>` : ''}
+                    ${node.type === 'external' ? `<rect x="${node.width - 34}" y="4" width="28" height="14" rx="3" fill="var(--warning-muted)" stroke="var(--warning-light)" stroke-width="0.5"/><text x="${node.width - 20}" y="14" text-anchor="middle" fill="var(--warning-light)" font-size="8" font-weight="600">EXT</text>` : ''}
                 </g>
             `;
     }).join('');

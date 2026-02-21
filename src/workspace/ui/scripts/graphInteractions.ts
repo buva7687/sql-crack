@@ -212,6 +212,42 @@ export function getGraphInteractionsScriptFragment(): string {
             return { upstream, downstream };
         }
 
+        function getLineageDepth(nodeId, direction) {
+            // Build adjacency once from a single edge scan
+            var upMap = {};
+            var downMap = {};
+            document.querySelectorAll('.edge').forEach(function(edge) {
+                var source = edge.getAttribute('data-source');
+                var target = edge.getAttribute('data-target');
+                if (!source || !target) return;
+                if (!upMap[target]) upMap[target] = [];
+                upMap[target].push(source);
+                if (!downMap[source]) downMap[source] = [];
+                downMap[source].push(target);
+            });
+            var adj = direction === 'upstream' ? upMap : downMap;
+            var visited = {};
+            visited[nodeId] = true;
+            var queue = [nodeId];
+            var depth = 0;
+            while (queue.length > 0) {
+                var next = [];
+                for (var i = 0; i < queue.length; i++) {
+                    var neighbors = adj[queue[i]];
+                    if (!neighbors) continue;
+                    for (var j = 0; j < neighbors.length; j++) {
+                        if (!visited[neighbors[j]]) {
+                            visited[neighbors[j]] = true;
+                            next.push(neighbors[j]);
+                        }
+                    }
+                }
+                if (next.length > 0) depth++;
+                queue = next;
+            }
+            return depth;
+        }
+
         function getNodeLabel(nodeId) {
             const nodeEl = document.querySelector('.node[data-id="' + CSS.escape(nodeId) + '"]');
             if (!nodeEl) return nodeId;
@@ -648,7 +684,13 @@ export function getGraphInteractionsScriptFragment(): string {
 
             if (selectionTitle) selectionTitle.textContent = label;
             if (selectionMeta) {
-                selectionMeta.textContent = typeLabel + ' • ' + connectionCount + ' connection' + (connectionCount === 1 ? '' : 's');
+                var upDepth = getLineageDepth(nodeId, 'upstream');
+                var downDepth = getLineageDepth(nodeId, 'downstream');
+                var depthInfo = [];
+                if (upDepth > 0) depthInfo.push(upDepth + ' level' + (upDepth > 1 ? 's' : '') + ' up');
+                if (downDepth > 0) depthInfo.push(downDepth + ' level' + (downDepth > 1 ? 's' : '') + ' down');
+                var depthSuffix = depthInfo.length > 0 ? ' • ' + depthInfo.join(', ') : '';
+                selectionMeta.textContent = typeLabel + ' • ' + connectionCount + ' connection' + (connectionCount === 1 ? '' : 's') + depthSuffix;
             }
 
             if (selectionFile) {
@@ -795,7 +837,20 @@ export function getGraphInteractionsScriptFragment(): string {
                     : 'Selected edge';
             }
             if (selectionEdgeMeta) {
-                selectionEdgeMeta.textContent = refType + ' • ' + count + ' reference' + (count === 1 ? '' : 's');
+                var breakdown = '';
+                if (references.length > 1) {
+                    var typeCounts = {};
+                    for (var ri = 0; ri < references.length; ri++) {
+                        var ctx = (references[ri].context || 'select').toLowerCase();
+                        typeCounts[ctx] = (typeCounts[ctx] || 0) + 1;
+                    }
+                    var breakdownParts = Object.keys(typeCounts).map(function(k) { return { type: k, count: typeCounts[k] }; });
+                    breakdownParts.sort(function(a, b) { return b.count - a.count; });
+                    if (breakdownParts.length > 1) {
+                        breakdown = ' (' + breakdownParts.map(function(p) { return p.count + '× ' + p.type.toUpperCase(); }).join(', ') + ')';
+                    }
+                }
+                selectionEdgeMeta.textContent = refType + ' • ' + count + ' reference' + (count === 1 ? '' : 's') + breakdown;
             }
             if (selectionEdgeWhy) {
                 selectionEdgeWhy.textContent = tableSummary
@@ -1207,11 +1262,26 @@ export function getGraphInteractionsScriptFragment(): string {
             });
         }
 
+        function updateLegendForMode() {
+            const legendBar = document.getElementById('workspace-legend-bar');
+            if (!legendBar) return;
+            const nodeItems = legendBar.querySelectorAll('.legend-inline-item[data-node-kind]');
+            nodeItems.forEach(function(item) {
+                const kind = item.getAttribute('data-node-kind');
+                if (currentGraphMode === 'files') {
+                    item.style.display = (kind === 'file') ? '' : 'none';
+                } else {
+                    item.style.display = (kind === 'file') ? 'none' : '';
+                }
+            });
+        }
+
         function syncGraphContextUi() {
             const query = searchInput ? searchInput.value.trim() : '';
             updateGraphContextCopy();
             renderGraphStateChips(query);
             updateGraphStateReason(query);
+            updateLegendForMode();
         }
 
         function setGraphExplainPanelVisible(visible) {

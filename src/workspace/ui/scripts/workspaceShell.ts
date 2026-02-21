@@ -52,6 +52,21 @@ export function getWorkspaceShellScriptFragment(): string {
             // Skip all other shortcuts if typing
             if (isTyping) return;
 
+            // ?: Show legend + expand shortcuts panel (workspace-wide, works in all views)
+            if (e.key === '?') {
+                e.preventDefault();
+                const legendBar = document.getElementById('workspace-legend-bar');
+                if (legendBar && legendBar.classList.contains('is-hidden')) {
+                    toggleGraphLegend();
+                }
+                const shortcutsToggle = document.getElementById('legend-shortcuts-toggle');
+                const shortcutsPanel = document.getElementById('legend-shortcuts-panel');
+                if (shortcutsToggle && shortcutsPanel && shortcutsPanel.style.display === 'none') {
+                    shortcutsToggle.click();
+                }
+                return;
+            }
+
             // Check if graph view is active
             const graphTab = document.querySelector('.view-tab[data-view="graph"]');
             const isGraphTabActive = graphTab?.classList.contains('active');
