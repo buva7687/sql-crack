@@ -614,6 +614,15 @@ SELECT * FROM t3;`;
       expect(result.error).toBeUndefined();
       expect(tableLabels).toContain('employees');
       expect(tableLabels).toContain('departments');
+
+      // The departments SQ node should connect to the WHERE filter node, not SELECT
+      const deptNode = result.nodes.find(n => n.type === 'table' && n.label.toLowerCase() === 'departments');
+      const whereNode = result.nodes.find(n => n.label === 'WHERE');
+      expect(deptNode).toBeDefined();
+      expect(whereNode).toBeDefined();
+      const deptEdge = result.edges.find(e => e.source === deptNode!.id);
+      expect(deptEdge).toBeDefined();
+      expect(deptEdge!.target).toBe(whereNode!.id);
     });
 
     it('parses correlated subquery', () => {

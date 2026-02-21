@@ -23,7 +23,7 @@ describe('Compare Mode examples', () => {
         const selectNode = result.nodes.find(node => node.type === 'select');
         expect(selectNode).toBeDefined();
         const subquerySourceEdges = result.edges.filter(edge =>
-            edge.target === selectNode?.id && edge.sqlClause === 'Subquery source'
+            edge.target === selectNode?.id && edge.sqlClause === 'SELECT subquery source'
         );
         expect(subquerySourceEdges.length).toBeGreaterThanOrEqual(3);
     });

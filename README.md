@@ -38,15 +38,15 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
-| **Command Palette** | Press `Cmd/Ctrl + Shift + P` or `/` inside the webview for quick action search |
+| **Command Palette** | Press `Cmd/Ctrl + Shift + P` inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
 | **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
-**Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • CTE (Purple) • Result (Green)
+**Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • Select (Indigo) • Union/Set Op (Slate) • CTE (Purple) • Subquery (Violet) • Case (Orange) • Result (Green)
 
-**Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Purple) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet)
+**Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Teal) • CTE (Purple) • SQ (Violet) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet) • CTAS (Cyan)
 
 ---
 
@@ -125,7 +125,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 - **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
-- **View Modes** — Display beside editor, in tab, or secondary sidebar
+- **View Modes** — Display beside editor or in a new tab
 - **Pin Visualizations** — Save snapshots as persistent tabs
 - **Fullscreen** — Press `F` for distraction-free viewing
 
@@ -133,7 +133,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 
 ## Supported Dialects
 
-MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino • Oracle
+MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino • Oracle • Teradata
 
 ---
 
@@ -199,7 +199,8 @@ Analyze cross-file dependencies:
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl + Shift + L` | Open visualization |
-| `Cmd/Ctrl + F` | Search nodes |
+| `Cmd/Ctrl + Shift + P` | Open command palette |
+| `Cmd/Ctrl + F` or `/` | Search nodes |
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
 | `Escape` | Clear selection |
@@ -207,11 +208,15 @@ Analyze cross-file dependencies:
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
+| `O` | Toggle hints/optimization panel |
 | `H` | Cycle layout (vertical → horizontal → compact → force → radial) |
 | `1-5` | Jump directly to a specific layout option |
 | `E` | Expand/collapse all CTEs |
+| `U` / `D` / `A` | Focus mode: upstream / downstream / all |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
+| `R` | Reset view (fit to screen) |
+| `+` / `-` | Zoom in / out |
 | `Cmd/Ctrl + Z` | Undo latest layout change |
 | `Cmd/Ctrl + Shift + Z` | Redo layout change |
 | `[` / `]` | Previous/next query |
@@ -276,7 +281,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 |---------|---------|-------------|
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Max files to auto-index (10-500) |
 | `sqlCrack.workspaceLineageDepth` | `5` | Default lineage traversal depth (1-20) |
-| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, `hybrid` |
+| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables` |
 
 ### Custom File Extensions
 

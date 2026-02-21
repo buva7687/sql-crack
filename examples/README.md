@@ -24,6 +24,7 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **Window functions** | `basic-window-functions.sql` | Notice OVER clause details, PARTITION BY/ORDER BY badges |
 | **Aggregations** | `basic-aggregates.sql` | See GROUP BY nodes with COUNT/SUM/AVG badges |
 | **Subqueries** | `basic-subqueries.sql` | Double-click subquery nodes to expand |
+| **Expression subqueries (SQ badge)** | `advanced_subqueries.sql` | SQ-badged tables route to the clause they belong to (WHERE, HAVING, SELECT, JOIN ON) |
 | **CASE expressions** | `basic-case-expressions.sql` | Check node details panel for branch logic |
 | **Set operations** | `basic-set-operations.sql` | See UNION/INTERSECT/EXCEPT connecting nodes |
 | **Table-valued functions** | `tvf-bigquery.sql`, `tvf-snowflake.sql`, `tvf-transactsql.sql` | Verify UNNEST/FLATTEN/OPENJSON appear as table-function nodes |
@@ -97,6 +98,7 @@ Use compare mode to diff the current query graph against a baseline query graph.
 | `basic-joins.sql` | INNER, LEFT, RIGHT, FULL, CROSS, self-joins, star schema |
 | `basic-ctes.sql` | Simple, chained, recursive CTEs with window functions |
 | `basic-subqueries.sql` | Scalar, correlated, EXISTS, IN subqueries |
+| `advanced_subqueries.sql` | WHERE IN and FROM derived subqueries with SQ-badged clause routing |
 | `basic-aggregates.sql` | GROUP BY, HAVING, COUNT, SUM, AVG patterns |
 | `basic-window-functions.sql` | ROW_NUMBER, RANK, LAG, LEAD, running totals |
 | `basic-case-expressions.sql` | Simple CASE, searched CASE, nested conditions |

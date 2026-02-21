@@ -279,8 +279,11 @@ function processSelect(
 
     // Process WHERE - connect from the last join output or first table
     let previousId = lastOutputId || tableIds[0];
+    let savedWhereId: string | null = null;
+    let savedHavingId: string | null = null;
     if (stmt.where) {
         const whereId = genId(runtime, 'filter');
+        savedWhereId = whereId;
         const conditions = extractConditions(stmt.where);
         ctx.stats.conditions += conditions.length;
         nodes.push({
@@ -336,6 +339,7 @@ function processSelect(
     // Process HAVING
     if (stmt.having) {
         const havingId = genId(runtime, 'filter');
+        savedHavingId = havingId;
         nodes.push({
             id: havingId,
             type: 'filter',
@@ -476,26 +480,40 @@ function processSelect(
         });
     }
 
-    for (const tableName of scalarSubquerySourceTables) {
+    for (const { tableName, clause } of scalarSubquerySourceTables) {
         const tableKey = tableName.toLowerCase();
         if (seenTableLabels.has(tableKey)) {
             continue;
         }
+
+        const clauseDescriptions: Record<SqClause, string> = {
+            where: 'WHERE subquery source',
+            having: 'HAVING subquery source',
+            select: 'SELECT subquery source',
+            on: 'JOIN ON subquery source',
+            orderby: 'ORDER BY subquery source'
+        };
+
+        const targetId =
+            clause === 'where' && savedWhereId ? savedWhereId :
+            clause === 'having' && savedHavingId ? savedHavingId :
+            clause === 'on' && lastOutputId ? lastOutputId :
+            selectId;
 
         const tableId = genId(runtime, 'table');
         nodes.push({
             id: tableId,
             type: 'table',
             label: tableName,
-            description: 'Subquery source (WHERE/SELECT/HAVING/ON)',
+            description: clauseDescriptions[clause],
             tableCategory: 'subquery_source',
             x: 0, y: 0, width: 140, height: 60
         });
         edges.push({
             id: genId(runtime, 'e'),
             source: tableId,
-            target: selectId,
-            sqlClause: 'Subquery source',
+            target: targetId,
+            sqlClause: clauseDescriptions[clause],
             clauseType: 'subquery_flow'
         });
 
@@ -955,52 +973,56 @@ function parseCteOrSubqueryInternals(
     }
 }
 
+type SqClause = 'where' | 'having' | 'select' | 'orderby' | 'on';
+
 function collectScalarSubquerySourceTables(
     stmt: any,
     cteNames: Set<string>,
     excludedTableLabels: Set<string>,
     dialect: SqlDialect
-): string[] {
-    const sourceTables = new Set<string>();
+): Array<{ tableName: string; clause: SqClause }> {
     const scopedCteNames = new Set<string>(Array.from(cteNames).map(name => name.toLowerCase()));
-    const expressions: any[] = [];
+    // Map from lowercase table name → { originalName, clause } (first clause wins for dedup)
+    const tableClauseMap = new Map<string, { originalName: string; clause: SqClause }>();
+
+    const collectFromExpressions = (expressions: any[], clause: SqClause) => {
+        const tables = new Set<string>();
+        for (const expr of expressions) {
+            const subqueries = findSubqueriesInExpression(expr);
+            for (const subquery of subqueries) {
+                collectTablesFromSelectTree(subquery, tables, scopedCteNames, dialect);
+            }
+        }
+        for (const name of tables) {
+            const key = name.toLowerCase();
+            if (!tableClauseMap.has(key)) {
+                tableClauseMap.set(key, { originalName: name, clause });
+            }
+        }
+    };
 
     if (stmt?.where) {
-        expressions.push(stmt.where);
+        collectFromExpressions([stmt.where], 'where');
     }
     if (stmt?.having) {
-        expressions.push(stmt.having);
+        collectFromExpressions([stmt.having], 'having');
     }
     if (Array.isArray(stmt?.columns)) {
-        for (const col of stmt.columns) {
-            if (col?.expr) {
-                expressions.push(col.expr);
-            }
-        }
+        const colExprs = stmt.columns.filter((col: any) => col?.expr).map((col: any) => col.expr);
+        collectFromExpressions(colExprs, 'select');
     }
     if (Array.isArray(stmt?.orderby)) {
-        for (const orderItem of stmt.orderby) {
-            if (orderItem?.expr) {
-                expressions.push(orderItem.expr);
-            }
-        }
+        const orderExprs = stmt.orderby.filter((o: any) => o?.expr).map((o: any) => o.expr);
+        collectFromExpressions(orderExprs, 'orderby');
     }
     if (Array.isArray(stmt?.from)) {
-        for (const fromItem of stmt.from) {
-            if (fromItem?.on) {
-                expressions.push(fromItem.on);
-            }
-        }
+        const onExprs = stmt.from.filter((f: any) => f?.on).map((f: any) => f.on);
+        collectFromExpressions(onExprs, 'on');
     }
 
-    for (const expr of expressions) {
-        const subqueries = findSubqueriesInExpression(expr);
-        for (const subquery of subqueries) {
-            collectTablesFromSelectTree(subquery, sourceTables, scopedCteNames, dialect);
-        }
-    }
-
-    return Array.from(sourceTables).filter(name => !excludedTableLabels.has(name.toLowerCase()));
+    return Array.from(tableClauseMap.entries())
+        .filter(([key]) => !excludedTableLabels.has(key))
+        .map(([, { originalName, clause }]) => ({ tableName: originalName, clause }));
 }
 
 function trackFunctionsFromExpressionSubqueries(
