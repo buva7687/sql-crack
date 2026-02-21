@@ -525,7 +525,7 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
 
     // Detect repeated table scans
     const tableUsage = new Map<string, FlowNode[]>();
-    nodes.filter(n => n.type === 'table' && n.tableCategory === 'physical').forEach(node => {
+    nodes.filter(n => n.type === 'table' && (n.tableCategory === 'physical' || n.tableCategory === 'subquery_source')).forEach(node => {
         const tableName = node.label.toLowerCase();
         if (!tableUsage.has(tableName)) {
             tableUsage.set(tableName, []);

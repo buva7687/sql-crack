@@ -487,8 +487,8 @@ function processSelect(
             id: tableId,
             type: 'table',
             label: tableName,
-            description: 'Scalar subquery source',
-            tableCategory: 'physical',
+            description: 'Subquery source (WHERE/SELECT/HAVING/ON)',
+            tableCategory: 'subquery_source',
             x: 0, y: 0, width: 140, height: 60
         });
         edges.push({
@@ -496,7 +496,7 @@ function processSelect(
             source: tableId,
             target: selectId,
             sqlClause: 'Subquery source',
-            clauseType: 'flow'
+            clauseType: 'subquery_flow'
         });
 
         seenTableLabels.add(tableKey);
@@ -1229,6 +1229,12 @@ function collectTablesFromSelectTree(
 function findSubqueriesInExpression(expr: any): any[] {
     const subqueries: any[] = [];
     if (!expr) { return subqueries; }
+    if (Array.isArray(expr)) {
+        for (const item of expr) {
+            subqueries.push(...findSubqueriesInExpression(item));
+        }
+        return subqueries;
+    }
 
     // Check if this expression itself is a subquery
     if (expr.type === 'select') {

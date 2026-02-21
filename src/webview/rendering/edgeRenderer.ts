@@ -2,7 +2,7 @@
 // Extracted from renderer.ts for modularity
 
 import { FlowEdge, FlowNode, LayoutType } from '../types';
-import { EDGE_COLORS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
+import { EDGE_COLORS, EDGE_DASH_PATTERNS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
 import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { escapeHtml } from '../../shared/stringUtils';
@@ -152,7 +152,10 @@ export function renderEdge(edge: FlowEdge, parent: SVGGElement, options: RenderE
         path.setAttribute('data-start-line', String(edge.startLine));
     }
 
-    const dashPattern = getEdgeDashPattern(edge.clauseType);
+    // SQ edges always get dashed pattern regardless of colorblind mode
+    const dashPattern = edge.clauseType === 'subquery_flow'
+        ? EDGE_DASH_PATTERNS.subquery_flow
+        : getEdgeDashPattern(edge.clauseType);
     if (dashPattern) {
         path.setAttribute('stroke-dasharray', dashPattern);
     }

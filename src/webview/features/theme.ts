@@ -1,4 +1,5 @@
 import type { FlowNode, Severity } from '../types';
+import { EDGE_DASH_PATTERNS } from '../constants/colors';
 
 export interface ApplyColorblindModeOptions {
     getEdgeDashPattern: (clauseType?: string) => string | null;
@@ -63,6 +64,11 @@ export function applyColorblindModeToRenderedGraph(options: ApplyColorblindModeO
     const allEdges = mainGroup.querySelectorAll('.edge');
     allEdges.forEach(edge => {
         const clauseType = edge.getAttribute('data-clause-type') || undefined;
+        // SQ edges always keep their dash pattern regardless of colorblind mode
+        if (clauseType === 'subquery_flow') {
+            edge.setAttribute('stroke-dasharray', EDGE_DASH_PATTERNS.subquery_flow!);
+            return;
+        }
         const dashPattern = getEdgeDashPattern(clauseType || undefined);
         if (dashPattern) {
             edge.setAttribute('stroke-dasharray', dashPattern);

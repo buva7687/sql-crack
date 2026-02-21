@@ -98,6 +98,10 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
             rect.setAttribute('stroke', NODE_STROKE_COLORS.derived);
             rect.setAttribute('stroke-width', '1.5');
             rect.setAttribute('stroke-dasharray', '5,3');
+        } else if (tableCategory === 'subquery_source') {
+            rect.setAttribute('stroke', NODE_STROKE_COLORS.subquerySource);
+            rect.setAttribute('stroke-width', '1.5');
+            rect.setAttribute('stroke-dasharray', '4,3');
         }
     }
 
@@ -144,6 +148,8 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
         badges.push({ text: 'CTE', color: BADGE_COLORS.cte });
     } else if (isTable && tableCategory === 'derived' && !node.accessMode) {
         badges.push({ text: 'DERIVED', color: BADGE_COLORS.derivedAlt });
+    } else if (isTable && tableCategory === 'subquery_source' && !node.accessMode) {
+        badges.push({ text: 'SQ', color: BADGE_COLORS.subquerySource });
     }
 
     if (node.operationType && node.operationType !== 'SELECT') {
