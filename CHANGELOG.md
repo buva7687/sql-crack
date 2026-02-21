@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace graph context-menu productivity action**:
   - Added `Copy Connections` action to copy a formatted upstream/downstream dependency summary for the selected node.
 - **SQL Flow keyboard easter eggs**: Added Matrix and zero-gravity keyboard-triggered modes in the SQL Flow webview.
+- **SQ badge for expression subquery source tables**: Tables discovered via expression subqueries (WHERE/SELECT/HAVING/ON) now display a violet **SQ** badge, dashed stroke, dashed edge, and legend entry — visually distinguishing them from direct FROM/JOIN table references.
+- **Circular dialect dropdown**: Toolbar dialect selector now renders options in circular order starting from the active dialect, so switching between adjacent engines is continuous.
 
 ### Changed
 
@@ -165,6 +167,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `XMLAGG(... ORDER BY ...)` argument rewrite (ORDER BY stripped at depth 0 inside XMLAGG),
     - XML method-chain stripping for `.RETREIVE(...)` / `.RETRIEVE(...)`.
   - Result: `examples/teradata-advanced.sql` now parses as `35/35` non-partial statements under Teradata dialect.
+- **IN-subquery source tables missed for `expr_list` AST shape**: `findSubqueriesInExpression()` did not handle arrays emitted by node-sql-parser for `IN (SELECT ...)` expressions, causing subquery source tables (e.g., `departments`) to be silently dropped from the graph.
 
 ### Documentation
 
@@ -228,6 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MERGE compatibility parsing without `partial`,
   - XMLAGG ORDER BY + `.RETREIVE(...)` preprocessing,
   - dialect support guard ensuring Teradata MERGE no longer degrades to partial parse.
+- Added IN-subquery source table regression test (`expr_list` AST shape) and advanced subquery example file (`examples/advanced_subqueries.sql`).
+- Added toolbar dialect circular-order regression tests for helper ordering and re-render wiring.
 
 ## [0.3.7] - 2026-02-13
 
