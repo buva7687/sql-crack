@@ -163,6 +163,44 @@ describe('MessageHandler depth and column lineage routing', () => {
         }));
     });
 
+    it('resolves external workspace ids using unqualified labels against qualified lineage node names', async () => {
+        const lineageGraph = {
+            nodes: new Map([
+                ['external:raw.carriers', { id: 'external:raw.carriers', type: 'external', name: 'raw.carriers', metadata: {} }],
+            ]),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        };
+        const { context, lineageView, postMessage } = createContext({
+            getLineageGraph: jest.fn(() => lineageGraph),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getLineageGraph',
+            nodeId: 'external_90',
+            nodeLabel: 'carriers',
+            nodeType: 'external',
+            depth: 5,
+            direction: 'both',
+        } as any);
+
+        expect(lineageView.generateLineageGraphView).toHaveBeenCalledWith(
+            lineageGraph,
+            'external:raw.carriers',
+            expect.objectContaining({ depth: 5, direction: 'both' })
+        );
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'lineageGraphResult',
+            data: expect.objectContaining({
+                nodeId: 'external:raw.carriers',
+            }),
+        }));
+    });
+
     it('uses configured default depth for setLineageDirection rerenders', async () => {
         const { context, lineageView } = createContext({
             getDefaultLineageDepth: jest.fn(() => 11),

@@ -186,6 +186,12 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                             <div class="item-path">${escapeHtml(item.filePath)}</div>
                             <div class="item-path" style="color: var(--text-muted); font-style: italic;">${escapeHtml(item.error)}</div>
                         </div>
+                        <button
+                            type="button"
+                            class="issue-inline-action open-in-editor-btn"
+                            data-filepath="${escapeHtml(item.filePath)}"
+                            aria-label="Open ${escapeHtml(item.fileName)} in editor"
+                        >Open in editor</button>
                     </div>
                     `).join('')}
                     ${detailedStats.parseErrorDetails.length > 50 ? `<div class="list-more">+ ${detailedStats.parseErrorDetails.length - 50} more files</div>` : ''}

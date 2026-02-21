@@ -14,10 +14,30 @@ export function getNodeInteractionsScriptFragment(): string {
                 if (!node) return;
 
                 var filePath = node.getAttribute('data-filepath');
-                if (filePath) {
+                var nodeType = node.getAttribute('data-type') || '';
+                if (filePath && nodeType === 'file') {
                     e.preventDefault();
                     e.stopPropagation();
                     openFile(filePath);
+                } else {
+                    // For table/view/CTE/external nodes, navigate to lineage view
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var nodeId = node.getAttribute('data-id');
+                    var nodeLabel = node.getAttribute('data-label') || nodeId;
+                    if (nodeId) {
+                        if (typeof switchToView === 'function') {
+                            switchToView('lineage', false, nodeLabel, nodeType);
+                        }
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: nodeId,
+                            nodeLabel: nodeLabel,
+                            nodeType: nodeType,
+                            depth: typeof lineageDepth !== 'undefined' ? lineageDepth : 5,
+                            direction: 'both'
+                        });
+                    }
                 }
             });
 

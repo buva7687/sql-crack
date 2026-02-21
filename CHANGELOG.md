@@ -144,6 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graph->Lineage node routing (`table_0` fallback issue)**:
   - Fixed graph-to-lineage handoff so workspace graph IDs (for example `table_0`) are resolved to lineage IDs (for example `table:customer_summary_2024`) before rendering lineage graph views.
   - Threaded node metadata (`nodeLabel`, `nodeType`) through `getLineageGraph` messaging to support deterministic host-side resolution.
+- **Graph->Lineage trace reliability for searched/external nodes**:
+  - Fixed `Trace in Lineage` and node double-click flows to always include stable node metadata from the selected graph node when action attributes are missing.
+  - Expanded lineage node resolution to match qualified/unqualified names (for example `carriers` resolving to `raw.carriers`) to prevent false empty-lineage states such as `external_90 has no upstream or downstream relationships`.
+- **Workspace Graph back-navigation and state consistency**:
+  - Back button behavior now consistently returns to Graph for Graph-origin lineage navigation while preserving `Back to Lineage` for in-lineage drilldowns.
+  - Restored graph selection state persistence across tab switches by saving graph view state before highlight cleanup.
+  - Mode switches now clear stale selection details/cross-links and reset path status so old node details do not linger while the new mode renders.
 - **Workspace export dropdown consistency**:
   - Normalized advanced export option styling so `SVG` onward uses the same left alignment and text contrast as `Copy to clipboard (PNG)` and `Save as PNG`.
 - **Workspace graph interaction runtime regression**:
@@ -180,6 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
 - Added regression coverage for parse-error source-line propagation (index → toolbar tooltip → renderer overlay), including absolute-to-relative statement line mapping.
 - Added parser regressions for cross-dialect auto-retry behavior (including `examples/postgres_complex.sql`) and time-literal detection safety.
+- Added workspace lineage routing regression for external graph IDs with unqualified labels resolving to qualified lineage node names.
 - Added Teradata dialect detection tests (VOLATILE TABLE, MULTISET, PRIMARY INDEX, LOCKING, SAMPLE, SEL shorthand, hash functions, COLLECT STATS, macros, JOIN INDEX, RANGE_N, NORMALIZE, RENAME).
 - Added Teradata preprocessing tests (SEL rewrite, LOCKING stripping, VOLATILE/MULTISET/SET stripping, PRIMARY INDEX stripping, SAMPLE/TOP stripping, QUALIFY depth-aware stripping, REPLACE VIEW rewrite, UPDATE FROM comma-join rewrite, bare DATE → CURRENT_DATE, reserved-word alias quoting, WITHIN GROUP stripping, RANGE BETWEEN INTERVAL fallback, combined constructs).
 - Added Teradata end-to-end parsing tests (basic SELECT, JOINs, CTEs, window functions, MERGE, DML, QUALIFY, UPDATE FROM, DATE keyword, PERCENTILE_CONT with WITHIN GROUP).

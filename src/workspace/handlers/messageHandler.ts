@@ -1036,7 +1036,8 @@ export class MessageHandler {
             {
                 depth,
                 direction,
-                expandedNodes: new Set(expandedNodes || [])
+                expandedNodes: new Set(expandedNodes || []),
+                displayLabel: nodeLabel
             }
         );
 
@@ -1170,8 +1171,14 @@ export class MessageHandler {
             return candidateId;
         }
 
-        // Try common type alternatives
-        const typeAlternatives = nodeType === 'view' ? ['view', 'table'] : nodeType === 'table' ? ['table', 'view'] : [nodeType];
+        // Try common type alternatives — external nodes may be stored as table/view/external in the lineage graph
+        const typeAlternatives = nodeType === 'view'
+            ? ['view', 'table']
+            : nodeType === 'table'
+                ? ['table', 'view']
+                : nodeType === 'external'
+                    ? ['external', 'table', 'view']
+                    : [nodeType];
         for (const t of typeAlternatives) {
             const altId = `${t}:${nameLower}`;
             if (lineageGraph.nodes.has(altId)) {
@@ -1179,10 +1186,21 @@ export class MessageHandler {
             }
         }
 
-        // Fallback: scan all nodes for matching name
+        // Fallback: scan all nodes for matching name (including qualified/unqualified variants)
+        const normalizedLabel = nameLower
+            .replace(/^["'`]+/, '')
+            .replace(/["'`]+$/, '');
         for (const [id, node] of lineageGraph.nodes) {
             if (node.type === 'column') { continue; }
-            if (node.name.toLowerCase() === nameLower) {
+            const nodeNameLower = node.name.toLowerCase();
+            const nodeTerminal = nodeNameLower.split('.').pop() || nodeNameLower;
+            if (
+                nodeNameLower === nameLower ||
+                nodeNameLower === normalizedLabel ||
+                nodeTerminal === nameLower ||
+                nodeTerminal === normalizedLabel ||
+                nodeNameLower.endsWith('.' + normalizedLabel)
+            ) {
                 return id;
             }
         }

@@ -708,26 +708,43 @@ export function getGraphInteractionsScriptFragment(): string {
             const downstreamList = Array.from(downstream).map(getNodeLabel);
             const maxVisible = 5;
 
-            if (selectionUpstream) {
-                if (upstreamList.length === 0) {
-                    selectionUpstream.textContent = 'None';
-                } else if (upstreamList.length <= maxVisible) {
-                    selectionUpstream.textContent = upstreamList.join(', ');
-                } else {
-                    selectionUpstream.textContent = upstreamList.slice(0, maxVisible).join(', ') + ' and ' + (upstreamList.length - maxVisible) + ' more';
+            function renderExpandableList(container, items) {
+                if (!container) return;
+                if (items.length === 0) {
+                    container.textContent = 'None';
+                    container.title = '';
+                    return;
                 }
-                selectionUpstream.title = upstreamList.join(', ');
-            }
-            if (selectionDownstream) {
-                if (downstreamList.length === 0) {
-                    selectionDownstream.textContent = 'None';
-                } else if (downstreamList.length <= maxVisible) {
-                    selectionDownstream.textContent = downstreamList.join(', ');
-                } else {
-                    selectionDownstream.textContent = downstreamList.slice(0, maxVisible).join(', ') + ' and ' + (downstreamList.length - maxVisible) + ' more';
+                if (items.length <= maxVisible) {
+                    container.textContent = items.join(', ');
+                    container.title = items.join(', ');
+                    return;
                 }
-                selectionDownstream.title = downstreamList.join(', ');
+                var visibleText = items.slice(0, maxVisible).map(escapeHtml).join(', ');
+                var hiddenCount = items.length - maxVisible;
+                var hiddenItems = items.slice(maxVisible).map(escapeHtml).join(', ');
+                container.innerHTML = visibleText +
+                    ' <button type="button" class="expand-more-btn" aria-expanded="false">' +
+                    'and ' + hiddenCount + ' more</button>' +
+                    '<span class="expand-more-list" style="display:none;">, ' + hiddenItems + '</span>';
+                container.title = items.join(', ');
+                var btn = container.querySelector('.expand-more-btn');
+                var list = container.querySelector('.expand-more-list');
+                if (btn && list) {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        var expanded = list.style.display !== 'none';
+                        list.style.display = expanded ? 'none' : 'inline';
+                        btn.textContent = expanded
+                            ? 'and ' + hiddenCount + ' more'
+                            : 'show less';
+                        btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                    });
+                }
             }
+
+            renderExpandableList(selectionUpstream, upstreamList);
+            renderExpandableList(selectionDownstream, downstreamList);
 
             if (selectionCrossLinks) {
                 const showCrossLinks = type === 'table' || type === 'view' || type === 'cte' || type === 'file' || type === 'external';

@@ -273,6 +273,18 @@ export function getWorkspaceShellScriptFragment(): string {
             vscode.postMessage({ command: 'switchGraphMode', mode });
         }
 
+        function getSelectedGraphNodeContext() {
+            if (!selectedNodeId) return null;
+            const sel = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
+            if (!sel) return null;
+            return {
+                id: sel.getAttribute('data-id') || '',
+                label: sel.getAttribute('data-label') || '',
+                type: sel.getAttribute('data-type') || '',
+                filePath: sel.getAttribute('data-filepath') || ''
+            };
+        }
+
         function prefillImpactSelection(nodeLabel, nodeId, nodeType, attempt = 0) {
             const impactInput = document.getElementById('impact-table-input');
             const impactTableId = document.getElementById('impact-table-id');
@@ -427,10 +439,17 @@ export function getWorkspaceShellScriptFragment(): string {
                     clearSelection();
                     break;
                 case 'view-lineage': {
-                    const nodeId = actionEl.getAttribute('data-node-id') || selectedNodeId;
-                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
-                    const nodeType = actionEl.getAttribute('data-node-type') || '';
-                    const filePath = actionEl.getAttribute('data-file-path') || '';
+                    const selectedNode = getSelectedGraphNodeContext();
+                    const nodeId = actionEl.getAttribute('data-node-id')
+                        || (selectedNode ? selectedNode.id : '')
+                        || selectedNodeId;
+                    const nodeLabel = actionEl.getAttribute('data-node-label')
+                        || (selectedNode ? selectedNode.label : '')
+                        || nodeId;
+                    const nodeType = actionEl.getAttribute('data-node-type')
+                        || (selectedNode ? selectedNode.type : '');
+                    const filePath = actionEl.getAttribute('data-file-path')
+                        || (selectedNode ? selectedNode.filePath : '');
                     if (!nodeId) {
                         break;
                     }
@@ -467,9 +486,13 @@ export function getWorkspaceShellScriptFragment(): string {
                     break;
                 }
                 case 'analyze-impact': {
-                    const nodeLabel = actionEl.getAttribute('data-node-label') || '';
-                    const nodeType = actionEl.getAttribute('data-node-type') || 'table';
-                    const nodeId = actionEl.getAttribute('data-node-id') || '';
+                    const selectedNode = getSelectedGraphNodeContext();
+                    const nodeLabel = actionEl.getAttribute('data-node-label')
+                        || (selectedNode ? selectedNode.label : '');
+                    const nodeType = actionEl.getAttribute('data-node-type')
+                        || (selectedNode ? selectedNode.type : 'table');
+                    const nodeId = actionEl.getAttribute('data-node-id')
+                        || (selectedNode ? selectedNode.id : '');
                     if (!nodeLabel) {
                         break;
                     }

@@ -164,7 +164,10 @@ function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGr
         content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
     }
 
-    content += '<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to select, double-click to open</div>';
+    const dblClickHint = node.type === 'file'
+        ? 'double-click to open'
+        : 'double-click to trace lineage';
+    content += `<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to select, ${dblClickHint}</div>`;
 
     return content;
 }

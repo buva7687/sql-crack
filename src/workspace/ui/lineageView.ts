@@ -132,13 +132,15 @@ export class LineageView {
             direction?: 'both' | 'upstream' | 'downstream';
             expandedNodes?: Set<string>;
             focusedNodeId?: string;
+            displayLabel?: string;
         } = {}
     ): string {
         const {
             depth = 5,
             direction = 'both',
             expandedNodes = new Set(),
-            focusedNodeId
+            focusedNodeId,
+            displayLabel
         } = options;
 
         const renderer = new LineageGraphRenderer(graph);
@@ -150,9 +152,9 @@ export class LineageView {
             includeExternal: true
         });
 
-        // Get center node name for display
+        // Get center node name for display (use displayLabel fallback for unresolved IDs)
         const centerNode = graph.nodes.get(centerNodeId);
-        const centerName = centerNode?.name || centerNodeId;
+        const centerName = centerNode?.name || displayLabel || centerNodeId;
 
         // Check for empty results based on direction
         if (renderableGraph.nodes.length === 0 ||
@@ -200,6 +202,13 @@ export class LineageView {
                                 <path d="M12 5v14M5 12l7 7 7-7"/>
                             </svg>
                             ${downstreamLabel}
+                        </span>
+                        <span class="stat-divider">|</span>
+                        <span class="stat depth-indicator" title="Traversal depth limit — controls how many levels of dependencies are shown. Change in Settings: sqlCrack.workspaceLineageDepth">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M3 12h4l3-9 4 18 3-9h4"/>
+                            </svg>
+                            Depth: ${depth}
                         </span>
                     </div>
                     <div class="direction-controls">

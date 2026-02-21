@@ -306,6 +306,21 @@ export function getIssuesScript(nonce: string): string {
             });
         });
 
+        document.querySelectorAll('.open-in-editor-btn').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const filePath = btn.getAttribute('data-filepath') || '';
+                if (filePath) {
+                    vscode.postMessage({
+                        command: 'openFileAtLine',
+                        filePath: filePath,
+                        line: 0
+                    });
+                }
+            });
+        });
+
         document.querySelectorAll('.show-in-graph-btn').forEach(btn => {
             btn.addEventListener('click', (event) => {
                 event.preventDefault();

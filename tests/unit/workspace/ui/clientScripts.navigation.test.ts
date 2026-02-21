@@ -35,7 +35,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("navigationOriginType = '';");
         expect(script).toContain('lineageDetailView = false;');
         expect(script).toContain('updateBackButtonText();');
-        expect(script).toContain("if (lineageDetailView && currentViewMode === 'lineage')");
+        expect(script).toContain("if (lineageDetailView && currentViewMode === 'lineage' && !navigationOriginLabel)");
         expect(script).toContain("switchToView('graph', true);");
     });
 

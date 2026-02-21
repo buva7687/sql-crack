@@ -230,8 +230,36 @@ export function getViewModeScriptFragment(): string {
             // always reflects the current tab's true navigation target.
             lineageDetailView = false;
 
-            // Save state of current view before switching
+            // Save state of current view BEFORE clearing highlights so selection is preserved
             saveCurrentViewState();
+
+            // Clear graph highlighting state when leaving the Graph view to prevent
+            // trace/focus/path highlights from persisting across view switches (ghost state).
+            // Note: selectedNodeId is NOT cleared here — it's saved above and restored when
+            // returning to Graph. Only visual highlights (trace, focus, path) are cleared.
+            if (previousView === 'graph') {
+                if (typeof clearTraceMode === 'function') { clearTraceMode(); }
+                if (typeof clearFocusMode === 'function') { clearFocusMode(); }
+                if (typeof clearPathHighlight === 'function') { clearPathHighlight(); }
+                traceMode = null;
+                focusModeEnabled = false;
+                pathStartNodeId = null;
+                pathEndNodeId = null;
+                pathStatusMessage = '';
+                document.querySelectorAll('.node-selected').forEach(function(el) { el.classList.remove('node-selected'); });
+                if (selectionDetails) selectionDetails.style.display = 'none';
+                if (selectionEdgeDetails) selectionEdgeDetails.style.display = 'none';
+                if (selectionCrossLinks) selectionCrossLinks.style.display = 'none';
+                if (selectionEmpty) {
+                    selectionEmpty.textContent = selectionEmptyText;
+                    selectionEmpty.style.display = '';
+                }
+                if (typeof updateFocusButton === 'function') { updateFocusButton(); }
+                if (typeof updateTraceButtons === 'function') { updateTraceButtons(); }
+                if (typeof updatePathBuilderUi === 'function') { updatePathBuilderUi(); }
+                if (typeof updateGraphActionButtons === 'function') { updateGraphActionButtons(); }
+                if (typeof syncGraphContextUi === 'function') { syncGraphContextUi(); }
+            }
 
             if (originLabel) {
                 navigationOriginLabel = originLabel;
@@ -446,6 +474,15 @@ export function getViewModeScriptFragment(): string {
                     if (typeof trackUxEvent === 'function') {
                         trackUxEvent('graph_mode_switched', { mode, fromView: currentViewMode });
                     }
+                    // Clear all graph highlighting state immediately to prevent ghost
+                    // highlights from the old mode being visible while the server regenerates HTML.
+                    // clearSelection() also hides the selection panel so stale details don't persist.
+                    if (typeof clearSelection === 'function') { clearSelection(); }
+                    if (typeof clearPathHighlight === 'function') { clearPathHighlight(); }
+                    pathStartNodeId = null;
+                    pathEndNodeId = null;
+                    pathStatusMessage = '';
+                    if (typeof updatePathBuilderUi === 'function') { updatePathBuilderUi(); }
                     currentGraphMode = mode;
                     if (typeof syncGraphContextUi === 'function') {
                         syncGraphContextUi();
@@ -486,9 +523,11 @@ export function getViewModeScriptFragment(): string {
 
         function updateBackButtonText() {
             if (!lineageBackBtn) return;
-            if (lineageDetailView && currentViewMode === 'lineage') {
+            if (lineageDetailView && currentViewMode === 'lineage' && !navigationOriginLabel) {
+                // Within-lineage navigation (search -> detail) — back goes to lineage list
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Lineage';
             } else {
+                // Came from Graph or at top level — back goes to Graph
                 const fromLabel = navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
                 lineageBackBtn.appendChild(document.createTextNode(' Back to Graph' + fromLabel));
@@ -497,13 +536,14 @@ export function getViewModeScriptFragment(): string {
 
         lineageBackBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (lineageDetailView && currentViewMode === 'lineage') {
+            if (lineageDetailView && currentViewMode === 'lineage' && !navigationOriginLabel) {
+                // Navigated within Lineage tab (search -> detail) — go back to lineage list
                 lineageDetailView = false;
                 updateBackButtonText();
                 if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
                 vscode.postMessage({ command: 'switchToLineageView' });
             } else {
-                // Non-detail back always returns to Graph to match button label and user expectation.
+                // Navigated from Graph (via "Trace in Lineage" / context menu) — go back to Graph directly
                 navStack.length = 0;
                 switchToView('graph', true); // skipMessage=true since this is local navigation
             }

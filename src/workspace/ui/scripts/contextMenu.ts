@@ -71,6 +71,13 @@ export function getContextMenuScriptFragment(): string {
                 }
             }
 
+            // Analyze Impact — only for table/view nodes (not file or external)
+            const impactItem = contextMenu.querySelector('[data-action="analyzeImpact"]');
+            if (impactItem) {
+                const showImpact = nodeData.type === 'table' || nodeData.type === 'view' || nodeData.type === 'cte';
+                impactItem.style.display = showImpact ? '' : 'none';
+            }
+
             // Visualize Dependencies only makes sense for file nodes
             if (visualizeItem) {
                 if (isFileNode) {

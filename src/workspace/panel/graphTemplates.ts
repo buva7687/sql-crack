@@ -266,6 +266,12 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 </svg>
                 Show Downstream
             </div>
+            <div class="context-menu-item" data-action="analyzeImpact">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+                </svg>
+                Analyze Impact
+            </div>
             <div class="context-menu-divider"></div>
             <div class="context-menu-item" data-action="copyName">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

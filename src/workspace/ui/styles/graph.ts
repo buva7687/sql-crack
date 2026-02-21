@@ -1166,6 +1166,9 @@ export function getLineageNodeStyles(): string {
         .graph-stats .stat.node-count {
             color: var(--text-secondary);
         }
+        .graph-stats .stat.depth-indicator {
+            color: var(--text-muted);
+        }
 
         /* Empty States */
         .lineage-empty-state {
@@ -1616,6 +1619,22 @@ export function getGraphStyles(): string {
         .selection-path-row .path-value {
             color: var(--text-secondary);
             text-align: right;
+        }
+        .expand-more-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+            font-size: inherit;
+            font-family: inherit;
+            padding: 0;
+            text-decoration: underline;
+            text-decoration-style: dotted;
+            text-underline-offset: 2px;
+        }
+        .expand-more-btn:hover {
+            color: var(--accent-hover, var(--accent));
+            text-decoration-style: solid;
         }
         .selection-actions {
             display: flex;
