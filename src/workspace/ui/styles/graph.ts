@@ -1549,7 +1549,7 @@ export function getGraphStyles(): string {
 
         /* ========== Sidebar Sections ========== */
         .sidebar-section { margin-bottom: 8px; }
-        .sidebar-section[data-sidebar-section="export"] { margin-top: 6px; }
+        .sidebar-section[data-sidebar-section="selection"] + .sidebar-section[data-sidebar-section="export"] { margin-top: 12px; }
         .section-header {
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 16px; cursor: pointer; user-select: none;
