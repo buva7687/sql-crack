@@ -21,6 +21,7 @@ env/
 .claude/
 CLAUDE.md
 AGENTS.md
+skills/
 *.swp
 *.swo
 *~
