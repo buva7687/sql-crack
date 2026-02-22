@@ -11,7 +11,7 @@ import {
     WorkspaceIndex,
 } from '../types';
 
-export function buildIndexStatus(index: WorkspaceIndex | null): IndexStatus {
+export function buildIndexStatus(index: WorkspaceIndex | null, changesSinceIndex: number = 0): IndexStatus {
     if (!index) {
         return {
             text: 'Index not ready',
@@ -31,9 +31,18 @@ export function buildIndexStatus(index: WorkspaceIndex | null): IndexStatus {
         level = 'stale';
     }
 
+    // Override to stale if workspace has changed since last index
+    if (changesSinceIndex > 0 && level === 'fresh') {
+        level = 'stale';
+    }
+
+    const dirtyNote = changesSinceIndex > 0
+        ? ` • ${changesSinceIndex} file change${changesSinceIndex === 1 ? '' : 's'} since last index`
+        : '';
+
     return {
-        text: `Indexed ${relative}`,
-        title: `Last indexed ${relative} • ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+        text: changesSinceIndex > 0 ? `Indexed ${relative} (${changesSinceIndex} changed)` : `Indexed ${relative}`,
+        title: `Last indexed ${relative} • ${fileCount} file${fileCount === 1 ? '' : 's'}${dirtyNote}`,
         level,
     };
 }

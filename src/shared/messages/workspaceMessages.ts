@@ -25,7 +25,7 @@ export interface ImpactEntry {
 
 export interface ImpactReportResult {
     changeType: string;
-    target: { type: 'table' | 'column'; name: string; tableName?: string };
+    target: { type: 'table' | 'view' | 'column'; name: string; tableName?: string };
     severity: string;
     summary: { totalAffected: number; tablesAffected: number; viewsAffected: number; queriesAffected: number; filesAffected: number };
     directImpacts: ImpactEntry[];

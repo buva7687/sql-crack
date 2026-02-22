@@ -316,6 +316,23 @@ export function getWorkspaceShellScriptFragment(): string {
             }
             if (impactAnalyzeBtn) {
                 impactAnalyzeBtn.disabled = false;
+                // Flash the analyze button to indicate prefill is ready
+                impactAnalyzeBtn.classList.add('prefill-ready');
+                setTimeout(() => impactAnalyzeBtn.classList.remove('prefill-ready'), 2000);
+            }
+            // Show prefill hint
+            var prefillHint = document.getElementById('impact-prefill-hint');
+            if (!prefillHint) {
+                prefillHint = document.createElement('div');
+                prefillHint.id = 'impact-prefill-hint';
+                prefillHint.className = 'impact-prefill-hint';
+                prefillHint.textContent = 'Prefilled from graph — select a change type and click Analyze Impact to run.';
+                var impactForm = impactAnalyzeBtn ? impactAnalyzeBtn.closest('.impact-form') || impactAnalyzeBtn.parentElement : null;
+                if (impactForm) {
+                    impactForm.appendChild(prefillHint);
+                }
+            } else {
+                prefillHint.style.display = '';
             }
         }
 

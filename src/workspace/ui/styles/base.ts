@@ -274,6 +274,11 @@ export function getBaseStyles(): string {
             font-size: 11px;
             line-height: 1.45;
         }
+        .graph-explain-hint {
+            margin-top: 4px;
+            color: var(--text-dim);
+            font-style: italic;
+        }
         .graph-explain-actions {
             margin-top: 8px;
             display: flex;

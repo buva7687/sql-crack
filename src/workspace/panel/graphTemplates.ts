@@ -173,10 +173,13 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
         <div class="graph-explain-panel is-hidden" id="graph-explain-panel" aria-hidden="true">
             <div class="graph-explain-title">Why am I seeing this graph?</div>
             <div class="graph-explain-body">
-                <div>Graph is a navigation surface: map dependencies here, then use Lineage/Impact for deeper analysis.</div>
-                <div>Files mode: which SQL files depend on each other.</div>
-                <div>Tables mode: which tables/views feed into which.</div>
-                <div>If graph looks reduced, check state chips for active search/focus/trace filters.</div>
+                <div><strong>${filesActive ? 'Files' : 'Tables'} mode:</strong> ${filesActive ? 'showing which SQL files depend on each other' : 'showing which tables/views feed into which'}.</div>
+                ${totalIssues > 0 ? `<div>⚠ ${totalIssues} parse issue${totalIssues === 1 ? '' : 's'} detected — some relationships may be missing.</div>` : ''}
+                ${searchFilter && searchFilter.query ? `<div>🔍 Search filter active: "${escapeHtml(searchFilter.query)}" — only matching nodes shown.</div>` : ''}
+                ${graph.stats.totalFiles === 0 ? '<div>No SQL files indexed yet. Try refreshing the index or checking workspace scope.</div>' : ''}
+                ${(graph.nodes || []).length === 0 && graph.stats.totalFiles > 0 ? `<div>No ${filesActive ? 'file dependencies' : 'table/view relationships'} found in ${graph.stats.totalFiles} indexed files.</div>` : ''}
+                ${indexStatus.level === 'old' ? '<div>Index is over an hour old — consider refreshing for current results.</div>' : ''}
+                <div class="graph-explain-hint">Graph is a navigation surface — use Lineage or Impact views for deeper analysis.</div>
             </div>
             <div class="graph-explain-actions">
                 <button class="action-chip action-chip-small" data-graph-action="focus-search">Try search</button>

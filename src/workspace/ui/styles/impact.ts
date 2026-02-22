@@ -684,5 +684,23 @@ export function getImpactFormStyles(): string {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+        .impact-prefill-hint {
+            font-size: 11px;
+            color: var(--accent);
+            padding: 6px 0 0;
+            animation: prefill-fade 2s ease-out forwards;
+        }
+        @keyframes prefill-fade {
+            0% { opacity: 1; }
+            70% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        .prefill-ready {
+            animation: prefill-pulse 0.6s ease-in-out 2;
+        }
+        @keyframes prefill-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.04); }
+        }
     `;
 }

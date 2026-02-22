@@ -1706,6 +1706,21 @@ export function getGraphStyles(): string {
             font-size: 11px;
             padding: 4px 2px;
         }
+        .selection-edge-expand-btn {
+            background: none;
+            border: 1px solid var(--border-primary);
+            color: var(--accent);
+            font-size: 11px;
+            padding: 4px 8px;
+            margin-top: 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            text-align: center;
+        }
+        .selection-edge-expand-btn:hover {
+            background: var(--bg-hover);
+        }
 
         /* ========== Legend Items ========== */
         .legend-grid { padding: 8px 16px; }

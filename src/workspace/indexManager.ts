@@ -36,6 +36,7 @@ export class IndexManager {
     private onIndexUpdated: (() => void) | null = null;
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
+    private _changesSinceIndex: number = 0;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -114,6 +115,7 @@ export class IndexManager {
         }
 
         this.index = newIndex;
+        this._changesSinceIndex = 0;
 
         // Persist to workspace state
         await this.persistIndex();
@@ -131,6 +133,14 @@ export class IndexManager {
      */
     getIndex(): WorkspaceIndex | null {
         return this.index;
+    }
+
+    /**
+     * Number of file change events since last full index build.
+     * 0 means index is clean (no known workspace changes since indexing).
+     */
+    getChangesSinceIndex(): number {
+        return this._changesSinceIndex;
     }
 
     /**
@@ -549,6 +559,7 @@ export class IndexManager {
             if (!this.shouldIndexFile(uri)) {
                 return;
             }
+            this._changesSinceIndex++;
             this.updateQueue.add(uri.fsPath);
             if (this.updateTimer) {
                 clearTimeout(this.updateTimer);
@@ -562,6 +573,7 @@ export class IndexManager {
         this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
         this.fileWatcher.onDidDelete(uri => {
             if (this.shouldIndexFile(uri)) {
+                this._changesSinceIndex++;
                 void this.removeFile(uri);
             }
         });

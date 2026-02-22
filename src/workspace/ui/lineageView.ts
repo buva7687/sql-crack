@@ -100,7 +100,7 @@ export class LineageView {
                             <div class="lineage-popular-header">
                                 <h4>Most Connected</h4>
                                 <button class="lineage-show-all-btn" id="lineage-show-all-btn" type="button">
-                                    Show all ${totalNodeCount} tables
+                                    Show all ${totalNodeCount} tables/views
                                 </button>
                             </div>
                             <div class="lineage-popular-grid" id="lineage-popular-grid">
@@ -111,7 +111,7 @@ export class LineageView {
                             ${this.generateAllNodes(graph, depth)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
-                            <p>No matching tables found</p>
+                            <p>No matching tables or views found</p>
                         </div>
                     </div>
                 </div>
@@ -558,7 +558,7 @@ export class LineageView {
                         <span class="step-text">Search for a table to visualize its lineage</span>
                     </div>
                 </div>
-                <p class="hint">\uD83D\uDCA1 Tip: The more SQL files you have open, the richer your lineage graph becomes!</p>
+                <p class="hint">\uD83D\uDCA1 Tip: Refresh the index to pick up new files, or ensure your SQL files are within the workspace scope for richer lineage.</p>
             </div>
         `;
     }
@@ -576,7 +576,21 @@ export class LineageView {
         let hint: string;
         let showDirectionButtons = false;
 
-        if (direction === 'upstream') {
+        const isExternal = nodeType === 'external';
+
+        if (isExternal) {
+            if (direction === 'upstream') {
+                message = `No upstream dependencies found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
+                hint = 'This is an external reference — its definition is not in the indexed workspace, so upstream lineage is unavailable.';
+            } else if (direction === 'downstream') {
+                message = `No downstream consumers found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
+                hint = 'This is an external reference — only relationships visible within the indexed workspace are shown.';
+            } else {
+                message = `<strong>${this.escapeHtml(nodeName)}</strong> is an external reference with limited lineage.`;
+                hint = 'Its definition is not in the indexed workspace. Ensure the source files are included in the workspace scope and refresh the index.';
+            }
+            showDirectionButtons = direction !== 'both';
+        } else if (direction === 'upstream') {
             message = `No upstream dependencies found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
             hint = 'This appears to be a source table with no incoming data flows.';
             showDirectionButtons = true;

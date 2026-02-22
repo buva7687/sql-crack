@@ -15,7 +15,7 @@ export type ChangeType = 'modify' | 'rename' | 'drop' | 'addColumn';
 export interface ImpactReport {
     changeType: ChangeType;
     target: {
-        type: 'table' | 'column';
+        type: 'table' | 'view' | 'column';
         name: string;
         tableName?: string;
     };
@@ -267,12 +267,13 @@ export class ImpactAnalyzer {
         });
 
         // Generate suggestions
-        const suggestions = this.generateSuggestions(tableName, 'table', changeType, severity);
+        const actualType = node.type === 'view' ? 'view' : 'table';
+        const suggestions = this.generateSuggestions(tableName, actualType, changeType, severity);
 
         return {
             changeType,
             target: {
-                type: 'table',
+                type: actualType,
                 name: tableName
             },
             directImpacts,
@@ -454,7 +455,7 @@ export class ImpactAnalyzer {
      */
     private generateSuggestions(
         name: string,
-        type: 'table' | 'column',
+        type: 'table' | 'view' | 'column',
         changeType: ChangeType,
         severity: string
     ): string[] {

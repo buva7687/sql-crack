@@ -159,7 +159,8 @@ export class ImpactView {
         const targetTableName = report.target.type === 'column'
             ? (report.target.tableName || report.target.name)
             : report.target.name;
-        const targetNodeId = `table:${targetTableName.toLowerCase()}`;
+        const targetType = report.target.type === 'view' ? 'view' : 'table';
+        const targetNodeId = `${targetType}:${targetTableName.toLowerCase()}`;
 
         let html = `
             <div class="impact-report">
@@ -178,7 +179,7 @@ export class ImpactView {
                                 data-action="cross-view-lineage"
                                 data-table="${this.escapeHtml(targetTableName)}"
                                 data-node-id="${this.escapeHtml(targetNodeId)}"
-                                data-node-type="table">
+                                data-node-type="${targetType}">
                             View Lineage Graph
                         </button>
                         <button type="button"
@@ -186,7 +187,7 @@ export class ImpactView {
                                 data-action="cross-view-detail"
                                 data-table="${this.escapeHtml(targetTableName)}"
                                 data-node-id="${this.escapeHtml(targetNodeId)}"
-                                data-node-type="table">
+                                data-node-type="${targetType}">
                             View Details
                         </button>
                     </div>

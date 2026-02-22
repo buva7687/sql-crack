@@ -89,12 +89,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace graph polish and discoverability updates**:
   - Merged keyboard hints into a collapsible `Shortcuts` panel inside the bottom legend bar.
   - Removed the redundant Graph-mode `?` help affordance to reduce competing help surfaces.
-  - Context menu actions now gray out unavailable upstream/downstream actions in Files mode with explicit affordance text.
+  - Context menu actions now hide unavailable upstream/downstream items in Files mode instead of graying them out, reducing dead-option friction.
   - Graph empty-state copy is now mode-specific (`No files match this search` / `No tables/views match this search`).
   - Graph search debounce aligned to SQL Flow timing for more consistent typing behavior.
   - Graph search clear now provides visual flash feedback in the search control to explain why results changed.
   - Removed visible `L` keyboard legend hint from the primary rail while retaining the `L` keybinding.
   - Added a small top offset to the Graph sidebar `Export` section for cleaner separation from Selection actions when the Selection panel expands.
+- **Workspace lineage & navigation trust improvements**:
+  - "Why am I seeing this graph?" panel is now context-aware: shows active mode, parse issue counts, active search filters, empty-index and empty-graph explanations, and stale-index warnings instead of static guidance copy.
+  - Selection panel depth now reads "N levels up, M levels down (visible)" with a tooltip clarifying it reflects rendered graph edges, not full system lineage depth.
+  - Edge evidence panel now offers "View all N references" expand/collapse instead of truncating at 6 with a static "+N more" label.
+  - Impact cross-view prefill now shows "Prefilled from graph — select a change type and click Analyze Impact to run" with a subtle button pulse, instead of silent prefill.
+  - Index freshness badge now includes a dirty/clean signal: shows "(N changed)" when files have changed since the last index build, and promotes to `stale` level even if the index is recent.
+  - Lineage search wording corrected from "tables" to "tables/views" for show-all button and empty-filter message.
+  - Lineage empty-state tip updated from "more SQL files you have open" to guidance about refreshing the index and workspace scope.
+  - External nodes now show "Trace in Lineage (limited)" with a tooltip explaining the external reference constraint, and empty-lineage states for external nodes provide explicit "not indexed" messaging instead of generic "no relationships" text.
 - **SQL Flow batch result navigation UX**:
   - Replaced the failed-only dropdown summary with compact inline status chips (`ok`, `failed`, `partial`) in the existing batch-tabs row (no new panel/row).
   - Added scoped navigation state so batch controls (`⏮`, `◀`, `▶`, `⏭`) and keyboard shortcuts (`[` and `]`) navigate within the active status scope.
@@ -103,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Context menu lineage routing false negatives**: Context menu upstream/downstream actions now use the canonical node ID (`contextMenuTarget.id`) instead of reconstructing it from `type:lowercase(label)`, preventing "no upstream/downstream" false negatives for schema-qualified, aliased, or case-sensitive nodes. The `analyzeImpact` action now passes the actual node type instead of hardcoding `'table'`.
+- **Impact cross-links misroute for views**: Impact analysis report cross-link buttons ("View Lineage Graph", "View Details") now derive node ID prefix and `data-node-type` from the actual target type (table vs view) instead of hardcoding `table:` and `data-node-type="table"`. The `ImpactReport.target.type` union was extended to include `'view'`.
 - **Cloud node not draggable**: Removed internal pan mousedown/mousemove/mouseup listeners from cloud `nestedSvg` that intercepted whole-cloud drag via the cloud rect. Wheel zoom for internal navigation is preserved.
 - **Cloud arrow disconnects when dragging CTE node**: Removed `updateCloudAndArrow` call from the node drag path — the cloud is a child of the node group, so the group transform already moves it correctly. Calling `updateCloudAndArrow` with absolute coordinates inside the transformed group caused the arrow to overshoot.
 - **Search not clearing when text is deleted**: The search input listener now calls `onClearSearch()` when the input value becomes empty, resetting breadcrumbs and highlights (same as pressing Escape).

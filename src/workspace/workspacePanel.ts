@@ -648,7 +648,7 @@ export class WorkspacePanel {
             script,
             currentGraphMode: this._currentGraphMode,
             isDarkTheme: this._isDarkTheme,
-            indexStatus: buildIndexStatus(this._indexManager.getIndex()),
+            indexStatus: buildIndexStatus(this._indexManager.getIndex(), this._indexManager.getChangesSinceIndex()),
             statsHtml: createStatsPanelHtml({
                 escapeHtml: escapeHtmlText,
             }),
@@ -846,7 +846,7 @@ ${bodyContent}
      * Get error HTML
      */
     private getErrorHtml(message: string, detail?: string): string {
-        const indexStatus = buildIndexStatus(this._indexManager.getIndex());
+        const indexStatus = buildIndexStatus(this._indexManager.getIndex(), this._indexManager.getChangesSinceIndex());
         const statusLine = indexStatus.level === 'missing'
             ? 'Index: not yet built'
             : indexStatus.title;

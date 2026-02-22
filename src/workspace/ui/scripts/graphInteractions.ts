@@ -689,8 +689,9 @@ export function getGraphInteractionsScriptFragment(): string {
                 var depthInfo = [];
                 if (upDepth > 0) depthInfo.push(upDepth + ' level' + (upDepth > 1 ? 's' : '') + ' up');
                 if (downDepth > 0) depthInfo.push(downDepth + ' level' + (downDepth > 1 ? 's' : '') + ' down');
-                var depthSuffix = depthInfo.length > 0 ? ' • ' + depthInfo.join(', ') : '';
+                var depthSuffix = depthInfo.length > 0 ? ' • ' + depthInfo.join(', ') + ' (visible)' : '';
                 selectionMeta.textContent = typeLabel + ' • ' + connectionCount + ' connection' + (connectionCount === 1 ? '' : 's') + depthSuffix;
+                selectionMeta.title = depthInfo.length > 0 ? 'Depth is based on currently rendered graph edges, not full system lineage' : '';
             }
 
             if (selectionFile) {
@@ -763,7 +764,13 @@ export function getGraphInteractionsScriptFragment(): string {
                 const fileTablesAction = selectionCrossLinks.querySelector('[data-graph-action="show-file-tables"]');
 
                 if (lineageAction) {
-                    lineageAction.textContent = 'Trace in Lineage';
+                    if (type === 'external') {
+                        lineageAction.textContent = 'Trace in Lineage (limited)';
+                        lineageAction.title = 'External reference — lineage may be incomplete if this object is not indexed';
+                    } else {
+                        lineageAction.textContent = 'Trace in Lineage';
+                        lineageAction.title = '';
+                    }
                     lineageAction.style.display = '';
                 }
 
@@ -879,18 +886,40 @@ export function getGraphInteractionsScriptFragment(): string {
                     selectionEdgeRefs.innerHTML = '<div class="selection-edge-empty">No file/line samples available for this edge yet.</div>';
                 } else {
                     const maxVisible = 6;
-                    selectionEdgeRefs.innerHTML = references.slice(0, maxVisible).map((reference) => {
+                    const renderRef = (reference) => {
                         const lineText = reference.lineNumber > 0 ? (':' + reference.lineNumber) : '';
                         const contextText = reference.context ? (' (' + reference.context + ')') : '';
                         return '<div class="selection-edge-ref">' +
                             '<span class="selection-edge-ref-path">' + escapeHtml(reference.filePath) + lineText + '</span>' +
                             '<span class="selection-edge-ref-meta">' + escapeHtml(reference.tableName + contextText) + '</span>' +
                             '</div>';
-                    }).join('');
+                    };
+                    selectionEdgeRefs.innerHTML = references.slice(0, maxVisible).map(renderRef).join('');
                     if (references.length > maxVisible) {
-                        selectionEdgeRefs.innerHTML += '<div class="selection-edge-empty">+' + (references.length - maxVisible) + ' more references</div>';
+                        const remaining = references.length - maxVisible;
+                        const overflowId = 'edge-refs-overflow';
+                        selectionEdgeRefs.innerHTML +=
+                            '<div id="' + overflowId + '" style="display:none;">' +
+                                references.slice(maxVisible).map(renderRef).join('') +
+                            '</div>' +
+                            '<button type="button" class="selection-edge-expand-btn" data-overflow="' + overflowId + '">' +
+                                'View all ' + references.length + ' references (' + remaining + ' more)' +
+                            '</button>';
                     }
                 }
+            }
+            // Expand/collapse handler for edge references overflow
+            var expandBtn = selectionEdgeRefs ? selectionEdgeRefs.querySelector('.selection-edge-expand-btn') : null;
+            if (expandBtn) {
+                expandBtn.addEventListener('click', function() {
+                    var overflowEl = document.getElementById(expandBtn.getAttribute('data-overflow'));
+                    if (!overflowEl) return;
+                    var isHidden = overflowEl.style.display === 'none';
+                    overflowEl.style.display = isHidden ? '' : 'none';
+                    expandBtn.textContent = isHidden
+                        ? 'Show fewer references'
+                        : 'View all ' + references.length + ' references (' + (references.length - 6) + ' more)';
+                });
             }
             if (selectionEdgeOpenRef) {
                 const firstReference = references[0];

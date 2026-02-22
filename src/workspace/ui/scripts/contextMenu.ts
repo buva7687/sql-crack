@@ -28,20 +28,18 @@ export function getContextMenuScriptFragment(): string {
             const openFileItem = contextMenu.querySelector('[data-action="openFile"]');
             const visualizeItem = contextMenu.querySelector('[data-action="visualize"]');
 
-            // In Files mode, grey out upstream/downstream for file nodes (graph already shows file deps)
+            // In Files mode, hide upstream/downstream for file nodes (graph already shows file deps)
             // In Tables mode, show upstream/downstream for table nodes
             if (upstreamItem && downstreamItem) {
                 if (graphMode === 'files' && isFileNode) {
-                    upstreamItem.classList.add('disabled');
-                    upstreamItem.setAttribute('aria-disabled', 'true');
-                    upstreamItem.title = 'Available in Tables mode';
-                    downstreamItem.classList.add('disabled');
-                    downstreamItem.setAttribute('aria-disabled', 'true');
-                    downstreamItem.title = 'Available in Tables mode';
+                    upstreamItem.style.display = 'none';
+                    downstreamItem.style.display = 'none';
                 } else {
+                    upstreamItem.style.display = '';
                     upstreamItem.classList.remove('disabled');
                     upstreamItem.removeAttribute('aria-disabled');
                     upstreamItem.title = '';
+                    downstreamItem.style.display = '';
                     downstreamItem.classList.remove('disabled');
                     downstreamItem.removeAttribute('aria-disabled');
                     downstreamItem.title = '';
@@ -129,10 +127,9 @@ export function getContextMenuScriptFragment(): string {
                                 depth: lineageDepth
                             });
                         } else {
-                            const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getUpstream',
-                                nodeId: nodeType + ':' + nodeName.toLowerCase(),
+                                nodeId: contextMenuTarget.id,
                                 depth: lineageDepth
                             });
                         }
@@ -149,10 +146,9 @@ export function getContextMenuScriptFragment(): string {
                                 depth: lineageDepth
                             });
                         } else {
-                            const nodeType = contextMenuTarget.type === 'external' ? 'external' : contextMenuTarget.type;
                             vscode.postMessage({
                                 command: 'getDownstream',
-                                nodeId: nodeType + ':' + nodeName.toLowerCase(),
+                                nodeId: contextMenuTarget.id,
                                 depth: lineageDepth
                             });
                         }
@@ -163,7 +159,7 @@ export function getContextMenuScriptFragment(): string {
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         vscode.postMessage({
                             command: 'analyzeImpact',
-                            type: 'table',
+                            type: contextMenuTarget.type || 'table',
                             name: nodeName,
                             changeType: 'modify'
                         });
