@@ -1708,7 +1708,7 @@ export function getGraphStyles(): string {
         }
         .selection-edge-expand-btn {
             background: none;
-            border: 1px solid var(--border-primary);
+            border: 1px solid var(--border-color);
             color: var(--accent);
             font-size: 11px;
             padding: 4px 8px;

@@ -66,7 +66,7 @@ export type WorkspaceWebviewMessage =
     | { command: 'switchToImpactView' }
     // Lineage analysis
     | { command: 'getLineage'; nodeId: string; direction: 'upstream' | 'downstream' | 'both'; depth?: number }
-    | { command: 'analyzeImpact'; type: 'table' | 'column'; name: string; tableName?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn' }
+    | { command: 'analyzeImpact'; type: 'table' | 'view' | 'column'; name: string; tableName?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn' }
     | { command: 'exploreTable'; tableName: string; nodeId?: string }
     | { command: 'getColumnLineage'; tableName?: string; tableId?: string; columnName: string }
     | { command: 'selectLineageNode'; nodeId: string }

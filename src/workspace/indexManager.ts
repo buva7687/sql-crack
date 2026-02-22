@@ -136,8 +136,8 @@ export class IndexManager {
     }
 
     /**
-     * Number of file change events since last full index build.
-     * 0 means index is clean (no known workspace changes since indexing).
+     * Number of pending workspace changes not yet reflected in the index.
+     * 0 means index is clean relative to observed file watcher events.
      */
     getChangesSinceIndex(): number {
         return this._changesSinceIndex;
@@ -559,7 +559,9 @@ export class IndexManager {
             if (!this.shouldIndexFile(uri)) {
                 return;
             }
-            this._changesSinceIndex++;
+            if (!this.updateQueue.has(uri.fsPath)) {
+                this._changesSinceIndex++;
+            }
             this.updateQueue.add(uri.fsPath);
             if (this.updateTimer) {
                 clearTimeout(this.updateTimer);
@@ -574,7 +576,9 @@ export class IndexManager {
         this.fileWatcher.onDidDelete(uri => {
             if (this.shouldIndexFile(uri)) {
                 this._changesSinceIndex++;
-                void this.removeFile(uri);
+                void this.removeFile(uri).finally(() => {
+                    this.markChangeProcessed();
+                });
             }
         });
 
@@ -589,7 +593,10 @@ export class IndexManager {
                 this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
                 this.fileWatcher.onDidDelete(uri => {
                     if (this.shouldIndexFile(uri)) {
-                        void this.removeFile(uri);
+                        this._changesSinceIndex++;
+                        void this.removeFile(uri).finally(() => {
+                            this.markChangeProcessed();
+                        });
                     }
                 });
             }
@@ -612,6 +619,7 @@ export class IndexManager {
         for (const filePath of files) {
             const uri = vscode.Uri.file(filePath);
             if (!this.shouldIndexFile(uri)) {
+                this.markChangeProcessed();
                 continue;
             }
             try {
@@ -620,13 +628,21 @@ export class IndexManager {
                     await vscode.workspace.fs.stat(uri);
                 } catch (e) {
                     logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
-                    this.removeFile(uri);
+                    await this.removeFile(uri);
                     continue;
                 }
                 await this.updateFile(uri);
             } catch (err) {
                 logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
+            } finally {
+                this.markChangeProcessed();
             }
+        }
+    }
+
+    private markChangeProcessed(): void {
+        if (this._changesSinceIndex > 0) {
+            this._changesSinceIndex--;
         }
     }
 

@@ -157,9 +157,10 @@ export function getContextMenuScriptFragment(): string {
                         switchToView('impact', false, nodeName, nodeType);
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
+                        var impactType = contextMenuTarget.type === 'view' ? 'view' : 'table';
                         vscode.postMessage({
                             command: 'analyzeImpact',
-                            type: contextMenuTarget.type || 'table',
+                            type: impactType,
                             name: nodeName,
                             changeType: 'modify'
                         });

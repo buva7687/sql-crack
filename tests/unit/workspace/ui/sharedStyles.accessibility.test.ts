@@ -128,6 +128,13 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).not.toContain('.export-option-advanced { padding-left: 16px; color: var(--text-muted); }');
     });
 
+    it('uses existing theme border tokens for edge-reference expand actions', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.selection-edge-expand-btn');
+        expect(css).toContain('border: 1px solid var(--border-color);');
+        expect(css).not.toContain('var(--border-primary)');
+    });
+
     it('renders theme-aware borders for workspace view tabs', () => {
         const css = getBaseStyles();
         expect(css).toContain('.view-tabs');

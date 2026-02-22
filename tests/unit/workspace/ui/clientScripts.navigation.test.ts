@@ -170,6 +170,20 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("clearPathState(true);");
     });
 
+    it('routes context-menu lineage and impact actions with canonical ids and safe view/table impact types', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("nodeId: contextMenuTarget.id,");
+        expect(script).toContain("var impactType = contextMenuTarget.type === 'view' ? 'view' : 'table';");
+        expect(script).toContain('type: impactType,');
+    });
+
     it('wires graph onboarding helper actions and explain panel toggle state', () => {
         const script = getWebviewScript({
             nonce: 'test',

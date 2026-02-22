@@ -825,6 +825,51 @@ describe('IndexManager', () => {
             expect(mockScanner.analyzeFile).toHaveBeenCalled();
         });
 
+        it('tracks pending changes and clears the counter after queued updates are processed', async () => {
+            const watcher = __getFileSystemWatcher();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+
+            mockScanner.analyzeFile.mockResolvedValue({
+                ...createMockAnalysis('/test.sql', [{ name: 'updated_users' }]),
+                contentHash: 'updated-hash',
+            });
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('deduplicates queued updates for the same file when computing pending change count', async () => {
+            const watcher = __getFileSystemWatcher();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+
+            mockScanner.analyzeFile.mockResolvedValue({
+                ...createMockAnalysis('/test.sql', [{ name: 'users' }]),
+                contentHash: 'another-hash',
+            });
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('clears pending count even when file content hash is unchanged', async () => {
+            const watcher = __getFileSystemWatcher();
+            const unchanged = createMockAnalysis('/test.sql', [{ name: 'users' }]);
+            mockScanner.analyzeFile.mockResolvedValue(unchanged);
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
         it('should remove file on delete', async () => {
             const watcher = __getFileSystemWatcher();
 
@@ -844,6 +889,7 @@ describe('IndexManager', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             expect(indexManager.findDefinition('delete_table')).toBeUndefined();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 
         it('should ignore updates from excluded directories', async () => {

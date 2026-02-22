@@ -325,6 +325,48 @@ describe('MessageHandler depth and column lineage routing', () => {
         expect(context.setLineageLegendVisible).toHaveBeenCalledWith(false);
     });
 
+    it('treats view impact requests as table-like analysis (not column analysis)', async () => {
+        const report = {
+            changeType: 'modify',
+            target: { type: 'view', name: 'customer_view' },
+            severity: 'low',
+            summary: { totalAffected: 0, tablesAffected: 0, viewsAffected: 0, queriesAffected: 0, filesAffected: 0 },
+            directImpacts: [],
+            transitiveImpacts: [],
+            suggestions: [],
+        };
+        const impactAnalyzer = {
+            analyzeTableChange: jest.fn(() => report),
+            analyzeColumnChange: jest.fn(),
+        };
+        const { context, postMessage } = createContext({
+            getImpactAnalyzer: jest.fn(() => impactAnalyzer),
+            buildLineageGraph: jest.fn().mockResolvedValue(undefined),
+            getImpactView: jest.fn(() => ({
+                generateImpactReport: jest.fn(() => '<div>impact</div>'),
+            })),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'analyzeImpact',
+            type: 'view',
+            name: 'customer_view',
+            changeType: 'modify',
+        } as any);
+
+        expect(impactAnalyzer.analyzeTableChange).toHaveBeenCalledWith('customer_view', 'modify');
+        expect(impactAnalyzer.analyzeColumnChange).not.toHaveBeenCalled();
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'impactResult',
+            data: expect.objectContaining({
+                report: expect.objectContaining({
+                    target: expect.objectContaining({ type: 'view', name: 'customer_view' }),
+                }),
+            }),
+        }));
+    });
+
     it('exports empty lineage payload when workspace node is missing from lineage graph', async () => {
         const flowAnalyzer = {
             getUpstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),

@@ -672,7 +672,7 @@ export class MessageHandler {
     }
 
     private async handleAnalyzeImpact(
-        type: 'table' | 'column',
+        type: 'table' | 'view' | 'column',
         name: string,
         tableName?: string,
         changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
@@ -700,10 +700,10 @@ export class MessageHandler {
         if (!impactAnalyzer) {return;}
 
         let report: ImpactReport;
-        if (type === 'table') {
-            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
-        } else {
+        if (type === 'column') {
             report = impactAnalyzer.analyzeColumnChange(tableName!.trim(), trimmedName, changeType);
+        } else {
+            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
         }
 
         this._context.setCurrentImpactReport(report);
