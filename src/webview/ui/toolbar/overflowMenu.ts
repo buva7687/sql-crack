@@ -30,8 +30,8 @@ export function applyOverflowMenuTheme(dark: boolean): void {
     const palette = getOverflowPalette(dark);
 
     if (overflowBtn) {
-        overflowBtn.style.background = palette.background;
-        overflowBtn.style.borderColor = palette.border;
+        overflowBtn.style.background = dark ? 'rgba(148, 163, 184, 0.15)' : 'rgba(15, 23, 42, 0.08)';
+        overflowBtn.style.borderColor = dark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.4)';
         overflowBtn.style.color = palette.text;
     }
 
@@ -67,7 +67,7 @@ function cleanOverflowLabel(title: string): string {
 function collectOverflowableButtons(actions: HTMLElement): Array<{ btn: HTMLElement; label: string; icon: string }> {
     const result: Array<{ btn: HTMLElement; label: string; icon: string }> = [];
 
-    // Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]
+    // Children of actions: [zoomGroup, featureGroup, exportGroup]
     const children = Array.from(actions.children) as HTMLElement[];
     const featureGroup = children[1];
     const exportGroup = children[2];
@@ -134,7 +134,7 @@ export function setupOverflowObserver(
     toolbarWrapper: HTMLElement,
     isDarkTheme: () => boolean
 ): ResizeObserver | null {
-    const overflowContainer = actions.querySelector('#sql-crack-overflow-container') as HTMLElement;
+    const overflowContainer = document.getElementById('sql-crack-overflow-container') as HTMLElement;
     const overflowDropdown = document.getElementById('sql-crack-overflow-dropdown') as HTMLElement;
     if (!overflowContainer || !overflowDropdown) {
         return null;

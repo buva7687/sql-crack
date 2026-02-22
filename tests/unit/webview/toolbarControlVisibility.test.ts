@@ -30,7 +30,7 @@ describe('toolbar control visibility and overflow behavior', () => {
         expect(source).toContain("pinsBtn.dataset.overflowKeepVisible = 'true';");
         expect(source).toMatch(/if \(el\.dataset\.overflowKeepVisible === 'true'\)\s*\{\s*continue;/);
         expect(source).toMatch(/if \(el\.tagName !== 'BUTTON'\)\s*\{\s*continue;/);
-        expect(source).toContain('Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]');
+        expect(source).toContain('Children of actions: [zoomGroup, featureGroup, exportGroup]');
     });
 
     it('prevents toolbar group shrink-clipping before overflow handling runs', () => {

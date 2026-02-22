@@ -25,7 +25,12 @@ interface ActionGroupsDeps {
     ) => HTMLElement;
 }
 
-export function createActionButtons(deps: ActionGroupsDeps): HTMLElement {
+export interface ActionButtonsResult {
+    actions: HTMLElement;
+    overflowContainer: HTMLElement;
+}
+
+export function createActionButtons(deps: ActionGroupsDeps): ActionButtonsResult {
     const {
         callbacks,
         options,
@@ -63,10 +68,11 @@ export function createActionButtons(deps: ActionGroupsDeps): HTMLElement {
     overflowBtn.title = 'More actions';
     overflowBtn.setAttribute('aria-label', 'More actions');
     overflowBtn.setAttribute('role', 'button');
+    const isDark = callbacks.isDarkTheme();
     overflowBtn.style.cssText = `
-        ${getBtnStyle(callbacks.isDarkTheme())}
-        background: transparent;
-        border: 1px solid transparent;
+        ${getBtnStyle(isDark)}
+        background: ${isDark ? 'rgba(148, 163, 184, 0.15)' : 'rgba(15, 23, 42, 0.08)'};
+        border: 1px solid ${isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.4)'};
         border-radius: 8px;
         font-size: 18px;
         letter-spacing: 1px;
@@ -74,7 +80,8 @@ export function createActionButtons(deps: ActionGroupsDeps): HTMLElement {
         padding: 8px 10px;
     `;
     overflowBtn.addEventListener('mouseenter', () => {
-        overflowBtn.style.background = getOverflowPalette(callbacks.isDarkTheme()).hover;
+        const dark = callbacks.isDarkTheme();
+        overflowBtn.style.background = dark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(15, 23, 42, 0.14)';
     }, listenerOptions);
     overflowBtn.addEventListener('mouseleave', () => {
         applyOverflowMenuTheme(callbacks.isDarkTheme());
@@ -119,9 +126,8 @@ export function createActionButtons(deps: ActionGroupsDeps): HTMLElement {
     documentListeners.push({ type: 'click', handler: overflowClickHandler });
 
     overflowContainer.appendChild(overflowBtn);
-    actions.appendChild(overflowContainer);
 
-    return actions;
+    return { actions, overflowContainer };
 }
 
 function createZoomGroup(

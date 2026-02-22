@@ -258,8 +258,18 @@ export function createToolbar(
         .map(option => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
         .join('');
 
+    const fileName = (window as any).fileName || '';
     title.innerHTML = `
         <span>SQL Flow</span>
+        ${fileName ? `<span style="
+            color: ${isDark ? '#94a3b8' : '#64748b'};
+            font-weight: 400;
+            font-size: 12px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        " title="${escapeHtml(fileName)}">· ${escapeHtml(fileName)}</span>` : ''}
         <select id="dialect-select" title="SQL dialect for parsing" style="
             background: ${selectBg};
             color: ${selectColor};
@@ -289,8 +299,8 @@ export function createToolbar(
     // Add toolbar (left side) to wrapper
     toolbarWrapper.appendChild(toolbar);
 
-    // Action buttons (right side) - now inside the wrapper instead of separate absolute
-    const actions = createToolbarActionButtons({
+    // Action buttons (right side) - inside the wrapper
+    const { actions, overflowContainer } = createToolbarActionButtons({
         callbacks,
         options,
         documentListeners,
@@ -312,8 +322,30 @@ export function createToolbar(
     });
     toolbarWrapper.appendChild(actions);
 
-    // Add the single wrapper to container
-    container.appendChild(toolbarWrapper);
+    // Outer container: wrapper (overflow: hidden) + always-visible ⋯ button
+    const outerContainer = document.createElement('div');
+    outerContainer.style.cssText = `
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        z-index: ${Z_INDEX.toolbar};
+    `;
+    // Move toolbarWrapper positioning to flex child (remove absolute from wrapper)
+    toolbarWrapper.style.position = 'relative';
+    toolbarWrapper.style.top = '0';
+    toolbarWrapper.style.left = '0';
+    toolbarWrapper.style.right = '0';
+    toolbarWrapper.style.zIndex = '';
+    toolbarWrapper.style.flex = '1';
+    toolbarWrapper.style.minWidth = '0';
+
+    outerContainer.appendChild(toolbarWrapper);
+    outerContainer.appendChild(overflowContainer);
+    container.appendChild(outerContainer);
 
     // Set up ResizeObserver for overflow menu
     const resizeObserver = setupOverflowObserver(actions, toolbarWrapper, callbacks.isDarkTheme);
