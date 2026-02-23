@@ -102,8 +102,8 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
         });
 
         expect(flowAnalyzer.getUpstream).toHaveBeenCalledTimes(2);
-        expect(flowAnalyzer.getUpstream).toHaveBeenCalledWith('table:orders', { maxDepth: 4 });
-        expect(flowAnalyzer.getUpstream).toHaveBeenCalledWith('view:daily_orders', { maxDepth: 4 });
+        expect(flowAnalyzer.getUpstream).toHaveBeenCalledWith('table:orders', { maxDepth: 4, excludeExternal: true });
+        expect(flowAnalyzer.getUpstream).toHaveBeenCalledWith('view:daily_orders', { maxDepth: 4, excludeExternal: true });
         expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'upstreamResult',
             data: expect.objectContaining({
@@ -157,8 +157,8 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
         });
 
         expect(flowAnalyzer.getDownstream).toHaveBeenCalledTimes(2);
-        expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('table:orders', { maxDepth: 6 });
-        expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('cte:daily_orders', { maxDepth: 6 });
+        expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('table:orders', { maxDepth: 6, excludeExternal: true });
+        expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('cte:daily_orders', { maxDepth: 6, excludeExternal: true });
         expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'downstreamResult',
             data: expect.objectContaining({

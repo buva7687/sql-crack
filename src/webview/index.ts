@@ -59,6 +59,7 @@ import {
     setErrorBadgeClickHandler,
     createBatchTabs,
     updateBatchTabs,
+    getScopedAdjacentQueryIndex,
     switchToTab,
     getActiveTabId,
     showFirstRunOverlay,
@@ -261,6 +262,19 @@ function init(): void {
     initRenderer(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
+    // R key triggers a full re-visualize (same as toolbar refresh)
+    document.addEventListener('sql-crack-reset-view', () => {
+        if (window.vscodeApi) {
+            window.vscodeApi.postMessage({ command: 'requestRefresh' });
+        } else {
+            const sql = window.initialSqlCode || '';
+            if (sql) {
+                void visualize(sql);
+                clearStaleIndicator();
+            }
+        }
+    });
+
     // Apply minimap mode from settings
     const minimapMode = (window.showMinimap as MinimapMode) || 'auto';
     setMinimapMode(minimapMode);
@@ -307,15 +321,17 @@ function init(): void {
         // [ for previous query
         if (e.key === '[') {
             e.preventDefault();
-            if (batchResult && currentQueryIndex > 0) {
-                switchToQueryIndex(currentQueryIndex - 1);
+            const prevIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'prev');
+            if (prevIndex !== null) {
+                switchToQueryIndex(prevIndex);
             }
         }
         // ] for next query
         if (e.key === ']') {
             e.preventDefault();
-            if (batchResult && currentQueryIndex < batchResult.queries.length - 1) {
-                switchToQueryIndex(currentQueryIndex + 1);
+            const nextIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'next');
+            if (nextIndex !== null) {
+                switchToQueryIndex(nextIndex);
             }
         }
     });

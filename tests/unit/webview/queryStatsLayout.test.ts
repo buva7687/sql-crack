@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('query stats compact layout', () => {
-    const source = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const source = readFileSync(join(__dirname, '../../../src/webview/panels/infoPanel.ts'), 'utf8');
 
     it('renders summary metrics in a single-row flex container', () => {
         expect(source).toContain('id="query-stats-summary-row"');

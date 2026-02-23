@@ -1,6 +1,57 @@
 import { parseSql } from '../../../src/webview/sqlParser';
 
 describe('Aggregate extraction regression', () => {
+    it('formats CASE aggregate arguments without collapsing to ? placeholders (demo-showcase Q3 pattern)', () => {
+        const sql = `
+SELECT
+    DATE_TRUNC('month', o.order_date) AS month,
+    SUM(CASE
+        WHEN EXTRACT(YEAR FROM o.order_date) = 2024
+        THEN o.total_amount
+        ELSE 0
+    END) AS revenue_2024,
+    COUNT(CASE
+        WHEN EXTRACT(YEAR FROM o.order_date) = 2024
+        THEN o.order_id
+        ELSE NULL
+    END) AS orders_2024
+FROM orders o
+GROUP BY DATE_TRUNC('month', o.order_date);
+        `;
+
+        const result = parseSql(sql, 'PostgreSQL');
+        const aggregateNode = result.nodes.find((n: any) => n.type === 'aggregate' && n.label === 'AGGREGATE') as any;
+        const details = aggregateNode.aggregateDetails.functions as Array<{ expression: string }>;
+        const expressions = details.map(d => d.expression);
+
+        expect(result.error).toBeUndefined();
+        expect(expressions.some(e => /SUM\(\?\)|COUNT\(\?\)/.test(e))).toBe(false);
+        expect(expressions.some(e => /\?\s*=\s*2024/.test(e))).toBe(false);
+        expect(expressions.some(e => e.startsWith('SUM(CASE'))).toBe(true);
+        expect(expressions.some(e => e.startsWith('COUNT(CASE'))).toBe(true);
+        expect(expressions.some(e => e.includes('EXTRACT(YEAR FROM order_date) = 2024'))).toBe(true);
+    });
+
+    it('tracks aggregate function usage from scalar subqueries for query stats', () => {
+        const sql = `
+SELECT
+    c.customer_id,
+    (
+        SELECT COUNT(*)
+        FROM order_items oi2
+        WHERE oi2.order_id = o.order_id
+    ) AS purchase_frequency
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id;
+        `;
+
+        const result = parseSql(sql, 'MySQL');
+        const functionsUsed = result.stats.functionsUsed || [];
+
+        expect(result.error).toBeUndefined();
+        expect(functionsUsed.some(f => f.name === 'COUNT' && f.category === 'aggregate')).toBe(true);
+    });
+
     it('does not leak CASE alias into unrelated aggregate functions (analytics-customer Q3)', () => {
         const sql = `
 SELECT

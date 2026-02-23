@@ -263,6 +263,31 @@ describe('Function Registry', () => {
             expect(isTableValuedFunction('SEQUENCE', 'trino')).toBe(true);
         });
 
+        it('identifies newly added Redshift table-valued functions', () => {
+            expect(isTableValuedFunction('UNNEST', 'redshift')).toBe(true);
+            expect(isTableValuedFunction('GENERATE_SERIES', 'redshift')).toBe(true);
+        });
+
+        it('identifies newly added Hive table-valued functions', () => {
+            expect(isTableValuedFunction('JSON_TUPLE', 'hive')).toBe(true);
+            expect(isTableValuedFunction('PARSE_URL_TUPLE', 'hive')).toBe(true);
+        });
+
+        it('identifies newly added Athena table-valued functions', () => {
+            expect(isTableValuedFunction('SEQUENCE', 'athena')).toBe(true);
+            expect(isTableValuedFunction('FLATTEN', 'athena')).toBe(true);
+        });
+
+        it('identifies newly added Snowflake table-valued functions', () => {
+            expect(isTableValuedFunction('EXTERNAL_TABLE_FILES', 'snowflake')).toBe(true);
+            expect(isTableValuedFunction('INFER_SCHEMA', 'snowflake')).toBe(true);
+        });
+
+        it('identifies newly added BigQuery table-valued functions', () => {
+            expect(isTableValuedFunction('ML.TRAIN', 'bigquery')).toBe(true);
+            expect(isTableValuedFunction('VECTOR_SEARCH', 'bigquery')).toBe(true);
+        });
+
         it('is case-insensitive', () => {
             expect(isTableValuedFunction('unnest', 'postgresql')).toBe(true);
             expect(isTableValuedFunction('Unnest', 'postgresql')).toBe(true);
@@ -275,8 +300,8 @@ describe('Function Registry', () => {
             expect(isTableValuedFunction('random_func', 'postgresql')).toBe(false);
         });
 
-        it('handles dialect with no table-valued functions', () => {
-            expect(isTableValuedFunction('any_func', 'redshift')).toBe(false);
+        it('handles unknown dialect with no table-valued functions', () => {
+            expect(isTableValuedFunction('any_func', 'unknown_dialect')).toBe(false);
         });
     });
 
@@ -299,8 +324,8 @@ describe('Function Registry', () => {
             expect(funcs).toContain('GENERATE_ARRAY');
         });
 
-        it('returns empty array for dialect with no TVFs', () => {
-            const funcs = getTableValuedFunctions('redshift');
+        it('returns empty array for unknown dialect with no TVFs', () => {
+            const funcs = getTableValuedFunctions('unknown_dialect');
 
             expect(Array.isArray(funcs)).toBe(true);
             expect(funcs.length).toBe(0);
@@ -373,10 +398,10 @@ describe('Function Registry', () => {
             expect(bigquery.tableValued.has('UNNEST')).toBe(true);
         });
 
-        it('returns empty tableValued set for dialects without TVFs', () => {
-            const redshift = getFunctionsForDialect('redshift');
-            expect(redshift.tableValued).toBeInstanceOf(Set);
-            expect(redshift.tableValued.size).toBe(0);
+        it('returns empty tableValued set for unknown dialects without TVFs', () => {
+            const unknown = getFunctionsForDialect('unknown_dialect');
+            expect(unknown.tableValued).toBeInstanceOf(Set);
+            expect(unknown.tableValued.size).toBe(0);
         });
 
         it('includes custom table-valued functions', () => {

@@ -2,26 +2,43 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('toolbar control visibility and overflow behavior', () => {
-    const source = readFileSync(
+    const toolbarSource = readFileSync(
         join(__dirname, '../../../src/webview/ui/toolbar.ts'),
         'utf8'
     );
+    const featureMenusSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/toolbar/featureMenus.ts'),
+        'utf8'
+    );
+    const actionGroupsSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/toolbar/actionGroups.ts'),
+        'utf8'
+    );
+    const featureGroupSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/toolbar/featureGroup.ts'),
+        'utf8'
+    );
+    const overflowSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/toolbar/overflowMenu.ts'),
+        'utf8'
+    );
+    const source = `${toolbarSource}\n${featureMenusSource}\n${actionGroupsSource}\n${featureGroupSource}\n${overflowSource}`;
 
     it('keeps view-location and focus-direction controls out of overflow hiding', () => {
         expect(source).toContain("viewLocBtn.dataset.overflowKeepVisible = 'true';");
         expect(source).toContain("container.dataset.overflowKeepVisible = 'true';");
         expect(source).toContain("pinsBtn.dataset.overflowKeepVisible = 'true';");
-        expect(source).toContain("if (el.dataset.overflowKeepVisible === 'true') {continue;}");
-        expect(source).toContain("if (el.tagName !== 'BUTTON') {continue;}");
-        expect(source).toContain('Children of actions: [zoomGroup, featureGroup, exportGroup, overflowContainer]');
+        expect(source).toMatch(/if \(el\.dataset\.overflowKeepVisible === 'true'\)\s*\{\s*continue;/);
+        expect(source).toMatch(/if \(el\.tagName !== 'BUTTON'\)\s*\{\s*continue;/);
+        expect(source).toContain('Children of actions: [zoomGroup, featureGroup, exportGroup]');
     });
 
     it('prevents toolbar group shrink-clipping before overflow handling runs', () => {
         expect(source).toContain('function createZoomGroup');
-        expect(source).toContain('function createFeatureGroup');
+        expect(source).toContain('function createFeatureGroupElement');
         expect(source).toContain('function createExportGroup');
         expect(source).toMatch(/function createZoomGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
-        expect(source).toMatch(/function createFeatureGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
+        expect(source).toMatch(/function createFeatureGroupElement[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
         expect(source).toMatch(/function createExportGroup[\s\S]*?display:\s*flex;[\s\S]*?flex-shrink:\s*0;/);
     });
 

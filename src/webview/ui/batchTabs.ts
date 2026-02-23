@@ -13,15 +13,86 @@ export interface BatchTabsCallbacks {
     isDarkTheme: () => boolean;
 }
 
+export type BatchNavigationScope = 'all' | 'ok' | 'failed' | 'partial';
+
 // Store current state for re-rendering on theme change
 let currentBatchResult: BatchParseResult | null = null;
 let currentQueryIdx: number = 0;
 let currentCallbacks: BatchTabsCallbacks | null = null;
-let errorSummaryCleanup: (() => void) | null = null;
 let batchTabsAbortController: AbortController | null = null;
+let currentNavigationScope: BatchNavigationScope = 'all';
 
 function getBatchTabsListenerOptions(): AddEventListenerOptions | undefined {
     return batchTabsAbortController ? { signal: batchTabsAbortController.signal } : undefined;
+}
+
+function getQueryStatus(query: BatchParseResult['queries'][number]): Exclude<BatchNavigationScope, 'all'> {
+    if (query.error) { return 'failed'; }
+    if (query.partial) { return 'partial'; }
+    return 'ok';
+}
+
+function queryMatchesScope(
+    query: BatchParseResult['queries'][number],
+    scope: BatchNavigationScope
+): boolean {
+    if (scope === 'all') { return true; }
+    return getQueryStatus(query) === scope;
+}
+
+function getScopedQueryIndices(
+    batchResult: BatchParseResult,
+    scope: BatchNavigationScope
+): number[] {
+    if (scope === 'all') {
+        return batchResult.queries.map((_query, idx) => idx);
+    }
+    const indices: number[] = [];
+    batchResult.queries.forEach((query, idx) => {
+        if (queryMatchesScope(query, scope)) {
+            indices.push(idx);
+        }
+    });
+    return indices;
+}
+
+function getScopedBoundaryIndex(
+    batchResult: BatchParseResult,
+    direction: 'first' | 'last'
+): number | null {
+    const indices = getScopedQueryIndices(batchResult, currentNavigationScope);
+    if (indices.length === 0) { return null; }
+    return direction === 'first' ? indices[0] : indices[indices.length - 1];
+}
+
+export function getBatchNavigationScope(): BatchNavigationScope {
+    return currentNavigationScope;
+}
+
+export function getScopedAdjacentQueryIndex(
+    batchResult: BatchParseResult | null,
+    currentIndex: number,
+    direction: 'prev' | 'next'
+): number | null {
+    if (!batchResult || batchResult.queries.length <= 1) { return null; }
+    const indices = getScopedQueryIndices(batchResult, currentNavigationScope);
+    if (indices.length === 0) { return null; }
+
+    if (direction === 'prev') {
+        for (let i = indices.length - 1; i >= 0; i--) {
+            if (indices[i] < currentIndex) {
+                return indices[i];
+            }
+        }
+        return null;
+    }
+
+    for (let i = 0; i < indices.length; i++) {
+        if (indices[i] > currentIndex) {
+            return indices[i];
+        }
+    }
+    return null;
 }
 
 export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCallbacks): void {
@@ -65,10 +136,7 @@ export function createBatchTabs(container: HTMLElement, callbacks: BatchTabsCall
 export function disposeBatchTabs(): void {
     batchTabsAbortController?.abort();
     batchTabsAbortController = null;
-    if (errorSummaryCleanup) {
-        errorSummaryCleanup();
-        errorSummaryCleanup = null;
-    }
+    currentNavigationScope = 'all';
 }
 
 function updateBatchTabsTheme(dark: boolean): void {
@@ -88,11 +156,6 @@ export function updateBatchTabs(
     callbacks: BatchTabsCallbacks
 ): void {
     const listenerOptions = getBatchTabsListenerOptions();
-
-    if (errorSummaryCleanup) {
-        errorSummaryCleanup();
-        errorSummaryCleanup = null;
-    }
 
     // Store for theme change re-renders
     currentBatchResult = batchResult;
@@ -125,9 +188,20 @@ export function updateBatchTabs(
     const warningBgTintHover = isDark ? 'rgba(251, 191, 36, 0.22)' : 'rgba(217, 119, 6, 0.16)';
     const successBgTint = isDark ? 'rgba(74, 222, 128, 0.10)' : 'rgba(22, 163, 74, 0.08)';
     const successBgTintHover = isDark ? 'rgba(74, 222, 128, 0.16)' : 'rgba(22, 163, 74, 0.12)';
+    const summaryBorder = isDark ? 'rgba(148, 163, 184, 0.35)' : 'rgba(148, 163, 184, 0.45)';
 
     tabsContainer.style.display = 'flex';
     tabsContainer.innerHTML = '';
+
+    let scopeQueryIndices = getScopedQueryIndices(batchResult, currentNavigationScope);
+    if (currentNavigationScope !== 'all' && scopeQueryIndices.length === 0) {
+        currentNavigationScope = 'all';
+        scopeQueryIndices = getScopedQueryIndices(batchResult, currentNavigationScope);
+    }
+    const prevScopedIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'prev');
+    const nextScopedIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'next');
+    const firstScopedIndex = getScopedBoundaryIndex(batchResult, 'first');
+    const lastScopedIndex = getScopedBoundaryIndex(batchResult, 'last');
 
     const navBtnStyle = (enabled: boolean) => `
         background: transparent;
@@ -141,12 +215,12 @@ export function updateBatchTabs(
     // First button
     const firstBtn = document.createElement('button');
     firstBtn.innerHTML = '⏮';
-    firstBtn.title = 'First query';
-    firstBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
-    firstBtn.disabled = currentQueryIndex === 0;
+    firstBtn.title = currentNavigationScope === 'all' ? 'First query' : `First ${currentNavigationScope} query`;
+    firstBtn.style.cssText = navBtnStyle(firstScopedIndex !== null && firstScopedIndex !== currentQueryIndex);
+    firstBtn.disabled = firstScopedIndex === null || firstScopedIndex === currentQueryIndex;
     firstBtn.addEventListener('click', () => {
-        if (currentQueryIndex > 0) {
-            callbacks.onQuerySelect(0);
+        if (firstScopedIndex !== null && firstScopedIndex !== currentQueryIndex) {
+            callbacks.onQuerySelect(firstScopedIndex);
         }
     }, listenerOptions);
     tabsContainer.appendChild(firstBtn);
@@ -154,22 +228,30 @@ export function updateBatchTabs(
     // Previous button
     const prevBtn = document.createElement('button');
     prevBtn.innerHTML = '◀';
-    prevBtn.title = 'Previous query';
-    prevBtn.style.cssText = navBtnStyle(currentQueryIndex > 0);
-    prevBtn.disabled = currentQueryIndex === 0;
+    prevBtn.title = currentNavigationScope === 'all' ? 'Previous query' : `Previous ${currentNavigationScope} query`;
+    prevBtn.style.cssText = navBtnStyle(prevScopedIndex !== null);
+    prevBtn.disabled = prevScopedIndex === null;
     prevBtn.addEventListener('click', () => {
-        if (currentQueryIndex > 0) {
-            callbacks.onQuerySelect(currentQueryIndex - 1);
+        if (prevScopedIndex !== null) {
+            callbacks.onQuerySelect(prevScopedIndex);
         }
     }, listenerOptions);
     tabsContainer.appendChild(prevBtn);
 
-    // Query tabs (show up to 7)
+    // Query tabs (show up to 7), scoped when a status filter is active
     const maxTabs = 7;
-    const startIdx = Math.max(0, Math.min(currentQueryIndex - Math.floor(maxTabs / 2), queryCount - maxTabs));
-    const endIdx = Math.min(startIdx + maxTabs, queryCount);
+    const tabIndices = currentNavigationScope === 'all'
+        ? batchResult.queries.map((_query, idx) => idx)
+        : scopeQueryIndices;
+    const activePos = tabIndices.indexOf(currentQueryIndex);
+    const startPos = Math.max(0, Math.min(
+        activePos >= 0 ? activePos - Math.floor(maxTabs / 2) : 0,
+        Math.max(0, tabIndices.length - maxTabs)
+    ));
+    const endPos = Math.min(startPos + maxTabs, tabIndices.length);
 
-    for (let i = startIdx; i < endIdx; i++) {
+    for (let pos = startPos; pos < endPos; pos++) {
+        const i = tabIndices[pos];
         const tab = document.createElement('button');
         const query = batchResult.queries[i];
         const isActive = i === currentQueryIndex;
@@ -222,12 +304,12 @@ export function updateBatchTabs(
     // Next button
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '▶';
-    nextBtn.title = 'Next query';
-    nextBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
-    nextBtn.disabled = currentQueryIndex >= queryCount - 1;
+    nextBtn.title = currentNavigationScope === 'all' ? 'Next query' : `Next ${currentNavigationScope} query`;
+    nextBtn.style.cssText = navBtnStyle(nextScopedIndex !== null);
+    nextBtn.disabled = nextScopedIndex === null;
     nextBtn.addEventListener('click', () => {
-        if (currentQueryIndex < queryCount - 1) {
-            callbacks.onQuerySelect(currentQueryIndex + 1);
+        if (nextScopedIndex !== null) {
+            callbacks.onQuerySelect(nextScopedIndex);
         }
     }, listenerOptions);
     tabsContainer.appendChild(nextBtn);
@@ -235,12 +317,12 @@ export function updateBatchTabs(
     // Last button
     const lastBtn = document.createElement('button');
     lastBtn.innerHTML = '⏭';
-    lastBtn.title = 'Last query';
-    lastBtn.style.cssText = navBtnStyle(currentQueryIndex < queryCount - 1);
-    lastBtn.disabled = currentQueryIndex >= queryCount - 1;
+    lastBtn.title = currentNavigationScope === 'all' ? 'Last query' : `Last ${currentNavigationScope} query`;
+    lastBtn.style.cssText = navBtnStyle(lastScopedIndex !== null && lastScopedIndex !== currentQueryIndex);
+    lastBtn.disabled = lastScopedIndex === null || lastScopedIndex === currentQueryIndex;
     lastBtn.addEventListener('click', () => {
-        if (currentQueryIndex < queryCount - 1) {
-            callbacks.onQuerySelect(queryCount - 1);
+        if (lastScopedIndex !== null && lastScopedIndex !== currentQueryIndex) {
+            callbacks.onQuerySelect(lastScopedIndex);
         }
     }, listenerOptions);
     tabsContainer.appendChild(lastBtn);
@@ -254,124 +336,91 @@ export function updateBatchTabs(
         padding-left: 8px;
         border-left: 1px solid rgba(148, 163, 184, 0.2);
     `;
-    counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
+    if (currentNavigationScope === 'all') {
+        counter.textContent = `${currentQueryIndex + 1} / ${queryCount}`;
+    } else {
+        const scopedPos = scopeQueryIndices.indexOf(currentQueryIndex);
+        counter.textContent = `${scopedPos + 1} / ${scopeQueryIndices.length}`;
+    }
     tabsContainer.appendChild(counter);
 
-    // Parse status summary indicator (errors + partial parse count)
+    // Parse status summary chips (compact + scope toggle)
     const errorCount = batchResult.errorCount || 0;
     const partialCount = batchResult.queries.filter(q => q.partial && !q.error).length;
     const successCount = Math.max(0, queryCount - errorCount - partialCount);
-    if (errorCount > 0 || partialCount > 0) {
-        const errorSummary = document.createElement('span');
-        errorSummary.style.cssText = `
-            position: relative;
-            color: ${errorCount > 0 ? errorColor : warningColor};
+    const summary = document.createElement('span');
+    summary.style.cssText = `
+        margin-left: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    `;
+
+    const chips: Array<{ scope: Exclude<BatchNavigationScope, 'all'>; count: number; color: string; bg: string; bgActive: string }> = [
+        {
+            scope: 'ok',
+            count: successCount,
+            color: successColor,
+            bg: successBgTint,
+            bgActive: successBgTintHover,
+        },
+        {
+            scope: 'failed',
+            count: errorCount,
+            color: errorColor,
+            bg: errorBgTint,
+            bgActive: errorBgTintHover,
+        },
+        {
+            scope: 'partial',
+            count: partialCount,
+            color: warningColor,
+            bg: warningBgTint,
+            bgActive: warningBgTintHover,
+        },
+    ];
+
+    chips.forEach(({ scope, count, color, bg, bgActive }) => {
+        const isActive = currentNavigationScope === scope;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.textContent = `${count} ${scope}`;
+        chip.disabled = count === 0;
+        chip.title = count === 0
+            ? `No ${scope} queries in this batch`
+            : isActive
+                ? `Show all queries`
+                : `Navigate ${scope} queries with [ and ]`;
+        chip.style.cssText = `
+            border: 1px solid ${isActive ? color : summaryBorder};
+            background: ${isActive ? bgActive : bg};
+            color: ${count === 0 ? textColorDim : (isActive ? color : textColorMuted)};
             font-size: 10px;
-            margin-left: 8px;
+            font-weight: ${isActive ? '600' : '500'};
+            border-radius: 10px;
             padding: 2px 6px;
-            background: ${errorCount > 0
-                ? (isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.1)')
-                : (isDark ? 'rgba(251, 191, 36, 0.15)' : 'rgba(217, 119, 6, 0.1)')};
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
+            cursor: ${count === 0 ? 'default' : 'pointer'};
+            opacity: ${count === 0 ? '0.55' : '1'};
+            line-height: 1.2;
+            transition: all 0.15s ease;
         `;
-        const statusIcon = errorCount > 0 ? ICONS.warning : ICONS.bolt;
-        const failedPart = errorCount > 0
-            ? `<button type="button" id="batch-tabs-failed-trigger" style="
-                border: none;
-                background: transparent;
-                color: ${errorColor};
-                font-size: 10px;
-                cursor: pointer;
-                font-weight: 600;
-                padding: 0;
-                text-decoration: underline;
-                text-underline-offset: 1px;
-            ">${errorCount} failed</button>`
-            : `0 failed`;
-        errorSummary.innerHTML = `
-            <span style="font-size: 10px; display: inline-flex; width: 12px; height: 12px;">${statusIcon}</span>
-            <span>
-                ${successCount} ok, ${failedPart}, ${partialCount} partial
-            </span>
-        `;
-        errorSummary.title = `${successCount} ok, ${errorCount} failed, ${partialCount} partial`;
-        tabsContainer.appendChild(errorSummary);
-
-        if (errorCount > 0) {
-            const trigger = errorSummary.querySelector('#batch-tabs-failed-trigger') as HTMLButtonElement | null;
-            if (trigger) {
-                const errorList = document.createElement('div');
-                errorList.style.cssText = `
-                    display: none;
-                    position: absolute;
-                    top: calc(100% + 6px);
-                    right: 0;
-                    min-width: 280px;
-                    max-width: 420px;
-                    max-height: 220px;
-                    overflow-y: auto;
-                    background: ${isDark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)'};
-                    border: 1px solid ${isDark ? 'rgba(248, 113, 113, 0.35)' : 'rgba(220, 38, 38, 0.35)'};
-                    border-radius: 6px;
-                    box-shadow: ${isDark ? '0 8px 20px rgba(0, 0, 0, 0.4)' : '0 8px 20px rgba(15, 23, 42, 0.2)'};
-                    z-index: ${Z_INDEX.floatingPanel};
-                `;
-
-                const parseErrors = batchResult.parseErrors || [];
-                parseErrors.forEach(parseError => {
-                    const item = document.createElement('button');
-                    const shortMessage = truncateSql(parseError.message, 120);
-                    item.type = 'button';
-                    item.style.cssText = `
-                        display: block;
-                        width: 100%;
-                        text-align: left;
-                        border: none;
-                        background: transparent;
-                        color: ${isDark ? '#fecaca' : '#991b1b'};
-                        font-size: 11px;
-                        padding: 8px 10px;
-                        cursor: pointer;
-                    `;
-                    item.textContent = `Q${parseError.queryIndex + 1}: ${shortMessage}`;
-                    item.title = parseError.message;
-                    item.addEventListener('mouseenter', () => {
-                        item.style.background = isDark ? 'rgba(248, 113, 113, 0.12)' : 'rgba(220, 38, 38, 0.10)';
-                    }, listenerOptions);
-                    item.addEventListener('mouseleave', () => {
-                        item.style.background = 'transparent';
-                    }, listenerOptions);
-                    item.addEventListener('click', (event) => {
-                        event.stopPropagation();
-                        errorList.style.display = 'none';
-                        callbacks.onQuerySelect(parseError.queryIndex);
-                    }, listenerOptions);
-                    errorList.appendChild(item);
-                });
-
-                errorSummary.appendChild(errorList);
-
-                trigger.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    errorList.style.display = errorList.style.display === 'none' ? 'block' : 'none';
-                }, listenerOptions);
-
-                const onDocumentClick = (event: Event) => {
-                    const target = event.target as Node | null;
-                    if (!target || !errorSummary.contains(target)) {
-                        errorList.style.display = 'none';
-                    }
-                };
-                document.addEventListener('click', onDocumentClick, listenerOptions);
-                errorSummaryCleanup = () => {
-                    document.removeEventListener('click', onDocumentClick);
-                };
+        chip.addEventListener('click', () => {
+            if (count === 0) { return; }
+            const nextScope: BatchNavigationScope = isActive ? 'all' : scope;
+            currentNavigationScope = nextScope;
+            if (nextScope !== 'all' && !queryMatchesScope(batchResult.queries[currentQueryIndex], nextScope)) {
+                const nextScopeIndices = getScopedQueryIndices(batchResult, nextScope);
+                if (nextScopeIndices.length > 0) {
+                    callbacks.onQuerySelect(nextScopeIndices[0]);
+                    return;
+                }
             }
-        }
-    }
+            updateBatchTabs(batchResult, currentQueryIndex, callbacks);
+        }, listenerOptions);
+        summary.appendChild(chip);
+    });
+
+    tabsContainer.appendChild(summary);
 }
 
 function truncateSql(sql: string, maxLen: number): string {

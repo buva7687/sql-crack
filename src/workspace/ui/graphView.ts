@@ -5,6 +5,7 @@ import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } 
 import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
 import { ICONS, getWorkspaceNodeIcon } from '../../shared';
+import { escapeHtml } from '../../shared/stringUtils';
 
 /**
  * Parameters for generating graph view body
@@ -27,12 +28,29 @@ export function generateGraphBody(params: GraphBodyParams): string {
     
     // Generate graph data JSON for client script
     const graphData = JSON.stringify({
-        nodes: graph.nodes.map(node => ({
-            id: node.id,
-            label: node.label,
-            type: node.type,
-            filePath: node.filePath
-        }))
+        nodes: graph.nodes.map(node => {
+            const columnSet = new Set<string>();
+            if (Array.isArray(node.definitions)) {
+                for (const def of node.definitions) {
+                    if (!def || !Array.isArray(def.columns)) {
+                        continue;
+                    }
+                    for (const col of def.columns) {
+                        const name = typeof col?.name === 'string' ? col.name : '';
+                        if (name) {
+                            columnSet.add(name);
+                        }
+                    }
+                }
+            }
+            return {
+                id: node.id,
+                label: node.label,
+                type: node.type,
+                filePath: node.filePath,
+                columns: Array.from(columnSet)
+            };
+        })
     });
 
     // Generate search filter query
@@ -156,13 +174,6 @@ function generateGraphArea(graph: WorkspaceDependencyGraph, searchFilter: Search
                     </svg>
                 </button>
             </div>
-            <select id="filter-type" class="search-select">
-                <option value="all" ${searchFilter.nodeTypes === undefined ? 'selected' : ''}>All Types</option>
-                <option value="file" ${searchFilter.nodeTypes?.includes('file') ? 'selected' : ''}>Files Only</option>
-                <option value="table" ${searchFilter.nodeTypes?.includes('table') ? 'selected' : ''}>Tables Only</option>
-                <option value="view" ${searchFilter.nodeTypes?.includes('view') ? 'selected' : ''}>Views Only</option>
-                <option value="external" ${searchFilter.nodeTypes?.includes('external') ? 'selected' : ''}>External Only</option>
-            </select>
             ${searchFilter.useRegex ? '<span class="regex-badge">Regex</span>' : ''}
             ${searchFilter.caseSensitive ? '<span class="case-badge">Aa</span>' : ''}
         </div>
@@ -259,18 +270,6 @@ function truncateLabel(label: string, maxLength: number): string {
 }
 
 /**
- * Escape HTML entities
- */
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-/**
  * Generate nonce for CSP
  */
 function getNonce(): string {
@@ -293,7 +292,7 @@ export function getGraphViewHtml(
         missingDefinitions: any[];
     }
 ): string {
-    const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length;
+    const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
     
     return `<!DOCTYPE html>
 <html lang="en">

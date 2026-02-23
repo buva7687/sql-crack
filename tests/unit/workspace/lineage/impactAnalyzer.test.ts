@@ -125,6 +125,31 @@ describe('ImpactAnalyzer', () => {
             const report = analyzer.analyzeTableChange('orders');
             expect(report.directImpacts).toHaveLength(0);
         });
+
+        it('uses safe table names for orphan foreign-key columns without parentId', () => {
+            const nodes = [
+                makeNode('table:customers', 'table', 'customers'),
+                makeNode('column:unknown.customer_id', 'column', 'customer_id', {
+                    columnInfo: {
+                        name: 'customer_id',
+                        dataType: 'INTEGER',
+                        nullable: false,
+                        primaryKey: false,
+                        foreignKey: {
+                            referencedTable: 'customers',
+                            referencedColumn: 'id'
+                        }
+                    }
+                })
+            ];
+            const { analyzer } = makeAnalyzer(nodes, []);
+
+            const report = analyzer.analyzeTableChange('customers');
+            const reasons = report.transitiveImpacts.map(i => i.reason);
+
+            expect(reasons.some(reason => reason.includes('null.'))).toBe(false);
+            expect(reasons.some(reason => reason.endsWith('.customer_id'))).toBe(true);
+        });
     });
 
     describe('analyzeColumnChange', () => {

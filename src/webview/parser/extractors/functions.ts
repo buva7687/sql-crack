@@ -1,7 +1,23 @@
 // Window, aggregate, and case function extraction utilities
 
-import { WindowFunctionDetail, AggregateFunctionDetail, CaseDetail, SqlDialect } from '../../types';
+import type {
+    AggregateFunctionDetail,
+    CaseDetail,
+    SqlDialect,
+    WindowFunctionDetail
+} from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
+import { unwrapIdentifierValue } from '../astUtils';
+import { formatExpressionFromAst } from './columns';
+
+export type TrackFunctionUsageFn = (
+    functionName: unknown,
+    category: 'aggregate' | 'window' | 'tvf' | 'scalar'
+) => void;
+
+export interface ExtractFunctionsOptions {
+    trackFunctionUsage?: TrackFunctionUsageFn;
+}
 
 export function extractWindowFunctions(columns: any): string[] {
     if (!columns || !Array.isArray(columns)) { return []; }
@@ -30,11 +46,14 @@ export function extractWindowFunctions(columns: any): string[] {
     return windowFuncs;
 }
 
-export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): WindowFunctionDetail[] {
+export function extractWindowFunctionDetails(
+    columns: any,
+    dialect: SqlDialect = 'MySQL',
+    options: ExtractFunctionsOptions = {}
+): WindowFunctionDetail[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
     const details: WindowFunctionDetail[] = [];
-    // Get dialect-specific window functions
     const windowFuncList = getWindowFunctions(dialect);
 
     const getStringName = (obj: any): string | null => {
@@ -80,7 +99,9 @@ export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect =
                         }
                     }
                 } catch (e) {
-                    window.debugLogging && console.debug('[functions] JSON.stringify failed for window function detection:', e);
+                    if (typeof window !== 'undefined' && (window as any).debugLogging) {
+                        console.debug('[functions] JSON.stringify failed for window function detection:', e);
+                    }
                 }
             }
 
@@ -101,6 +122,7 @@ export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect =
             }
 
             const cleanName = typeof funcName === 'string' ? funcName : 'WINDOW';
+            options.trackFunctionUsage?.(cleanName, 'window');
 
             details.push({
                 name: cleanName.toUpperCase(),
@@ -114,66 +136,225 @@ export function extractWindowFunctionDetails(columns: any, dialect: SqlDialect =
     return details;
 }
 
-export function extractAggregateFunctionDetails(columns: any, dialect: SqlDialect = 'MySQL'): AggregateFunctionDetail[] {
+export type AggregateFunctionDetailWithSource = AggregateFunctionDetail & {
+    sourceColumn?: string;
+    sourceTable?: string;
+};
+
+export function extractAggregateFunctionDetails(
+    columns: any,
+    dialect: SqlDialect = 'MySQL'
+): AggregateFunctionDetailWithSource[] {
     if (!columns || !Array.isArray(columns)) { return []; }
 
-    // Get dialect-specific aggregate functions
     const aggregateFuncSet = new Set(getAggregateFunctions(dialect));
-    const details: AggregateFunctionDetail[] = [];
+    const details: AggregateFunctionDetailWithSource[] = [];
+
+    function getExpressionFunctionName(expr: any): string {
+        if (typeof expr?.name === 'string') {
+            return expr.name.toUpperCase();
+        }
+        const nameParts = expr?.name?.name;
+        if (Array.isArray(nameParts) && nameParts.length > 0) {
+            return String(nameParts[0]?.value || '').toUpperCase();
+        }
+        return '';
+    }
+
+    function normalizeColumnRefName(columnRef: any): string {
+        const normalized = unwrapIdentifierValue(columnRef?.column);
+        if (normalized) {
+            return normalized;
+        }
+        if (typeof columnRef?.column === 'string') {
+            return columnRef.column;
+        }
+        return '?';
+    }
+
+    function formatAggregateArg(arg: any): string {
+        if (!arg || typeof arg !== 'object') {
+            return arg === undefined ? '?' : String(arg);
+        }
+
+        const argType = typeof arg.type === 'string' ? arg.type.toLowerCase() : '';
+
+        if (arg.type === 'star') {
+            return '*';
+        }
+        if (arg.type === 'column_ref') {
+            return normalizeColumnRefName(arg);
+        }
+        if (arg.type === 'expr_list' && Array.isArray(arg.value)) {
+            return arg.value.map(formatAggregateArg).join(', ');
+        }
+        if (argType === 'number' || argType === 'bool' || argType === 'boolean') {
+            return String(arg.value ?? '?');
+        }
+        if (argType === 'null') {
+            return 'NULL';
+        }
+        if (arg.type && String(arg.type).toLowerCase().includes('string')) {
+            return `'${String(arg.value ?? '')}'`;
+        }
+        if (argType === 'binary_expr') {
+            const left = formatAggregateArg(arg.left);
+            const right = formatAggregateArg(arg.right);
+            return `${left} ${arg.operator || '?'} ${right}`;
+        }
+        if (argType === 'unary_expr') {
+            return `${arg.operator || ''}${formatAggregateArg(arg.expr ?? arg.value)}`;
+        }
+        if (argType === 'cast') {
+            const castExpr = formatAggregateArg(arg.expr);
+            const dataType = arg.target?.dataType || arg.target || '?';
+            return `CAST(${castExpr} AS ${String(dataType)})`;
+        }
+        if (argType === 'aggr_func' || argType === 'function') {
+            const funcName = getExpressionFunctionName(arg) || 'FUNC';
+            const argsContainer = arg.args;
+            const argNode = argsContainer?.value ?? argsContainer?.expr ?? argsContainer;
+            const argList = Array.isArray(argNode) ? argNode : (argNode ? [argNode] : []);
+            const distinct = argsContainer?.distinct ? 'DISTINCT ' : '';
+            const argsStr = argList.map(formatAggregateArg).join(', ');
+            return `${funcName}(${distinct}${argsStr})`;
+        }
+        if (argType === 'case') {
+            const baseExpr = arg.expr ? ` ${formatAggregateArg(arg.expr)}` : '';
+            let elseExpr = arg.else !== undefined ? ` ELSE ${formatAggregateArg(arg.else)}` : '';
+            const clauses = Array.isArray(arg.args)
+                ? arg.args
+                    .map((caseArg: any) => {
+                        const caseArgType = typeof caseArg?.type === 'string' ? caseArg.type.toLowerCase() : '';
+                        if (caseArgType === 'else') {
+                            const elseResult = caseArg?.result ?? caseArg?.expr ?? caseArg?.value;
+                            if (elseResult !== undefined && !elseExpr) {
+                                elseExpr = ` ELSE ${formatAggregateArg(elseResult)}`;
+                            }
+                            return '';
+                        }
+
+                        const whenExpr = caseArg?.cond ?? caseArg?.when ?? caseArg?.expr;
+                        const thenExpr = caseArg?.result ?? caseArg?.then ?? caseArg?.value;
+                        if (!whenExpr || thenExpr === undefined) {
+                            return '';
+                        }
+                        return `WHEN ${formatAggregateArg(whenExpr)} THEN ${formatAggregateArg(thenExpr)}`;
+                    })
+                    .filter(Boolean)
+                    .join(' ')
+                : '';
+            if (!clauses && !elseExpr) {
+                return 'CASE...END';
+            }
+            return `CASE${baseExpr} ${clauses}${elseExpr} END`.replace(/\s+/g, ' ').trim();
+        }
+        if (argType === 'extract') {
+            const field = arg.args?.field ? String(arg.args.field) : '?';
+            const source = arg.args?.source ? formatAggregateArg(arg.args.source) : '?';
+            return `EXTRACT(${field} FROM ${source})`;
+        }
+        if (arg.value !== undefined) {
+            return String(arg.value);
+        }
+        if (arg.column) {
+            return String(arg.column);
+        }
+        if (arg.expr) {
+            return formatAggregateArg(arg.expr);
+        }
+        const formatted = formatExpressionFromAst(arg);
+        if (formatted && formatted !== 'expr') {
+            return formatted;
+        }
+        return '?';
+    }
 
     function extractAggregatesFromExpr(expr: any): void {
-        if (!expr) {return;}
-
-        const exprFuncName = String(expr.name || '').toUpperCase();
-        if (expr.type === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
-            const funcName = exprFuncName || 'AGG';
-
-            let expression = funcName + '()';
-            if (expr.args) {
-                const args = expr.args.value || expr.args;
-                if (Array.isArray(args)) {
-                    const argStrs = args.map((arg: any) => {
-                        if (arg.column) {return arg.column;}
-                        if (arg.value) {return String(arg.value);}
-                        if (arg.expr?.column) {return arg.expr.column;}
-                        return '?';
-                    });
-                    expression = funcName + '(' + argStrs.join(', ') + ')';
-                } else if (args.column) {
-                    expression = funcName + '(' + args.column + ')';
-                }
-            }
-
-            details.push({
-                name: funcName,
-                expression: expression,
-                alias: undefined
-            });
+        if (!expr || typeof expr !== 'object') {
             return;
         }
 
-        if (expr.args) {
-            const args = expr.args.value || expr.args;
-            if (Array.isArray(args)) {
-                args.forEach(extractAggregatesFromExpr);
-            } else {
-                extractAggregatesFromExpr(args);
+        if (Array.isArray(expr)) {
+            for (const item of expr) {
+                extractAggregatesFromExpr(item);
             }
+            return;
         }
-        if (expr.left) {extractAggregatesFromExpr(expr.left);}
-        if (expr.right) {extractAggregatesFromExpr(expr.right);}
+
+        const exprType = typeof expr.type === 'string' ? expr.type.toLowerCase() : '';
+        const exprFuncName = getExpressionFunctionName(expr);
+        if (exprType === 'aggr_func' || (exprFuncName && aggregateFuncSet.has(exprFuncName))) {
+            const funcName = exprFuncName || 'AGG';
+            const argsContainer = expr.args;
+            const argNode = argsContainer?.value ?? argsContainer?.expr ?? argsContainer;
+            const argList = Array.isArray(argNode) ? argNode : (argNode ? [argNode] : []);
+            const hasDistinct = String(argsContainer?.distinct || '').toUpperCase() === 'DISTINCT';
+
+            let sourceColumn: string | undefined;
+            let sourceTable: string | undefined;
+            const argStrs = argList.map((arg: any) => {
+                if (!sourceColumn && arg?.type === 'column_ref') {
+                    sourceColumn = normalizeColumnRefName(arg);
+                    sourceTable = arg.table;
+                } else if (!sourceColumn && arg?.expr?.type === 'column_ref') {
+                    sourceColumn = normalizeColumnRefName(arg.expr);
+                    sourceTable = arg.expr.table;
+                }
+                return formatAggregateArg(arg);
+            }).filter(Boolean);
+
+            const distinctPrefix = hasDistinct ? 'DISTINCT ' : '';
+            const expression = `${funcName}(${distinctPrefix}${argStrs.join(', ')})`;
+
+            details.push({
+                name: funcName,
+                expression,
+                alias: undefined,
+                sourceColumn,
+                sourceTable
+            });
+        }
+
+        for (const value of Object.values(expr)) {
+            extractAggregatesFromExpr(value);
+        }
     }
 
     for (const col of columns) {
-        if (col.expr) {
-            extractAggregatesFromExpr(col.expr);
-            if (col.as && details.length > 0) {
-                details[details.length - 1].alias = col.as;
-            }
+        if (!col?.expr) {
+            continue;
+        }
+
+        const startIndex = details.length;
+        extractAggregatesFromExpr(col.expr);
+        const addedCount = details.length - startIndex;
+        const topExprType = typeof col.expr?.type === 'string' ? col.expr.type.toLowerCase() : '';
+        const topExprName = getExpressionFunctionName(col.expr);
+        const isTopLevelAggregate =
+            topExprType === 'aggr_func' || (topExprName && aggregateFuncSet.has(topExprName));
+
+        if (col.as && addedCount === 1 && isTopLevelAggregate) {
+            details[startIndex].alias = col.as;
         }
     }
 
-    return details;
+    const deduped: AggregateFunctionDetailWithSource[] = [];
+    const indexByKey = new Map<string, number>();
+    for (const detail of details) {
+        const key = `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex === undefined) {
+            indexByKey.set(key, deduped.length);
+            deduped.push(detail);
+            continue;
+        }
+        if (!deduped[existingIndex].alias && detail.alias) {
+            deduped[existingIndex].alias = detail.alias;
+        }
+    }
+
+    return deduped;
 }
 
 export function extractCaseStatementDetails(columns: any): CaseDetail[] {

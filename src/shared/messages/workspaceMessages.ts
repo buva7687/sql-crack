@@ -25,7 +25,7 @@ export interface ImpactEntry {
 
 export interface ImpactReportResult {
     changeType: string;
-    target: { type: 'table' | 'column'; name: string; tableName?: string };
+    target: { type: 'table' | 'view' | 'column'; name: string; tableName?: string };
     severity: string;
     summary: { totalAffected: number; tablesAffected: number; viewsAffected: number; queriesAffected: number; filesAffected: number };
     directImpacts: ImpactEntry[];
@@ -40,6 +40,9 @@ export interface SearchResultEntry {
     filePath?: string;
 }
 
+export type WorkspaceUxMetricValue = string | number | boolean | null;
+export type WorkspaceUxMetricMetadata = Record<string, WorkspaceUxMetricValue>;
+
 // ─── Webview → Host messages ───
 
 export type WorkspaceWebviewMessage =
@@ -49,19 +52,21 @@ export type WorkspaceWebviewMessage =
     | { command: 'switchGraphMode'; mode: string }
     | { command: 'search'; filter: SearchFilter }
     | { command: 'clearSearch' }
+    | { command: 'trackUxEvent'; event: string; metadata?: WorkspaceUxMetricMetadata }
     | { command: 'toggleHelp' }
     | { command: 'toggleTheme' }
     | { command: 'export'; format: string }
     // File operations
     | { command: 'openFile'; filePath: string }
     | { command: 'openFileAtLine'; filePath: string; line: number }
+    | { command: 'showInGraph'; query: string; nodeType?: 'table' | 'view' | 'external' | 'file' }
     | { command: 'visualizeFile'; filePath: string }
     // Lineage view switching
     | { command: 'switchToLineageView' }
     | { command: 'switchToImpactView' }
     // Lineage analysis
     | { command: 'getLineage'; nodeId: string; direction: 'upstream' | 'downstream' | 'both'; depth?: number }
-    | { command: 'analyzeImpact'; type: 'table' | 'column'; name: string; tableName?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn' }
+    | { command: 'analyzeImpact'; type: 'table' | 'view' | 'column'; name: string; tableName?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn' }
     | { command: 'exploreTable'; tableName: string; nodeId?: string }
     | { command: 'getColumnLineage'; tableName?: string; tableId?: string; columnName: string }
     | { command: 'selectLineageNode'; nodeId: string }
@@ -69,12 +74,17 @@ export type WorkspaceWebviewMessage =
     | { command: 'getDownstream'; nodeId?: string; depth?: number; nodeType?: string; filePath?: string }
     // Visual lineage graph
     | { command: 'searchLineageTables'; query: string; typeFilter?: string }
-    | { command: 'getLineageGraph'; nodeId: string; depth?: number; direction?: 'both' | 'upstream' | 'downstream'; expandedNodes?: string[] }
+    | { command: 'getLineageGraph'; nodeId: string; nodeLabel?: string; nodeType?: string; depth?: number; direction?: 'both' | 'upstream' | 'downstream'; expandedNodes?: string[] }
     | { command: 'expandNodeColumns'; nodeId: string }
     | { command: 'setLineageDirection'; nodeId: string; direction: 'both' | 'upstream' | 'downstream' }
     | { command: 'collapseNodeColumns'; nodeId: string }
+    | { command: 'setLineageLegendVisibility'; visible: boolean }
     | { command: 'selectColumn'; tableId: string; columnName: string }
-    | { command: 'clearColumnSelection' };
+    | { command: 'clearColumnSelection' }
+    | { command: 'savePng'; data: string; filename: string }
+    | { command: 'exportPngError'; error: string }
+    // Node-specific export
+    | { command: 'exportNodeLineage'; nodeId: string; nodeLabel: string; nodeType: string };
 
 // ─── Host → Webview messages ───
 
@@ -88,7 +98,7 @@ export type WorkspaceHostMessage =
     | { command: 'impactFormResult'; data: { html: string } }
     | { command: 'impactResult'; data: { report: ImpactReportResult; html: string } | { error: string } }
     | { command: 'tableDetailResult'; data: { table?: LineageNodeResult; html?: string; error?: string } }
-    | { command: 'columnLineageResult'; data: { tableName?: string; tableId?: string; columnName: string; upstream: unknown[]; downstream: unknown[]; html?: string } }
+    | { command: 'columnLineageResult'; data: { tableName?: string; tableId?: string; columnName: string; upstream: unknown[]; downstream: unknown[]; html?: string; warning?: string } }
     | { command: 'upstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number } }
     | { command: 'downstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number } }
     // Visual lineage graph

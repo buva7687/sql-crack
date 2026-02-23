@@ -552,3 +552,24 @@ export class EventEmitter<T> {
         this.listeners = [];
     }
 }
+
+// ============================================================================
+// RelativePattern - Scoped file pattern matching
+// ============================================================================
+
+export class RelativePattern {
+    readonly baseUri: Uri;
+    readonly base: string;
+    readonly pattern: string;
+
+    constructor(base: Uri | string, pattern: string) {
+        if (typeof base === 'string') {
+            this.baseUri = Uri.file(base);
+            this.base = base;
+        } else {
+            this.baseUri = base;
+            this.base = base.fsPath;
+        }
+        this.pattern = pattern;
+    }
+}

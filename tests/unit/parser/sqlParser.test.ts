@@ -593,6 +593,38 @@ SELECT * FROM t3;`;
       expect(result.error).toBeUndefined();
     });
 
+    it('includes IN-subquery source tables from expr_list AST shape', () => {
+      const sql = `
+        SELECT
+          e.employee_id,
+          e.name,
+          e.salary
+        FROM employees e
+        WHERE e.dept_id IN (
+          SELECT id
+          FROM departments
+          WHERE location = 'New York'
+        )
+      `;
+      const result = parseSql(sql, 'MySQL');
+      const tableLabels = result.nodes
+        .filter(n => n.type === 'table')
+        .map(n => n.label.toLowerCase());
+
+      expect(result.error).toBeUndefined();
+      expect(tableLabels).toContain('employees');
+      expect(tableLabels).toContain('departments');
+
+      // The departments SQ node should connect to the WHERE filter node, not SELECT
+      const deptNode = result.nodes.find(n => n.type === 'table' && n.label.toLowerCase() === 'departments');
+      const whereNode = result.nodes.find(n => n.label === 'WHERE');
+      expect(deptNode).toBeDefined();
+      expect(whereNode).toBeDefined();
+      const deptEdge = result.edges.find(e => e.source === deptNode!.id);
+      expect(deptEdge).toBeDefined();
+      expect(deptEdge!.target).toBe(whereNode!.id);
+    });
+
     it('parses correlated subquery', () => {
       const sql = `
         SELECT * FROM employees e

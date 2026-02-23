@@ -27,6 +27,7 @@ export class IndexManager {
     private context: vscode.ExtensionContext;
     private scanner: WorkspaceScanner;
     private dialect: SqlDialect;
+    private scopeUri: vscode.Uri | undefined;
     private index: WorkspaceIndex | null = null;
     private fileWatcher: vscode.FileSystemWatcher | null = null;
     private updateQueue: Set<string> = new Set();
@@ -35,11 +36,13 @@ export class IndexManager {
     private onIndexUpdated: (() => void) | null = null;
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
+    private _changesSinceIndex: number = 0;
 
-    constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL') {
+    constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
         this.dialect = dialect;
-        this.scanner = new WorkspaceScanner(dialect);
+        this.scopeUri = scopeUri;
+        this.scanner = new WorkspaceScanner(dialect, undefined, scopeUri);
     }
 
     /**
@@ -112,6 +115,7 @@ export class IndexManager {
         }
 
         this.index = newIndex;
+        this._changesSinceIndex = 0;
 
         // Persist to workspace state
         await this.persistIndex();
@@ -129,6 +133,14 @@ export class IndexManager {
      */
     getIndex(): WorkspaceIndex | null {
         return this.index;
+    }
+
+    /**
+     * Number of pending workspace changes not yet reflected in the index.
+     * 0 means index is clean relative to observed file watcher events.
+     */
+    getChangesSinceIndex(): number {
+        return this._changesSinceIndex;
     }
 
     /**
@@ -526,7 +538,14 @@ export class IndexManager {
      * do not re-index generated/dependency folders.
      */
     private shouldIndexFile(uri: vscode.Uri): boolean {
-        return !/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath);
+        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath)) {
+            return false;
+        }
+        // When scoped to a subfolder, only index files within that folder
+        if (this.scopeUri && !uri.fsPath.startsWith(this.scopeUri.fsPath)) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -539,6 +558,9 @@ export class IndexManager {
         const queueUpdate = (uri: vscode.Uri) => {
             if (!this.shouldIndexFile(uri)) {
                 return;
+            }
+            if (!this.updateQueue.has(uri.fsPath)) {
+                this._changesSinceIndex++;
             }
             this.updateQueue.add(uri.fsPath);
             if (this.updateTimer) {
@@ -553,7 +575,10 @@ export class IndexManager {
         this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
         this.fileWatcher.onDidDelete(uri => {
             if (this.shouldIndexFile(uri)) {
-                void this.removeFile(uri);
+                this._changesSinceIndex++;
+                void this.removeFile(uri).finally(() => {
+                    this.markChangeProcessed();
+                });
             }
         });
 
@@ -568,7 +593,10 @@ export class IndexManager {
                 this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
                 this.fileWatcher.onDidDelete(uri => {
                     if (this.shouldIndexFile(uri)) {
-                        void this.removeFile(uri);
+                        this._changesSinceIndex++;
+                        void this.removeFile(uri).finally(() => {
+                            this.markChangeProcessed();
+                        });
                     }
                 });
             }
@@ -591,6 +619,7 @@ export class IndexManager {
         for (const filePath of files) {
             const uri = vscode.Uri.file(filePath);
             if (!this.shouldIndexFile(uri)) {
+                this.markChangeProcessed();
                 continue;
             }
             try {
@@ -599,13 +628,21 @@ export class IndexManager {
                     await vscode.workspace.fs.stat(uri);
                 } catch (e) {
                     logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
-                    this.removeFile(uri);
+                    await this.removeFile(uri);
                     continue;
                 }
                 await this.updateFile(uri);
             } catch (err) {
                 logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
+            } finally {
+                this.markChangeProcessed();
             }
+        }
+    }
+
+    private markChangeProcessed(): void {
+        if (this._changesSinceIndex > 0) {
+            this._changesSinceIndex--;
         }
     }
 

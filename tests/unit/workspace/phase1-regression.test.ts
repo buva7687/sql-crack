@@ -155,15 +155,16 @@ describe('HTML escaping in clientScripts.ts', () => {
         expect(script).toContain('CSS.escape(graphState.selectedNodeId)');
     });
 
-    it('should compute search match count with string type filters', () => {
+    it('should compute search match count from query-only graph search', () => {
         const script = getWebviewScript({
             nonce: 'test-nonce',
             graphData: '{"nodes":[]}',
             searchFilterQuery: ''
         });
 
-        expect(script).toContain('const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;');
-        expect(script).toContain('const matched = getSearchMatchCount(query, typeFilter);');
+        expect(script).not.toContain('const normalizedTypeFilter = Array.isArray(typeFilter) ? typeFilter[0] : typeFilter;');
+        expect(script).toContain('function getSearchMatchNodes(query)');
+        expect(script).toContain("const matched = searchMatchNodeIds.length;");
     });
 });
 

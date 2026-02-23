@@ -38,15 +38,15 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
-| **Command Palette** | Press `Cmd/Ctrl + Shift + P` or `/` inside the webview for quick action search |
+| **Command Palette** | Press `Cmd/Ctrl + Shift + P` inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
 | **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
-**Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • CTE (Purple) • Result (Green)
+**Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • Select (Indigo) • Union/Set Op (Slate) • CTE (Purple) • Subquery (Violet) • Case (Orange) • Result (Green)
 
-**Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Purple) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet)
+**Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Teal) • CTE (Purple) • SQ (Violet) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet) • CTAS (Cyan)
 
 ---
 
@@ -125,7 +125,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 - **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
 - **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
-- **View Modes** — Display beside editor, in tab, or secondary sidebar
+- **View Modes** — Display beside editor or in a new tab
 - **Pin Visualizations** — Save snapshots as persistent tabs
 - **Fullscreen** — Press `F` for distraction-free viewing
 
@@ -133,7 +133,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 
 ## Supported Dialects
 
-MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino
+MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • BigQuery • Redshift • Hive • Athena • Trino • Oracle • Teradata
 
 ---
 
@@ -147,6 +147,15 @@ MySQL • PostgreSQL • SQL Server • MariaDB • SQLite • Snowflake • Big
 4. Click **Install**
 
 Or install directly: [SQL Crack on Marketplace](https://marketplace.visualstudio.com/items?itemName=buvan.sql-crack)
+
+### Cursor
+
+1. Open Cursor
+2. Go to Extensions (`Cmd+Shift+X` / `Ctrl+Shift+X`)
+3. Search for **"buvan.sql-crack"** (use the publisher-qualified name for reliable results)
+4. Click **Install**
+
+Or install from [Open VSX Registry](https://open-vsx.org/extension/buvan/sql-crack).
 
 ### From Source
 
@@ -190,7 +199,8 @@ Analyze cross-file dependencies:
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl + Shift + L` | Open visualization |
-| `Cmd/Ctrl + F` | Search nodes |
+| `Cmd/Ctrl + Shift + P` | Open command palette |
+| `Cmd/Ctrl + F` or `/` | Search nodes |
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
 | `Escape` | Clear selection |
@@ -198,11 +208,15 @@ Analyze cross-file dependencies:
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
 | `Q` | Toggle query stats |
+| `O` | Toggle hints/optimization panel |
 | `H` | Cycle layout (vertical → horizontal → compact → force → radial) |
 | `1-5` | Jump directly to a specific layout option |
 | `E` | Expand/collapse all CTEs |
+| `U` / `D` / `A` | Focus mode: upstream / downstream / all |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
+| `R` | Reset view (fit to screen) |
+| `+` / `-` | Zoom in / out |
 | `Cmd/Ctrl + Z` | Undo latest layout change |
 | `Cmd/Ctrl + Shift + Z` | Redo layout change |
 | `[` / `]` | Previous/next query |
@@ -267,7 +281,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 |---------|---------|-------------|
 | `sqlCrack.workspaceAutoIndexThreshold` | `50` | Max files to auto-index (10-500) |
 | `sqlCrack.workspaceLineageDepth` | `5` | Default lineage traversal depth (1-20) |
-| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables`, `hybrid` |
+| `sqlCrack.workspaceGraphDefaultMode` | `tables` | Default Graph tab mode: `files`, `tables` |
 
 ### Custom File Extensions
 
@@ -355,25 +369,39 @@ Press `F5` to launch the Extension Development Host.
 
 ### Architecture Overview
 
-```
+```text
 src/
-├── extension.ts           # VS Code extension entry point, commands, lifecycle
-├── visualizationPanel.ts  # Query visualization webview panel
-├── webview/               # Browser-side code (runs in webview)
-│   ├── index.ts           # Webview entry point
-│   ├── sqlParser.ts       # SQL parsing with node-sql-parser
-│   ├── renderer.ts        # SVG rendering, pan/zoom, interactions
-│   ├── constants/         # Centralized colors and theme
-│   ├── types/             # TypeScript interfaces
-│   └── ui/                # Toolbar, tabs, panels
-├── workspace/             # Workspace analysis (runs in extension host)
-│   ├── workspacePanel.ts  # Workspace webview panel
-│   ├── scanner.ts         # File discovery and parsing
-│   ├── indexManager.ts    # Incremental index with SHA-256 hashing
-│   ├── lineage/           # Cross-file lineage tracking
-│   └── ui/                # Workspace view renderers
-├── dialects/              # SQL dialect function registry
-└── shared/                # Shared utilities (theme, colors)
+├── extension.ts                 # Extension entrypoint, commands, lifecycle
+├── visualizationPanel.ts        # SQL Flow webview panel orchestration
+├── dialects/                    # Dialect registry/config
+├── shared/                      # Cross-layer tokens/utils/messages
+│   └── messages/                # Typed host/webview message contracts
+├── webview/                     # Browser-side SQL Flow runtime
+│   ├── index.ts                 # Webview bootstrap + wiring
+│   ├── sqlParser.ts             # Parse orchestrator
+│   ├── renderer.ts              # Render orchestrator
+│   ├── parser/                  # Extracted parser modules (validation, dialects, hints, statements, extractors)
+│   ├── rendering/               # Node/edge/cloud/viewport rendering modules
+│   ├── features/                # Export, lineage, theme, minimap, focus, search, metadata
+│   ├── interaction/             # Event listeners, drag/zoom/keyboard, pulse/selection
+│   ├── navigation/              # Node/table/keyboard navigation helpers
+│   ├── panels/                  # Info/stats/sql panel renderers
+│   ├── state/                   # Renderer state factories
+│   ├── constants/               # Color/theme constants
+│   ├── types/                   # Webview runtime types
+│   ├── ui/                      # Toolbar/context menu/tooltip/layout/command UI
+│   │   └── toolbar/             # Extracted toolbar component modules
+│   └── workers/                 # Worker scripts
+└── workspace/                   # Extension-host workspace analysis runtime
+    ├── workspacePanel.ts        # Workspace panel orchestrator
+    ├── scanner.ts               # SQL file discovery/scanning
+    ├── indexManager.ts          # Incremental index/cache/watcher
+    ├── handlers/                # Message routing + command handlers
+    ├── panel/                   # Workspace panel/page/export/stats modules
+    ├── lineage/                 # Cross-file lineage graph + analyzers
+    ├── extraction/              # Definition/reference extraction pipeline
+    ├── graph/                   # Workspace graph build/filter/layout modules
+    └── ui/                      # Workspace webview scripts/styles/views
 ```
 
 **Data Flow**:
@@ -391,6 +419,9 @@ src/
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
+- ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
+
+Refactoring milestone: large-file decomposition completed across core surfaces with full regression validation (`tsc`, lint, and test suite all green).
 
 **Planned**:
 - Export preview dialog with PDF support

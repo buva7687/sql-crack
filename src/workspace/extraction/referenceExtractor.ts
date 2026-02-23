@@ -13,6 +13,7 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { escapeRegex } from '../../shared';
+import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
 import type {
     AstStatement,
     AstTableRef,
@@ -52,7 +53,13 @@ const SQL_RESERVED_WORDS = new Set([
     // Transaction keywords
     'begin', 'commit', 'rollback', 'transaction', 'savepoint',
     // Permissions
-    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger'
+    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger',
+]);
+
+// Teradata-specific reserved words — only applied when dialect is Teradata
+const TERADATA_RESERVED_WORDS = new Set([
+    'sel', 'multiset', 'volatile', 'locking', 'qualify', 'sample', 'normalize',
+    'hashrow', 'hashbucket', 'hashamp'
 ]);
 
 /**
@@ -63,6 +70,7 @@ export class ReferenceExtractor {
     private options: ExtractionOptions;
     private columnExtractor: ColumnExtractor;
     private globalCteNames: Set<string> = new Set(); // Track CTE names across the entire file
+    private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -78,10 +86,13 @@ export class ReferenceExtractor {
     }
 
     /**
-     * Check if a name is a SQL reserved word
+     * Check if a name is a SQL reserved word (dialect-scoped for Teradata-only keywords)
      */
     private isReservedWord(name: string): boolean {
-        return SQL_RESERVED_WORDS.has(name.toLowerCase());
+        const lower = name.toLowerCase();
+        if (SQL_RESERVED_WORDS.has(lower)) { return true; }
+        if (this._activeDialect === 'Teradata' && TERADATA_RESERVED_WORDS.has(lower)) { return true; }
+        return false;
     }
 
     /**
@@ -104,6 +115,7 @@ export class ReferenceExtractor {
         filePath: string,
         dialect: SqlDialect = this.options.dialect
     ): TableReference[] {
+        this._activeDialect = dialect;
         const references: TableReference[] = [];
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
@@ -149,7 +161,8 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(sql, { database: dbDialect });
+            const sqlToParse = preprocessForParsing(sql, dialect);
+            const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
             // Also collect CTE names from AST (may find names regex missed)
@@ -296,7 +309,9 @@ export class ReferenceExtractor {
             'Hive': 'hive',
             'Redshift': 'redshift',
             'Athena': 'athena',
-            'Trino': 'trino'
+            'Trino': 'trino',
+            'Oracle': 'postgresql',
+            'Teradata': 'mysql'
         };
         return dialectMap[dialect] || 'mysql';
     }

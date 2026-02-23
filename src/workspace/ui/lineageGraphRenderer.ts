@@ -69,6 +69,8 @@ export interface RenderableGraph {
     stats: {
         upstreamCount: number;
         downstreamCount: number;
+        externalUpstreamCount: number;
+        externalDownstreamCount: number;
         totalNodes: number;
     };
 }
@@ -96,8 +98,8 @@ export class LineageGraphRenderer {
     private readonly NODE_HEIGHT_COLLAPSED = 78;
     private readonly NODE_HEIGHT_PER_COLUMN = 24;
     private readonly MAX_VISIBLE_COLUMNS = 20;
-    private readonly NODE_SEP = 60;
-    private readonly RANK_SEP = 120;
+    private readonly NODE_SEP = 44;
+    private readonly RANK_SEP = 90;
     private readonly EDGE_SEP = 20;
 
     constructor(lineageGraph: LineageGraph) {
@@ -185,9 +187,13 @@ export class LineageGraphRenderer {
             height: layout.height,
             stats: {
                 upstreamCount: direction === 'downstream' ? 0 :
-                    Array.from(nodeMap.values()).filter(n => n.depth < 0).length,
+                    Array.from(nodeMap.values()).filter(n => n.depth < 0 && this.isDisplayableLineageNode(n.type)).length,
                 downstreamCount: direction === 'upstream' ? 0 :
-                    Array.from(nodeMap.values()).filter(n => n.depth > 0).length,
+                    Array.from(nodeMap.values()).filter(n => n.depth > 0 && this.isDisplayableLineageNode(n.type)).length,
+                externalUpstreamCount: direction === 'downstream' ? 0 :
+                    Array.from(nodeMap.values()).filter(n => n.depth < 0 && n.type === 'external').length,
+                externalDownstreamCount: direction === 'upstream' ? 0 :
+                    Array.from(nodeMap.values()).filter(n => n.depth > 0 && n.type === 'external').length,
                 totalNodes: nodeMap.size
             }
         };
@@ -291,8 +297,8 @@ export class LineageGraphRenderer {
             rankdir: 'LR', // Left to Right
             nodesep: this.NODE_SEP,
             ranksep: this.RANK_SEP,
-            marginx: 50,
-            marginy: 50
+            marginx: 24,
+            marginy: 24
         });
 
         g.setDefaultEdgeLabel(() => ({}));
@@ -353,6 +359,8 @@ export class LineageGraphRenderer {
             stats: {
                 upstreamCount: 0,
                 downstreamCount: 0,
+                externalUpstreamCount: 0,
+                externalDownstreamCount: 0,
                 totalNodes: 0
             }
         };
@@ -632,6 +640,10 @@ export class LineageGraphRenderer {
         return 'type-other';
     }
 
+    private isDisplayableLineageNode(type: GraphNode['type']): boolean {
+        return type === 'table' || type === 'view' || type === 'cte' || type === 'external';
+    }
+
     /**
      * Truncate name to fit in node
      */
@@ -659,7 +671,7 @@ export class LineageGraphRenderer {
         const nodes: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
 
         for (const [id, node] of this.lineageGraph.nodes) {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+            if (node.type === 'table' || node.type === 'view') {
                 nodes.push({
                     id,
                     name: node.name,

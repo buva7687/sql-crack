@@ -10,6 +10,10 @@ describe('SQL Flow theme initialization respects defaultTheme setting', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const rendererStateSource = readFileSync(
+        join(__dirname, '../../../src/webview/state/rendererState.ts'),
+        'utf8'
+    );
 
     describe('visualizationPanel.ts', () => {
         it('reads the advanced.defaultTheme setting', () => {
@@ -34,8 +38,9 @@ describe('SQL Flow theme initialization respects defaultTheme setting', () => {
 
     describe('renderer.ts', () => {
         it('initializes isDarkTheme from window.vscodeTheme instead of hardcoding true', () => {
-            expect(rendererSource).toContain("isDarkTheme: window.vscodeTheme !== 'light'");
-            expect(rendererSource).not.toMatch(/isDarkTheme:\s*true\s*,/);
+            expect(rendererSource).toContain('createInitialViewState(window.vscodeTheme, window.defaultLayout)');
+            expect(rendererStateSource).toContain("isDarkTheme: vscodeTheme !== 'light'");
+            expect(rendererStateSource).not.toMatch(/isDarkTheme:\s*true\s*,/);
         });
     });
 });

@@ -15,6 +15,7 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('columnTraceHintStorageKey');
         expect(script).toContain('buildColumnFlowSummary');
         expect(script).toContain('Clear trace');
+        expect(script).toContain('if (warning && typeof showCopyFeedback === \'function\')');
     });
 
     it('supports keyboard navigation through expanded column rows', () => {
@@ -30,7 +31,20 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain("event.key === 'ArrowDown'");
         expect(script).toContain("event.key === 'ArrowUp'");
         expect(script).toContain("event.key === 'Enter' || event.key === ' '");
+        expect(script).toContain('triggerColumnTraceFromRow(nextRow);');
         expect(script).toContain('Press Enter to trace lineage');
+    });
+
+    it('does not trigger lineage keyboard shortcuts when modifier keys are held', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('if (e.metaKey || e.ctrlKey || e.altKey) return;');
     });
 
     it('supports lineage bottom legend visibility controls with L shortcut and dismiss button', () => {
@@ -47,7 +61,46 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('initializeLineageLegendBar');
         expect(script).toContain("if (e.key === 'l' || e.key === 'L')");
         expect(script).toContain("const dismissBtn = document.getElementById('legend-dismiss');");
-        expect(script).toContain("const legendToggleBtn = document.getElementById('lineage-legend-toggle');");
+        expect(script).toContain('vscode.postMessage({ command: \'setLineageLegendVisibility\', visible: nextVisible });');
+        expect(script).toContain('const showLegend = lineageLegendVisibleFromHost !== false;');
+        expect(script).not.toContain('lineage-legend-toggle');
+        expect(script).not.toContain('localStorage.getItem(lineageLegendStorageKey)');
+    });
+
+    it('logs unknown lineage node icon types once when debug logging is enabled', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('const warnedLineageIconTypes = new Set();');
+        expect(script).toContain('if (!icons[type] && type && !warnedLineageIconTypes.has(type)) {');
+        expect(script).toContain("console.debug('[sql-crack] Unknown lineage node type icon fallback:', type);");
+    });
+
+    it('injects initial lineage legend visibility from host state', () => {
+        const hiddenScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+            lineageLegendVisible: false,
+        });
+        const visibleScript = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+            lineageLegendVisible: true,
+        });
+
+        expect(hiddenScript).toContain('let lineageLegendVisibleFromHost = false;');
+        expect(visibleScript).toContain('let lineageLegendVisibleFromHost = true;');
     });
 
     it('debounces lineage table search input for smoother typing on large workspaces', () => {
@@ -62,5 +115,40 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('lineageFilterDebounceMs = 180');
         expect(script).toContain('function scheduleLineageFilter(immediate = false)');
         expect(script).toContain('scheduleLineageFilter();');
+        expect(script).toContain('let lineageSearchState = {');
+        expect(script).toContain('window.captureLineageSearchState = captureLineageSearchState;');
+        expect(script).toContain('searchInput.value = lineageSearchState.query || \'\';');
+    });
+
+    it('avoids duplicate legend setup calls and releases queued lineage updates on paint', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        const legendInitCalls = script.match(/initializeLineageLegendBar\(\);/g) || [];
+        expect(legendInitCalls).toHaveLength(1);
+        expect(script).toContain('function finishLineageSetup()');
+        expect(script).toContain('requestAnimationFrame(() => requestAnimationFrame(finishLineageSetup));');
+        expect(script).not.toContain('}, 200);');
+        expect(script).toContain('const lineageBounds = lineageContent ? lineageContent.getBoundingClientRect() : null;');
+        expect(script).toContain('left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));');
+    });
+
+    it('suppresses node tooltip while column trace panel is active', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('window.__workspaceColumnTraceActive = true;');
+        expect(script).toContain('window.__workspaceColumnTraceActive = false;');
+        expect(script).toContain('if (window.__workspaceColumnTraceActive) return;');
     });
 });

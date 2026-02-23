@@ -5,6 +5,257 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-22
+
+### Added
+
+- **Teradata SQL dialect support**: Teradata is now a first-class dialect in SQL Crack.
+  - Added `Teradata` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
+  - Teradata-specific function registry: aggregates (XMLAGG, KURTOSIS, SKEWNESS, CORR, STDDEV family, REGR family, APPROX_COUNT_DISTINCT), window functions (CUME_DIST, PERCENT_RANK, PERCENTILE_CONT, PERCENTILE_DISC), and TVFs (TABLE, XMLTABLE, STRTOK_SPLIT_TO_TABLE).
+  - Dialect auto-detection with 13 Teradata-specific patterns: `VOLATILE TABLE`, `MULTISET/SET TABLE`, `PRIMARY INDEX`, hash functions (`HASHROW`, `HASHBUCKET`), `COLLECT STATISTICS`, `CREATE MACRO`, `JOIN INDEX`, `LOCKING ... FOR ACCESS`, `SAMPLE`, `SEL` shorthand, `RANGE_N`/`HASHBAKAMP`, `NORMALIZE`, `RENAME TABLE/VIEW`.
+  - Teradata preprocessing (15 rewrite steps): `SEL` → `SELECT`, `REPLACE VIEW` → `CREATE OR REPLACE VIEW`, `LOCKING ... FOR ACCESS` stripping, `VOLATILE`/`MULTISET`/`SET`/`GLOBAL TEMPORARY` stripping, `PRIMARY INDEX(...)` stripping, `ON COMMIT PRESERVE/DELETE ROWS` stripping, `SAMPLE`/`TOP n` stripping, `NORMALIZE` stripping, `WITH DATA`/`WITH NO DATA` stripping, `QUALIFY` stripping (shared depth-aware scanner), `UPDATE t FROM s` → comma-join rewrite, `WITHIN GROUP(...)` stripping, `RANGE BETWEEN INTERVAL` safe fallback, bare `DATE` → `CURRENT_DATE`, `WHEN MATCHED AND` conditional stripping, reserved-word alias backtick quoting.
+  - Teradata session commands: `DATABASE`, `COMMENT ON`, `COLLECT STATISTICS`, `RENAME TABLE/VIEW`.
+  - Teradata-specific syntax warnings when Teradata patterns are used in non-Teradata dialects.
+  - Teradata → MySQL proxy mapping for AST parsing.
+  - Added Teradata example files (`examples/teradata-basic.sql`, `examples/teradata-advanced.sql`, `examples/teradata-ddl.sql`).
+- **Oracle SQL dialect support**: Oracle is now a first-class dialect in SQL Crack.
+  - Added `Oracle` to `SqlDialect` type union, VS Code settings dropdown, and SQL Flow toolbar dialect selector.
+  - Oracle-specific function registry: aggregates (LISTAGG, COLLECT, XMLAGG, MEDIAN, STATS_MODE), window functions (RATIO_TO_REPORT, CUME_DIST, PERCENT_RANK, PERCENTILE_CONT, PERCENTILE_DISC), and TVFs (XMLTABLE, JSON_TABLE, TABLE, XMLSEQUENCE).
+  - Dialect auto-detection with 10 Oracle-specific patterns: `CONNECT BY`, `ROWNUM`, `NVL`/`DECODE`, `MINUS`, sequence `.NEXTVAL`/`.CURRVAL`, `(+)` outer joins, `SYSDATE`/`SYSTIMESTAMP`, `PIVOT`, `AS OF SCN/TIMESTAMP` (flashback), `MODEL DIMENSION/MEASURES/RULES`.
+  - Oracle preprocessing: strips `(+)` outer join operators, rewrites `MINUS` → `EXCEPT`, strips `START WITH`/`CONNECT BY`/`ORDER SIBLINGS BY` hierarchical clauses, strips `PIVOT`/`UNPIVOT` clauses, strips `AS OF SCN/TIMESTAMP` flashback queries, strips `MODEL` clauses, strips `RETURNING ... INTO` bind variables.
+  - Oracle optimizer hints (`/*+ ... */`) detected and surfaced as info hints.
+  - Oracle-specific syntax warnings when Oracle patterns are used in non-Oracle dialects.
+  - Oracle → PostgreSQL proxy mapping for AST parsing (PostgreSQL is the closest supported parser dialect).
+  - `PL/SQL` alias normalization for the `defaultDialect` setting.
+  - Added Oracle complex example file (`examples/oracle-complex.sql`) with 10 queries covering hierarchical queries, (+) joins, MINUS, DECODE/NVL, sequences, and ROWNUM.
+- **Unified workspace preprocessing**: Workspace extractors (`referenceExtractor`, `schemaExtractor`) now apply all dialect preprocessing transforms via `preprocessForParsing()` — PostgreSQL (AT TIME ZONE, type-prefixed literals), Snowflake (deep path collapse), CTE hoisting, GROUPING SETS rewrite, and Oracle syntax. Previously workspace extractors had no preprocessing.
+- **TVF registry coverage expansion**: Added missing table-valued functions across dialects:
+  - Redshift: `UNNEST`, `GENERATE_SERIES`
+  - Hive: `JSON_TUPLE`, `PARSE_URL_TUPLE`
+  - Athena: `SEQUENCE`, `FLATTEN`
+  - Snowflake: `EXTERNAL_TABLE_FILES`, `INFER_SCHEMA`
+  - BigQuery: `ML.TRAIN`, `VECTOR_SEARCH`
+- **Parser compatibility preprocessors**:
+  - `GROUPING SETS` rewrite support for parser compatibility.
+  - Snowflake deep path collapsing for `:<path>` chains with 3+ levels.
+- **Unrecognized TVF hinting**: FROM-clause function calls that are not recognized as table-valued now emit a low-severity quality hint with guidance to add custom TVFs.
+- **Additional dialect auto-detection coverage**: Added parser auto-detection patterns for Hive, Trino, Athena, Redshift, and SQLite to improve cross-dialect retry selection on mixed SQL corpora.
+- **Workspace lineage discoverability features**:
+  - Filter/search table list in lineage start view.
+  - Export selected node lineage as JSON from the workspace context menu.
+  - Expanded lineage keyboard affordances for node/column navigation and quick actions.
+- **Workspace graph context-menu productivity action**:
+  - Added `Copy Connections` action to copy a formatted upstream/downstream dependency summary for the selected node.
+- **SQL Flow keyboard easter eggs**: Added Matrix and zero-gravity keyboard-triggered modes in the SQL Flow webview.
+- **SQ badge for expression subquery source tables**: Tables discovered via expression subqueries (WHERE/SELECT/HAVING/ON) now display a violet **SQ** badge, dashed stroke, dashed edge, and legend entry — visually distinguishing them from direct FROM/JOIN table references.
+- **Circular dialect dropdown**: Toolbar dialect selector now renders options in circular order starting from the active dialect, so switching between adjacent engines is continuous.
+
+### Changed
+
+- **Large-file refactor completed (Phases 1-6)**: Split major orchestrators into focused modules while preserving behavior and public workflows.
+  - `sharedStyles.ts`: 4,620 -> 68 lines (style assembler + extracted style modules)
+  - `sqlParser.ts`: 6,269 -> 1,071 lines (orchestrator + parser module tree)
+  - `renderer.ts`: 9,686 -> 3,040 lines (orchestrator + extracted rendering/feature/interaction/navigation modules)
+  - `clientScripts.ts`: 4,183 -> 173 lines (script assembler + extracted script fragments)
+  - `workspacePanel.ts`: 2,568 -> 780 lines (orchestrator + extracted panel modules)
+  - `toolbar.ts`: ~2,000 -> 475 lines (orchestrator + extracted toolbar modules)
+- **Workspace message routing hardening**: Typed workspace message protocol and host router now explicitly handle PNG save/error round-trips from webview exports.
+- **Shared escaping helper adoption**: Consolidated additional non-renderer HTML escaping paths to `src/shared/stringUtils.ts`.
+- **SQL Flow icon**: Replaced graph-node circle icon with bold **SC** letterform SVGs (path-based, compatible with VS Code and Cursor). Menu entries now use the custom SC icon instead of the generic `$(database)` codicon.
+- **PIVOT detection shared**: Renamed `hasTSqlPivot` → `hasPivot` in dialect detection; PIVOT now scores for both TransactSQL and Oracle.
+- **Toolbar pin affordance refresh**: Replaced the pin glyph with a cleaner pushpin icon and reordered controls to keep pin-related actions grouped (`View location` → `Pin visualization as new tab` → `Pinned tabs`).
+- **Examples compare documentation**: Expanded `examples/README.md` with a dedicated "Compare with Baseline Query" section and updated wording to reference the compare button label (instead of legacy `⇆` symbol text).
+- **Workspace scope behavior**: Workspace analysis/indexing now respects the selected subfolder scope more consistently across scanning and interactive UX flows.
+- **Lineage graph presentation and controls**:
+  - Improved viewport utilization for sparse lineage graphs (layout spacing and auto-fit behavior).
+  - Removed the redundant lineage legend toggle icon near zoom controls while preserving the `L` shortcut and bottom legend controls.
+  - Simplified lineage stats: removed redundant node count badge and relationship count; upstream/downstream counts now include external nodes with a parenthetical annotation.
+  - Removed CTEs from lineage list view — CTEs are query-scoped and their referenced tables/views already appear as lineage nodes.
+  - Moved direction filter buttons (Upstream/Both/Downstream) into the graph header row to save vertical space.
+- **Workspace Dependencies Graph UX refresh (navigation-first model)**:
+  - Graph header now keeps only Graph/Lineage/Impact tabs and two explicit graph modes (Files/Tables) with mode-specific context copy.
+  - Added persistent graph state chips/reason text so users can see when search/focus/trace filters are reducing visibility.
+  - Added search next/previous navigation controls with match count feedback and current-match highlighting.
+  - Selection panel actions were streamlined to task language: `Trace in Lineage`, `Analyze in Impact`, `Show tables in file`, `Open file`.
+  - Added context actions in the Selection area for graph-level exploration controls: `Focus neighbors`, `Trace upstream`, `Trace downstream`, `Clear graph state`.
+  - Introduced local opt-in Workspace UX instrumentation hooks for key graph actions/events (no server dependency required).
+- **Workspace dependency-debugging flow improvements**:
+  - Edge selection now exposes a "Why this edge?" drilldown with sampled file/line/context references and quick-open for the first reference.
+  - Issues view now includes `Show in graph` actions that route directly back to Graph with prefilled query context.
+  - Graph search no-result state now offers fuzzy suggestions for likely table/view labels.
+  - Selection panel now includes a two-endpoint shortest-path flow: `Set as start`, `Set as end`, `Show path`, and `Clear path`.
+- **Workspace graph polish and discoverability updates**:
+  - Merged keyboard hints into a collapsible `Shortcuts` panel inside the bottom legend bar.
+  - Removed the redundant Graph-mode `?` help affordance to reduce competing help surfaces.
+  - Context menu actions now hide unavailable upstream/downstream items in Files mode instead of graying them out, reducing dead-option friction.
+  - Graph empty-state copy is now mode-specific (`No files match this search` / `No tables/views match this search`).
+  - Graph search debounce aligned to SQL Flow timing for more consistent typing behavior.
+  - Graph search clear now provides visual flash feedback in the search control to explain why results changed.
+  - Removed visible `L` keyboard legend hint from the primary rail while retaining the `L` keybinding.
+  - Added a small top offset to the Graph sidebar `Export` section for cleaner separation from Selection actions when the Selection panel expands.
+- **Workspace lineage & navigation trust improvements**:
+  - "Why am I seeing this graph?" panel is now context-aware: shows active mode, parse issue counts, active search filters, empty-index and empty-graph explanations, and stale-index warnings instead of static guidance copy.
+  - Selection panel depth now reads "N levels up, M levels down (visible)" with a tooltip clarifying it reflects rendered graph edges, not full system lineage depth.
+  - Edge evidence panel now offers "View all N references" expand/collapse instead of truncating at 6 with a static "+N more" label.
+  - Impact cross-view prefill now shows "Prefilled from graph — select a change type and click Analyze Impact to run" with a subtle button pulse, instead of silent prefill.
+  - Index freshness badge now includes a dirty/clean signal: shows "(N changed)" when files have changed since the last index build, and promotes to `stale` level even if the index is recent.
+  - Lineage search wording corrected from "tables" to "tables/views" for show-all button and empty-filter message.
+  - Lineage empty-state tip updated from "more SQL files you have open" to guidance about refreshing the index and workspace scope.
+  - External nodes now show "Trace in Lineage (limited)" with a tooltip explaining the external reference constraint, and empty-lineage states for external nodes provide explicit "not indexed" messaging instead of generic "no relationships" text.
+- **SQL Flow batch result navigation UX**:
+  - Replaced the failed-only dropdown summary with compact inline status chips (`ok`, `failed`, `partial`) in the existing batch-tabs row (no new panel/row).
+  - Added scoped navigation state so batch controls (`⏮`, `◀`, `▶`, `⏭`) and keyboard shortcuts (`[` and `]`) navigate within the active status scope.
+  - Batch tab card rendering now honors active scope (show only matching query cards), including auto-jump into scope when current selection is outside the selected status set.
+  - Retained disabled zero-count chips for status visibility without adding extra UI footprint.
+
+### Fixed
+
+- **Context menu lineage routing false negatives**: Context menu upstream/downstream actions now use the canonical node ID (`contextMenuTarget.id`) instead of reconstructing it from `type:lowercase(label)`, preventing "no upstream/downstream" false negatives for schema-qualified, aliased, or case-sensitive nodes. The `analyzeImpact` action now passes the actual node type instead of hardcoding `'table'`.
+- **Impact cross-links misroute for views**: Impact analysis report cross-link buttons ("View Lineage Graph", "View Details") now derive node ID prefix and `data-node-type` from the actual target type (table vs view) instead of hardcoding `table:` and `data-node-type="table"`. The `ImpactReport.target.type` union was extended to include `'view'`.
+- **Cloud node not draggable**: Removed internal pan mousedown/mousemove/mouseup listeners from cloud `nestedSvg` that intercepted whole-cloud drag via the cloud rect. Wheel zoom for internal navigation is preserved.
+- **Cloud arrow disconnects when dragging CTE node**: Removed `updateCloudAndArrow` call from the node drag path — the cloud is a child of the node group, so the group transform already moves it correctly. Calling `updateCloudAndArrow` with absolute coordinates inside the transformed group caused the arrow to overshoot.
+- **Search not clearing when text is deleted**: The search input listener now calls `onClearSearch()` when the input value becomes empty, resetting breadcrumbs and highlights (same as pressing Escape).
+- **R key now triggers full refresh**: Pressing `R` dispatches a `sql-crack-reset-view` event that triggers a full re-parse and re-render (same as the toolbar refresh button), collapsing all expanded cloud nodes and resetting positions.
+- **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, and stored parse-error SQL context was expanded (200 → 500 chars) for more reliable source-line extraction.
+- **Cross-dialect retry reliability**: Reduced dialect false positives from time literals like `00:00:00` and ensured dialect auto-retry applies compatibility preprocessing (`AT TIME ZONE`, type-prefixed literals) before regex fallback.
+- **CONNECT BY + ORDER SIBLINGS BY stripping**: The preprocessing regex incorrectly terminated at `ORDER SIBLINGS BY` (treating it as a regular `ORDER BY`). Replaced with a keyword-scanning approach that correctly identifies and strips all three hierarchical clause types.
+- **CONNECT BY inside CTE bodies**: Hierarchical clause stripping now works correctly within CTE subqueries.
+- **T-SQL warning too broad for Oracle**: The T-SQL syntax warning was fully suppressed when Oracle was selected. Now only the ambiguous PIVOT signal is suppressed; T-SQL-only constructs (CROSS APPLY, TOP) still warn on Oracle dialect.
+- **RETURNING INTO cross-statement corruption**: The `RETURNING ... INTO` regex could match across semicolons into a subsequent statement (e.g., `UPDATE ... RETURNING id; INSERT INTO ...`). Constrained to single-statement scope with `[^;]` guard.
+- **GROUP BY clause scanning performance**: `findGroupByClauseEnd()` no longer runs regex matching against `substring()` at each character offset (quadratic behavior). The scan now uses a linear keyword boundary check.
+- **Hint duplication on retry preprocessing**: Parser compatibility hints are now deduplicated when parse retry applies the same rewrites.
+- **Keyboard sibling cycling at same depth (`←/→`)**: Sibling navigation now falls back to visual row/column bucketing when semantic `depth` metadata is too strict, so side-by-side nodes (for example `customer_segments` and `regional_metrics` in `examples/demo-showcase.sql`) can be cycled reliably.
+- **Focus direction shortcuts (`U` / `D` / `A`)**: Selecting focus direction now immediately enables focus mode when a node is selected and refreshes the breadcrumb label (`Focus: Upstream/Downstream/All`) to match the active mode.
+- **WHERE node condition rendering (`[object Object]`)**: Filter details now format nested AST operands correctly (wrapped `column_ref`, `expr_list`/`IN`, function/unary operands), preventing `[object Object]` placeholders in Q1 (`examples/demo-showcase.sql`) and similar queries.
+- **Compare overlay label collisions**: Removed/ghost diff nodes are now repositioned when they overlap active nodes, preventing stacked/overlapping text in side-by-side compare mode.
+- **Duplicate repeated-table performance hints**: Prevented overlapping hints for the same table/count pair (for example `scanned 2 times` + `is accessed 2 times`) by deduplicating repeated-scan/access signals across analyzers.
+- **Aggregate detail placeholders in CASE expressions**: Aggregate node details now format `EXTRACT(...)` and CASE `ELSE` branches correctly, eliminating residual `?` placeholders in Query 3-style expressions.
+- **Function usage stats from scalar subqueries**: Query Stats now includes aggregate/scalar functions found inside expression subqueries (for example Query 4 `COUNT(*)` scalar subquery), not just top-level SELECT expressions.
+- **Workspace lineage export reliability**:
+  - Export no longer fails when a workspace node cannot be resolved to a lineage node ID; unresolved nodes now export with empty upstream/downstream arrays and resolution metadata.
+  - Added defensive guards around graph payload column extraction and column-search matching to prevent malformed data from breaking export/search paths.
+- **Workspace lineage parity and shortcut correctness**:
+  - Fixed upstream count mismatch between lineage cards and lineage detail views by aligning internal-node counting and depth usage.
+  - Fixed `Cmd/Ctrl+C` conflicts where copy actions could incorrectly trigger column-lineage shortcuts.
+  - Escape now correctly clears active column trace and returns the lineage view to normal state.
+  - Arrow-key column navigation now auto-updates the column trace panel without requiring Enter.
+  - Suppressed overlapping table tooltip behavior while column trace panel is active.
+- **Workspace export/render guards**:
+  - SVG/PNG export now strips `foreignObject` content and clears pan/zoom transform from the cloned SVG to prevent off-center or failed raster exports.
+  - Restored HTML entity handling in workspace tooltip sanitizer paths.
+- **Workspace lineage/state robustness**: Added null/race guards and state-preservation fixes across lineage loading, minimap/tooltip bounds, and cross-view transitions.
+- **Workspace Graph onboarding overlap on first load**:
+  - Prevented stacked first-load surfaces by default-hiding the explain panel unless explicitly opened.
+  - Hid graph overlay chrome (keyboard hints and zoom toolbar) while empty/welcome overlays are active.
+  - Updated the welcome-card `Why am I seeing this?` action to transition cleanly (dismiss welcome -> open explain) instead of rendering both states simultaneously.
+- **Workspace Graph header search collisions**:
+  - Reworked graph search sizing to be shrink-safe under dense header controls.
+  - Removed ambiguous `Scope: current mode` suffix to avoid a “double search field” impression and compacted control sizing.
+- **Graph->Lineage node routing (`table_0` fallback issue)**:
+  - Fixed graph-to-lineage handoff so workspace graph IDs (for example `table_0`) are resolved to lineage IDs (for example `table:customer_summary_2024`) before rendering lineage graph views.
+  - Threaded node metadata (`nodeLabel`, `nodeType`) through `getLineageGraph` messaging to support deterministic host-side resolution.
+- **Graph->Lineage trace reliability for searched/external nodes**:
+  - Fixed `Trace in Lineage` and node double-click flows to always include stable node metadata from the selected graph node when action attributes are missing.
+  - Expanded lineage node resolution to match qualified/unqualified names (for example `carriers` resolving to `raw.carriers`) to prevent false empty-lineage states such as `external_90 has no upstream or downstream relationships`.
+- **Workspace Graph back-navigation and state consistency**:
+  - Back button behavior now consistently returns to Graph for Graph-origin lineage navigation while preserving `Back to Lineage` for in-lineage drilldowns.
+  - Restored graph selection state persistence across tab switches by saving graph view state before highlight cleanup.
+  - Mode switches now clear stale selection details/cross-links and reset path status so old node details do not linger while the new mode renders.
+- **Workspace export dropdown consistency**:
+  - Normalized advanced export option styling so `SVG` onward uses the same left alignment and text contrast as `Copy to clipboard (PNG)` and `Save as PNG`.
+- **Workspace graph interaction runtime regression**:
+  - Removed stale `focusBtn` references from graph scripts that could break interaction flows after moving focus actions to the Selection panel.
+- **Workspace graph search count visibility**:
+  - Fixed search-count rendering by explicitly using inline display state so `X of Y` feedback is visible when matches exist.
+- **Aggregate window function parser compatibility (`FILTER ... OVER`)**:
+  - Added preprocessing support to strip `FILTER (WHERE ...)` clauses before parsing, preventing failures on valid SQL patterns like `max(col) FILTER (WHERE ...) OVER (...)`.
+- **CTE hoisting with quoted CTE names**:
+  - Fixed nested CTE hoisting when CTE names are quoted (`"name"`, `` `name` ``, `[name]`) so multi-block nested `WITH` queries hoist reliably.
+- **Indented `SEL` not detected or preprocessed**: Both detection and preprocessing regexes only matched `SEL` at absolute line start or after `;`. Indented Teradata queries (`  SEL id FROM t`) now correctly detected and rewritten.
+- **`LOCKING TABLE <object> FOR ACCESS` not stripped**: The LOCKING regex only handled the bare `LOCKING TABLE FOR ACCESS` form without an object name. Object-qualified forms like `LOCKING TABLE customers FOR ACCESS` are now stripped correctly.
+- **Teradata reserved words leaked into global scope**: Words like `sample`, `normalize`, `locking` were added to the global `SQL_RESERVED_WORDS` set, causing `SELECT * FROM sample` to return no table references in MySQL mode. Teradata-specific reserved words are now dialect-scoped.
+- **QUALIFY clause stripping depth-awareness**:
+  - `stripQualifyClauses()` now uses depth-aware scanning (`findQualifyClauseEnd()`) instead of flat regex terminator matching. Previously, `ORDER BY` inside `OVER()` parentheses was incorrectly treated as a clause boundary, breaking queries like `QUALIFY ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) <= 3`.
+- **Snowflake syntax preprocessing compatibility**:
+  - Added Snowflake compatibility rewrites for parser ingestion: `QUALIFY` stripping, `IFF()` rewrite to `CASE`, trailing-comma cleanup before `FROM/WHERE`, and `::TYPE` cast suffix stripping.
+- **Teradata advanced query partial parsing in SQL Flow**:
+  - Eliminated partial fallbacks for Teradata MERGE statements in `examples/teradata-advanced.sql` (Q1/Q2) by adding a Teradata MERGE compatibility parse path that preserves source/target/branch structure without setting `partial`.
+  - Eliminated partial fallback for Teradata XML aggregation query patterns (Q23) by extending Teradata preprocessing with:
+    - `XMLAGG(... ORDER BY ...)` argument rewrite (ORDER BY stripped at depth 0 inside XMLAGG),
+    - XML method-chain stripping for `.RETREIVE(...)` / `.RETRIEVE(...)`.
+  - Result: `examples/teradata-advanced.sql` now parses as `35/35` non-partial statements under Teradata dialect.
+- **IN-subquery source tables missed for `expr_list` AST shape**: `findSubqueriesInExpression()` did not handle arrays emitted by node-sql-parser for `IN (SELECT ...)` expressions, causing subquery source tables (e.g., `departments`) to be silently dropped from the graph.
+- **MERGE visualization quality**: Fixed three issues with MERGE statement rendering in the fallback parser:
+  - `SET` keyword falsely extracted as a table node from `UPDATE SET` inside MERGE WHEN clauses (added negative lookahead to UPDATE regex pattern).
+  - MERGE node displayed an oversized empty box because `details[]` is not rendered for 'result' type nodes — moved WHEN clause and column info into the visible `description` field.
+  - Fallback parser results had no layout applied (dagre was skipped), causing nodes to stack vertically with crossed edges instead of aligning source tables side-by-side above the MERGE node.
+
+### Documentation
+
+- Updated `README.md` Architecture Overview to a single current tree (removed duplicate architecture trees).
+- Added Cursor installation instructions to `README.md` with Open VSX Registry link and publisher-qualified search name.
+
+### Tests
+
+- Added `UndoManager.getInitial()` unit tests (5 cases: basic, after undo/redo, empty, cleared, max history eviction).
+- Added interaction regression characterisation tests guarding against re-introduction of cloud drag, arrow disconnect, search clear, and reset view bugs.
+- Added regression coverage for parse-error source-line propagation (index → toolbar tooltip → renderer overlay), including absolute-to-relative statement line mapping.
+- Added parser regressions for cross-dialect auto-retry behavior (including `examples/postgres_complex.sql`) and time-literal detection safety.
+- Added workspace lineage routing regression for external graph IDs with unqualified labels resolving to qualified lineage node names.
+- Added Teradata dialect detection tests (VOLATILE TABLE, MULTISET, PRIMARY INDEX, LOCKING, SAMPLE, SEL shorthand, hash functions, COLLECT STATS, macros, JOIN INDEX, RANGE_N, NORMALIZE, RENAME).
+- Added Teradata preprocessing tests (SEL rewrite, LOCKING stripping, VOLATILE/MULTISET/SET stripping, PRIMARY INDEX stripping, SAMPLE/TOP stripping, QUALIFY depth-aware stripping, REPLACE VIEW rewrite, UPDATE FROM comma-join rewrite, bare DATE → CURRENT_DATE, reserved-word alias quoting, WITHIN GROUP stripping, RANGE BETWEEN INTERVAL fallback, combined constructs).
+- Added Teradata end-to-end parsing tests (basic SELECT, JOINs, CTEs, window functions, MERGE, DML, QUALIFY, UPDATE FROM, DATE keyword, PERCENTILE_CONT with WITHIN GROUP).
+- Added Oracle dialect detection tests (CONNECT BY, (+) joins, ROWNUM + sequences, NVL/DECODE, comment masking).
+- Added Oracle preprocessing tests (outer join removal, MINUS → EXCEPT, START WITH/CONNECT BY stripping, ORDER SIBLINGS BY, CTE-nested hierarchical queries, string literal safety).
+- Added Oracle end-to-end parsing tests (basic SELECT, WHERE, CTEs, JOINs, window functions, (+) join preprocessing, MINUS rewriting).
+- Added Oracle PIVOT/UNPIVOT preprocessing tests (basic, nested subquery, combined with (+) joins).
+- Added Oracle FLASHBACK (AS OF SCN/TIMESTAMP) preprocessing tests.
+- Added Oracle MODEL clause preprocessing tests (DIMENSION BY/MEASURES/RULES, PARTITION BY, column-name false positive guard).
+- Added Oracle RETURNING INTO preprocessing tests (single/multiple bind vars, multi-line, cross-statement boundary safety).
+- Added Oracle optimizer hints detection test.
+- Added `preprocessForParsing()` unified tests (PostgreSQL, GROUPING SETS, Oracle, Snowflake, CTE hoisting, no-op passthrough).
+- Added `PL/SQL` → `Oracle` normalizeDialect mapping test.
+- Added unit tests for preprocessing transforms (GROUPING SETS edge cases, Snowflake path/time-literal safety).
+- Added unit tests for unrecognized TVF hint behavior.
+- Expanded registry tests for new dialect TVFs.
+- Added integration coverage for `GROUPING SETS` rewrite and Snowflake deep-path collapsing.
+- Added keyboard navigation regression tests for sibling cycling fallback when visual peers have different `depth` metadata.
+- Added integration assertions for `U`/`D`/`A` focus direction shortcuts and `setFocusMode()` auto-enable breadcrumb behavior.
+- Added condition extractor unit regressions for wrapped `column_ref` operands and `IN` `expr_list` formatting.
+- Added demo showcase integration regression ensuring Q1 WHERE details never contain `[object Object]`.
+- Added compare-view regression coverage for removed ghost-node repositioning to avoid overlap with active nodes and other ghost nodes.
+- Added regression test coverage for repeated-table hint deduplication (`scanned` vs `accessed`) so the same table is not reported twice.
+- Added aggregate extraction regressions for CASE + `EXTRACT(...)` formatting and function-usage tracking from scalar subqueries.
+- Added workspace regressions for:
+  - subfolder-scoped analysis behavior and mode-switch search reset,
+  - lineage keyboard discoverability and navigation behavior,
+  - upstream/downstream count parity for internal lineage nodes,
+  - depth-aware lineage overview counts,
+  - Escape clear-path handling for active column trace,
+  - unresolved-node lineage export payload behavior.
+- Added Workspace Graph UX regression coverage for:
+  - first-load overlay/toolbar overlap prevention behavior,
+  - graph action routing and context button availability in Selection actions,
+  - host-side graph-node -> lineage-node ID resolution for `getLineageGraph` requests,
+  - export dropdown advanced-option alignment/contrast parity,
+  - issues-page `Show in graph` routing and query handoff,
+  - edge metadata serialization for graph SVG and edge-selection rendering,
+  - shortest-path action wiring and Selection panel path-controls presence.
+- Added parser regressions for:
+  - aggregate window expressions using `FILTER (WHERE ...) OVER (...)`,
+  - `stripFilterClauses()` behavior boundaries (presence, absence, string-literal safety),
+  - quoted-name nested CTE hoisting,
+  - Snowflake syntax preprocessing transforms (`QUALIFY`, `IFF`, trailing commas, `::TYPE` casts).
+- Added SQL Flow batch navigation regressions for scoped status navigation:
+  - `[` / `]` wiring through scoped adjacency helpers,
+  - compact `ok/failed/partial` chip rendering and scope toggling in batch tabs.
+- Added Teradata regression coverage for:
+  - MERGE compatibility parsing without `partial`,
+  - XMLAGG ORDER BY + `.RETREIVE(...)` preprocessing,
+  - dialect support guard ensuring Teradata MERGE no longer degrades to partial parse.
+- Added IN-subquery source table regression test (`expr_list` AST shape) and advanced subquery example file (`examples/advanced_subqueries.sql`).
+- Added toolbar dialect circular-order regression tests for helper ordering and re-render wiring.
+
 ## [0.3.7] - 2026-02-13
 
 ### Fixed
@@ -590,6 +841,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace dependency graph**: Cross-file SQL analysis (Graph, Lineage, Tables, Impact views).
 
 ---
+
+[0.4.0]: https://github.com/buva7687/sql-crack/compare/v0.3.7...v0.4.0
 
 [0.3.7]: https://github.com/buva7687/sql-crack/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/buva7687/sql-crack/compare/v0.3.5...v0.3.6

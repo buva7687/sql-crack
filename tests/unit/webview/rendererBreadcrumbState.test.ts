@@ -6,6 +6,34 @@ describe('webview renderer filter breadcrumb state reset', () => {
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
+    const listenerSource = readFileSync(
+        join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'),
+        'utf8'
+    );
+    const tooltipSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/tooltip.ts'),
+        'utf8'
+    );
+    const infoPanelSource = readFileSync(
+        join(__dirname, '../../../src/webview/panels/infoPanel.ts'),
+        'utf8'
+    );
+    const sqlPanelSource = readFileSync(
+        join(__dirname, '../../../src/webview/panels/sqlPanels.ts'),
+        'utf8'
+    );
+    const columnLineageSource = readFileSync(
+        join(__dirname, '../../../src/webview/features/columnLineage.ts'),
+        'utf8'
+    );
+    const bootstrapSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/rendererBootstrap.ts'),
+        'utf8'
+    );
+    const breadcrumbSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/breadcrumbPopup.ts'),
+        'utf8'
+    );
 
     it('resets breadcrumb/filter UI state before rendering a new query result', () => {
         expect(rendererSource).toContain('clearSearch();');
@@ -21,27 +49,27 @@ describe('webview renderer filter breadcrumb state reset', () => {
     });
 
     it('uses theme-aware breadcrumb colors instead of hardcoded dark-only values', () => {
-        expect(rendererSource).toContain('const crumbText = state.isDarkTheme');
-        expect(rendererSource).toContain('const crumbMuted = state.isDarkTheme');
-        expect(rendererSource).toContain('const separatorColor = state.isDarkTheme');
-        expect(rendererSource).toContain('breadcrumbPanel.style.background = state.isDarkTheme');
+        expect(breadcrumbSource).toContain('const crumbText = state.isDarkTheme');
+        expect(breadcrumbSource).toContain('const crumbMuted = state.isDarkTheme');
+        expect(breadcrumbSource).toContain('const separatorColor = state.isDarkTheme');
+        expect(breadcrumbSource).toContain('breadcrumbPanel.style.background = state.isDarkTheme');
     });
 
     it('suppresses the legacy breadcrumb popup while column lineage mode is active', () => {
-        expect(rendererSource).toContain('if (state.showColumnFlows) {');
-        expect(rendererSource).toContain("breadcrumbPanel.style.display = 'none';");
+        expect(breadcrumbSource).toContain('if (state.showColumnFlows) {');
+        expect(breadcrumbSource).toContain("breadcrumbPanel.style.display = 'none';");
         expect(rendererSource).toContain('if (state.selectedNodeId) {');
         expect(rendererSource).toContain('updateBreadcrumb(state.selectedNodeId);');
-        expect(rendererSource).toContain('right: auto;');
-        expect(rendererSource).toContain('pointer-events: none;');
+        expect(bootstrapSource).toContain('right: auto;');
+        expect(bootstrapSource).toContain('pointer-events: none;');
     });
 
     it('adds panel close affordance and themed scrollbar styles for column lineage panel', () => {
-        expect(rendererSource).toContain('column-lineage-panel-close');
-        expect(rendererSource).toContain('Close column lineage panel');
+        expect(columnLineageSource).toContain('column-lineage-panel-close');
+        expect(columnLineageSource).toContain('Close column lineage panel');
         expect(rendererSource).toContain('ensureColumnLineagePanelScrollbarStyles');
-        expect(rendererSource).toContain('#column-lineage-panel::-webkit-scrollbar');
-        expect(rendererSource).toContain('scrollbar-color:');
+        expect(columnLineageSource).toContain('#column-lineage-panel::-webkit-scrollbar');
+        expect(columnLineageSource).toContain('scrollbar-color:');
     });
 
     it('applies theme-aware scrollbar styling for performance hints in light and dark modes', () => {
@@ -63,24 +91,25 @@ describe('webview renderer filter breadcrumb state reset', () => {
     });
 
     it('shows "Press S for full SQL" in tooltip when SQL preview is truncated', () => {
-        expect(rendererSource).toContain('if (sqlSnippet.truncated)');
-        expect(rendererSource).toContain('Press S for full SQL');
-        expect(rendererSource).toContain("if (e.key === 's' || e.key === 'S')");
-        expect(rendererSource).toContain('toggleSqlPreview();');
+        expect(tooltipSource).toContain('if (sqlSnippet.truncated)');
+        expect(tooltipSource).toContain('Press S for full SQL');
+        expect(rendererSource).toContain('showTooltipUi({');
+        expect(listenerSource).toContain("if (e.key === 's' || e.key === 'S')");
+        expect(listenerSource).toContain('callbacks.toggleSqlPreview();');
     });
 
     it('uses theme-aware SQL preview heading and body text colors', () => {
-        expect(rendererSource).toContain('const sqlHeaderColor = state.isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;');
-        expect(rendererSource).toContain('const sqlBodyColor = state.isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;');
-        expect(rendererSource).toContain('color: ${sqlHeaderColor}');
-        expect(rendererSource).toContain('color: ${sqlBodyColor};');
+        expect(sqlPanelSource).toContain('const sqlHeaderColor = isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;');
+        expect(sqlPanelSource).toContain('const sqlBodyColor = isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;');
+        expect(sqlPanelSource).toContain('color: ${sqlHeaderColor}');
+        expect(sqlPanelSource).toContain('color: ${sqlBodyColor};');
     });
 
     it('uses theme-aware colors for details and SQL clause panels', () => {
-        expect(rendererSource).toContain('const headingColor = isDark ? UI_COLORS.text : UI_COLORS.textLight;');
-        expect(rendererSource).toContain('const closeButtonColor = isDark ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;');
-        expect(rendererSource).toContain('const footerColor = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;');
-        expect(rendererSource).toContain('const panelBg = isDark ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid;');
-        expect(rendererSource).toContain('const clauseText = isDark ? UI_COLORS.textBright : UI_COLORS.textLight;');
+        expect(infoPanelSource).toContain('const headingColor = isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;');
+        expect(infoPanelSource).toContain('const closeButtonColor = isDarkTheme ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;');
+        expect(infoPanelSource).toContain('const footerColor = isDarkTheme ? UI_COLORS.textDim : UI_COLORS.textLightDim;');
+        expect(sqlPanelSource).toContain('panelBg: isDarkTheme ? UI_COLORS.backgroundPanelSolid : UI_COLORS.backgroundPanelLightSolid');
+        expect(sqlPanelSource).toContain('clauseText: isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight');
     });
 });

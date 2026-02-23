@@ -10,3 +10,14 @@ export {
     clearLineageBadges,
 } from './edgeRenderer';
 export type { RenderEdgeOptions } from './edgeRenderer';
+export {
+    layoutSubflowNodes,
+    layoutSubflowNodesVertical,
+    renderCloudSubflow,
+    renderSubflow,
+} from './cloudRenderer';
+export type {
+    CloudSubflowRenderCallbacks,
+    RenderCloudSubflowOptions,
+    RenderSubflowOptions,
+} from './cloudRenderer';

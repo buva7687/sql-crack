@@ -9,6 +9,7 @@ jest.mock('fs');
 
 import * as fs from 'fs';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
+import { logger } from '../../../../src/logger';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
 import type { ColumnInfo } from '../../../../src/workspace/extraction/types';
 
@@ -213,6 +214,22 @@ describe('LineageBuilder', () => {
 
             expect(builder.nodes.has('cte:recent_orders')).toBe(true);
             expect(builder.nodes.get('cte:recent_orders')!.type).toBe('cte');
+        });
+
+        it('logs parser fallback when CTE AST parsing fails and regex extraction is used', () => {
+            const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => {});
+            mockedFs.existsSync.mockReturnValue(true);
+            mockedFs.readFileSync.mockReturnValue('WITH broken AS (SELECT FROM) SELECT *');
+
+            const fileAnalysis = makeFileAnalysis('broken.sql', [], [], []);
+            const files = new Map([['broken.sql', fileAnalysis]]);
+            const index = makeIndex([], files);
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('using regex fallback'));
+            debugSpy.mockRestore();
         });
 
         it('deduplicates nodes with same ID (first definition wins)', () => {

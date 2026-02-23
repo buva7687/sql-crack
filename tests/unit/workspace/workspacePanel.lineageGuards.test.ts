@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkspacePanel } from '../../../src/workspace/workspacePanel';
 import { LineageBuilder } from '../../../src/workspace/lineage/lineageBuilder';
+import { resolveAutoIndexThresholdFromConfig } from '../../../src/workspace/panel/settings';
 
 describe('WorkspacePanel lineage guards and config defaults', () => {
     beforeEach(() => {
@@ -37,6 +38,7 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
             _impactAnalyzer: null,
             _columnLineageTracker: null,
             _lineageBuildPromise: null,
+            _lineageBuildVersion: 0,
             _indexManager: {
                 getIndex: jest.fn(() => ({ files: [] })),
             },
@@ -53,14 +55,48 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(context._lineageBuildPromise).toBeNull();
     });
 
+    it('retries lineage build when awaited in-flight promise resolves without graph', async () => {
+        const mockGraph = {
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        } as any;
+
+        const buildSpy = jest
+            .spyOn(LineageBuilder.prototype, 'buildFromIndex')
+            .mockReturnValue(mockGraph);
+
+        const context: any = {
+            _lineageGraph: null,
+            _lineageBuilder: null,
+            _flowAnalyzer: null,
+            _impactAnalyzer: null,
+            _columnLineageTracker: null,
+            _lineageBuildPromise: Promise.resolve(), // stale completed promise
+            _lineageBuildVersion: 1,
+            _indexManager: {
+                getIndex: jest.fn(() => ({ files: [] })),
+            },
+        };
+
+        await (WorkspacePanel.prototype as any).buildLineageGraph.call(context);
+
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(context._lineageGraph).toBe(mockGraph);
+        expect(context._lineageBuildPromise).toBeNull();
+    });
+
     it('reads auto-index threshold from configuration with bounds', () => {
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 999 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(500);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(500);
 
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 5 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(10);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(10);
 
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 73 });
-        expect((WorkspacePanel as any).resolveAutoIndexThreshold()).toBe(73);
+        expect(resolveAutoIndexThresholdFromConfig()).toBe(73);
     });
 });

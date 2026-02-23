@@ -119,4 +119,36 @@ describe('LineageGraphRenderer UX markup', () => {
         expect(svg).toContain('column-close-btn-circle');
         expect(svg).toContain('column-close-btn-icon');
     });
+
+    it('includes external nodes in upstream/downstream stats', () => {
+        const graphWithExternal: LineageGraph = {
+            nodes: new Map([
+                ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
+                ['table:customers', { id: 'table:customers', type: 'table', name: 'customers', metadata: {} }],
+                ['external:vendor_feed', { id: 'external:vendor_feed', type: 'external', name: 'vendor_feed', metadata: {} }],
+            ]),
+            edges: [
+                { id: 'e-table', sourceId: 'table:customers', targetId: 'table:orders', type: 'direct', metadata: {} },
+                { id: 'e-external', sourceId: 'external:vendor_feed', targetId: 'table:orders', type: 'direct', metadata: {} },
+            ],
+            columnEdges: [],
+            getUpstream: () => [],
+            getDownstream: () => [],
+            getColumnLineage: () => [],
+        };
+
+        const renderer = new LineageGraphRenderer(graphWithExternal);
+        const renderGraph = renderer.buildGraph({
+            centerNodeId: 'table:orders',
+            depth: 5,
+            direction: 'both',
+            expandedNodes: new Set(),
+            includeExternal: true,
+        });
+
+        expect(renderGraph.stats.upstreamCount).toBe(2);
+        expect(renderGraph.stats.externalUpstreamCount).toBe(1);
+        expect(renderGraph.stats.downstreamCount).toBe(0);
+        expect(renderGraph.stats.externalDownstreamCount).toBe(0);
+    });
 });

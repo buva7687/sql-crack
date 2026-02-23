@@ -141,6 +141,75 @@ function computeBounds(nodes: FlowNode[]): { minX: number; minY: number; maxX: n
     return { minX, minY, maxX, maxY };
 }
 
+interface CompareNodeFrame {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+function resolveCompareNodeFrame(node: FlowNode, indexHint: number): CompareNodeFrame {
+    return {
+        x: Number.isFinite(node.x) ? node.x : 80,
+        y: Number.isFinite(node.y) ? node.y : 80 + (indexHint * 80),
+        width: Number.isFinite(node.width) ? node.width : 180,
+        height: Number.isFinite(node.height) ? node.height : 58,
+    };
+}
+
+function isFrameOverlapping(a: CompareNodeFrame, b: CompareNodeFrame, padding = 8): boolean {
+    const left = a.x;
+    const right = a.x + a.width;
+    const top = a.y;
+    const bottom = a.y + a.height;
+
+    const otherLeft = b.x;
+    const otherRight = b.x + b.width;
+    const otherTop = b.y;
+    const otherBottom = b.y + b.height;
+
+    return left < (otherRight + padding)
+        && (right + padding) > otherLeft
+        && top < (otherBottom + padding)
+        && (bottom + padding) > otherTop;
+}
+
+export function positionRemovedGhostNodes(ghostNodes: FlowNode[], anchorNodes: FlowNode[]): FlowNode[] {
+    if (ghostNodes.length === 0) {
+        return ghostNodes;
+    }
+
+    const occupied = anchorNodes.map((node, index) => resolveCompareNodeFrame(node, index));
+    const positioned: FlowNode[] = [];
+
+    ghostNodes.forEach((ghostNode, index) => {
+        const baseFrame = resolveCompareNodeFrame(ghostNode, anchorNodes.length + index);
+        const frame: CompareNodeFrame = { ...baseFrame };
+        const stepY = baseFrame.height + 14;
+        let attempts = 0;
+
+        // Keep removed ghost labels readable by nudging them away from occupied slots.
+        while (occupied.some(existing => isFrameOverlapping(frame, existing)) && attempts < 12) {
+            attempts += 1;
+            const deltaRows = Math.ceil(attempts / 2);
+            frame.y = attempts % 2 === 1
+                ? baseFrame.y + (stepY * deltaRows)
+                : baseFrame.y - (stepY * deltaRows);
+        }
+
+        occupied.push({ ...frame });
+        positioned.push({
+            ...ghostNode,
+            x: frame.x,
+            y: frame.y,
+            width: frame.width,
+            height: frame.height,
+        });
+    });
+
+    return positioned;
+}
+
 function createNodeGroup(
     _svg: SVGSVGElement,
     node: FlowNode,
@@ -229,8 +298,9 @@ function renderGraphPane(
     svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     viewport.appendChild(svg);
 
+    const positionedGhostNodes = positionRemovedGhostNodes(ghostNodes, result.nodes);
     const allNodes = result.nodes.slice();
-    const bounds = computeBounds(allNodes.concat(ghostNodes));
+    const bounds = computeBounds(allNodes.concat(positionedGhostNodes));
     const padding = 100;
     const width = Math.max(640, (bounds.maxX - bounds.minX) + (padding * 2));
     const height = Math.max(420, (bounds.maxY - bounds.minY) + (padding * 2));
@@ -272,7 +342,7 @@ function renderGraphPane(
         graphGroup.appendChild(createNodeGroup(svg, node, state, dark, index));
     });
 
-    ghostNodes.forEach((node, index) => {
+    positionedGhostNodes.forEach((node, index) => {
         graphGroup.appendChild(createNodeGroup(svg, node, 'removed', dark, result.nodes.length + index));
     });
 

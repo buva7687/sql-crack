@@ -101,13 +101,20 @@ describe('IndexManager', () => {
     describe('initialization', () => {
         it('should create index manager with default dialect', () => {
             const manager = new IndexManager(mockContext as vscode.ExtensionContext);
-            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL');
+            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL', undefined, undefined);
             manager.dispose();
         });
 
         it('should create index manager with specified dialect', () => {
             const manager = new IndexManager(mockContext as vscode.ExtensionContext, 'PostgreSQL');
-            expect(WorkspaceScanner).toHaveBeenCalledWith('PostgreSQL');
+            expect(WorkspaceScanner).toHaveBeenCalledWith('PostgreSQL', undefined, undefined);
+            manager.dispose();
+        });
+
+        it('should pass scopeUri to WorkspaceScanner', () => {
+            const scopeUri = vscode.Uri.file('/workspace/subfolder');
+            const manager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL', scopeUri);
+            expect(WorkspaceScanner).toHaveBeenCalledWith('MySQL', undefined, scopeUri);
             manager.dispose();
         });
 
@@ -818,6 +825,51 @@ describe('IndexManager', () => {
             expect(mockScanner.analyzeFile).toHaveBeenCalled();
         });
 
+        it('tracks pending changes and clears the counter after queued updates are processed', async () => {
+            const watcher = __getFileSystemWatcher();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+
+            mockScanner.analyzeFile.mockResolvedValue({
+                ...createMockAnalysis('/test.sql', [{ name: 'updated_users' }]),
+                contentHash: 'updated-hash',
+            });
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('deduplicates queued updates for the same file when computing pending change count', async () => {
+            const watcher = __getFileSystemWatcher();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+
+            mockScanner.analyzeFile.mockResolvedValue({
+                ...createMockAnalysis('/test.sql', [{ name: 'users' }]),
+                contentHash: 'another-hash',
+            });
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('clears pending count even when file content hash is unchanged', async () => {
+            const watcher = __getFileSystemWatcher();
+            const unchanged = createMockAnalysis('/test.sql', [{ name: 'users' }]);
+            mockScanner.analyzeFile.mockResolvedValue(unchanged);
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            expect(indexManager.getChangesSinceIndex()).toBe(1);
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
         it('should remove file on delete', async () => {
             const watcher = __getFileSystemWatcher();
 
@@ -837,6 +889,7 @@ describe('IndexManager', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             expect(indexManager.findDefinition('delete_table')).toBeUndefined();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 
         it('should ignore updates from excluded directories', async () => {
@@ -860,6 +913,32 @@ describe('IndexManager', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             expect(removeSpy).not.toHaveBeenCalled();
+        });
+
+        it('should ignore updates from outside scopeUri', async () => {
+            // Create a scoped IndexManager
+            indexManager.dispose();
+            const scopeUri = vscode.Uri.file('/workspace/subfolder');
+            indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL', scopeUri);
+
+            mockScanner.getFileCount.mockResolvedValue(3);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/subfolder/q1.sql', [{ name: 'orders' }])
+            ]);
+            await indexManager.initialize();
+
+            const watcher = __getFileSystemWatcher();
+
+            // File outside scope — should be ignored
+            watcher?.__triggerChange(vscode.Uri.file('/workspace/other_folder/query.sql'));
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+
+            // analyzeFile should NOT be called for the out-of-scope file
+            // (it was called once during initialize for the in-scope file)
+            expect(mockScanner.analyzeFile).not.toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/workspace/other_folder/query.sql' })
+            );
         });
     });
 

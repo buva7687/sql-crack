@@ -76,4 +76,14 @@ describe('TableExplorer connection count caching', () => {
         expect(upstreamSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ maxDepth: 4 }));
         expect(downstreamSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ maxDepth: 4 }));
     });
+
+    it('initializes per-graph cache map before setting connection counts', () => {
+        const explorer = new TableExplorer();
+        const graph = createGraph();
+
+        expect(() => explorer.generateTableList(graph)).not.toThrow();
+
+        const cache = (explorer as any).connectionCountCache.get(graph);
+        expect(cache).toBeInstanceOf(Map);
+    });
 });

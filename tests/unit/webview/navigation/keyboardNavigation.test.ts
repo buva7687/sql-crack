@@ -107,4 +107,21 @@ describe('keyboardNavigation helpers', () => {
 
         expect(target?.id).toBe('q');
     });
+
+    it('falls back to coordinate bucketing when depth metadata differs from visual row', () => {
+        const mixedDepthNodes: FlowNode[] = [
+            createNode('left', 100, 180, 1),
+            createNode('right', 260, 182, 2),
+            createNode('bottom', 120, 320, 3),
+        ];
+
+        const target = getSiblingCycleTarget({
+            nodes: mixedDepthNodes,
+            currentNode: mixedDepthNodes[0],
+            direction: 'next',
+            layoutType: 'vertical',
+        });
+
+        expect(target?.id).toBe('right');
+    });
 });

@@ -98,6 +98,7 @@ export const EDGE_DASH_PATTERNS: Record<string, string | null> = {
     filter: '2,2',
     merge_source: '9,2,2,2',
     merge_target: '12,3',
+    subquery_flow: '4,4',
 };
 
 // ============================================================
@@ -126,6 +127,9 @@ export const BADGE_COLORS = {
 
     // Function names
     functionName: '#fbbf24', // Amber/Gold
+
+    // Subquery source tables
+    subquerySource: '#7c3aed', // Violet-600
 } as const;
 
 // ============================================================
@@ -138,6 +142,7 @@ export const CONDITION_COLORS: Record<string, string> = {
     having: '#ec4899',  // Pink
     on: '#06b6d4',      // Cyan
     filter: '#f59e0b',  // Amber
+    subquery_flow: '#7c3aed', // Violet
     default: '#64748b', // Gray
 };
 
@@ -150,6 +155,7 @@ export const NODE_STROKE_COLORS = {
     read: 'rgba(59, 130, 246, 0.8)',    // Blue
     cte: 'rgba(168, 85, 247, 0.8)',     // Purple
     derived: 'rgba(168, 85, 247, 0.7)', // Purple (lighter)
+    subquerySource: 'rgba(124, 58, 237, 0.7)', // Violet
     default: 'rgba(255, 255, 255, 0.3)', // White
 } as const;
 

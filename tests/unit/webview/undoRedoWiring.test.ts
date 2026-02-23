@@ -3,17 +3,23 @@ import { join } from 'path';
 
 describe('undo/redo layout history wiring', () => {
     const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
-    const toolbarSource = readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8');
+    const listenerSource = readFileSync(join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'), 'utf8');
+    const rendererStateSource = readFileSync(join(__dirname, '../../../src/webview/state/rendererState.ts'), 'utf8');
+    const toolbarSource = [
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar/actionGroups.ts'), 'utf8'),
+    ].join('\n');
     const indexSource = readFileSync(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
 
     it('wires Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z keyboard shortcuts in renderer', () => {
-        expect(rendererSource).toContain("(e.key === 'z' || e.key === 'Z')");
-        expect(rendererSource).toContain('redoLayoutChange();');
-        expect(rendererSource).toContain('undoLayoutChange();');
+        expect(listenerSource).toContain("(e.key === 'z' || e.key === 'Z')");
+        expect(listenerSource).toContain('callbacks.redoLayoutChange();');
+        expect(listenerSource).toContain('callbacks.undoLayoutChange();');
     });
 
     it('records and restores layout history snapshots in renderer', () => {
-        expect(rendererSource).toContain('const layoutHistory = new UndoManager<LayoutHistorySnapshot>');
+        expect(rendererSource).toContain('const layoutHistory = createLayoutHistory();');
+        expect(rendererStateSource).toContain('new UndoManager<LayoutHistorySnapshot>');
         expect(rendererSource).toContain('function captureLayoutHistorySnapshot()');
         expect(rendererSource).toContain('function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void');
         expect(rendererSource).toContain('recordLayoutHistorySnapshot();');

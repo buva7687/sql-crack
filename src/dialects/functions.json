@@ -98,7 +98,9 @@
         "STRTOK_SPLIT_TO_TABLE",
         "GENERATOR", 
         "RESULT_SCAN", 
-        "VALIDATE"
+        "VALIDATE",
+        "EXTERNAL_TABLE_FILES",
+        "INFER_SCHEMA"
       ]
     },
     "bigquery": {
@@ -128,7 +130,9 @@
         "APPENDS", 
         "CHANGES", 
         "ML.PREDICT", 
-        "ML.EVALUATE"
+        "ML.EVALUATE",
+        "ML.TRAIN",
+        "VECTOR_SEARCH"
       ]
     },
     "redshift": {
@@ -142,7 +146,10 @@
       "window": [
         "RATIO_TO_REPORT"
       ],
-      "tableValued": []
+      "tableValued": [
+        "UNNEST",
+        "GENERATE_SERIES"
+      ]
     },
     "hive": {
       "aggregates": [
@@ -156,7 +163,7 @@
         "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY"
       ],
       "window": [],
-      "tableValued": ["EXPLODE", "POSEXPLODE", "INLINE", "STACK"]
+      "tableValued": ["EXPLODE", "POSEXPLODE", "INLINE", "STACK", "JSON_TUPLE", "PARSE_URL_TUPLE"]
     },
     "athena": {
       "aggregates": [
@@ -172,7 +179,7 @@
         "REGR_INTERCEPT", "REGR_SLOPE"
       ],
       "window": [],
-      "tableValued": ["UNNEST"]
+      "tableValued": ["UNNEST", "SEQUENCE", "FLATTEN"]
     },
     "trino": {
       "aggregates": [
@@ -210,6 +217,47 @@
       ],
       "window": [],
       "tableValued": ["JSON_EACH", "JSON_TREE"]
+    },
+    "teradata": {
+      "aggregates": [
+        "XMLAGG",
+        "KURTOSIS", "SKEWNESS",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VAR_POP", "VAR_SAMP", "VARIANCE",
+        "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE",
+        "ANY_VALUE", "MEDIAN", "MODE",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY"
+      ],
+      "window": [
+        "CUME_DIST", "PERCENT_RANK",
+        "PERCENTILE_CONT", "PERCENTILE_DISC"
+      ],
+      "tableValued": [
+        "TABLE", "XMLTABLE", "STRTOK_SPLIT_TO_TABLE"
+      ]
+    },
+    "oracle": {
+      "aggregates": [
+        "LISTAGG", "COLLECT", "XMLAGG", "WM_CONCAT",
+        "MEDIAN", "STATS_MODE",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "REGR_AVGX", "REGR_AVGY", "REGR_COUNT", "REGR_INTERCEPT",
+        "REGR_R2", "REGR_SLOPE", "REGR_SXX", "REGR_SXY", "REGR_SYY",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+        "VARIANCE", "VAR_POP", "VAR_SAMP",
+        "ANY_VALUE", "APPROX_COUNT_DISTINCT",
+        "JSON_ARRAYAGG", "JSON_OBJECTAGG"
+      ],
+      "window": [
+        "RATIO_TO_REPORT", "NTH_VALUE", "FIRST_VALUE", "LAST_VALUE",
+        "CUME_DIST", "PERCENT_RANK", "PERCENTILE_CONT", "PERCENTILE_DISC"
+      ],
+      "tableValued": [
+        "XMLTABLE", "JSON_TABLE", "TABLE", "XMLSEQUENCE",
+        "DBMS_XPLAN.DISPLAY", "DBMS_XPLAN.DISPLAY_CURSOR"
+      ]
     }
   }
 }

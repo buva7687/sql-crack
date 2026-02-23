@@ -3,6 +3,28 @@
 // due to their tight interdependencies with internal processing functions.
 // Parser state is managed via ParserContext (ctx) inside sqlParser.ts only.
 
+// Context
+export { createFreshContext } from './context';
+export type { ParserContext } from './context';
+
+// Validation
+export { DEFAULT_VALIDATION_LIMITS, validateSql } from './validation/validate';
+export { splitSqlStatements } from './validation/splitting';
+
+// Dialects
+export { detectDialect, rankDialectScores } from './dialects/detection';
+export type { DialectDetectionResult } from './dialects/detection';
+export { regexFallbackParse } from './dialects/fallback';
+export {
+    hoistNestedCtes,
+    preprocessPostgresSyntax,
+    preprocessOracleSyntax,
+    preprocessSnowflakeSyntax,
+    rewriteGroupingSets,
+    collapseSnowflakePaths
+} from './dialects/preprocessing';
+export { detectDialectSpecificSyntax } from './dialects/warnings';
+
 // Extractors
 export {
     extractColumnInfos,
@@ -17,8 +39,16 @@ export {
     extractTablesFromStatement
 } from './extractors';
 
-// Note: generateHints and detectAdvancedIssues are now internal to sqlParser.ts
-// They use the consolidated ParserContext (ctx) for state management.
+// Hints
+export { generateHints, detectAdvancedIssues, calculateEnhancedMetrics } from './hints';
+
+// Statements
+export {
+    getStatementPresentation,
+    tryProcessCreateStatement,
+    tryProcessDmlStatements,
+    processSelectStatement
+} from './statements';
 
 // Layout
 export { layoutGraph } from './layout';

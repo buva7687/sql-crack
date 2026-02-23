@@ -59,6 +59,24 @@ describe('workspace cross-view linking', () => {
         expect(impactHtml).toContain('data-action="cross-view-detail"');
     });
 
+    it('adds accessible labels to table explorer interactive actions', () => {
+        const graph = createGraph();
+        const table = graph.nodes.get('table:orders')!;
+        const explorer = new TableExplorer();
+        const tableListHtml = explorer.generateTableList(graph);
+        const tableHtml = explorer.generateTableView({ table, graph });
+
+        expect(tableListHtml).toContain('role="button"');
+        expect(tableListHtml).toContain('tabindex="0"');
+        expect(tableListHtml).toContain('aria-label="Explore table orders"');
+        expect(tableHtml).toContain('aria-label="View lineage for orders"');
+        expect(tableHtml).toContain('aria-label="Analyze impact for orders"');
+        expect(tableHtml).toContain('title="View lineage for orders"');
+        expect(tableHtml).toContain('title="Analyze impact for orders"');
+        expect(tableHtml).toContain('class="flow-item flow-item-internal"');
+        expect(tableHtml).toContain('aria-label="Explore view daily_orders"');
+    });
+
     it('handles cross-view actions through delegated client script logic', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -70,12 +88,15 @@ describe('workspace cross-view linking', () => {
         const css = getWebviewStyles(true);
 
         expect(script).toContain("action.indexOf('cross-view-') === 0");
-        expect(script).toContain('prefillImpactForm');
+        expect(script).toContain('scheduleImpactSelectionPrefill');
         expect(script).toContain("switchToView('lineage'");
         expect(script).toContain("action === 'cross-view-detail'");
         expect(script).not.toContain('cross-view-table-explorer');
         expect(script).not.toContain("switchToView('tableExplorer'");
         expect(script).toContain("switchToView('impact'");
+        expect(script).toContain("lineageContent.addEventListener('keydown'");
+        expect(script).toContain("if (e.key !== 'Enter' && e.key !== ' ')");
+        expect(script).toContain("const target = e.target.closest('[data-action]');");
         expect(css).toContain('.cross-link-actions');
         expect(css).toContain('.cross-link-btn');
     });
