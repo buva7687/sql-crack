@@ -773,8 +773,8 @@ function applyParserCompatibilityPreprocessing(
         transformedSql = oraclePreprocessedSql;
         pushHintOnce(context, {
             type: 'info',
-            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL) for parser compatibility',
-            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY), PIVOT/UNPIVOT, flashback queries, and MODEL clauses are stripped for parser compatibility.',
+            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, CREATE TABLE storage/type options) for parser compatibility',
+            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY), PIVOT/UNPIVOT, flashback queries, MODEL clauses, and CREATE TABLE physical/type syntax are rewritten for parser compatibility.',
             category: 'best-practice',
             severity: 'low',
         });
