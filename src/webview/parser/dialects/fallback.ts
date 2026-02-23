@@ -73,7 +73,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         /\bFROM\s+([`"']?[\w.]+[`"']?)/gi,
         /\bJOIN\s+([`"']?[\w.]+[`"']?)/gi,
         /\bINTO\s+([`"']?[\w.]+[`"']?)/gi,
-        /\bUPDATE\s+([`"']?[\w.]+[`"']?)/gi,
+        /\bUPDATE\s+(?!SET\b)([`"']?[\w.]+[`"']?)/gi,
         /\bMERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/gi,
         /\bUSING\s+([`"']?[\w.]+[`"']?)/gi,
     ];
@@ -181,28 +181,64 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             const targetTable = mergeTargetMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeTargetMatch[1];
             const sourceTable = mergeSourceMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeSourceMatch[1];
 
+            // Extract ON condition
+            const onMatch = commentStripped.match(/\bON\s+(.+?)(?=\s*WHEN\b)/is);
+            const onCondition = onMatch ? onMatch[1].trim().replace(/\s+/g, ' ') : '';
+
+            // Extract UPDATE SET columns
+            const updateCols: string[] = [];
+            const setMatch = commentStripped.match(/UPDATE\s+SET\s+([\s\S]+?)(?=\bWHEN\b|\bINSERT\b|$)/i);
+            if (setMatch) {
+                const assignments = setMatch[1].split(',');
+                for (const a of assignments) {
+                    const colMatch = a.trim().match(/(?:\w+\.)?(\w+)\s*=/);
+                    if (colMatch) { updateCols.push(colMatch[1]); }
+                }
+            }
+
+            // Extract INSERT columns
+            const insertCols: string[] = [];
+            const insertMatch = commentStripped.match(/\bINSERT\s*\(([^)]+)\)/i);
+            if (insertMatch) {
+                insertCols.push(...insertMatch[1].split(',').map(c => c.trim()));
+            }
+
+            // Build a compact description (rendered) — details[] is NOT rendered for 'result' nodes
+            const descParts: string[] = [];
+            for (const w of whenClauses) {
+                descParts.push(`${w.type} → ${w.action}`);
+            }
+            if (updateCols.length > 0) { descParts.push(`SET: ${updateCols.join(', ')}`); }
+            if (insertCols.length > 0) { descParts.push(`INSERT: ${insertCols.join(', ')}`); }
+            const description = descParts.join(' | ');
+
             const mergeNodeId = genId('merge');
             nodes.push({
                 id: mergeNodeId,
                 type: 'result',
-                label: 'MERGE',
-                description: 'MERGE operation',
-                details: [
-                    `Target: ${targetTable}`,
-                    `Source: ${sourceTable}`,
-                    `Branches: ${whenClauses.length} WHEN clause${whenClauses.length > 1 ? 's' : ''}`,
-                    ...whenClauses.map(w => `  WHEN ${w.type}: ${w.action}`)
-                ],
+                label: `MERGE INTO ${targetTable}`,
+                description,
                 x: 100,
                 y: nodes.length * 100,
-                width: 180,
-                height: 80 + whenClauses.length * 15,
+                width: 200,
+                height: 60,
                 accessMode: 'write',
                 operationType: 'MERGE',
             });
 
             const sourceNode = nodes.find(n => n.label === sourceTable);
             const targetNode = nodes.find(n => n.label === targetTable);
+
+            // Both source and target flow INTO the MERGE node
+            if (targetNode) {
+                edges.push({
+                    id: genId('edge'),
+                    source: targetNode.id,
+                    target: mergeNodeId,
+                    sqlClause: 'INTO',
+                    clauseType: 'merge_target',
+                });
+            }
 
             if (sourceNode) {
                 edges.push({
@@ -211,16 +247,6 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
                     target: mergeNodeId,
                     sqlClause: 'USING',
                     clauseType: 'merge_source',
-                });
-            }
-
-            if (targetNode) {
-                edges.push({
-                    id: genId('edge'),
-                    source: mergeNodeId,
-                    target: targetNode.id,
-                    sqlClause: 'INTO',
-                    clauseType: 'merge_target',
                 });
             }
         }

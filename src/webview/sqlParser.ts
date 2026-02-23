@@ -694,6 +694,7 @@ function tryParseTeradataMergeCompatibility(sql: string, dialect: SqlDialect): P
             : node.details,
     }));
 
+    layoutGraph(result.nodes, result.edges);
     return result;
 }
 
@@ -943,6 +944,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             // Return regex fallback with the timeout hint merged in
             const fallbackResult = regexFallbackParse(sql, dialect);
             fallbackResult.hints.unshift(timeoutHint);
+            layoutGraph(fallbackResult.nodes, fallbackResult.edges);
             return fallbackResult;
         }
 
@@ -1119,6 +1121,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Merge dialect-specific hints from ctx (populated by detectDialectSpecificSyntax above)
         fallbackResult.hints.push(...ctx.hints);
 
+        layoutGraph(fallbackResult.nodes, fallbackResult.edges);
         return fallbackResult;
     }
 }

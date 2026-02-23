@@ -187,6 +187,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - XML method-chain stripping for `.RETREIVE(...)` / `.RETRIEVE(...)`.
   - Result: `examples/teradata-advanced.sql` now parses as `35/35` non-partial statements under Teradata dialect.
 - **IN-subquery source tables missed for `expr_list` AST shape**: `findSubqueriesInExpression()` did not handle arrays emitted by node-sql-parser for `IN (SELECT ...)` expressions, causing subquery source tables (e.g., `departments`) to be silently dropped from the graph.
+- **MERGE visualization quality**: Fixed three issues with MERGE statement rendering in the fallback parser:
+  - `SET` keyword falsely extracted as a table node from `UPDATE SET` inside MERGE WHEN clauses (added negative lookahead to UPDATE regex pattern).
+  - MERGE node displayed an oversized empty box because `details[]` is not rendered for 'result' type nodes — moved WHEN clause and column info into the visible `description` field.
+  - Fallback parser results had no layout applied (dagre was skipped), causing nodes to stack vertically with crossed edges instead of aligning source tables side-by-side above the MERGE node.
 
 ### Documentation
 
