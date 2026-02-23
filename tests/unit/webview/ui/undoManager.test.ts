@@ -70,4 +70,48 @@ describe('UndoManager', () => {
         expect(manager.canUndo()).toBe(false);
         expect(manager.canRedo()).toBe(false);
     });
+
+    describe('getInitial()', () => {
+        it('returns the first snapshot recorded via initialize()', () => {
+            const manager = new UndoManager<Snapshot>();
+            manager.initialize(snap(0));
+            manager.record(snap(1));
+            manager.record(snap(2));
+
+            expect(manager.getInitial()).toEqual(snap(0));
+        });
+
+        it('returns the first snapshot even after undo/redo', () => {
+            const manager = new UndoManager<Snapshot>();
+            manager.initialize(snap(0));
+            manager.record(snap(1));
+            manager.undo();
+            manager.record(snap(2));
+
+            expect(manager.getInitial()).toEqual(snap(0));
+        });
+
+        it('returns null when history is empty', () => {
+            const manager = new UndoManager<Snapshot>();
+            expect(manager.getInitial()).toBeNull();
+        });
+
+        it('returns null after clear()', () => {
+            const manager = new UndoManager<Snapshot>();
+            manager.initialize(snap(0));
+            manager.clear();
+
+            expect(manager.getInitial()).toBeNull();
+        });
+
+        it('returns oldest surviving entry after max history eviction', () => {
+            const manager = new UndoManager<Snapshot>({ maxEntries: 2 });
+            manager.initialize(snap(0));
+            manager.record(snap(1));
+            manager.record(snap(2));
+
+            // snap(0) was evicted, snap(1) is now the oldest
+            expect(manager.getInitial()).toEqual(snap(1));
+        });
+    });
 });

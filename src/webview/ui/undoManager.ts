@@ -87,4 +87,8 @@ export class UndoManager<T> {
         }
         return this.history[this.index] ?? null;
     }
+
+    getInitial(): T | null {
+        return this.history[0] ?? null;
+    }
 }

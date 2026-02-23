@@ -2,10 +2,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('toolbar first-run help pulse', () => {
-    const toolbarSource = readFileSync(
-        join(__dirname, '../../../src/webview/ui/toolbar.ts'),
-        'utf8'
-    );
+    const toolbarSource = [
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar/featureGroup.ts'), 'utf8'),
+    ].join('\n');
     const indexSource = readFileSync(
         join(__dirname, '../../../src/webview/index.ts'),
         'utf8'

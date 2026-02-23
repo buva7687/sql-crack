@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -29,7 +29,8 @@
   "activationEvents": [
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
-    "onCommand:sql-crack.analyzeWorkspace"
+    "onCommand:sql-crack.analyzeWorkspace",
+    "onCommand:sql-crack.showWorkspaceUxMetrics"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -46,6 +47,11 @@
         "command": "sql-crack.analyzeWorkspace",
         "title": "SQL Crack: Analyze Workspace Dependencies",
         "icon": "$(references)"
+      },
+      {
+        "command": "sql-crack.showWorkspaceUxMetrics",
+        "title": "SQL Crack: Show Workspace UX Metrics",
+        "icon": "$(graph-line)"
       }
     ],
     "menus": {
@@ -53,7 +59,6 @@
         {
           "command": "sql-crack.visualize",
           "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile",
-          "icon": "$(database)",
           "group": "navigation"
         }
       ],
@@ -61,7 +66,6 @@
         {
           "command": "sql-crack.visualize",
           "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile",
-          "icon": "$(database)",
           "group": "navigation"
         }
       ],
@@ -69,7 +73,6 @@
         {
           "command": "sql-crack.visualize",
           "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
-          "icon": "$(database)",
           "group": "navigation"
         },
         {
@@ -87,6 +90,10 @@
         },
         {
           "command": "sql-crack.analyzeWorkspace",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "sql-crack.showWorkspaceUxMetrics",
           "when": "workspaceFolderCount > 0"
         }
       ]
@@ -117,7 +124,9 @@
             "Athena",
             "Trino",
             "MariaDB",
-            "SQLite"
+            "SQLite",
+            "Oracle",
+            "Teradata"
           ],
           "enumDescriptions": [
             "MySQL dialect",
@@ -131,7 +140,9 @@
             "Amazon Athena dialect",
             "Trino (formerly Presto) dialect",
             "MariaDB dialect",
-            "SQLite dialect"
+            "SQLite dialect",
+            "Oracle Database dialect",
+            "Teradata dialect"
           ],
           "description": "Default SQL dialect for parsing queries"
         },
@@ -216,13 +227,11 @@
           "default": "tables",
           "enum": [
             "files",
-            "tables",
-            "hybrid"
+            "tables"
           ],
           "enumDescriptions": [
             "File-level dependency graph. Nodes are SQL files; edges show which files reference tables defined in other files.",
-            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.).",
-            "Files plus prominent tables (referenced 3+ times). Mix of file and table nodes."
+            "Table-level dependency graph. Nodes are tables/views; edges show references (SELECT, JOIN, INSERT, etc.)."
           ],
           "description": "Default mode for the Workspace Dependencies Graph tab. Used when the panel loads or when you refresh the index."
         },
@@ -353,6 +362,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Enable verbose debug logging to the SQL Crack output channel. Useful for troubleshooting. (Advanced)"
+        },
+        "sqlCrack.advanced.workspaceUxInstrumentation": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable local-only Workspace Graph UX interaction metrics in the SQL Crack output channel. No external telemetry is sent. (Advanced)"
         },
         "sqlCrack.customAggregateFunctions": {
           "type": "array",

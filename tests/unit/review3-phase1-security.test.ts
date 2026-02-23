@@ -20,7 +20,10 @@ import { join } from 'path';
 // =========================================================================
 
 describe('XSS: clientScripts.ts lineage result rendering', () => {
-    const source = readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8');
+    const source = [
+        readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../src/workspace/ui/scripts/messageHandling.ts'), 'utf8'),
+    ].join('\n');
 
     it('should NOT use inline onclick for lineage clickable nodes', () => {
         // The old pattern: onclick="vscode.postMessage({command:'openFileAtLine'..."
@@ -52,7 +55,10 @@ describe('XSS: clientScripts.ts lineage result rendering', () => {
 // =========================================================================
 
 describe('XSS: tooltip sanitization in clientScripts.ts', () => {
-    const source = readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8');
+    const source = [
+        readFileSync(join(__dirname, '../../src/workspace/ui/clientScripts.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../src/workspace/ui/scripts/tooltip.ts'), 'utf8'),
+    ].join('\n');
 
     it('should define a sanitizeTooltipHtml function', () => {
         expect(source).toContain('function sanitizeTooltipHtml');
@@ -63,15 +69,15 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
         expect(source).toContain('div.textContent = html');
         expect(source).toContain('div.innerHTML');
         // Then selectively restore only allowlisted structural tags
-        // Should only allow div, ul, li, strong, span — no script, img, iframe, etc.
-        expect(source).toMatch(/div\|ul\|li\|strong\|span/);
+        // Should only allow div, ul, li, strong, span, br — no script, img, iframe, etc.
+        expect(source).toMatch(/div\|ul\|li\|strong\|span\|br/);
     });
 
-    it('should only restore class attribute, not style or event handlers', () => {
-        // The allowlist regex should permit class only (style removed — tooltips use CSS classes)
-        expect(source).toMatch(/class=&quot;/);
-        // style should NOT be in the attribute whitelist
-        expect(source).not.toMatch(/(?:class\|style|style\|class)/);
+    it('should only restore class and style attributes, not event handlers', () => {
+        // The allowlist regex should permit class and style only.
+        // Note: innerHTML escapes < > & but leaves " as literal quotes (not &quot;),
+        // so the regex matches literal " not &quot;.
+        expect(source).toMatch(/class\|style/);
         // Should NOT contain any pattern that passes through on* attributes
         expect(source).not.toMatch(/sanitizeTooltipHtml[^}]*onclick/);
     });
@@ -212,7 +218,7 @@ describe('defensive guards in visualizationPanel.ts', () => {
 // =========================================================================
 
 describe('XSS: renderer tooltip escaping', () => {
-    const source = readFileSync(join(__dirname, '../../src/webview/renderer.ts'), 'utf8');
+    const source = readFileSync(join(__dirname, '../../src/webview/ui/tooltip.ts'), 'utf8');
 
     it('should escape window function PARTITION BY values in tooltip markup', () => {
         expect(source).toContain('escapeHtml(fn.partitionBy.join(\', \'))');

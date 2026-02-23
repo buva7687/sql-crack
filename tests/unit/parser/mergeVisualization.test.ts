@@ -40,10 +40,10 @@ describe('Item #3: MERGE Statement Visualization', () => {
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
             // Check if MERGE node exists with details
-            const mergeNode = result.nodes.find((n: any) => n.label === 'MERGE');
+            const mergeNode = result.nodes.find((n: any) => n.label.startsWith('MERGE'));
             if (mergeNode) {
-                // Fallback parser was used
-                expect(mergeNode?.details?.some((d: string) => d.includes('MATCHED'))).toBe(true);
+                // WHEN clause info is in the description (details aren't rendered for result nodes)
+                expect(mergeNode.description).toContain('MATCHED');
             } else {
                 // Normal parser succeeded
                 expect(result.nodes.length).toBeGreaterThan(0);
@@ -59,9 +59,9 @@ describe('Item #3: MERGE Statement Visualization', () => {
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            const mergeNode = result.nodes.find((n: any) => n.label === 'MERGE');
+            const mergeNode = result.nodes.find((n: any) => n.label.startsWith('MERGE'));
             if (mergeNode) {
-                expect(mergeNode?.details?.some((d: string) => d.includes('NOT MATCHED'))).toBe(true);
+                expect(mergeNode.description).toContain('NOT MATCHED');
             } else {
                 expect(result.nodes.length).toBeGreaterThan(0);
             }
@@ -77,11 +77,9 @@ describe('Item #3: MERGE Statement Visualization', () => {
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            const mergeNode = result.nodes.find((n: any) => n.label === 'MERGE');
+            const mergeNode = result.nodes.find((n: any) => n.label.startsWith('MERGE'));
             if (mergeNode) {
-                const hasMatched = mergeNode?.details?.some((d: string) => d.includes('MATCHED'));
-                const hasNotMatched = mergeNode?.details?.some((d: string) => d.includes('NOT MATCHED'));
-                expect(hasMatched || hasNotMatched).toBe(true);
+                expect(mergeNode.description).toContain('MATCHED');
             } else {
                 expect(result.nodes.length).toBeGreaterThan(0);
             }
@@ -201,7 +199,7 @@ describe('Item #3: MERGE Statement Visualization', () => {
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
             // Should still create MERGE node
-            const mergeNode = result.nodes.find((n: any) => n.label === 'MERGE');
+            const mergeNode = result.nodes.find((n: any) => n.label.startsWith('MERGE'));
             expect(mergeNode).toBeDefined();
         });
 
@@ -214,7 +212,7 @@ describe('Item #3: MERGE Statement Visualization', () => {
             `;
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-            const mergeNode = result.nodes.find((n: any) => n.label === 'MERGE');
+            const mergeNode = result.nodes.find((n: any) => n.label.startsWith('MERGE'));
             expect(mergeNode).toBeDefined();
         });
 

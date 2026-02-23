@@ -21,6 +21,7 @@ env/
 .claude/
 CLAUDE.md
 AGENTS.md
+skills/
 *.swp
 *.swo
 *~
@@ -37,8 +38,12 @@ Thumbs.db
 #archive
 archive/
 
+# Local example queries
+examples/sample_queries/
+
 # Local docs/notes
 docs/
+RELEASE_CHECKLIST.md
 
 # YouTube video scripts
 youtube/

@@ -21,7 +21,11 @@ import { LineageView } from '../ui/lineageView';
 import { ImpactView } from '../ui/impactView';
 import { ViewMode } from '../ui/types';
 import { logger } from '../../logger';
-import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../../shared/messages';
+import type {
+    WorkspaceWebviewMessage,
+    WorkspaceHostMessage,
+    WorkspaceUxMetricMetadata
+} from '../../shared/messages';
 
 /**
  * Context interface for message handler
@@ -60,6 +64,8 @@ export interface MessageHandlerContext {
     setCurrentImpactReport: (report: ImpactReport | null) => void;
     getCurrentFlowResult: () => FlowResult | null;
     setCurrentFlowResult: (result: FlowResult | null) => void;
+    getLineageLegendVisible: () => boolean;
+    setLineageLegendVisible: (visible: boolean) => void;
 
     // UI generators
     getTableExplorer: () => TableExplorer;
@@ -82,6 +88,8 @@ export interface MessageHandlerContext {
     rebuildAndRenderGraph: () => Promise<void>;
     buildLineageGraph: () => Promise<void>;
     handleExport: (format: string) => Promise<void>;
+    savePngToFile: (base64Data: string, suggestedFilename: string) => Promise<void>;
+    trackUxEvent: (event: string, metadata?: WorkspaceUxMetricMetadata) => void;
 }
 
 /**
@@ -139,6 +147,17 @@ export function findSimilarTableNames(
 
     candidates.sort((a, b) => a.distance - b.distance);
     return candidates.slice(0, limit).map(c => c.name);
+}
+
+function createEmptyLineageGraph(): LineageGraph {
+    return {
+        nodes: new Map(),
+        edges: [],
+        columnEdges: [],
+        getUpstream: () => [],
+        getDownstream: () => [],
+        getColumnLineage: () => []
+    };
 }
 
 export class MessageHandler {
@@ -247,6 +266,10 @@ export class MessageHandler {
                     this.handleClearSearch();
                     break;
 
+                case 'trackUxEvent':
+                    this.handleTrackUxEvent(message.event, message.metadata);
+                    break;
+
                 case 'toggleHelp':
                     this.handleToggleHelp();
                     break;
@@ -265,6 +288,10 @@ export class MessageHandler {
 
                 case 'openFileAtLine':
                     await this.handleOpenFileAtLine(message.filePath, message.line);
+                    break;
+
+                case 'showInGraph':
+                    this.handleShowInGraph(message.query, message.nodeType);
                     break;
 
                 case 'visualizeFile':
@@ -342,7 +369,9 @@ export class MessageHandler {
                         message.nodeId,
                         this.resolveRequestedDepth(message.depth),
                         message.direction || 'both',
-                        message.expandedNodes
+                        message.expandedNodes,
+                        message.nodeLabel,
+                        message.nodeType
                     );
                     break;
 
@@ -358,12 +387,32 @@ export class MessageHandler {
                     this.handleCollapseNodeColumns(message.nodeId);
                     break;
 
+                case 'setLineageLegendVisibility':
+                    this._context.setLineageLegendVisible(message.visible);
+                    break;
+
                 case 'selectColumn':
                     await this.handleSelectColumn(message.tableId, message.columnName);
                     break;
 
                 case 'clearColumnSelection':
                     await this.handleClearColumnSelection();
+                    break;
+
+                case 'savePng':
+                    await this._context.savePngToFile(message.data, message.filename);
+                    break;
+
+                case 'exportPngError':
+                    vscode.window.showErrorMessage(message.error || 'PNG export failed.');
+                    break;
+
+                case 'exportNodeLineage':
+                    await this.handleExportNodeLineage(
+                        message.nodeId,
+                        message.nodeLabel,
+                        message.nodeType
+                    );
                     break;
 
                 default:
@@ -382,22 +431,52 @@ export class MessageHandler {
         this._context.renderCurrentView();
     }
 
+    private handleShowInGraph(query: string, nodeType?: 'table' | 'view' | 'external' | 'file'): void {
+        const trimmedQuery = (query || '').trim();
+        const filter: SearchFilter = {
+            query: trimmedQuery,
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        };
+
+        this._context.setCurrentSearchFilter(filter);
+        this._context.setCurrentView('graph');
+        this._context.trackUxEvent('workspace_show_in_graph', {
+            queryLength: trimmedQuery.length,
+            nodeType: nodeType || 'unknown'
+        });
+
+        const graph = this._context.getCurrentGraph();
+        if (graph) {
+            this._context.panel.webview.html = this._context.getWebviewHtml(graph, filter);
+            return;
+        }
+        this._context.renderCurrentView();
+    }
+
     private async handleRefresh(): Promise<void> {
         await this._context.buildIndexWithProgress();
         await this._context.rebuildAndRenderGraph();
     }
 
     /**
-     * Handle graph mode switch (Files/Tables/Hybrid).
+     * Handle graph mode switch (Files/Tables).
      * Validates mode and rebuilds graph with new mode.
      * Ensures view stays on Graph tab (not Lineage/Tables/Impact).
      */
     private async handleSwitchGraphMode(mode: string): Promise<void> {
-        const valid: GraphMode[] = ['files', 'tables', 'hybrid'];
+        const valid: GraphMode[] = ['files', 'tables'];
         const m = valid.includes(mode as GraphMode) ? (mode as GraphMode) : 'tables';
         this._context.setCurrentGraphMode(m);
+        // Clear search filter — previous search terms may not apply to the new mode
+        this._context.setCurrentSearchFilter({
+            query: '',
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        });
         // Ensure we're on Graph view when switching modes (not Lineage/Tables/Impact)
-        // This prevents the view from switching to the wrong tab after mode change
         this._context.setCurrentView('graph');
         await this._context.rebuildAndRenderGraph();
     }
@@ -422,6 +501,13 @@ export class MessageHandler {
         if (graph) {
             this._context.panel.webview.html = this._context.getWebviewHtml(graph, clearFilter);
         }
+    }
+
+    private handleTrackUxEvent(event: string, metadata?: WorkspaceUxMetricMetadata): void {
+        if (typeof event !== 'string' || event.trim().length === 0) {
+            return;
+        }
+        this._context.trackUxEvent(event, metadata);
     }
 
     private handleToggleHelp(): void {
@@ -501,13 +587,15 @@ export class MessageHandler {
         await this._context.buildLineageGraph();
 
         const lineageGraph = this._context.getLineageGraph();
-        if (lineageGraph) {
-            const html = this._context.getLineageView().generateLineageOverview(lineageGraph);
-            this.postMessage({
-                command: 'lineageOverviewResult',
-                data: { html }
-            });
-        }
+        const graph = lineageGraph || createEmptyLineageGraph();
+        const html = this._context.getLineageView().generateLineageSearchView(graph, {
+            depth: this._context.getDefaultLineageDepth()
+        });
+
+        this.postMessage({
+            command: 'lineageOverviewResult',
+            data: { html }
+        });
     }
 
     private async handleSwitchToImpactView(): Promise<void> {
@@ -546,8 +634,8 @@ export class MessageHandler {
         let result: FlowResult | null = null;
 
         if (direction === 'both') {
-            const upstream = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
-            const downstream = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+            const upstream = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth, excludeExternal: true });
+            const downstream = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth, excludeExternal: true });
             result = {
                 nodes: this.dedupeLineageNodes([...upstream.nodes, ...downstream.nodes]),
                 edges: this.dedupeLineageEdges([...upstream.edges, ...downstream.edges]),
@@ -555,9 +643,9 @@ export class MessageHandler {
                 depth: Math.max(upstream.depth, downstream.depth)
             };
         } else if (direction === 'upstream') {
-            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth });
+            result = flowAnalyzer.getUpstream(nodeId, { maxDepth: depth, excludeExternal: true });
         } else {
-            result = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth });
+            result = flowAnalyzer.getDownstream(nodeId, { maxDepth: depth, excludeExternal: true });
         }
 
         this._context.setCurrentFlowResult(result);
@@ -584,7 +672,7 @@ export class MessageHandler {
     }
 
     private async handleAnalyzeImpact(
-        type: 'table' | 'column',
+        type: 'table' | 'view' | 'column',
         name: string,
         tableName?: string,
         changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
@@ -612,10 +700,10 @@ export class MessageHandler {
         if (!impactAnalyzer) {return;}
 
         let report: ImpactReport;
-        if (type === 'table') {
-            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
-        } else {
+        if (type === 'column') {
             report = impactAnalyzer.analyzeColumnChange(tableName!.trim(), trimmedName, changeType);
+        } else {
+            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
         }
 
         this._context.setCurrentImpactReport(report);
@@ -788,7 +876,7 @@ export class MessageHandler {
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
-            const result = flowAnalyzer.getUpstream(nid, { maxDepth: depth });
+            const result = flowAnalyzer.getUpstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
                     allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
@@ -846,7 +934,7 @@ export class MessageHandler {
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
-            const result = flowAnalyzer.getDownstream(nid, { maxDepth: depth });
+            const result = flowAnalyzer.getDownstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
                     allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
@@ -884,7 +972,7 @@ export class MessageHandler {
 
         for (const [id, node] of lineageGraph.nodes) {
             // Skip columns and external tables in search
-            if (node.type === 'column') {continue;}
+            if (node.type === 'column' || node.type === 'external') {continue;}
 
             // Apply type filter
             if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
@@ -919,7 +1007,9 @@ export class MessageHandler {
         nodeId: string,
         depth: number,
         direction: 'both' | 'upstream' | 'downstream',
-        expandedNodes?: string[]
+        expandedNodes?: string[],
+        nodeLabel?: string,
+        nodeType?: string
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
@@ -932,21 +1022,51 @@ export class MessageHandler {
             return;
         }
 
+        const resolvedNodeId = this.resolveRequestedLineageNodeId(
+            lineageGraph,
+            nodeId,
+            nodeLabel,
+            nodeType
+        );
+
         // Generate HTML using the lineage view
         const html = this._context.getLineageView().generateLineageGraphView(
             lineageGraph,
-            nodeId,
+            resolvedNodeId,
             {
                 depth,
                 direction,
-                expandedNodes: new Set(expandedNodes || [])
+                expandedNodes: new Set(expandedNodes || []),
+                displayLabel: nodeLabel
             }
         );
 
         this.postMessage({
             command: 'lineageGraphResult',
-            data: { html, nodeId, direction, expandedNodes: expandedNodes || [] }
+            data: { html, nodeId: resolvedNodeId, direction, expandedNodes: expandedNodes || [] }
         });
+    }
+
+    private resolveRequestedLineageNodeId(
+        lineageGraph: LineageGraph,
+        requestedNodeId: string,
+        nodeLabel?: string,
+        nodeType?: string
+    ): string {
+        if (lineageGraph.nodes.has(requestedNodeId)) {
+            return requestedNodeId;
+        }
+
+        const label = nodeLabel?.trim() || '';
+        const type = nodeType?.trim() || '';
+        if (label && type) {
+            const resolved = this.resolveLineageNodeId(lineageGraph, requestedNodeId, label, type);
+            if (resolved) {
+                return resolved;
+            }
+        }
+
+        return requestedNodeId;
     }
 
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
@@ -990,7 +1110,20 @@ export class MessageHandler {
             return;
         }
 
-        const columnEdgeCount = lineageGraph.columnEdges?.length || 0;
+        const selectedTable = lineageGraph.nodes.get(tableId);
+        if (!selectedTable) {
+            this.postMessage({
+                command: 'columnLineageResult',
+                data: {
+                    tableId,
+                    columnName,
+                    upstream: [],
+                    downstream: [],
+                    warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.'
+                }
+            });
+            return;
+        }
 
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
@@ -1014,6 +1147,129 @@ export class MessageHandler {
         this.postMessage({
             command: 'columnSelectionCleared'
         });
+    }
+
+    /**
+     * Resolve a workspace graph node ID (e.g. "table_5") to a lineage graph node ID (e.g. "table:daily_sales").
+     * Falls back to matching by type:label_lowercase and then by name substring.
+     */
+    private resolveLineageNodeId(
+        lineageGraph: LineageGraph,
+        graphNodeId: string,
+        nodeLabel: string,
+        nodeType: string
+    ): string | null {
+        // Direct match (unlikely since graph IDs differ from lineage IDs)
+        if (lineageGraph.nodes.has(graphNodeId)) {
+            return graphNodeId;
+        }
+
+        // Try type:label_lowercase (the lineage graph ID format)
+        const nameLower = nodeLabel.toLowerCase();
+        const candidateId = `${nodeType}:${nameLower}`;
+        if (lineageGraph.nodes.has(candidateId)) {
+            return candidateId;
+        }
+
+        // Try common type alternatives — external nodes may be stored as table/view/external in the lineage graph
+        const typeAlternatives = nodeType === 'view'
+            ? ['view', 'table']
+            : nodeType === 'table'
+                ? ['table', 'view']
+                : nodeType === 'external'
+                    ? ['external', 'table', 'view']
+                    : [nodeType];
+        for (const t of typeAlternatives) {
+            const altId = `${t}:${nameLower}`;
+            if (lineageGraph.nodes.has(altId)) {
+                return altId;
+            }
+        }
+
+        // Fallback: scan all nodes for matching name (including qualified/unqualified variants)
+        const normalizedLabel = nameLower
+            .replace(/^["'`]+/, '')
+            .replace(/["'`]+$/, '');
+        for (const [id, node] of lineageGraph.nodes) {
+            if (node.type === 'column') { continue; }
+            const nodeNameLower = node.name.toLowerCase();
+            const nodeTerminal = nodeNameLower.split('.').pop() || nodeNameLower;
+            if (
+                nodeNameLower === nameLower ||
+                nodeNameLower === normalizedLabel ||
+                nodeTerminal === nameLower ||
+                nodeTerminal === normalizedLabel ||
+                nodeNameLower.endsWith('.' + normalizedLabel)
+            ) {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    private async handleExportNodeLineage(
+        nodeId: string,
+        nodeLabel: string,
+        nodeType: string
+    ): Promise<void> {
+        await this._context.buildLineageGraph();
+        const flowAnalyzer = this._context.getFlowAnalyzer();
+        const lineageGraph = this._context.getLineageGraph();
+
+        if (!flowAnalyzer || !lineageGraph) {
+            vscode.window.showErrorMessage('No lineage data available. Refresh the index first.');
+            return;
+        }
+
+        const resolvedId = this.resolveLineageNodeId(lineageGraph, nodeId, nodeLabel, nodeType);
+        const node = resolvedId ? lineageGraph.nodes.get(resolvedId) : undefined;
+
+        // Some workspace graph nodes (especially unresolved external refs) may not
+        // exist in the lineage graph. Export should still succeed with an empty flow.
+        const upstream = resolvedId
+            ? flowAnalyzer.getUpstream(resolvedId, { maxDepth: -1, excludeExternal: false })
+            : { nodes: [], edges: [], paths: [], depth: 0 };
+        const downstream = resolvedId
+            ? flowAnalyzer.getDownstream(resolvedId, { maxDepth: -1, excludeExternal: false })
+            : { nodes: [], edges: [], paths: [], depth: 0 };
+
+        const safeLabel = nodeLabel
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            || 'node';
+
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            node: {
+                id: nodeId,
+                lineageNodeId: resolvedId || null,
+                name: nodeLabel,
+                type: nodeType,
+                filePath: node?.filePath
+            },
+            upstream: upstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
+            downstream: downstream.nodes.map(n => ({ id: n.id, name: n.name, type: n.type, filePath: n.filePath })),
+            summary: {
+                upstreamCount: upstream.nodes.length,
+                downstreamCount: downstream.nodes.length,
+                upstreamDepth: upstream.depth,
+                downstreamDepth: downstream.depth,
+                lineageNodeResolved: Boolean(resolvedId)
+            }
+        };
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`lineage-${safeLabel}.json`),
+            filters: { 'JSON': ['json'] }
+        });
+
+        if (!uri) { return; }
+
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(payload, null, 2)));
+        const resolutionNote = resolvedId ? '' : ' (exported without lineage links)';
+        vscode.window.showInformationMessage(`Exported lineage for "${nodeLabel}" to ${uri.fsPath}${resolutionNote}`);
     }
 
     private dedupeLineageNodes(nodes: LineageNode[]): LineageNode[] {

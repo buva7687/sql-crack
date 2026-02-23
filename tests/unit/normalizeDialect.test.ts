@@ -9,6 +9,10 @@ describe('normalizeDialect', () => {
         expect(normalizeDialect('TransactSQL')).toBe('TransactSQL');
     });
 
+    it('maps "PL/SQL" to "Oracle"', () => {
+        expect(normalizeDialect('PL/SQL')).toBe('Oracle');
+    });
+
     it('passes through other dialects unchanged', () => {
         expect(normalizeDialect('MySQL')).toBe('MySQL');
         expect(normalizeDialect('PostgreSQL')).toBe('PostgreSQL');
@@ -20,5 +24,6 @@ describe('normalizeDialect', () => {
         expect(normalizeDialect('Trino')).toBe('Trino');
         expect(normalizeDialect('MariaDB')).toBe('MariaDB');
         expect(normalizeDialect('SQLite')).toBe('SQLite');
+        expect(normalizeDialect('Teradata')).toBe('Teradata');
     });
 });

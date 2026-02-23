@@ -53,3 +53,11 @@ export type {
     CloudOffset,
     CloudElements,
 } from './renderer';
+
+export type {
+    RendererContext,
+    RendererDomContext,
+    RenderDataContext,
+    PanelElementsContext,
+    CloudStateContext,
+} from './rendererContext';

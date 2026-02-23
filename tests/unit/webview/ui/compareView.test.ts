@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ParseResult } from '../../../../src/webview/types';
-import { computeCompareDiff } from '../../../../src/webview/ui/compareView';
+import { computeCompareDiff, positionRemovedGhostNodes } from '../../../../src/webview/ui/compareView';
 
 function makeResult(
     labels: string[],
@@ -140,6 +140,27 @@ describe('compareView', () => {
         expect(diff.changedNodeKeys).toEqual([]);
         expect(diff.addedNodeKeys).toHaveLength(6);
         expect(diff.removedNodeKeys).toHaveLength(6);
+    });
+
+    it('repositions removed ghost nodes to avoid overlap with active nodes and each other', () => {
+        const anchors = makeResult(['orders']).nodes;
+        const ghosts = [
+            {
+                ...anchors[0],
+                id: 'ghost-1',
+                label: 'Removed: orders',
+            },
+            {
+                ...anchors[0],
+                id: 'ghost-2',
+                label: 'Removed: orders_legacy',
+            },
+        ];
+
+        const positioned = positionRemovedGhostNodes(ghosts, anchors);
+        expect(positioned[0].y).not.toBe(anchors[0].y);
+        expect(positioned[1].y).not.toBe(anchors[0].y);
+        expect(positioned[0].y).not.toBe(positioned[1].y);
     });
 
     it('renders a two-pane compare layout with state highlights', () => {

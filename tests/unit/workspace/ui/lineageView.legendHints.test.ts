@@ -41,10 +41,10 @@ describe('LineageView legend keyboard hints', () => {
 
         expect(html).toContain('id="lineage-legend-content"');
         expect(html).toContain('id="legend-dismiss"');
-        expect(html).toContain('id="lineage-legend-toggle"');
         expect(html).toContain('legend-keyboard-hints');
         expect(html).toContain('id="lineage-keyboard-hints"');
         expect(html).toContain('<kbd>L</kbd>');
+        expect(html).not.toContain('id="lineage-legend-toggle"');
         expect(html).not.toContain('id="keyboard-hints"');
         expect(html).not.toContain('id="legend-toggle"');
     });

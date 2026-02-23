@@ -73,14 +73,17 @@ export function getCycledNode(
     return orderedNodes[targetIndex] ?? null;
 }
 
+function getCoordinateDepthBucket(node: FlowNode, layoutType: LayoutType): number {
+    const depthAxis = layoutType === 'horizontal' ? node.x : node.y;
+    const bucketSize = layoutType === 'horizontal' ? 80 : 60;
+    return Math.round(depthAxis / bucketSize);
+}
+
 function getDepthBucket(node: FlowNode, layoutType: LayoutType): number {
     if (typeof node.depth === 'number') {
         return node.depth;
     }
-
-    const depthAxis = layoutType === 'horizontal' ? node.x : node.y;
-    const bucketSize = layoutType === 'horizontal' ? 80 : 60;
-    return Math.round(depthAxis / bucketSize);
+    return getCoordinateDepthBucket(node, layoutType);
 }
 
 export function getSiblingNodes(
@@ -91,13 +94,27 @@ export function getSiblingNodes(
     const currentDepth = getDepthBucket(currentNode, layoutType);
     const siblingAxis = layoutType === 'horizontal' ? 'y' : 'x';
 
-    return nodes
+    let siblings = nodes
         .filter(node => getDepthBucket(node, layoutType) === currentDepth)
         .sort((a, b) => {
             const aAxis = siblingAxis === 'x' ? a.x : a.y;
             const bAxis = siblingAxis === 'x' ? b.x : b.y;
             return aAxis - bAxis;
         });
+
+    // Fallback to visual row/column matching when semantic depth is too strict.
+    if (siblings.length <= 1 && typeof currentNode.depth === 'number') {
+        const visualDepth = getCoordinateDepthBucket(currentNode, layoutType);
+        siblings = nodes
+            .filter(node => getCoordinateDepthBucket(node, layoutType) === visualDepth)
+            .sort((a, b) => {
+                const aAxis = siblingAxis === 'x' ? a.x : a.y;
+                const bAxis = siblingAxis === 'x' ? b.x : b.y;
+                return aAxis - bAxis;
+            });
+    }
+
+    return siblings;
 }
 
 export function getSiblingCycleTarget(options: {

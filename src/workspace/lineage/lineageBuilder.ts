@@ -1,6 +1,7 @@
 // Lineage Builder - Build lineage graph from workspace index
 
 import * as fs from 'fs';
+import { logger } from '../../logger';
 import {
     WorkspaceIndex,
     SchemaDefinition,
@@ -16,6 +17,28 @@ import {
     LineagePath,
     ColumnLineageEdge
 } from './types';
+
+type NodeSqlParserInstance = {
+    astify: (sql: string, options?: { database?: string }) => any;
+};
+type NodeSqlParserCtor = new () => NodeSqlParserInstance;
+
+let cachedSqlParserCtor: NodeSqlParserCtor | null | undefined;
+
+function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
+    if (cachedSqlParserCtor !== undefined) {
+        return cachedSqlParserCtor;
+    }
+    try {
+        const moduleRef = require('node-sql-parser') as Record<string, unknown>;
+        const parserCtor = moduleRef?.['Parser'];
+        cachedSqlParserCtor = typeof parserCtor === 'function' ? (parserCtor as NodeSqlParserCtor) : null;
+    } catch (error) {
+        cachedSqlParserCtor = null;
+        logger.debug('[LineageBuilder] node-sql-parser unavailable; CTE extraction will use regex fallback.');
+    }
+    return cachedSqlParserCtor;
+}
 
 /**
  * Builds lineage graph from workspace index
@@ -80,16 +103,21 @@ export class LineageBuilder implements LineageGraph {
         for (const [filePath, analysis] of index.files) {
             // Only process if we don't have queries array (which would have CTEs)
             if (!analysis.queries || analysis.queries.length === 0) {
-                try {
-                    // filePath should be a file system path
-                    if (fs.existsSync(filePath)) {
-                        const sql = fs.readFileSync(filePath, 'utf8');
-                        this.extractCTEsFromSQL(sql, filePath, cteNames);
-                    }
-                } catch (error) {
-                    // File read error - skip this file
-                    // This is expected if file was deleted or path is invalid
+                // filePath should be a file system path
+                if (!fs.existsSync(filePath)) {
+                    continue;
                 }
+
+                let sql: string;
+                try {
+                    sql = fs.readFileSync(filePath, 'utf8');
+                } catch (error) {
+                    // Expected in race windows (deleted/moved file) or invalid paths.
+                    logger.debug(`[LineageBuilder] Failed reading SQL file for CTE extraction (${filePath}): ${error instanceof Error ? error.message : String(error)}`);
+                    continue;
+                }
+
+                this.extractCTEsFromSQL(sql, filePath, cteNames);
             }
         }
         
@@ -812,54 +840,60 @@ export class LineageBuilder implements LineageGraph {
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
     ): void {
-        try {
-            const { Parser } = require('node-sql-parser');
-            const parser = new Parser();
-            
-            // Try different dialects
-            const dialects = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
-            
-            for (const dialect of dialects) {
-                try {
-                    const ast = parser.astify(sql, { database: dialect });
-                    const statements = Array.isArray(ast) ? ast : [ast];
-                    
-                    for (const stmt of statements) {
-                        if (stmt && stmt.type) {
-                            const stmtType = stmt.type.toLowerCase();
-                            
-                            // Check for WITH clause in SELECT statements
-                            if (stmtType === 'select' && stmt.with) {
-                                const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
-                                for (const cte of withClause) {
-                                    const cteName = cte.name?.value || cte.name;
-                                    if (cteName && typeof cteName === 'string') {
-                                        const cteKey = cteName.toLowerCase();
-                                        if (!cteNames.has(cteKey)) {
-                                            const lineNumber = this.getLineNumberFromSQL(sql, cteName);
-                                            cteNames.set(cteKey, {
-                                                name: cteName,
-                                                filePath: filePath,
-                                                lineNumber: lineNumber
-                                            });
-                                        }
-                                    }
-                                }
+        const ParserCtor = getNodeSqlParserCtor();
+        if (!ParserCtor) {
+            this.extractCTEsWithRegex(sql, filePath, cteNames);
+            return;
+        }
+
+        const parser = new ParserCtor();
+        // Try different dialects
+        const dialects = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
+        let parsedSuccessfully = false;
+
+        for (const dialect of dialects) {
+            try {
+                const ast = parser.astify(sql, { database: dialect });
+                const statements = Array.isArray(ast) ? ast : [ast];
+
+                for (const stmt of statements) {
+                    if (!stmt || !stmt.type) {
+                        continue;
+                    }
+                    const stmtType = stmt.type.toLowerCase();
+                    // Check for WITH clause in SELECT statements
+                    if (stmtType !== 'select' || !stmt.with) {
+                        continue;
+                    }
+                    const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
+                    for (const cte of withClause) {
+                        const cteName = cte.name?.value || cte.name;
+                        if (cteName && typeof cteName === 'string') {
+                            const cteKey = cteName.toLowerCase();
+                            if (!cteNames.has(cteKey)) {
+                                const lineNumber = this.getLineNumberFromSQL(sql, cteName);
+                                cteNames.set(cteKey, {
+                                    name: cteName,
+                                    filePath: filePath,
+                                    lineNumber: lineNumber
+                                });
                             }
                         }
                     }
-                    
-                    // If we successfully parsed, break
-                    break;
-                } catch (parseError) {
-                    // Try next dialect
-                    continue;
                 }
+
+                parsedSuccessfully = true;
+                break;
+            } catch (parseError) {
+                // Try next dialect
+                continue;
             }
-        } catch (error) {
-            // Parser not available or failed
         }
-        
+
+        if (!parsedSuccessfully) {
+            logger.debug(`[LineageBuilder] CTE parsing failed for ${filePath}; using regex fallback.`);
+        }
+
         // Fallback to regex extraction
         this.extractCTEsWithRegex(sql, filePath, cteNames);
     }

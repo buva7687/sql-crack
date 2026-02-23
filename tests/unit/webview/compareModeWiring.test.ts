@@ -2,7 +2,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('compare mode wiring', () => {
-    const toolbarSource = readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8');
+    const toolbarSource = [
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar/featureGroup.ts'), 'utf8'),
+    ].join('\n');
     const indexSource = readFileSync(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
     const uiIndexSource = readFileSync(join(__dirname, '../../../src/webview/ui/index.ts'), 'utf8');
 

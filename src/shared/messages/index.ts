@@ -13,4 +13,6 @@ export type {
     ImpactEntry,
     ImpactReportResult,
     SearchResultEntry,
+    WorkspaceUxMetricMetadata,
+    WorkspaceUxMetricValue,
 } from './workspaceMessages';

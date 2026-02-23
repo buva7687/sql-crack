@@ -43,11 +43,12 @@ export class ColumnLineageTracker {
     ): LineagePath[] {
         const paths: LineagePath[] = [];
         const columnNameLower = columnName.toLowerCase();
+        const tableMatchKey = this.getTableMatchKey(tableId);
 
         // Find all column edges where this column is the target
         const upstreamEdges = (graph.columnEdges || []).filter(edge => {
             const targetMatches = edge.targetTableId === tableId ||
-                                  edge.targetTableId.endsWith(`:${this.getTableName(tableId)}`);
+                (tableMatchKey !== null && this.getTableMatchKey(edge.targetTableId) === tableMatchKey);
             const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
             return targetMatches && columnMatches;
         });
@@ -106,11 +107,12 @@ export class ColumnLineageTracker {
     ): LineagePath[] {
         const paths: LineagePath[] = [];
         const columnNameLower = columnName.toLowerCase();
+        const tableMatchKey = this.getTableMatchKey(tableId);
 
         // Find all column edges where this column is the source
         const downstreamEdges = (graph.columnEdges || []).filter(edge => {
             const sourceMatches = edge.sourceTableId === tableId ||
-                                  edge.sourceTableId.endsWith(`:${this.getTableName(tableId)}`);
+                (tableMatchKey !== null && this.getTableMatchKey(edge.sourceTableId) === tableMatchKey);
             const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
             return sourceMatches && columnMatches;
         });
@@ -184,12 +186,12 @@ export class ColumnLineageTracker {
         columnName: string
     ): ColumnLineageResult {
         const columnNameLower = columnName.toLowerCase();
-        const tableName = this.getTableName(tableId);
+        const tableMatchKey = this.getTableMatchKey(tableId);
 
         // Find upstream column paths
         const upstreamEdges = (graph.columnEdges || []).filter(edge => {
             const targetMatches = edge.targetTableId === tableId ||
-                                  edge.targetTableId.endsWith(`:${tableName}`);
+                (tableMatchKey !== null && this.getTableMatchKey(edge.targetTableId) === tableMatchKey);
             const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
             return targetMatches && columnMatches;
         });
@@ -197,7 +199,7 @@ export class ColumnLineageTracker {
         // Find downstream column paths
         const downstreamEdges = (graph.columnEdges || []).filter(edge => {
             const sourceMatches = edge.sourceTableId === tableId ||
-                                  edge.sourceTableId.endsWith(`:${tableName}`);
+                (tableMatchKey !== null && this.getTableMatchKey(edge.sourceTableId) === tableMatchKey);
             const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
             return sourceMatches && columnMatches;
         });
@@ -277,11 +279,29 @@ export class ColumnLineageTracker {
      * Handles formats like "table:customers" or "view:my_view"
      */
     private getTableName(nodeId: string): string {
-        const colonIndex = nodeId.indexOf(':');
-        if (colonIndex !== -1) {
-            return nodeId.substring(colonIndex + 1);
+        const prefixed = /^(table|view|cte|external):(.+)$/.exec(nodeId);
+        if (prefixed && prefixed[2]) {
+            return prefixed[2];
         }
-        return nodeId;
+        if (/^[A-Za-z0-9_.]+$/.test(nodeId)) {
+            return nodeId;
+        }
+        return 'unknown_table';
+    }
+
+    private getTableMatchKey(nodeIdOrName: string): string | null {
+        const value = (nodeIdOrName || '').trim();
+        if (!value) {
+            return null;
+        }
+
+        const prefixed = /^(table|view|cte|external):(.+)$/.exec(value);
+        const tableName = prefixed ? prefixed[2] : value;
+        if (!tableName || !/^[A-Za-z0-9_.]+$/.test(tableName)) {
+            return null;
+        }
+
+        return tableName.toLowerCase();
     }
 
     /**

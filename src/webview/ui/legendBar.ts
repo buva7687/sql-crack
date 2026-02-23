@@ -2,6 +2,7 @@
 // Replaces the old top-left legend panel
 
 import { NODE_ACCENT_COLORS } from '../../shared/themeTokens';
+import { BADGE_COLORS } from '../constants/colors';
 import type { NodeAccentType } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
 
@@ -122,6 +123,22 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         </div>`;
     }).join('');
 
+    // Badge legend entry for SQ (subquery source)
+    const sqBadge = `<div style="display: flex; align-items: center; gap: 6px;">
+        <span style="
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: ${BADGE_COLORS.subquerySource};
+            color: white;
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 14px;
+            flex-shrink: 0;
+        ">SQ</span>
+        <span>Subquery Src</span>
+    </div>`;
+
     // Dismiss button
     const dismissBtn = `<button id="legend-bar-close" aria-label="Dismiss legend" style="
         position: absolute;
@@ -138,7 +155,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         transition: ${prefersReducedMotion() ? 'none' : 'color 0.15s'};
     ">&times;</button>`;
 
-    el.innerHTML = items + dismissBtn;
+    el.innerHTML = items + sqBadge + dismissBtn;
 
     // Attach close handler
     const closeBtn = el.querySelector('#legend-bar-close');

@@ -79,6 +79,14 @@ export interface WorkspaceEdge {
     referenceType: TableReference['referenceType'];
     count: number;             // Number of references
     tables: string[];          // Table names involved
+    references?: WorkspaceEdgeReference[]; // Sample references explaining why this edge exists
+}
+
+export interface WorkspaceEdgeReference {
+    filePath: string;
+    lineNumber: number;
+    context: string;
+    tableName: string;
 }
 
 /**
@@ -92,6 +100,7 @@ export interface WorkspaceStats {
     orphanedDefinitions: string[];  // Tables defined but never referenced
     missingDefinitions: string[];   // Tables referenced but not defined
     circularDependencies: string[]; // Files with circular dependencies
+    parseErrors: number;            // Files that failed to parse
 }
 
 /**
@@ -106,7 +115,7 @@ export interface WorkspaceDependencyGraph {
 /**
  * Graph visualization mode
  */
-export type GraphMode = 'files' | 'tables' | 'hybrid';
+export type GraphMode = 'files' | 'tables';
 
 /**
  * Options for workspace analysis
@@ -158,6 +167,7 @@ export interface SearchResult {
 export interface DetailedWorkspaceStats extends WorkspaceStats {
     orphanedDetails: DefinitionDetail[];
     missingDetails: MissingDefinitionDetail[];
+    parseErrorDetails: ParseErrorDetail[];
 }
 
 /**
@@ -178,4 +188,13 @@ export interface MissingDefinitionDetail {
     references: TableReference[];
     referenceCount: number;
     referencingFiles: string[];
+}
+
+/**
+ * Detail for a file that failed to parse
+ */
+export interface ParseErrorDetail {
+    filePath: string;
+    fileName: string;
+    error: string;
 }

@@ -32,9 +32,10 @@ export class LineageView {
         options: {
             selectedNodeId?: string;
             recentSelections?: RecentSelection[];
+            depth?: number;
         } = {}
     ): string {
-        const { selectedNodeId, recentSelections = [] } = options;
+        const { selectedNodeId, recentSelections = [], depth = 5 } = options;
 
         // Get all searchable nodes
         const renderer = new LineageGraphRenderer(graph);
@@ -53,7 +54,7 @@ export class LineageView {
                 <div class="view-compact-header">
                     <span class="view-icon">${ICONS.columns}</span>
                     <h3>Lineage</h3>
-                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views, ${stats.ctes} CTEs, ${stats.relationships} relationships</span>
+                    <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views</span>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -62,7 +63,7 @@ export class LineageView {
                     <input type="text"
                            id="lineage-search-input"
                            class="view-search-input"
-                           placeholder="Search tables, views, CTEs..."
+                           placeholder="Search tables and views..."
                            autocomplete="off"
                            value="">
                     <button class="view-search-clear" id="lineage-search-clear">
@@ -77,7 +78,6 @@ export class LineageView {
                         <button class="view-filter-chip active" data-filter="all">All</button>
                         <button class="view-filter-chip" data-filter="table">Tables</button>
                         <button class="view-filter-chip" data-filter="view">Views</button>
-                        <button class="view-filter-chip" data-filter="cte">CTEs</button>
                     </div>
                     <div class="view-sort-group">
                         <label class="view-filter-label" for="lineage-sort">Sort:</label>
@@ -100,18 +100,18 @@ export class LineageView {
                             <div class="lineage-popular-header">
                                 <h4>Most Connected</h4>
                                 <button class="lineage-show-all-btn" id="lineage-show-all-btn" type="button">
-                                    Show all ${totalNodeCount} tables
+                                    Show all ${totalNodeCount} tables/views
                                 </button>
                             </div>
                             <div class="lineage-popular-grid" id="lineage-popular-grid">
-                                ${this.generatePopularNodes(graph, 6)}
+                                ${this.generatePopularNodes(graph, 6, depth)}
                             </div>
                         </div>
                         <div class="lineage-tables-grid" id="lineage-tables-grid" style="display: none;">
-                            ${this.generateAllNodes(graph)}
+                            ${this.generateAllNodes(graph, depth)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
-                            <p>No matching tables found</p>
+                            <p>No matching tables or views found</p>
                         </div>
                     </div>
                 </div>
@@ -132,13 +132,15 @@ export class LineageView {
             direction?: 'both' | 'upstream' | 'downstream';
             expandedNodes?: Set<string>;
             focusedNodeId?: string;
+            displayLabel?: string;
         } = {}
     ): string {
         const {
             depth = 5,
             direction = 'both',
             expandedNodes = new Set(),
-            focusedNodeId
+            focusedNodeId,
+            displayLabel
         } = options;
 
         const renderer = new LineageGraphRenderer(graph);
@@ -150,33 +152,33 @@ export class LineageView {
             includeExternal: true
         });
 
-        // Get center node name for display
+        // Get center node name for display (use displayLabel fallback for unresolved IDs)
         const centerNode = graph.nodes.get(centerNodeId);
-        const centerName = centerNode?.name || centerNodeId;
+        const centerName = centerNode?.name || displayLabel || centerNodeId;
 
         // Check for empty results based on direction
         if (renderableGraph.nodes.length === 0 ||
             (renderableGraph.nodes.length === 1 && renderableGraph.nodes[0].id === centerNodeId)) {
             return this.generateNoRelationshipsView(centerName, direction, centerNodeId, centerNode?.type || 'table');
         }
+        if (renderableGraph.edges.length === 0) {
+            return this.generateNoRelationshipsView(centerName, direction, centerNodeId, centerNode?.type || 'table');
+        }
+
+        const minimapWidth = Math.min(Math.max(renderableGraph.width, 1), 20000);
+        const minimapHeight = Math.min(Math.max(renderableGraph.height, 1), 20000);
 
         // Generate SVG
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
 
-        // Calculate node counts by type
-        const nodeCounts = { table: 0, view: 0, cte: 0, external: 0 };
-        for (const node of renderableGraph.nodes) {
-            if (node.type in nodeCounts) {
-                nodeCounts[node.type as keyof typeof nodeCounts]++;
-            }
-        }
-
-        // Build node count badge parts
-        const countParts: string[] = [];
-        if (nodeCounts.table > 0) {countParts.push(`${nodeCounts.table} table${nodeCounts.table !== 1 ? 's' : ''}`);}
-        if (nodeCounts.view > 0) {countParts.push(`${nodeCounts.view} view${nodeCounts.view !== 1 ? 's' : ''}`);}
-        if (nodeCounts.cte > 0) {countParts.push(`${nodeCounts.cte} CTE${nodeCounts.cte !== 1 ? 's' : ''}`);}
-        if (nodeCounts.external > 0) {countParts.push(`${nodeCounts.external} external`);}
+        // Build external count parentheticals
+        const { upstreamCount, downstreamCount, externalUpstreamCount, externalDownstreamCount } = renderableGraph.stats;
+        const upstreamLabel = externalUpstreamCount > 0
+            ? `${upstreamCount} upstream (${externalUpstreamCount} external)`
+            : `${upstreamCount} upstream`;
+        const downstreamLabel = externalDownstreamCount > 0
+            ? `${downstreamCount} downstream (${externalDownstreamCount} external)`
+            : `${downstreamCount} downstream`;
 
         return `
             <div class="lineage-graph-view">
@@ -188,28 +190,52 @@ export class LineageView {
                         <span class="node-type-badge">${centerNode?.type || 'table'}</span>
                     </div>
                     <div class="graph-stats">
-                        <span class="stat node-count" title="Nodes in graph">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                                <rect x="14" y="14" width="7" height="7" rx="1"/>
-                            </svg>
-                            ${countParts.join(', ') || 'No nodes'}
-                        </span>
-                        <span class="stat-divider">|</span>
-                        <span class="stat upstream" title="Upstream tables">
+                        <span class="stat upstream" title="Upstream dependencies">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 19V5M5 12l7-7 7 7"/>
                             </svg>
-                            ${renderableGraph.stats.upstreamCount} upstream
+                            ${upstreamLabel}
                         </span>
-                        <span class="stat downstream" title="Downstream tables">
+                        <span class="stat-divider">|</span>
+                        <span class="stat downstream" title="Downstream consumers">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 5v14M5 12l7 7 7-7"/>
                             </svg>
-                            ${renderableGraph.stats.downstreamCount} downstream
+                            ${downstreamLabel}
                         </span>
+                        <span class="stat-divider">|</span>
+                        <span class="stat depth-indicator" title="Traversal depth limit — controls how many levels of dependencies are shown. Change in Settings: sqlCrack.workspaceLineageDepth">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M3 12h4l3-9 4 18 3-9h4"/>
+                            </svg>
+                            Depth: ${depth}
+                        </span>
+                    </div>
+                    <div class="direction-controls">
+                        <button class="direction-btn ${direction === 'upstream' ? 'active' : ''}"
+                                data-direction="upstream"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M12 19V5M5 12l7-7 7 7"/>
+                            </svg>
+                            Upstream
+                        </button>
+                        <button class="direction-btn ${direction === 'both' ? 'active' : ''}"
+                                data-direction="both"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M7 17l5 5 5-5M7 7l5-5 5 5"/>
+                            </svg>
+                            Both
+                        </button>
+                        <button class="direction-btn ${direction === 'downstream' ? 'active' : ''}"
+                                data-direction="downstream"
+                                data-node-id="${this.escapeHtml(centerNodeId)}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M12 5v14M5 12l7 7 7-7"/>
+                            </svg>
+                            Downstream
+                        </button>
                     </div>
                     <div class="cross-link-actions">
                         <button type="button"
@@ -239,34 +265,6 @@ export class LineageView {
                     </div>
                 </div>
 
-                <!-- Direction Toggle -->
-                <div class="direction-controls">
-                    <button class="direction-btn ${direction === 'upstream' ? 'active' : ''}"
-                            data-direction="upstream"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M12 19V5M5 12l7-7 7 7"/>
-                        </svg>
-                        Upstream Only
-                    </button>
-                    <button class="direction-btn ${direction === 'both' ? 'active' : ''}"
-                            data-direction="both"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M7 17l5 5 5-5M7 7l5-5 5 5"/>
-                        </svg>
-                        Both
-                    </button>
-                    <button class="direction-btn ${direction === 'downstream' ? 'active' : ''}"
-                            data-direction="downstream"
-                            data-node-id="${this.escapeHtml(centerNodeId)}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                            <path d="M12 5v14M5 12l7 7 7-7"/>
-                        </svg>
-                        Downstream Only
-                    </button>
-                </div>
-
                 <!-- Graph Container with SVG and overlays -->
                 <div class="lineage-graph-container" id="lineage-graph-container">
                     ${svg}
@@ -291,14 +289,6 @@ export class LineageView {
                                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                             </svg>
                         </button>
-                        <div class="zoom-divider"></div>
-                        <button class="zoom-btn" id="lineage-legend-toggle" title="Toggle legend (L)" aria-label="Toggle lineage legend" aria-pressed="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <rect x="4" y="5" width="16" height="14" rx="2"/>
-                                <line x1="8" y1="10" x2="16" y2="10"/>
-                                <line x1="8" y1="14" x2="12" y2="14"/>
-                            </svg>
-                        </button>
                     </div>
 
                     <!-- Bottom Legend Bar -->
@@ -308,7 +298,6 @@ export class LineageView {
                                 <span class="legend-section-title">Nodes</span>
                                 <span class="legend-item"><span class="legend-color legend-table"></span><span class="legend-label">Table</span></span>
                                 <span class="legend-item"><span class="legend-color legend-view"></span><span class="legend-label">View</span></span>
-                                <span class="legend-item"><span class="legend-color legend-cte"></span><span class="legend-label">CTE</span></span>
                                 <span class="legend-item"><span class="legend-color legend-external"></span><span class="legend-label">External</span></span>
                             </div>
                             <div class="legend-divider"></div>
@@ -342,7 +331,7 @@ export class LineageView {
                             <span>Overview</span>
                         </div>
                         <div class="minimap-content" id="minimap-content">
-                            <svg class="minimap-svg" id="minimap-svg" viewBox="0 0 ${renderableGraph.width} ${renderableGraph.height}">
+                            <svg class="minimap-svg" id="minimap-svg" viewBox="0 0 ${minimapWidth} ${minimapHeight}">
                                 <g class="minimap-nodes">
                                     ${renderableGraph.nodes.map(node => `
                                         <rect class="minimap-node minimap-node-${node.type}"
@@ -424,8 +413,8 @@ export class LineageView {
                         depth,
                         nodeCount: renderableGraph.nodes.length,
                         edgeCount: renderableGraph.edges.length,
-                        width: renderableGraph.width,
-                        height: renderableGraph.height
+                        width: minimapWidth,
+                        height: minimapHeight
                     })}
                 </script>
             </div>
@@ -435,17 +424,16 @@ export class LineageView {
     /**
      * Generate all nodes as filterable grid items
      */
-    private generateAllNodes(graph: LineageGraph): string {
+    private generateAllNodes(graph: LineageGraph, depth: number = 5): string {
         const flowAnalyzer = new FlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
-                // Use excludeExternal: false to match what the graph view shows
-                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 5, excludeExternal: false });
-                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 5, excludeExternal: false });
-                // Count only tables, views, CTEs (exclude external and column nodes to match graph display)
-                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+            if (node.type === 'table' || node.type === 'view') {
+                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
+                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
+                // Count only tables and views (exclude external, CTE, and column nodes)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
                 const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
@@ -457,7 +445,7 @@ export class LineageView {
         nodeConnections.sort((a, b) => b.total - a.total);
 
         if (nodeConnections.length === 0) {
-            return '<p class="no-tables">No tables, views, or CTEs found</p>';
+            return '<p class="no-tables">No tables or views found</p>';
         }
 
         return nodeConnections.map(({ node, upstreamCount, downstreamCount, total }) => `
@@ -481,18 +469,18 @@ export class LineageView {
     /**
      * Generate popular/most connected nodes
      */
-    private generatePopularNodes(graph: LineageGraph, limit: number): string {
+    private generatePopularNodes(graph: LineageGraph, limit: number, depth: number = 5): string {
         const flowAnalyzer = new FlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {
-            if (node.type === 'table' || node.type === 'view' || node.type === 'cte') {
+            if (node.type === 'table' || node.type === 'view') {
                 // Curated "Most Connected" should prioritize internal lineage density.
                 // External endpoints are still visible in full-node exploration views.
-                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: 10, excludeExternal: true });
-                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: 10, excludeExternal: true });
-                // Count only tables, views, CTEs (exclude column nodes to match graph display)
-                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view' || n.type === 'cte';
+                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
+                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
+                // Count only tables and views (exclude column nodes to match graph display)
+                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view';
                 const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
                 const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
                 const total = upstreamCount + downstreamCount;
@@ -555,7 +543,7 @@ export class LineageView {
                     </svg>
                 </div>
                 <h3>Start Exploring Data Lineage</h3>
-                <p>Discover how your data flows between tables, views, and CTEs.</p>
+                <p>Discover how your data flows between tables and views.</p>
                 <div class="empty-steps">
                     <div class="step">
                         <span class="step-number">1</span>
@@ -570,7 +558,7 @@ export class LineageView {
                         <span class="step-text">Search for a table to visualize its lineage</span>
                     </div>
                 </div>
-                <p class="hint">\uD83D\uDCA1 Tip: The more SQL files you have open, the richer your lineage graph becomes!</p>
+                <p class="hint">\uD83D\uDCA1 Tip: Refresh the index to pick up new files, or ensure your SQL files are within the workspace scope for richer lineage.</p>
             </div>
         `;
     }
@@ -588,7 +576,21 @@ export class LineageView {
         let hint: string;
         let showDirectionButtons = false;
 
-        if (direction === 'upstream') {
+        const isExternal = nodeType === 'external';
+
+        if (isExternal) {
+            if (direction === 'upstream') {
+                message = `No upstream dependencies found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
+                hint = 'This is an external reference — its definition is not in the indexed workspace, so upstream lineage is unavailable.';
+            } else if (direction === 'downstream') {
+                message = `No downstream consumers found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
+                hint = 'This is an external reference — only relationships visible within the indexed workspace are shown.';
+            } else {
+                message = `<strong>${this.escapeHtml(nodeName)}</strong> is an external reference with limited lineage.`;
+                hint = 'Its definition is not in the indexed workspace. Ensure the source files are included in the workspace scope and refresh the index.';
+            }
+            showDirectionButtons = direction !== 'both';
+        } else if (direction === 'upstream') {
             message = `No upstream dependencies found for <strong>${this.escapeHtml(nodeName)}</strong>.`;
             hint = 'This appears to be a source table with no incoming data flows.';
             showDirectionButtons = true;
@@ -648,20 +650,15 @@ export class LineageView {
     /**
      * Collect statistics from graph
      */
-    private collectStats(graph: LineageGraph): { tables: number; views: number; ctes: number; external: number; relationships: number } {
+    private collectStats(graph: LineageGraph): { tables: number; views: number } {
         const stats = {
             tables: 0,
-            views: 0,
-            ctes: 0,
-            external: 0,
-            relationships: graph.edges.length
+            views: 0
         };
 
         graph.nodes.forEach((node) => {
             if (node.type === 'table') {stats.tables++;}
             else if (node.type === 'view') {stats.views++;}
-            else if (node.type === 'cte') {stats.ctes++;}
-            else if (node.type === 'external') {stats.external++;}
         });
 
         return stats;

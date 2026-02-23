@@ -49,7 +49,7 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('bottom: calc(18px + clamp(0px, var(--lineage-legend-height), 96px));');
         expect(css).toContain('bottom: calc(22px + clamp(0px, var(--lineage-legend-height), 96px));');
         expect(css).toContain('.workspace-legend-bar');
-        expect(css).toContain('.graph-area.graph-legend-visible .keyboard-hints');
+        expect(css).toContain('.legend-shortcuts-panel');
         expect(css).not.toContain('.workspace-legend-bar,\n        .legend-inline');
     });
 
@@ -75,6 +75,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(lightVars).toContain('--lineage-minimap-viewport-fill: rgba(79, 70, 229, 0.15)');
     });
 
+    it('defines a theme token for text rendered on accent surfaces', () => {
+        const darkVars = getCssVariables(true);
+        const lightVars = getCssVariables(false);
+
+        expect(darkVars).toContain('--text-on-accent: #ffffff');
+        expect(lightVars).toContain('--text-on-accent: #ffffff');
+    });
+
     it('uses CSS variables for column edge strokes and arrowhead fills', () => {
         const css = getWebviewStyles(true);
 
@@ -94,6 +102,14 @@ describe('workspace sharedStyles accessibility rules', () => {
     it('includes search-count, typeahead-loading, and btn-disabled styles', () => {
         const css = getWebviewStyles(true);
         expect(css).toContain('.search-count');
+        expect(css).toContain('.search-nav-btn');
+        expect(css).toContain('.node-search-current .node-bg');
+        expect(css).toContain('.graph-explain-panel');
+        expect(css).toContain('.keyboard-hints.is-hidden');
+        expect(css).toContain('.zoom-toolbar.is-hidden');
+        expect(css).toContain('max-width: min(420px, 34vw);');
+        expect(css).toContain('@media (max-width: 1600px)');
+        expect(css).toContain('.search-nav-btn');
         expect(css).toContain('.typeahead-loading');
         expect(css).toContain('.loading-spinner-small');
         expect(css).toContain('.icon-btn.btn-disabled');
@@ -104,6 +120,19 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.selection-cross-links');
         expect(css).toContain('.selection-divider');
         expect(css).toContain('.selection-actions-label');
+    });
+
+    it('keeps advanced export options aligned and same contrast as other options', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.export-option-advanced { padding-left: 10px; color: var(--text-secondary); }');
+        expect(css).not.toContain('.export-option-advanced { padding-left: 16px; color: var(--text-muted); }');
+    });
+
+    it('uses existing theme border tokens for edge-reference expand actions', () => {
+        const css = getWebviewStyles(true);
+        expect(css).toContain('.selection-edge-expand-btn');
+        expect(css).toContain('border: 1px solid var(--border-color);');
+        expect(css).not.toContain('var(--border-primary)');
     });
 
     it('renders theme-aware borders for workspace view tabs', () => {
@@ -133,5 +162,15 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.lineage-legend .legend-numeric { background: var(--lineage-coltype-numeric); }');
         expect(css).toContain('.lineage-minimap .minimap-viewport {\n            fill: var(--lineage-minimap-viewport-fill);');
         expect(css).not.toContain('.lineage-legend .legend-numeric { background: #60a5fa; }');
+    });
+
+    it('uses text-on-accent token for lineage badges and connection pills', () => {
+        const css = getWebviewStyles(true);
+
+        expect(css).toContain('.badge-primary {\n            background: var(--accent); color: var(--text-on-accent);');
+        expect(css).toContain('.badge-not-null {\n            background: var(--warning); color: var(--text-on-accent);');
+        expect(css).toContain('.connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }');
+        expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
+        expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');
     });
 });

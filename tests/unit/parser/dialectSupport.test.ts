@@ -9,7 +9,7 @@
  * - SQL Server (TransactSQL) specific features
  */
 
-import { parseSql, preprocessPostgresSyntax } from '../../../src/webview/sqlParser';
+import { parseSql, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
 
 describe('Dialect Support', () => {
   describe('MySQL', () => {
@@ -124,7 +124,20 @@ describe('Dialect Support', () => {
 
     it('parses window function with FILTER', () => {
       const result = parseSql('SELECT COUNT(*) FILTER (WHERE active = true) FROM users', dialect);
-      // May or may not parse depending on node-sql-parser version
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses aggregate FILTER combined with OVER window clause (issue #48)', () => {
+      const sql = `SELECT
+        day_start_ct,
+        swim_grp,
+        max(distance_m) filter (where distance_m <> 0) over (
+            partition by day_start_ct, swim_grp
+        ) as last_swim_distance_m
+      FROM swim_data`;
+      const result = parseSql(sql, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThanOrEqual(1);
     });
 
     describe('preprocessPostgresSyntax', () => {
@@ -206,6 +219,45 @@ describe('Dialect Support', () => {
       });
     });
 
+    describe('stripFilterClauses', () => {
+      it('strips FILTER (WHERE ...) from aggregate function', () => {
+        const result = stripFilterClauses(
+          'SELECT COUNT(*) FILTER (WHERE active = true) FROM users'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('FILTER');
+        expect(result).toContain('COUNT(*)');
+        expect(result).toContain('FROM users');
+      });
+
+      it('strips FILTER combined with OVER window clause', () => {
+        const sql = `SELECT max(distance_m) filter (where distance_m <> 0) over (
+            partition by day_start_ct, swim_grp
+        ) as last_swim_distance_m FROM swim_data`;
+        const result = stripFilterClauses(sql);
+        expect(result).not.toBeNull();
+        expect(result!).not.toMatch(/\bfilter\b/i);
+        expect(result).toContain('max(distance_m)');
+        expect(result).toContain('over');
+        expect(result).toContain('FROM swim_data');
+      });
+
+      it('returns null when no FILTER clauses present', () => {
+        const result = stripFilterClauses('SELECT COUNT(*) FROM users');
+        expect(result).toBeNull();
+      });
+
+      it('does not strip FILTER inside string literals', () => {
+        const result = stripFilterClauses("SELECT 'FILTER (WHERE x)' FROM t");
+        expect(result).toBeNull();
+      });
+
+      it('does not strip FILTER without WHERE keyword', () => {
+        const result = stripFilterClauses('SELECT filter FROM t');
+        expect(result).toBeNull();
+      });
+    });
+
     it('parses query with AT TIME ZONE and timestamptz literals', () => {
       const sql = `
         WITH time_buckets AS (
@@ -241,6 +293,19 @@ describe('Dialect Support', () => {
         expect.stringContaining('recent'),
         expect.stringContaining('summary'),
       ]));
+    });
+
+    it('parses GROUPING SETS by rewriting to a parser-compatible GROUP BY', () => {
+      const sql = `
+        SELECT dept, region, COUNT(*) AS total
+        FROM sales
+        GROUP BY GROUPING SETS ((dept), (region), ())
+      `;
+      const result = parseSql(sql, dialect);
+
+      expect(result.partial).not.toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('Rewrote GROUPING SETS'))).toBe(true);
     });
   });
 
@@ -284,6 +349,15 @@ describe('Dialect Support', () => {
     it('parses semi-structured data access', () => {
       const result = parseSql('SELECT data:name::string FROM json_table', dialect);
       // Document behavior for JSON path syntax
+    });
+
+    it('parses deep Snowflake paths by collapsing to parser-compatible depth', () => {
+      const sql = 'SELECT data:items:sku:value::string AS sku FROM json_table';
+      const result = parseSql(sql, dialect);
+
+      expect(result.partial).not.toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('Collapsed deep Snowflake path expressions'))).toBe(true);
     });
   });
 
@@ -474,6 +548,372 @@ describe('Dialect Support', () => {
     it('parses TRY() function', () => {
       const result = parseSql("SELECT TRY(CAST('abc' AS INTEGER))", dialect);
       // Document behavior
+    });
+  });
+
+  describe('Oracle', () => {
+    const dialect = 'Oracle';
+
+    it('parses basic SELECT via PostgreSQL proxy', () => {
+      const result = parseSql('SELECT * FROM employees', dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses SELECT with WHERE clause', () => {
+      const result = parseSql('SELECT id, name FROM employees WHERE department_id = 10', dialect);
+      expect(result.error).toBeUndefined();
+      const tableLabels = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tableLabels).toContain('employees');
+    });
+
+    it('parses CTE queries', () => {
+      const result = parseSql(`
+        WITH dept_summary AS (
+          SELECT department_id, COUNT(*) AS cnt
+          FROM employees
+          GROUP BY department_id
+        )
+        SELECT * FROM dept_summary
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses JOINs', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e
+        JOIN departments d ON e.department_id = d.department_id
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.tables).toBeGreaterThanOrEqual(2);
+    });
+
+    it('parses window functions', () => {
+      const result = parseSql(`
+        SELECT employee_id, salary,
+          ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rn
+        FROM employees
+      `, dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('strips (+) outer join operator via preprocessing', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e, departments d
+        WHERE e.department_id = d.department_id(+)
+      `, dialect);
+      // Should parse (with or without fallback) after (+) is stripped
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('rewrites MINUS to EXCEPT via preprocessing', () => {
+      const result = parseSql(`
+        SELECT id FROM employees
+        MINUS
+        SELECT id FROM contractors
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('strips CONNECT BY with ORDER SIBLINGS BY', () => {
+      const result = parseSql(`
+        SELECT employee_id, first_name, last_name, salary
+        FROM employees
+        START WITH manager_id IS NULL
+        CONNECT BY PRIOR employee_id = manager_id
+        ORDER SIBLINGS BY last_name
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('strips CONNECT BY inside CTE body', () => {
+      const result = parseSql(`
+        WITH dept_hierarchy AS (
+          SELECT department_id, department_name, manager_id
+          FROM departments
+          START WITH manager_id IS NULL
+          CONNECT BY PRIOR department_id = manager_id
+        )
+        SELECT dh.department_id, dh.department_name, e.employee_id
+        FROM dept_hierarchy dh
+        LEFT JOIN employees e ON dh.department_id = e.department_id
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    describe('preprocessOracleSyntax', () => {
+      it('removes (+) outer join operator', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT * FROM a, b WHERE a.id = b.id(+)',
+          'Oracle'
+        );
+        expect(result).not.toBeNull();
+        expect(result).not.toContain('(+)');
+      });
+
+      it('rewrites MINUS to EXCEPT', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT id FROM a MINUS SELECT id FROM b',
+          'Oracle'
+        );
+        expect(result).not.toBeNull();
+        expect(result).toContain('EXCEPT');
+        expect(result).not.toMatch(/\bMINUS\b/);
+      });
+
+      it('returns null for non-Oracle dialect', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT * FROM a WHERE a.id = b.id(+)',
+          'MySQL'
+        );
+        expect(result).toBeNull();
+      });
+
+      it('returns null when no rewrites needed', () => {
+        const result = preprocessOracleSyntax(
+          'SELECT id, name FROM employees WHERE active = 1',
+          'Oracle'
+        );
+        expect(result).toBeNull();
+      });
+    });
+
+    it('parses PIVOT query after preprocessing', () => {
+      const result = parseSql(`
+        SELECT * FROM (
+          SELECT department_id, job_id, salary FROM employees
+        )
+        PIVOT (SUM(salary) FOR job_id IN ('IT_PROG', 'SA_REP', 'FI_ACCOUNT'))
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Oracle-specific syntax'))).toBe(true);
+    });
+
+    it('parses flashback query (AS OF TIMESTAMP) after preprocessing', () => {
+      const result = parseSql(`
+        SELECT * FROM employees AS OF TIMESTAMP SYSTIMESTAMP - INTERVAL '1' HOUR
+        WHERE department_id = 10
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses MODEL clause query after preprocessing', () => {
+      const result = parseSql(`
+        SELECT country, year, sales FROM sales_view
+        MODEL
+        DIMENSION BY (country, year)
+        MEASURES (sales)
+        RULES (sales['US', 2025] = sales[cv(country), 2024] * 1.1)
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('detects Oracle optimizer hints', () => {
+      const result = parseSql(`
+        SELECT /*+ FULL(e) PARALLEL(e, 4) */ employee_id, salary
+        FROM employees e
+        WHERE department_id = 10
+      `, dialect);
+      expect(result.hints.some(h => h.message.includes('Oracle optimizer hints'))).toBe(true);
+    });
+  });
+
+  describe('Teradata', () => {
+    const dialect = 'Teradata';
+
+    it('parses basic SELECT via MySQL proxy', () => {
+      const result = parseSql('SELECT * FROM employees', dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses SELECT with WHERE clause', () => {
+      const result = parseSql('SELECT id, name FROM employees WHERE department_id = 10', dialect);
+      expect(result.error).toBeUndefined();
+      const tableLabels = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tableLabels).toContain('employees');
+    });
+
+    it('parses CTE queries', () => {
+      const result = parseSql(`
+        WITH dept_summary AS (
+          SELECT department_id, COUNT(*) AS cnt
+          FROM employees
+          GROUP BY department_id
+        )
+        SELECT * FROM dept_summary
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.ctes).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses JOINs', () => {
+      const result = parseSql(`
+        SELECT e.name, d.department_name
+        FROM employees e
+        JOIN departments d ON e.department_id = d.department_id
+      `, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.stats.tables).toBeGreaterThanOrEqual(2);
+    });
+
+    it('preprocesses SEL shorthand to SELECT', () => {
+      const result = parseSql('SEL customer_id, customer_name FROM customers', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Teradata-specific syntax'))).toBe(true);
+    });
+
+    it('strips LOCKING ROW FOR ACCESS via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, customer_name
+        FROM customers
+        LOCKING ROW FOR ACCESS
+        WHERE customer_id = 1001
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('Teradata-specific syntax'))).toBe(true);
+    });
+
+    it('strips QUALIFY clause via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, order_date,
+          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) AS rn
+        FROM customer_orders
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) <= 3
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('strips SAMPLE clause via preprocessing', () => {
+      const result = parseSql(`
+        SELECT customer_id, customer_name FROM customers SAMPLE 1000
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses window functions', () => {
+      const result = parseSql(`
+        SELECT employee_id, salary,
+          ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rn
+        FROM employees
+      `, dialect);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('parses MERGE INTO', () => {
+      const result = parseSql(`
+        MERGE INTO target_table t
+        USING source_table s ON t.id = s.id
+        WHEN MATCHED THEN UPDATE SET t.value = s.value
+        WHEN NOT MATCHED THEN INSERT (id, value) VALUES (s.id, s.value)
+      `, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses QUALIFY with ROW_NUMBER (nested OVER with ORDER BY)', () => {
+      const result = parseSql(`
+        SELECT customer_id, order_date,
+          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) AS rn
+        FROM customer_orders
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) <= 3
+      `, dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses subquery with QUALIFY inside IN clause', () => {
+      const result = parseSql(`
+        SELECT * FROM customers
+        WHERE customer_id IN (
+          SELECT customer_id FROM orders
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date DESC) = 1
+        )
+      `, dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses TOP n with SAMPLE', () => {
+      const result = parseSql('SELECT TOP 10 * FROM large_table SAMPLE 1000', dialect);
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('handles DATABASE command as session command', () => {
+      const result = parseSql('database random;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('DATABASE'))).toBe(true);
+    });
+
+    it('handles COMMENT ON as session command', () => {
+      const result = parseSql("comment on view emp is 'test abc xyz';", dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('COMMENT ON'))).toBe(true);
+    });
+
+    it('handles COLLECT STATISTICS as session command', () => {
+      const result = parseSql('COLLECT STATISTICS ON orders COLUMN (order_id);', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.hints.some(h => h.message.includes('COLLECT STATISTICS'))).toBe(true);
+    });
+
+    it('rewrites REPLACE VIEW and parses with LOCKING+SEL', () => {
+      const result = parseSql(`replace view emp_v
+as
+/***
+* some comments
+* some more
+***/
+locking row for access
+sel * from emp
+where id=1;`, dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses LOCKING before SELECT', () => {
+      const result = parseSql('locking row for access\nselect * from emp;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses LOCKING before SEL', () => {
+      const result = parseSql('locking row for access\nsel * from emp;', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      const tables = result.nodes.filter(n => n.type === 'table').map(n => n.label);
+      expect(tables).toContain('emp');
+    });
+
+    it('parses bare DATE as CURRENT_DATE', () => {
+      const result = parseSql('SELECT DATE AS system_date', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses SELECT with DATE and reserved word aliases', () => {
+      const result = parseSql('SELECT CURRENT_DATE AS today, CURRENT_TIME AS current_time, DATE AS system_date', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses UPDATE FROM with comma-join rewrite', () => {
+      const result = parseSql('UPDATE target t FROM source s SET t.col = s.col WHERE t.id = s.id', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.partial).toBeUndefined();
+    });
+
+    it('parses PERCENTILE_CONT with WITHIN GROUP stripped', () => {
+      const result = parseSql('SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) FROM emp', dialect);
+      expect(result.nodes.length).toBeGreaterThan(0);
     });
   });
 });

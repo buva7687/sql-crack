@@ -15,7 +15,7 @@ export type ChangeType = 'modify' | 'rename' | 'drop' | 'addColumn';
 export interface ImpactReport {
     changeType: ChangeType;
     target: {
-        type: 'table' | 'column';
+        type: 'table' | 'view' | 'column';
         name: string;
         tableName?: string;
     };
@@ -122,7 +122,9 @@ export class ImpactAnalyzer {
             const sourceTableId = this.getTableNodeId(fk.referencedTable);
             const sourceTable = this.getTableDisplayName(sourceTableId);
             const targetTable = node.parentId ? this.getTableDisplayName(node.parentId) : this.getTableDisplayNameFromColumnId(node.id);
-            const reason = `${sourceTable}.${fk.referencedColumn} → ${targetTable}.${node.name}`;
+            const referencedColumn = fk.referencedColumn || 'unknown_column';
+            const targetColumn = node.name || 'unknown_column';
+            const reason = `${sourceTable}.${referencedColumn} → ${targetTable}.${targetColumn}`;
 
             columnsWithDataFlow.add(node.id);
             foreignKeyReasons.set(node.id, reason);
@@ -265,12 +267,13 @@ export class ImpactAnalyzer {
         });
 
         // Generate suggestions
-        const suggestions = this.generateSuggestions(tableName, 'table', changeType, severity);
+        const actualType = node.type === 'view' ? 'view' : 'table';
+        const suggestions = this.generateSuggestions(tableName, actualType, changeType, severity);
 
         return {
             changeType,
             target: {
-                type: 'table',
+                type: actualType,
                 name: tableName
             },
             directImpacts,
@@ -452,7 +455,7 @@ export class ImpactAnalyzer {
      */
     private generateSuggestions(
         name: string,
-        type: 'table' | 'column',
+        type: 'table' | 'view' | 'column',
         changeType: ChangeType,
         severity: string
     ): string[] {
@@ -565,13 +568,18 @@ export class ImpactAnalyzer {
         return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
     }
 
-    private getTableDisplayName(tableId: string): string {
+    private getTableDisplayName(tableId: string | undefined): string {
+        if (!tableId) {
+            return 'unknown_table';
+        }
+
         const node = this.graph.nodes.get(tableId);
         if (node?.name) {
             return node.name;
         }
 
-        return tableId.replace(/^(table|view|external|cte):/, '');
+        const normalized = tableId.replace(/^(table|view|external|cte):/, '');
+        return normalized || 'unknown_table';
     }
 
     private matchesForeignKeyTarget(fkTable: string, targetTable: string, normalizedTarget: string): boolean {
@@ -596,13 +604,14 @@ export class ImpactAnalyzer {
 
     private getTableDisplayNameFromColumnId(columnId: string): string {
         if (!columnId.startsWith('column:')) {
-            return columnId;
+            return columnId || 'unknown_table';
         }
         const withoutPrefix = columnId.substring(7);
         const dotIndex = withoutPrefix.lastIndexOf('.');
         if (dotIndex <= 0) {
-            return withoutPrefix;
+            return withoutPrefix || 'unknown_table';
         }
-        return withoutPrefix.substring(0, dotIndex);
+        const tableName = withoutPrefix.substring(0, dotIndex);
+        return tableName || 'unknown_table';
     }
 }

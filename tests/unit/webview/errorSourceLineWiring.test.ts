@@ -6,12 +6,16 @@ describe('error source-line wiring', () => {
         join(__dirname, '../../../src/webview/index.ts'),
         'utf8'
     );
-    const toolbarSource = readFileSync(
-        join(__dirname, '../../../src/webview/ui/toolbar.ts'),
-        'utf8'
-    );
+    const toolbarSource = [
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar.ts'), 'utf8'),
+        readFileSync(join(__dirname, '../../../src/webview/ui/toolbar/errorBadge.ts'), 'utf8'),
+    ].join('\n');
     const rendererSource = readFileSync(
         join(__dirname, '../../../src/webview/renderer.ts'),
+        'utf8'
+    );
+    const errorRendererSource = readFileSync(
+        join(__dirname, '../../../src/webview/ui/errorRenderer.ts'),
         'utf8'
     );
     const parserSource = readFileSync(
@@ -30,7 +34,7 @@ describe('error source-line wiring', () => {
         expect(toolbarSource).toContain('sourceLine?: string');
         expect(toolbarSource).toContain("text += `\\n→ ${e.sourceLine}`;");
         expect(rendererSource).toContain('function renderError(message: string, sourceLine?: string): void');
-        expect(rendererSource).toContain('sourceText.textContent = `→ ${sourceLine}`;');
+        expect(errorRendererSource).toContain('sourceText.textContent = `→ ${sourceLine}`;');
         expect(rendererSource).toContain('renderError(result.error, result.errorSourceLine);');
     });
 
