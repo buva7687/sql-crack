@@ -2,6 +2,22 @@ import { EDGE_COLORS, UI_COLORS } from '../constants';
 import { FlowNode, ViewState } from '../types';
 import { escapeRegex } from '../../shared';
 
+/** Recursively search for a node by ID, including inside children of cloud/CTE nodes. */
+function findNodeById(nodes: FlowNode[], nodeId: string): FlowNode | undefined {
+    for (const node of nodes) {
+        if (node.id === nodeId) {
+            return node;
+        }
+        if (node.children && node.children.length > 0) {
+            const found = findNodeById(node.children, nodeId);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return undefined;
+}
+
 export interface SelectNodeFeatureOptions {
     nodeId: string | null;
     skipNavigation?: boolean;
@@ -60,7 +76,7 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
     }
 
     if (nodeId && !skipNavigation && typeof window !== 'undefined') {
-        const node = currentNodes.find(candidate => candidate.id === nodeId);
+        const node = findNodeById(currentNodes, nodeId);
         if (node) {
             const vscodeApi = (window as { vscodeApi?: { postMessage?: (message: unknown) => void } }).vscodeApi;
             if (vscodeApi?.postMessage) {

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CTE/subquery UNION convergence**: UNION, UNION ALL, INTERSECT, and EXCEPT branches inside CTEs now properly converge — both left and right branches connect to the set operation node instead of only the left branch. Chained set operations (A UNION B UNION C) cascade correctly.
+- **CTE subquery→outer clause connectivity**: When a CTE wraps a subquery (e.g., `FROM (SELECT ...) GROUP BY`), downstream nodes like GROUP BY and AGGREGATE are now connected to the subquery output instead of floating disconnected. `parseCteOrSubqueryInternals()` now returns the last node ID (`string | null`) so callers can chain from it.
+- **Cloud child node details panel not showing**: Clicking a child node inside a CTE cloud container (e.g., AGGREGATE, GROUP BY, WHERE) now opens the Node Details side panel for that specific node. Previously, clicks bubbled up to the parent cloud and always showed the CTE node info. Added `selectNode` callback with `stopPropagation` to cloud subflow child nodes.
+- **Details panel and navigation not finding child nodes**: The Node Details panel and Ctrl+click source navigation now recursively search through `node.children` to find cloud child nodes, instead of only searching the top-level `currentNodes` array.
+
+### Tests
+
+- Added CTE UNION convergence regression tests (UNION, UNION ALL, INTERSECT, EXCEPT two-branch edge convergence; chained UNION cascading; `parseCteOrSubqueryInternals` return type guard).
+- Added CTE subquery→outer clause connectivity tests (GROUP BY downstream of FROM, UNION+GROUP BY chaining, WHERE+JOIN flow chain completeness).
+- Added cloud child node selection regression tests (click handler with `stopPropagation`, `selectNode` callback wiring through renderer, `findNodeById` recursive search in both details panel and node selection).
+
 ## [0.4.0] - 2026-02-22
 
 ### Added

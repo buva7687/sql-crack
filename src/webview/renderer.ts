@@ -1586,6 +1586,7 @@ function renderCloudSubflow(
         isDarkTheme: state.isDarkTheme,
         offsetX,
         offsetY,
+        selectNode,
         showTooltip,
         truncate,
         updateTooltipPosition,
