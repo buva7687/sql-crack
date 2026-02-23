@@ -458,6 +458,179 @@ WHERE o.order_date >= CURRENT_DATE
     AND o.status IN ('completed', 'processed');
 
 -- ============================================================
+-- QUERY 10: Unified Support Ticket Metrics (CTE with 3-way UNION)
+-- Demonstrates: UNION convergence inside CTEs, subquery wrapping,
+--   GROUP BY + aggregates connected downstream of UNION
+-- ============================================================
+
+WITH ticket_volume AS (
+    SELECT
+        t.priority,
+        a.team_name,
+        a.skill_level,
+        COUNT(*) AS ticket_count,
+        AVG(t.resolution_hours) AS avg_resolution_hrs,
+        SUM(CASE WHEN t.reopened = 1 THEN 1 ELSE 0 END) AS reopen_count
+    FROM (
+        -- Phone tickets
+        SELECT
+            ph.ticket_id, ph.created_at, ph.priority, ph.agent_id,
+            ph.resolution_hours, ph.reopened, ph.satisfaction_score
+        FROM phone_tickets ph
+        JOIN call_logs cl ON ph.ticket_id = cl.ticket_id
+        WHERE cl.duration_seconds > 30
+
+        UNION
+
+        -- Email tickets
+        SELECT
+            em.ticket_id, em.received_at, em.priority, em.assigned_agent_id,
+            em.resolution_hours, em.reopened, em.csat_rating
+        FROM email_tickets em
+        LEFT JOIN spam_filter sf ON em.ticket_id = sf.ticket_id
+        WHERE sf.ticket_id IS NULL
+
+        UNION
+
+        -- Chat tickets
+        SELECT
+            ch.session_id, ch.started_at, ch.urgency, ch.handler_id,
+            ch.time_to_resolve_hrs, ch.was_reopened, ch.feedback_score
+        FROM live_chat_sessions ch
+        JOIN chat_transcripts ct ON ch.session_id = ct.session_id
+        WHERE ct.message_count >= 3
+    ) t
+    JOIN agents a ON a.agent_id = t.agent_id
+    WHERE t.created_at >= '2024-01-01'
+    GROUP BY t.priority, a.team_name, a.skill_level
+)
+SELECT
+    tv.team_name,
+    tv.priority,
+    tv.skill_level,
+    tv.ticket_count,
+    ROUND(tv.avg_resolution_hrs, 1) AS avg_hours,
+    tv.reopen_count,
+    ROUND(tv.reopen_count * 100.0 / NULLIF(tv.ticket_count, 0), 1) AS reopen_pct,
+    tg.target_hours,
+    CASE
+        WHEN tv.avg_resolution_hrs <= tg.target_hours THEN 'Meeting SLA'
+        WHEN tv.avg_resolution_hrs <= tg.target_hours * 1.5 THEN 'At Risk'
+        ELSE 'Breaching SLA'
+    END AS sla_status
+FROM ticket_volume tv
+JOIN team_goals tg ON tv.team_name = tg.team_name AND tv.priority = tg.priority
+ORDER BY tv.reopen_count DESC, tv.avg_resolution_hrs DESC
+LIMIT 50;
+
+-- ============================================================
+-- QUERY 11: Course Enrollment Funnel with CTE-to-CTE UNION
+-- Demonstrates: Multiple CTEs merged via UNION, recursive CTE
+--   with UNION ALL, cross-CTE convergence
+-- ============================================================
+
+WITH
+-- Semester windows
+semesters AS (
+    SELECT 'Fall 2024' AS term, CAST('2024-09-01' AS date) AS start_dt, CAST('2024-12-15' AS date) AS end_dt
+    UNION
+    SELECT 'Spring 2025' AS term, CAST('2025-01-15' AS date) AS start_dt, CAST('2025-05-30' AS date) AS end_dt
+),
+
+-- Students who enrolled through the main application portal
+portal_enrollments AS (
+    SELECT
+        s.student_id,
+        s.full_name,
+        s.gpa,
+        dept.department_name,
+        c.course_code,
+        c.credits,
+        sem.term,
+        'Portal' AS enrollment_source
+    FROM students s
+    JOIN applications app ON s.student_id = app.student_id
+    JOIN courses c ON app.course_id = c.course_id
+    JOIN departments dept ON c.department_id = dept.department_id
+    JOIN semesters sem ON app.submitted_at BETWEEN sem.start_dt AND sem.end_dt
+    WHERE app.status = 'confirmed'
+      AND s.gpa >= 2.0
+),
+
+-- Students enrolled via advisor override (waitlist, late add, special permission)
+advisor_overrides AS (
+    SELECT
+        s.student_id,
+        s.full_name,
+        s.gpa,
+        dept.department_name,
+        c.course_code,
+        c.credits,
+        sem.term,
+        'Advisor Override' AS enrollment_source
+    FROM students s
+    JOIN override_requests ovr ON s.student_id = ovr.student_id
+    JOIN advisors adv ON ovr.advisor_id = adv.advisor_id
+    JOIN courses c ON ovr.course_id = c.course_id
+    JOIN departments dept ON c.department_id = dept.department_id
+    JOIN semesters sem ON ovr.approved_at BETWEEN sem.start_dt AND sem.end_dt
+    WHERE ovr.decision = 'approved'
+),
+
+-- Combine both enrollment paths
+all_enrollments AS (
+    SELECT * FROM portal_enrollments
+    UNION
+    SELECT * FROM advisor_overrides
+    WHERE student_id NOT IN (
+        SELECT DISTINCT student_id FROM portal_enrollments
+        WHERE course_code = advisor_overrides.course_code
+    )
+),
+
+-- Build prerequisite chains (recursive)
+prereq_chain AS (
+    -- Direct prerequisites
+    SELECT
+        c.course_code,
+        p.prereq_code,
+        pc.course_name AS prereq_name,
+        1 AS chain_depth
+    FROM courses c
+    JOIN prerequisites p ON c.course_id = p.course_id
+    JOIN courses pc ON p.prereq_course_id = pc.course_id
+
+    UNION ALL
+
+    -- Transitive prerequisites
+    SELECT
+        ch.course_code,
+        p.prereq_code,
+        pc.course_name AS prereq_name,
+        ch.chain_depth + 1 AS chain_depth
+    FROM prereq_chain ch
+    JOIN prerequisites p ON ch.prereq_code = p.course_code
+    JOIN courses pc ON p.prereq_course_id = pc.course_id
+    WHERE ch.chain_depth < 4
+)
+
+SELECT
+    ae.term,
+    ae.department_name,
+    ae.course_code,
+    ae.full_name,
+    ae.gpa,
+    ae.credits,
+    ae.enrollment_source,
+    COUNT(pc.prereq_code) AS prereq_depth,
+    STRING_AGG(pc.prereq_name, ' → ' ORDER BY pc.chain_depth) AS prereq_path
+FROM all_enrollments ae
+LEFT JOIN prereq_chain pc ON ae.course_code = pc.course_code
+GROUP BY ae.term, ae.department_name, ae.course_code,
+         ae.full_name, ae.gpa, ae.credits, ae.enrollment_source
+ORDER BY ae.department_name, ae.course_code, ae.full_name;
+
+-- ============================================================
 -- END OF DEMO SHOWCASE
 -- ============================================================
 -- 
@@ -489,6 +662,16 @@ WHERE o.order_date >= CURRENT_DATE
 -- 5. Show Query 7, 8, 9 for:
 --    - WRITE operation badges (red for UPDATE/DELETE, green for INSERT)
 --    - Operation type badges
+--
+-- 5b. Show Query 10 (Multi-Channel Sales) for:
+--    - 3-way UNION convergence inside a CTE cloud
+--    - FROM subquery wrapping with GROUP BY connected downstream
+--    - Click child nodes inside the CTE cloud to see their details
+--
+-- 5c. Show Query 11 (Entity Hierarchy) for:
+--    - CTE-to-CTE UNION (merging two issuer CTEs)
+--    - Recursive CTE with UNION ALL
+--    - Deep CTE chain with cross-references
 --
 -- 6. Use keyboard shortcuts:
 --    - Press 'Q' to toggle query stats panel
