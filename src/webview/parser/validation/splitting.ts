@@ -51,12 +51,27 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
     let dollarQuoteTag = '';
     let customDelimiter = null as string | null;
 
+    const isIdentifierChar = (ch: string | undefined): boolean => {
+        if (!ch) { return false; }
+        const code = ch.charCodeAt(0);
+        return (code >= 48 && code <= 57) // 0-9
+            || (code >= 65 && code <= 90) // A-Z
+            || (code >= 97 && code <= 122) // a-z
+            || code === 95; // _
+    };
+
     const matchKeyword = (idx: number, keyword: string): boolean => {
         if (idx + keyword.length > sql.length) { return false; }
-        if (sql.substring(idx, idx + keyword.length).toUpperCase() !== keyword) { return false; }
-        if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) { return false; }
+        for (let i = 0; i < keyword.length; i++) {
+            const sourceCode = sql.charCodeAt(idx + i);
+            const upperSourceCode = (sourceCode >= 97 && sourceCode <= 122) ? sourceCode - 32 : sourceCode;
+            if (upperSourceCode !== keyword.charCodeAt(i)) {
+                return false;
+            }
+        }
+        if (idx > 0 && isIdentifierChar(sql[idx - 1])) { return false; }
         const afterIdx = idx + keyword.length;
-        if (afterIdx < sql.length && /[a-zA-Z0-9_]/.test(sql[afterIdx])) { return false; }
+        if (afterIdx < sql.length && isIdentifierChar(sql[afterIdx])) { return false; }
         return true;
     };
 
@@ -142,7 +157,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
 
         if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
             const lineStart = current.trim();
-            if (lineStart === '' && char.toUpperCase() === 'D') {
+            if (lineStart === '' && (char === 'D' || char === 'd')) {
                 const remaining = sql.substring(i, i + 20).toUpperCase();
                 if (remaining.startsWith('DELIMITER ')) {
                     const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);

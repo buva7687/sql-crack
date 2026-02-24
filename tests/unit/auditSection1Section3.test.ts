@@ -5,7 +5,7 @@ describe('audit section 1 + section 3 fixes', () => {
     const webviewIndex = readFileSync(join(__dirname, '../../src/webview/index.ts'), 'utf8');
     const extension = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
     const panel = readFileSync(join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
-    const pkg = readFileSync(join(__dirname, '../../package.json'), 'utf8');
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
 
     it('BUG-1: debugLog no longer recurses into itself', () => {
         expect(webviewIndex).toContain('console.log(...args);');
@@ -50,8 +50,26 @@ describe('audit section 1 + section 3 fixes', () => {
         expect(panel).toContain('vscode.Uri.parse(pin.sourceDocumentUri)');
     });
 
+    it('U8: advanced numeric settings are normalized to safe min/max bounds', () => {
+        expect(extension).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000)");
+        expect(extension).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500)");
+        expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000)");
+        expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500)");
+        expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60)");
+        expect(webviewIndex).toContain('const maxFileSizeKB = normalizeAdvancedLimit(window.maxFileSizeKB, 100, 10, 10000);');
+        expect(webviewIndex).toContain('const maxStatements = normalizeAdvancedLimit(window.maxStatements, 50, 1, 500);');
+        expect(webviewIndex).toContain('const parseTimeoutSeconds = normalizeAdvancedLimit(window.parseTimeoutSeconds, 5, 1, 60);');
+    });
+
     it('U9: restore pinned tabs command is contributed for command palette discoverability', () => {
         expect(extension).toContain("registerCommand('sql-crack.restorePinnedTabs'");
-        expect(pkg).toContain('"command": "sql-crack.restorePinnedTabs"');
+        expect(pkg.contributes?.menus?.commandPalette).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    command: 'sql-crack.restorePinnedTabs',
+                    when: 'workspaceFolderCount > 0',
+                }),
+            ])
+        );
     });
 });

@@ -29,6 +29,25 @@ describe('parserClient', () => {
     `;
 
     describe('parseAsync', () => {
+        it('defers parsing to a macrotask so UI can paint loading states', async () => {
+            jest.useFakeTimers();
+            try {
+                let resolved = false;
+                const pending = parseAsync('SELECT 1', 'MySQL').then(() => {
+                    resolved = true;
+                });
+
+                await Promise.resolve();
+                expect(resolved).toBe(false);
+
+                jest.runOnlyPendingTimers();
+                await pending;
+                expect(resolved).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('should parse SQL asynchronously', async () => {
             const result = await parseAsync(testSql, 'MySQL');
 

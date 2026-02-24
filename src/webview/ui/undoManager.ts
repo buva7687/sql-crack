@@ -16,6 +16,7 @@ export class UndoManager<T> {
     private readonly maxEntries: number;
     private readonly serialize: (snapshot: T) => string;
     private history: T[] = [];
+    private serializedHistory: string[] = [];
     private index = -1;
 
     constructor(options: UndoManagerOptions<T> = {}) {
@@ -25,18 +26,22 @@ export class UndoManager<T> {
 
     clear(): void {
         this.history = [];
+        this.serializedHistory = [];
         this.index = -1;
     }
 
     initialize(snapshot: T): void {
         this.history = [snapshot];
+        this.serializedHistory = [this.serialize(snapshot)];
         this.index = 0;
     }
 
     record(snapshot: T): void {
+        const snapshotSerialized = this.serialize(snapshot);
+
         if (this.index >= 0) {
-            const current = this.history[this.index];
-            if (this.serialize(current) === this.serialize(snapshot)) {
+            const currentSerialized = this.serializedHistory[this.index];
+            if (currentSerialized === snapshotSerialized) {
                 return;
             }
         }
@@ -44,13 +49,16 @@ export class UndoManager<T> {
         // New action after undo should clear redo branch.
         if (this.index < this.history.length - 1) {
             this.history = this.history.slice(0, this.index + 1);
+            this.serializedHistory = this.serializedHistory.slice(0, this.index + 1);
         }
 
         this.history.push(snapshot);
+        this.serializedHistory.push(snapshotSerialized);
 
         if (this.history.length > this.maxEntries) {
             const overflow = this.history.length - this.maxEntries;
             this.history.splice(0, overflow);
+            this.serializedHistory.splice(0, overflow);
             this.index = this.history.length - 1;
             return;
         }
@@ -110,6 +118,7 @@ export class UndoManager<T> {
         }
 
         this.history = [...state.history];
+        this.serializedHistory = this.history.map(snapshot => this.serialize(snapshot));
         this.index = Math.max(-1, Math.min(state.index, this.history.length - 1));
     }
 }

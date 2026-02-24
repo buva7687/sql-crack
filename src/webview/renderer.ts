@@ -229,6 +229,7 @@ let loadingOverlay: HTMLDivElement | null = null;
 let panelResizerCleanup: Array<() => void> = [];
 let legendResizeObserver: ResizeObserver | null = null;
 let legendResizeHandler: (() => void) | null = null;
+let legendResizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererResizeObserver: ResizeObserver | null = null;
 let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
@@ -257,6 +258,7 @@ const layoutHistory = createLayoutHistory();
 // Virtualization state
 let virtualizationEnabled = true;
 let renderedNodeIds: Set<string> = new Set();
+let renderedEdgeIds: Set<string> = new Set();
 let lastVirtualizationResult: VirtualizationResult | null = null;
 let offscreenIndicator: SVGGElement | null = null;
 // Store references to cloud and arrow elements for dynamic updates
@@ -944,9 +946,19 @@ export function initRenderer(container: HTMLElement): void {
     if (legendResizeObserver) {
         legendResizeObserver.disconnect();
     }
+    if (legendResizeDebounceTimer) {
+        clearTimeout(legendResizeDebounceTimer);
+        legendResizeDebounceTimer = null;
+    }
     if (legendPanel) {
         legendResizeObserver = new ResizeObserver(() => {
-            adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+            if (legendResizeDebounceTimer) {
+                clearTimeout(legendResizeDebounceTimer);
+            }
+            legendResizeDebounceTimer = setTimeout(() => {
+                legendResizeDebounceTimer = null;
+                adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+            }, 150);
         });
         legendResizeObserver.observe(legendPanel);
     }
@@ -1182,6 +1194,10 @@ export function cleanupRenderer(): void {
     }
     legendResizeObserver?.disconnect();
     legendResizeObserver = null;
+    if (legendResizeDebounceTimer) {
+        clearTimeout(legendResizeDebounceTimer);
+        legendResizeDebounceTimer = null;
+    }
     rendererResizeObserver?.disconnect();
     rendererResizeObserver = null;
     if (resizeObserverDebounceTimer) {
@@ -1236,6 +1252,7 @@ function updateVisibleNodes(): void {
         offsetX: state.offsetX,
         offsetY: state.offsetY,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         isDarkTheme: state.isDarkTheme,
         renderNode,
@@ -1258,6 +1275,7 @@ export function setVirtualizationEnabled(enabled: boolean): void {
         currentEdges,
         mainGroup,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         renderNode,
         renderEdge,
@@ -1310,6 +1328,15 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
     preCalculateExpandableDimensionsFeature(nodes);
 }
 
+function clearMainGroupContent(): void {
+    if (!mainGroup) {
+        return;
+    }
+    while (mainGroup.firstChild) {
+        mainGroup.removeChild(mainGroup.firstChild);
+    }
+}
+
 function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
     return applyClusteringFeature({
         nodes,
@@ -1325,6 +1352,7 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
+    const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
 
     // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
     selectNode(null);
@@ -1353,6 +1381,12 @@ export function render(result: ParseResult): void {
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
+    if (shouldResetCloudState) {
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
+    }
+
     // Reset highlight state
     state.highlightedColumnSources = [];
 
@@ -1362,14 +1396,15 @@ export function render(result: ParseResult): void {
 
     // Reset virtualization state
     renderedNodeIds.clear();
+    renderedEdgeIds.clear();
     lastVirtualizationResult = null;
     if (offscreenIndicator) {
         offscreenIndicator.remove();
         offscreenIndicator = null;
     }
 
-    // Clear previous content
-    mainGroup.innerHTML = '';
+    // Clear previous graph layers without forcing an HTML parser reset.
+    clearMainGroupContent();
 
     if (result.error) {
         renderNodes = [];
@@ -1378,6 +1413,10 @@ export function render(result: ParseResult): void {
         // Clear stale column data so pressing "C" doesn't show previous query's lineage
         currentColumnLineage = [];
         currentColumnFlows = [];
+        // Clear cloud maps to prevent stale SVG DOM references from leaking
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
         renderError(result.error, result.errorSourceLine);
         updateStatsPanel();
         updateHintsPanel();
@@ -1393,6 +1432,10 @@ export function render(result: ParseResult): void {
         // Clear stale column data so pressing "C" doesn't show previous query's lineage
         currentColumnLineage = [];
         currentColumnFlows = [];
+        // Clear cloud maps to prevent stale SVG DOM references from leaking
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -1432,6 +1475,7 @@ export function render(result: ParseResult): void {
     edgesGroup.setAttribute('class', 'edges');
     for (const edge of edgesToRender) {
         renderEdge(edge, edgesGroup);
+        renderedEdgeIds.add(edge.id);
     }
     mainGroup.appendChild(edgesGroup);
 
@@ -1799,10 +1843,11 @@ function getClauseTypeColor(clauseType: string): string {
 }
 
 function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    // Also escape quotes to keep attribute contexts safe.
-    return div.innerHTML
+    // Pure string escaping avoids per-call DOM element allocations on large hint/detail renders.
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }

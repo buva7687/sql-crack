@@ -15,6 +15,7 @@ interface UpdateVisibleNodesFeatureOptions {
     offsetX: number;
     offsetY: number;
     renderedNodeIds: Set<string>;
+    renderedEdgeIds: Set<string>;
     currentOffscreenIndicator: SVGGElement | null;
     isDarkTheme: boolean;
     renderNode: (node: FlowNode, parent: SVGGElement) => void;
@@ -28,6 +29,7 @@ interface SetVirtualizationEnabledFeatureOptions {
     currentEdges: FlowEdge[];
     mainGroup: SVGGElement | null;
     renderedNodeIds: Set<string>;
+    renderedEdgeIds: Set<string>;
     currentOffscreenIndicator: SVGGElement | null;
     renderNode: (node: FlowNode, parent: SVGGElement) => void;
     renderEdge: (edge: FlowEdge, parent: SVGGElement) => void;
@@ -125,6 +127,7 @@ export function updateVisibleNodesFeature(
         offsetX,
         offsetY,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator,
         isDarkTheme,
         renderNode,
@@ -160,11 +163,18 @@ export function updateVisibleNodesFeature(
         renderedNodeIds.add(node.id);
     }
 
-    if (nodesToAdd.length > 0 || nodeIdsToRemove.length > 0) {
-        edgesGroup.innerHTML = '';
-        for (const edge of result.visibleEdges) {
-            renderEdge(edge, edgesGroup);
+    const visibleEdgeIds = new Set(result.visibleEdges.map(edge => edge.id));
+    const edgeIdsToRemove = [...renderedEdgeIds].filter(edgeId => !visibleEdgeIds.has(edgeId));
+    for (const edgeId of edgeIdsToRemove) {
+        edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`)?.remove();
+        renderedEdgeIds.delete(edgeId);
+    }
+    for (const edge of result.visibleEdges) {
+        if (renderedEdgeIds.has(edge.id)) {
+            continue;
         }
+        renderEdge(edge, edgesGroup);
+        renderedEdgeIds.add(edge.id);
     }
 
     const offscreenIndicator = buildOffscreenIndicators(result, svg, currentOffscreenIndicator, isDarkTheme);
@@ -180,6 +190,7 @@ export function setVirtualizationEnabledFeature(
         currentEdges,
         mainGroup,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator,
         renderNode,
         renderEdge,
@@ -204,9 +215,20 @@ export function setVirtualizationEnabledFeature(
             }
         }
 
-        edgesGroup.innerHTML = '';
+        const allEdgeIds = new Set(currentEdges.map(edge => edge.id));
+        for (const edgeId of [...renderedEdgeIds]) {
+            if (allEdgeIds.has(edgeId)) {
+                continue;
+            }
+            edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`)?.remove();
+            renderedEdgeIds.delete(edgeId);
+        }
         for (const edge of currentEdges) {
+            if (renderedEdgeIds.has(edge.id)) {
+                continue;
+            }
             renderEdge(edge, edgesGroup);
+            renderedEdgeIds.add(edge.id);
         }
 
         currentOffscreenIndicator?.remove();
@@ -228,6 +250,7 @@ export function updateNodeEdgesFeature(options: {
     if (!mainGroup) {
         return;
     }
+    const nodeMap = new Map(nodes.map(candidate => [candidate.id, candidate]));
 
     const edges = mainGroup.querySelectorAll(`.edge[data-source="${node.id}"], .edge[data-target="${node.id}"]`);
     edges.forEach(edgeEl => {
@@ -238,8 +261,8 @@ export function updateNodeEdgesFeature(options: {
             return;
         }
 
-        const sourceNode = nodes.find(candidate => candidate.id === sourceId);
-        const targetNode = nodes.find(candidate => candidate.id === targetId);
+        const sourceNode = nodeMap.get(sourceId);
+        const targetNode = nodeMap.get(targetId);
         if (!sourceNode || !targetNode) {
             return;
         }

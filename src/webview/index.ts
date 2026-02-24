@@ -5,7 +5,7 @@ import process from 'process/browser';
 import { parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
-import { BatchParseResult, LayoutType, ParseError, QueryLineRange, SqlDialect } from './types';
+import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
     render,
@@ -133,6 +133,9 @@ let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
 let applyInitialStatePending = true;
 let cleanupDialectSuggestion: (() => void) | null = null;
+const deferredQueryIndexes: Set<number> = new Set();
+const hydrationPromises: Map<number, Promise<void>> = new Map();
+const DEFERRED_QUERY_THRESHOLD = 12;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -393,7 +396,7 @@ function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
     return candidate as PersistedWebviewState;
 }
 
-function applyInitialUiStateIfAvailable(): void {
+async function applyInitialUiStateIfAvailable(): Promise<void> {
     if (!applyInitialStatePending || !batchResult) {
         return;
     }
@@ -420,7 +423,7 @@ function applyInitialUiStateIfAvailable(): void {
 
     const targetIndex = Math.max(0, Math.min(state.currentQueryIndex, batchResult.queries.length - 1));
     if (targetIndex !== currentQueryIndex) {
-        switchToQueryIndex(targetIndex);
+        await switchToQueryIndex(targetIndex);
     }
 
     const activeQueryViewState = queryViewStates.get(currentQueryIndex) || state.renderer.viewState;
@@ -443,6 +446,94 @@ function applyInitialUiStateIfAvailable(): void {
     }
     restoreLayoutHistoryState(state.renderer.layoutHistory);
 
+}
+
+function clearDeferredQueryState(): void {
+    deferredQueryIndexes.clear();
+    hydrationPromises.clear();
+}
+
+function compactBatchResultMemory(result: BatchParseResult, activeIndex: number): void {
+    clearDeferredQueryState();
+    if (result.queries.length <= DEFERRED_QUERY_THRESHOLD) {
+        return;
+    }
+
+    result.queries.forEach((query, index) => {
+        if (index === activeIndex || query.error) {
+            return;
+        }
+
+        const compacted: ParseResult = {
+            ...query,
+            nodes: [],
+            edges: [],
+            hints: [],
+            columnLineage: [],
+            columnFlows: [],
+            tableUsage: new Map<string, number>(),
+        };
+        result.queries[index] = compacted;
+        deferredQueryIndexes.add(index);
+    });
+}
+
+async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
+    if (!batchResult || !deferredQueryIndexes.has(queryIndex)) {
+        return;
+    }
+
+    const existingPromise = hydrationPromises.get(queryIndex);
+    if (existingPromise) {
+        await existingPromise;
+        return;
+    }
+
+    const parseToken = parseRequestId;
+    const query = batchResult.queries[queryIndex];
+    const querySql = query?.sql;
+    if (!querySql) {
+        deferredQueryIndexes.delete(queryIndex);
+        return;
+    }
+
+    const hydrationPromise = (async () => {
+        const runtimeConfig = normalizeRuntimeConfig();
+        const hydrated = await parseBatchAsync(
+            querySql,
+            currentDialect,
+            {
+                maxSqlSizeBytes: Math.max(runtimeConfig.maxFileSizeKB * 1024, querySql.length + 1024),
+                maxQueryCount: Number.POSITIVE_INFINITY,
+            },
+            {
+                combineDdlStatements: window.combineDdlStatements === true
+            }
+        );
+
+        if (!batchResult || parseToken !== parseRequestId || !deferredQueryIndexes.has(queryIndex)) {
+            return;
+        }
+
+        const hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, 'Failed to hydrate deferred query');
+        hydratedQuery.sql = querySql;
+        if (query.partial) {
+            hydratedQuery.partial = true;
+        }
+        if (query.error && !hydratedQuery.error) {
+            hydratedQuery.error = query.error;
+        }
+
+        batchResult.queries[queryIndex] = hydratedQuery;
+        deferredQueryIndexes.delete(queryIndex);
+    })();
+
+    hydrationPromises.set(queryIndex, hydrationPromise);
+    try {
+        await hydrationPromise;
+    } finally {
+        hydrationPromises.delete(queryIndex);
+    }
 }
 
 function truncateSourceLine(line: string, maxLength = 120): string {
@@ -552,12 +643,7 @@ function handleSwitchToQuery(queryIndex: number): void {
     }
 
     if (currentQueryIndex !== queryIndex) {
-        currentQueryIndex = queryIndex;
-        hideCompareView();
-        setCompareModeState(false);
-        renderCurrentQuery();
-        updateBatchTabsUI();
-        schedulePersistUiState();
+        void switchToQueryIndex(queryIndex);
     }
 }
 
@@ -628,14 +714,14 @@ function init(): void {
     // Create batch tabs
     createBatchTabs(container, {
         onQuerySelect: (index: number) => {
-            switchToQueryIndex(index);
+            void switchToQueryIndex(index);
         },
         isDarkTheme
     });
 
     // Wire error badge click to switch to the errored query
     setErrorBadgeClickHandler((queryIndex: number) => {
-        switchToQueryIndex(queryIndex);
+        void switchToQueryIndex(queryIndex);
     });
 
     // Keyboard shortcuts for query navigation
@@ -653,7 +739,7 @@ function init(): void {
             e.preventDefault();
             const prevIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'prev');
             if (prevIndex !== null) {
-                switchToQueryIndex(prevIndex);
+                void switchToQueryIndex(prevIndex);
             }
         }
         // ] for next query
@@ -661,7 +747,7 @@ function init(): void {
             e.preventDefault();
             const nextIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'next');
             if (nextIndex !== null) {
-                switchToQueryIndex(nextIndex);
+                void switchToQueryIndex(nextIndex);
             }
         }
     });
@@ -944,6 +1030,7 @@ async function visualize(sql: string): Promise<void> {
     queryViewStates.clear();
     clearUndoHistory();
     clearDialectSwitchSuggestion();
+    clearDeferredQueryState();
 
     if (!hasExecutableSql(sql)) {
         const message = 'No executable SQL found. File appears to contain only comments or whitespace.';
@@ -1012,6 +1099,7 @@ async function visualize(sql: string): Promise<void> {
         if (requestId !== parseRequestId) {
             return;
         }
+        compactBatchResultMemory(result, 0);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {
@@ -1101,7 +1189,7 @@ async function visualize(sql: string): Promise<void> {
     currentQueryIndex = 0;
     updateBatchTabsUI();
     renderCurrentQuery();
-    applyInitialUiStateIfAvailable();
+    await applyInitialUiStateIfAvailable();
     schedulePersistUiState();
 }
 
@@ -1126,7 +1214,7 @@ function renderCurrentQuery(): void {
 /**
  * Switch to a different query index, preserving view state
  */
-function switchToQueryIndex(newIndex: number): void {
+async function switchToQueryIndex(newIndex: number): Promise<void> {
     if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }
@@ -1139,6 +1227,19 @@ function switchToQueryIndex(newIndex: number): void {
     hideCompareView();
     setCompareModeState(false);
     clearUndoHistory();
+
+    if (deferredQueryIndexes.has(newIndex)) {
+        showGlobalLoading('Loading query details...');
+        try {
+            await hydrateQueryIfNeeded(newIndex);
+        } finally {
+            hideGlobalLoading();
+        }
+        if (currentQueryIndex !== newIndex) {
+            return;
+        }
+    }
+
     renderCurrentQuery();
     updateBatchTabsUI();
 
@@ -1157,7 +1258,7 @@ function switchToQueryIndex(newIndex: number): void {
 function updateBatchTabsUI(): void {
     updateBatchTabs(batchResult, currentQueryIndex, {
         onQuerySelect: (index: number) => {
-            switchToQueryIndex(index);
+            void switchToQueryIndex(index);
         },
         isDarkTheme
     });

@@ -319,10 +319,26 @@ export function parseSqlBatch(
         pendingDdlCommands = [];
     };
 
+    const countLines = (text: string): number => {
+        let count = 1;
+        for (let i = 0; i < text.length; i++) {
+            if (text.charCodeAt(i) === 10) { // '\n'
+                count++;
+            }
+        }
+        return count;
+    };
+
     for (const stmt of statements) {
+        const stmtTrimmed = stmt.trim();
+        const firstNewlineIdx = stmtTrimmed.indexOf('\n');
+        const stmtFirstLine = firstNewlineIdx === -1
+            ? stmtTrimmed
+            : stmtTrimmed.slice(0, firstNewlineIdx);
+        const stmtLineCount = countLines(stmt);
+
         // Find the starting line of this statement in the original SQL
         let stmtStartLine = currentLine;
-        const stmtFirstLine = stmt.trim().split('\n')[0];
         for (let i = currentLine - 1; i < lines.length; i++) {
             if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
                 stmtStartLine = i + 1;
@@ -330,7 +346,7 @@ export function parseSqlBatch(
             }
         }
 
-        const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
+        const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
         // Check if this is a session command
         const sessionInfo = getSessionCommandInfo(stmt);
@@ -338,7 +354,8 @@ export function parseSqlBatch(
         if (sessionInfo) {
             // Calculate actual start line by counting lines in leading comments
             const strippedSql = stripLeadingComments(stmt);
-            const leadingLinesCount = stmt.split('\n').length - strippedSql.split('\n').length;
+            const strippedLineCount = countLines(strippedSql);
+            const leadingLinesCount = Math.max(0, stmtLineCount - strippedLineCount);
             const actualStartLine = stmtStartLine + leadingLinesCount;
 
             // Add to pending session commands (store stripped SQL without leading comments)
@@ -359,7 +376,8 @@ export function parseSqlBatch(
             if (ddlInfo) {
                 // Calculate actual start line by counting lines in leading comments
                 const strippedSql = stripLeadingComments(stmt);
-                const leadingLinesCount = stmt.split('\n').length - strippedSql.split('\n').length;
+                const strippedLineCount = countLines(strippedSql);
+                const leadingLinesCount = Math.max(0, stmtLineCount - strippedLineCount);
                 const actualStartLine = stmtStartLine + leadingLinesCount;
 
                 // Add to pending DDL commands
@@ -407,7 +425,7 @@ export function parseSqlBatch(
         }
 
         // Update current line past this statement
-        currentLine = stmtStartLine + stmt.split('\n').length;
+        currentLine = stmtStartLine + stmtLineCount;
     }
 
     // Flush any remaining session commands at the end
