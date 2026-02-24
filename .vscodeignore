@@ -10,6 +10,7 @@
 # Source files (dist is bundled)
 src/**
 out/**
+out-cjs/**
 **/*.ts
 **/*.map
 **/tsconfig.json
@@ -24,16 +25,26 @@ jest.config.js
 # Dependencies (bundled into dist)
 node_modules/**
 
-# Test and archive files
+# Test, coverage, and archive files
 sql/**
 archive/**
 test-*.js
+tests/**
+coverage/**
+junit.xml
 
 # Python virtual env
 sql_crack_venv/**
 venv/**
+**/.venv/**
 **/__pycache__/**
 *.pyc
+
+# Docs, examples, scripts
+docs/**
+examples/**
+scripts/**
+youtube/**
 
 # Package artifacts
 *.vsix
@@ -41,3 +52,9 @@ venv/**
 # Misc
 *.log
 .npmrc
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+RELEASE_CHECKLIST.md
+SECURITY.md
+WORKSPACE_GRAPH_PROGRESS_TODO.md
