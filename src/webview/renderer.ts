@@ -2157,6 +2157,27 @@ export function canRedoLayoutChanges(): boolean {
     return layoutHistory.canRedo();
 }
 
+export interface LayoutHistoryStateSnapshot {
+    history: LayoutHistorySnapshot[];
+    index: number;
+}
+
+export function getLayoutHistoryState(): LayoutHistoryStateSnapshot {
+    return layoutHistory.exportState();
+}
+
+export function restoreLayoutHistoryState(snapshot: LayoutHistoryStateSnapshot | null | undefined): void {
+    if (!snapshot) {
+        return;
+    }
+    layoutHistory.importState(snapshot);
+    const current = layoutHistory.getCurrent();
+    if (current) {
+        restoreLayoutHistorySnapshot(current);
+    }
+    syncUndoRedoUiState();
+}
+
 export function clearUndoHistory(): void {
     layoutHistory.clear();
     syncUndoRedoUiState();
@@ -2430,6 +2451,10 @@ export function toggleLegend(show?: boolean): void {
     state.legendVisible = isLegendBarVisible();
 }
 
+export function isLegendVisible(): boolean {
+    return state.legendVisible;
+}
+
 let statsVisible = true;
 
 export function toggleStats(show?: boolean): void {
@@ -2452,6 +2477,10 @@ export function toggleHints(show?: boolean): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
     }
+}
+
+export function isHintsVisible(): boolean {
+    return hintsVisible;
 }
 
 const PANEL_BASE_BOTTOM = PANEL_LAYOUT_DEFAULTS.baseBottom;
@@ -2493,7 +2522,7 @@ function adjustPanelBottoms(legendHeight: number): void {
 const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
 
 // Loading state helpers
-function showLoading(message?: string): void {
+export function showGlobalLoading(message?: string): void {
     if (!loadingOverlay) { return; }
     const textEl = loadingOverlay.querySelector('span');
     if (textEl && message) {
@@ -2502,7 +2531,7 @@ function showLoading(message?: string): void {
     loadingOverlay.style.display = 'flex';
 }
 
-function hideLoading(): void {
+export function hideGlobalLoading(): void {
     if (!loadingOverlay) { return; }
     loadingOverlay.style.display = 'none';
 }
@@ -2522,7 +2551,7 @@ export function switchLayout(layoutType: LayoutType): void {
     // Show loading for larger graphs
     const showLoadingIndicator = currentNodes.length > 15;
     if (showLoadingIndicator) {
-        showLoading('Calculating layout...');
+        showGlobalLoading('Calculating layout...');
     }
 
     // Use requestAnimationFrame to allow UI to update before heavy computation
@@ -2600,7 +2629,7 @@ export function switchLayout(layoutType: LayoutType): void {
         // Hide loading after a brief delay to ensure UI updates are visible
         if (showLoadingIndicator) {
             requestAnimationFrame(() => {
-                hideLoading();
+                hideGlobalLoading();
             });
         }
 
@@ -2610,6 +2639,10 @@ export function switchLayout(layoutType: LayoutType): void {
 
 export function getCurrentLayout(): LayoutType {
     return state.layoutType || 'vertical';
+}
+
+export function isFocusModeEnabled(): boolean {
+    return state.focusModeEnabled;
 }
 
 /**
@@ -2718,6 +2751,13 @@ export function toggleSqlPreview(show?: boolean): void {
             toggleSqlPreview(nextShow);
         },
     }, show);
+}
+
+export function isSqlPreviewVisible(): boolean {
+    if (!sqlPreviewPanel) {
+        return false;
+    }
+    return !(sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0');
 }
 
 function updateSqlPreview(): void {
@@ -3211,6 +3251,10 @@ export function toggleColumnFlows(show?: boolean): void {
 
     // Update legend
     updateLegendPanel();
+}
+
+export function isColumnFlowsVisible(): boolean {
+    return state.showColumnFlows;
 }
 
 /**

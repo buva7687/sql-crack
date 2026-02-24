@@ -3,6 +3,11 @@ export interface UndoManagerOptions<T> {
     serialize?: (snapshot: T) => string;
 }
 
+export interface UndoManagerState<T> {
+    history: T[];
+    index: number;
+}
+
 function defaultSerialize<T>(snapshot: T): string {
     return JSON.stringify(snapshot);
 }
@@ -90,5 +95,21 @@ export class UndoManager<T> {
 
     getInitial(): T | null {
         return this.history[0] ?? null;
+    }
+
+    exportState(): UndoManagerState<T> {
+        return {
+            history: [...this.history],
+            index: this.index,
+        };
+    }
+
+    importState(state: UndoManagerState<T>): void {
+        if (!Array.isArray(state.history) || !Number.isInteger(state.index)) {
+            return;
+        }
+
+        this.history = [...state.history];
+        this.index = Math.max(-1, Math.min(state.index, this.history.length - 1));
     }
 }
