@@ -5,8 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ## [0.4.1] - 2026-02-24
 
 ### Added
@@ -870,7 +868,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/buva7687/sql-crack/compare/v0.4.1...HEAD
 [0.4.1]: https://github.com/buva7687/sql-crack/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/buva7687/sql-crack/compare/v0.3.7...v0.4.0
 
