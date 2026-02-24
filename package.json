@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -30,6 +30,7 @@
     "onLanguage:sql",
     "onCommand:sql-crack.visualize",
     "onCommand:sql-crack.analyzeWorkspace",
+    "onCommand:sql-crack.restorePinnedTabs",
     "onCommand:sql-crack.showWorkspaceUxMetrics"
   ],
   "main": "./dist/extension.js",
@@ -52,6 +53,11 @@
         "command": "sql-crack.showWorkspaceUxMetrics",
         "title": "SQL Crack: Show Workspace UX Metrics",
         "icon": "$(graph-line)"
+      },
+      {
+        "command": "sql-crack.restorePinnedTabs",
+        "title": "SQL Crack: Restore Pinned SQL Flow Tabs",
+        "icon": "$(pinned)"
       }
     ],
     "menus": {
@@ -94,6 +100,10 @@
         },
         {
           "command": "sql-crack.showWorkspaceUxMetrics",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "sql-crack.restorePinnedTabs",
           "when": "workspaceFolderCount > 0"
         }
       ]

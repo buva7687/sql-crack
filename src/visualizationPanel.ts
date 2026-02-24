@@ -16,12 +16,14 @@ interface PinnedVisualization {
     sql: string;
     dialect: string;
     timestamp: number;
+    sourceDocumentUri?: string;
 }
 
 export class VisualizationPanel {
     public static currentPanel: VisualizationPanel | undefined;
     public static readonly viewType = 'sqlCrackVisualization';
     public static pinnedPanels: Map<string, VisualizationPanel> = new Map();
+    private static readonly _uiStateStoreKey = 'sqlFlow.panelUiStateByKey';
 
     private static _context: vscode.ExtensionContext | undefined;
 
@@ -35,6 +37,43 @@ export class VisualizationPanel {
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
     private _disposed: boolean = false;
+
+    private static _createUiStateKey(
+        options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string }
+    ): string | null {
+        if (options.isPinned && options.pinId) {
+            return `pin:${options.pinId}`;
+        }
+        if (options.documentUri) {
+            return `doc:${options.documentUri.toString()}`;
+        }
+        if (options.fileName) {
+            return `file:${options.fileName}`;
+        }
+        return null;
+    }
+
+    private static _getPersistedUiState(
+        options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string }
+    ): unknown {
+        if (!VisualizationPanel._context) { return null; }
+        const key = VisualizationPanel._createUiStateKey(options);
+        if (!key) { return null; }
+        const store = VisualizationPanel._context.workspaceState.get<Record<string, unknown>>(VisualizationPanel._uiStateStoreKey) || {};
+        return store[key] ?? null;
+    }
+
+    private static _persistUiState(
+        options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string },
+        state: unknown
+    ): void {
+        if (!VisualizationPanel._context) { return; }
+        const key = VisualizationPanel._createUiStateKey(options);
+        if (!key) { return; }
+        const store = VisualizationPanel._context.workspaceState.get<Record<string, unknown>>(VisualizationPanel._uiStateStoreKey) || {};
+        store[key] = state;
+        void VisualizationPanel._context.workspaceState.update(VisualizationPanel._uiStateStoreKey, store);
+    }
 
     public static setContext(context: vscode.ExtensionContext) {
         VisualizationPanel._context = context;
@@ -124,7 +163,8 @@ export class VisualizationPanel {
             name,
             sql: sqlCode,
             dialect: options.dialect,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sourceDocumentUri: options.documentUri?.toString()
         });
 
         return id;
@@ -175,13 +215,18 @@ export class VisualizationPanel {
                 return;
             }
 
-            // Try to find the document URI if we can match by name
-            let documentUri: vscode.Uri | undefined;
-            // For pinned tabs, we don't have the original URI, so we'll try to find it
+            let restoredDocumentUri: vscode.Uri | undefined;
+            if (pin.sourceDocumentUri) {
+                try {
+                    restoredDocumentUri = vscode.Uri.parse(pin.sourceDocumentUri);
+                } catch {
+                    restoredDocumentUri = undefined;
+                }
+            }
             VisualizationPanel.createPinnedPanel(extensionUri, pin.sql, {
                 dialect: pin.dialect,
                 fileName: pin.name,
-                documentUri: documentUri
+                documentUri: restoredDocumentUri
             }, pin.id);
         }
     }
@@ -223,6 +268,15 @@ export class VisualizationPanel {
             VisualizationPanel.currentPanel._isStale = true;
             VisualizationPanel.currentPanel._postMessage({
                 command: 'markStale'
+            });
+        }
+    }
+
+    public static setActiveEditorActivity(isSqlLikeActiveEditor: boolean) {
+        if (VisualizationPanel.currentPanel) {
+            VisualizationPanel.currentPanel._postMessage({
+                command: 'setEditorActivity',
+                isSqlLikeActiveEditor
             });
         }
     }
@@ -307,7 +361,8 @@ export class VisualizationPanel {
                                 message.sql || this._currentSql,
                                 {
                                     dialect: message.dialect || this._currentOptions.dialect,
-                                    fileName: message.name || this._currentOptions.fileName
+                                    fileName: message.name || this._currentOptions.fileName,
+                                    documentUri: this._sourceDocumentUri
                                 }
                             );
                             this._postMessage({
@@ -318,6 +373,14 @@ export class VisualizationPanel {
                         } else {
                             vscode.window.showErrorMessage('Cannot pin: extension context not available');
                         }
+                        return;
+                    case 'persistUiState':
+                        VisualizationPanel._persistUiState({
+                            documentUri: this._sourceDocumentUri,
+                            isPinned: this._isPinned,
+                            pinId: this._pinId,
+                            fileName: this._currentOptions.fileName
+                        }, message.state);
                         return;
                     case 'changeViewLocation':
                         this._changeViewLocation(message.location);
@@ -487,11 +550,17 @@ export class VisualizationPanel {
         const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
         const showMinimap = config.get<string>('showMinimap') || 'auto';
         const colorblindMode = config.get<string>('colorblindMode') || 'off';
-        const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
-        const maxStatements = config.get<number>('advanced.maxStatements', 50);
-        const parseTimeoutSeconds = config.get<number>('advanced.parseTimeoutSeconds', 5);
+        const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
+        const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
+        const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
+        const initialUiState = VisualizationPanel._getPersistedUiState({
+            documentUri: this._sourceDocumentUri,
+            isPinned: this._isPinned,
+            pinId: this._pinId,
+            fileName: this._currentOptions.fileName
+        });
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -532,6 +601,7 @@ export class VisualizationPanel {
         window.defaultLayout = ${this._escapeForInlineScript(defaultLayout)};
         window.flowDirection = ${this._escapeForInlineScript(flowDirection)};
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
+        window.initialUiState = ${this._escapeForInlineScript(initialUiState)};
         window.showDeadColumnHints = ${this._escapeForInlineScript(showDeadColumnHints)};
         window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
         window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
@@ -582,4 +652,12 @@ function getNonce() {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
     return text;
+}
+
+function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+        return fallback;
+    }
+    const rounded = Math.round(raw);
+    return Math.max(min, Math.min(max, rounded));
 }

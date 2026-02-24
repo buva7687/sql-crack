@@ -598,6 +598,7 @@ function processSelect(
         if (nextResultId) {
             const unionId = genId(runtime, 'union');
             const setOp = stmt.set_op || 'UNION';
+            maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
 
             // Collect tables from both sides for details
             const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
@@ -634,6 +635,44 @@ function processSelect(
     }
 
     return resultId;
+}
+
+function getProjectedColumnCount(stmt: any): number | null {
+    if (!stmt?.columns || stmt.columns === '*' || !Array.isArray(stmt.columns)) {
+        return null;
+    }
+    return stmt.columns.length;
+}
+
+function maybeAddSetOperationColumnCountHint(
+    context: ParserContext,
+    setOp: string,
+    leftStmt: any,
+    rightStmt: any
+): void {
+    const leftCount = getProjectedColumnCount(leftStmt);
+    const rightCount = getProjectedColumnCount(rightStmt);
+    if (leftCount === null || rightCount === null || leftCount === rightCount) {
+        return;
+    }
+
+    const signature = `${setOp.toUpperCase()}:${leftCount}:${rightCount}`;
+    const mutableContext = context as ParserContext & { setOpColumnCountHints?: Set<string> };
+    if (!mutableContext.setOpColumnCountHints) {
+        mutableContext.setOpColumnCountHints = new Set<string>();
+    }
+    if (mutableContext.setOpColumnCountHints.has(signature)) {
+        return;
+    }
+    mutableContext.setOpColumnCountHints.add(signature);
+
+    context.hints.push({
+        type: 'warning',
+        severity: 'medium',
+        category: 'quality',
+        message: `${setOp.toUpperCase()} branches project different column counts (${leftCount} vs ${rightCount}).`,
+        suggestion: 'Set operations should return the same number of columns in each branch. Align the SELECT lists to avoid runtime errors.',
+    });
 }
 
 function getCteStatementAst(cte: any): any {
@@ -786,9 +825,9 @@ function parseCteOrSubqueryInternals(
     edges: FlowEdge[],
     parentId?: string,
     depth: number = 0
-): void {
+): string | null {
     const ctx = runtime.context;
-    if (!stmt) { return; }
+    if (!stmt) { return null; }
 
     // Track function usage inside nested SELECTs so stats include aggregates/scalars
     // that appear only in scalar/WHERE subqueries (e.g., COUNT(*) in Query 4 demo).
@@ -807,8 +846,9 @@ function parseCteOrSubqueryInternals(
             // Check for nested subqueries in FROM clause
             if (fromItem.expr && fromItem.expr.ast) {
                 ctx.stats.subqueries++; // Count nested subqueries
-                // Recursively parse the nested subquery
-                parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                // Recursively parse the nested subquery and capture last node for chaining
+                const subqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                if (subqLastId) { previousId = subqLastId; }
             } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
                 if (tableName && tableName !== 'table') {
@@ -838,8 +878,9 @@ function parseCteOrSubqueryInternals(
                 // Check for nested subqueries in JOIN
                 if (fromItem.expr && fromItem.expr.ast) {
                     ctx.stats.subqueries++; // Count nested subqueries in joins
-                    // Recursively parse the nested subquery
-                    parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                    // Recursively parse the nested subquery and capture last node for chaining
+                    const joinSubqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                    if (joinSubqLastId) { previousId = joinSubqLastId; }
                 } else {
                     const joinId = genId(runtime, 'child_join');
                     const joinTable = getTableName(fromItem);
@@ -847,14 +888,21 @@ function parseCteOrSubqueryInternals(
                     if (joinTable && joinTable !== 'table') {
                         trackTableUsage(runtime, joinTable);
                     }
+                    // Extract join condition details
+                    const joinDetails: string[] = [];
+                    if (fromItem.on) {
+                        joinDetails.push(formatCondition(fromItem.on));
+                    }
+                    joinDetails.push(`${joinTable}`);
                     nodes.push({
                         id: joinId,
                         type: 'join',
                         label: `${fromItem.join} ${joinTable}`,
                         description: 'Join',
+                        details: joinDetails,
                         parentId: parentId,
                         depth: depth + 1,
-                        x: 0, y: 0, width: 120, height: 32
+                        x: 0, y: 0, width: 140, height: 60
                     });
                     if (previousId) {
                         edges.push({ id: genId(runtime, 'ce'), source: previousId, target: joinId });
@@ -876,8 +924,9 @@ function parseCteOrSubqueryInternals(
         for (const col of stmt.columns) {
             if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
                 ctx.stats.subqueries++; // Count scalar subqueries
-                // Recursively parse the nested subquery
-                parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
+                // Recursively parse the nested subquery and capture last node for chaining
+                const scalarSubqLastId = parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
+                if (scalarSubqLastId) { previousId = scalarSubqLastId; }
             }
         }
     }
@@ -885,14 +934,17 @@ function parseCteOrSubqueryInternals(
     // Add WHERE if present
     if (stmt.where) {
         const whereId = genId(runtime, 'child_where');
+        const conditions = extractConditions(stmt.where);
+        ctx.stats.conditions += conditions.length;
         nodes.push({
             id: whereId,
             type: 'filter',
             label: 'WHERE',
-            description: 'Filter',
+            description: 'Filter rows',
+            details: conditions,
             parentId: parentId,
             depth: depth + 1,
-            x: 0, y: 0, width: 80, height: 32
+            x: 0, y: 0, width: 140, height: 60
         });
         if (previousId) {
             edges.push({ id: genId(runtime, 'ce'), source: previousId, target: whereId });
@@ -907,20 +959,66 @@ function parseCteOrSubqueryInternals(
         (stmt.groupby.columns && Array.isArray(stmt.groupby.columns) && stmt.groupby.columns.length > 0)
     );
     if (hasGroupBy) {
+        ctx.stats.aggregations++;
         const groupId = genId(runtime, 'child_group');
+        const groupbyArr = Array.isArray(stmt.groupby) ? stmt.groupby : (stmt.groupby.columns || []);
+        const groupCols = groupbyArr.map((g: any) => g.column || g.expr?.column || '?').join(', ');
         nodes.push({
             id: groupId,
             type: 'aggregate',
             label: 'GROUP BY',
-            description: 'Aggregate',
+            description: 'Aggregate rows',
+            details: [`Columns: ${groupCols}`],
             parentId: parentId,
             depth: depth + 1,
-            x: 0, y: 0, width: 90, height: 32
+            x: 0, y: 0, width: 140, height: 60
         });
         if (previousId) {
             edges.push({ id: genId(runtime, 'ce'), source: previousId, target: groupId });
         }
         previousId = groupId;
+    }
+
+    // Add HAVING if present
+    if (stmt.having) {
+        const havingId = genId(runtime, 'child_having');
+        nodes.push({
+            id: havingId,
+            type: 'filter',
+            label: 'HAVING',
+            description: 'Filter groups',
+            details: [formatCondition(stmt.having)],
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 140, height: 60
+        });
+        if (previousId) {
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: havingId });
+        }
+        previousId = havingId;
+    }
+
+    // Add aggregate function details
+    const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns, ctx.dialect);
+    if (aggregateFuncDetails.length > 0) {
+        const aggregateId = genId(runtime, 'child_aggregate');
+        const baseHeight = 50;
+        const perFuncHeight = 28;
+        const aggregateHeight = baseHeight + aggregateFuncDetails.length * perFuncHeight;
+        nodes.push({
+            id: aggregateId,
+            type: 'aggregate',
+            label: 'AGGREGATE',
+            description: `${aggregateFuncDetails.length} aggregate function${aggregateFuncDetails.length > 1 ? 's' : ''}`,
+            aggregateDetails: { functions: aggregateFuncDetails },
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 180, height: Math.min(aggregateHeight, 150)
+        });
+        if (previousId) {
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: aggregateId });
+        }
+        previousId = aggregateId;
     }
 
     // Extract CASE statements from SELECT columns in CTEs
@@ -950,6 +1048,32 @@ function parseCteOrSubqueryInternals(
         previousId = caseId;
     }
 
+    // Add window function details
+    const windowFuncDetails = extractWindowFunctionDetails(stmt.columns, ctx.dialect, {
+        trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+    });
+    if (windowFuncDetails.length > 0) {
+        ctx.stats.windowFunctions += windowFuncDetails.length;
+        const windowId = genId(runtime, 'child_window');
+        const baseHeight = 50;
+        const perFuncHeight = 28;
+        const windowHeight = baseHeight + windowFuncDetails.length * perFuncHeight;
+        nodes.push({
+            id: windowId,
+            type: 'window',
+            label: 'WINDOW',
+            description: `${windowFuncDetails.length} window function${windowFuncDetails.length > 1 ? 's' : ''}`,
+            windowDetails: { functions: windowFuncDetails },
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 180, height: Math.min(windowHeight, 150)
+        });
+        if (previousId) {
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: windowId });
+        }
+        previousId = windowId;
+    }
+
     // Add ORDER BY if present
     // orderby can be an array or an object with columns property
     const hasOrderBy = stmt.orderby && (
@@ -958,19 +1082,95 @@ function parseCteOrSubqueryInternals(
     );
     if (hasOrderBy) {
         const sortId = genId(runtime, 'child_sort');
+        const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
+        const sortCols = orderbyArr.map((o: any) => {
+            const col = o.expr?.column || o.expr?.value || '?';
+            const dir = o.type || 'ASC';
+            return `${col} ${dir}`;
+        }).join(', ');
         nodes.push({
             id: sortId,
             type: 'sort',
             label: 'ORDER BY',
-            description: 'Sort',
+            description: 'Sort results',
+            details: [sortCols],
             parentId: parentId,
             depth: depth + 1,
-            x: 0, y: 0, width: 90, height: 32
+            x: 0, y: 0, width: 140, height: 60
         });
         if (previousId) {
             edges.push({ id: genId(runtime, 'ce'), source: previousId, target: sortId });
         }
+        previousId = sortId;
     }
+
+    // Add LIMIT if present (guard against phantom objects from node-sql-parser)
+    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
+        const limitId = genId(runtime, 'child_limit');
+        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        nodes.push({
+            id: limitId,
+            type: 'limit',
+            label: 'LIMIT',
+            description: 'Limit rows',
+            details: [`${limitVal} rows`],
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 120, height: 60
+        });
+        if (previousId) {
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: limitId });
+        }
+        previousId = limitId;
+    }
+
+    // Handle UNION/INTERSECT/EXCEPT inside CTEs and subqueries
+    if (stmt._next) {
+        ctx.stats.unions++;
+        const setOp = stmt.set_op || 'UNION';
+        maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
+        const unionId = genId(runtime, 'child_union');
+
+        // Collect tables from both sides for details
+        const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
+        const rightTables = extractTablesFromStatement(stmt._next, ctx.dialect);
+        const unionDetails: string[] = [];
+        if (leftTables.length > 0) {
+            unionDetails.push(`Left: ${leftTables.join(', ')}`);
+        }
+        if (rightTables.length > 0) {
+            unionDetails.push(`Right: ${rightTables.join(', ')}`);
+        }
+
+        // Save left branch's last node before processing right branch
+        const leftLastId = previousId;
+
+        // Recursively parse the right branch and capture its last node
+        const rightLastId = parseCteOrSubqueryInternals(runtime, stmt._next, nodes, edges, parentId, depth);
+
+        nodes.push({
+            id: unionId,
+            type: 'union',
+            label: setOp.toUpperCase(),
+            description: `${setOp} operation`,
+            details: unionDetails.length > 0 ? unionDetails : undefined,
+            parentId: parentId,
+            depth: depth,
+            x: 0, y: 0, width: 140, height: 60
+        });
+
+        // Connect both branches to the UNION node for proper convergence
+        if (leftLastId) {
+            edges.push({ id: genId(runtime, 'ce'), source: leftLastId, target: unionId });
+        }
+        if (rightLastId) {
+            edges.push({ id: genId(runtime, 'ce'), source: rightLastId, target: unionId });
+        }
+
+        previousId = unionId;
+    }
+
+    return previousId;
 }
 
 type SqClause = 'where' | 'having' | 'select' | 'orderby' | 'on';
@@ -1248,12 +1448,18 @@ function collectTablesFromSelectTree(
 }
 
 // Helper function to find subqueries in expressions (for counting nested subqueries)
-function findSubqueriesInExpression(expr: any): any[] {
+function findSubqueriesInExpression(expr: any, visited: WeakSet<object> = new WeakSet<object>()): any[] {
     const subqueries: any[] = [];
     if (!expr) { return subqueries; }
+    if (typeof expr === 'object') {
+        if (visited.has(expr)) {
+            return subqueries;
+        }
+        visited.add(expr);
+    }
     if (Array.isArray(expr)) {
         for (const item of expr) {
-            subqueries.push(...findSubqueriesInExpression(item));
+            subqueries.push(...findSubqueriesInExpression(item, visited));
         }
         return subqueries;
     }
@@ -1264,44 +1470,44 @@ function findSubqueriesInExpression(expr: any): any[] {
     } else if (expr.ast && expr.ast.type === 'select') {
         subqueries.push(expr.ast);
     } else if (expr.ast && typeof expr.ast === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.ast));
+        subqueries.push(...findSubqueriesInExpression(expr.ast, visited));
     }
 
     if (expr.expr) {
-        subqueries.push(...findSubqueriesInExpression(expr.expr));
+        subqueries.push(...findSubqueriesInExpression(expr.expr, visited));
     }
 
     if (expr.value && typeof expr.value === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.value));
+        subqueries.push(...findSubqueriesInExpression(expr.value, visited));
     }
 
     // Recursively check left and right sides of binary expressions
     if (expr.left) {
-        subqueries.push(...findSubqueriesInExpression(expr.left));
+        subqueries.push(...findSubqueriesInExpression(expr.left, visited));
     }
     if (expr.right) {
-        subqueries.push(...findSubqueriesInExpression(expr.right));
+        subqueries.push(...findSubqueriesInExpression(expr.right, visited));
     }
 
     // Check function arguments
     if (expr.args && Array.isArray(expr.args)) {
         for (const arg of expr.args) {
-            subqueries.push(...findSubqueriesInExpression(arg));
+            subqueries.push(...findSubqueriesInExpression(arg, visited));
         }
     } else if (Array.isArray(expr.args?.value)) {
         for (const arg of expr.args.value) {
-            subqueries.push(...findSubqueriesInExpression(arg));
+            subqueries.push(...findSubqueriesInExpression(arg, visited));
         }
     } else if (expr.args && expr.args.expr) {
-        subqueries.push(...findSubqueriesInExpression(expr.args.expr));
+        subqueries.push(...findSubqueriesInExpression(expr.args.expr, visited));
     } else if (expr.args && typeof expr.args === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.args));
+        subqueries.push(...findSubqueriesInExpression(expr.args, visited));
     }
 
     if (Array.isArray(expr.columns)) {
         for (const col of expr.columns) {
             if (col?.expr) {
-                subqueries.push(...findSubqueriesInExpression(col.expr));
+                subqueries.push(...findSubqueriesInExpression(col.expr, visited));
             }
         }
     }

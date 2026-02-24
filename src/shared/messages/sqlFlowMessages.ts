@@ -19,6 +19,7 @@ export type SqlFlowWebviewMessage =
     | { command: 'error'; text: string }
     | { command: 'info'; text: string }
     | { command: 'requestRefresh' }
+    | { command: 'persistUiState'; state: unknown }
     | { command: 'goToLine'; line: number }
     | { command: 'requestFullscreen'; enable: boolean }
     | { command: 'pinVisualization'; sql?: string; dialect?: string; name?: string }
@@ -35,5 +36,6 @@ export type SqlFlowHostMessage =
     | { command: 'cursorPosition'; line: number }
     | { command: 'switchToQuery'; queryIndex: number }
     | { command: 'markStale' }
+    | { command: 'setEditorActivity'; isSqlLikeActiveEditor: boolean }
     | { command: 'viewLocationOptions'; currentLocation: ViewLocation; pinnedTabs: PinnedVisualizationInfo[] }
     | { command: 'pinCreated'; pinId: string };

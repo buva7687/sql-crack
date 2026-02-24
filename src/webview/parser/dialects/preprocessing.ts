@@ -125,6 +125,10 @@ export function stripFilterClauses(sql: string): string | null {
  * 1. `(+)` outer join operator — removed (confuses other parsers)
  * 2. `MINUS` set operator — rewritten to `EXCEPT` for parser compatibility
  * 3. `CONNECT BY` / `START WITH` clauses — stripped (hierarchical queries unsupported)
+ * 4. Oracle physical DDL table options after `CREATE TABLE (...)` — stripped
+ *    (TABLESPACE, PCTFREE, INITRANS, STORAGE, SEGMENT CREATION, LOGGING, COMPRESS, PARALLEL, LOB STORE AS, etc.)
+ * 5. Oracle DDL data types rewritten for PostgreSQL proxy compatibility
+ *    (`NUMBER`→`NUMERIC`, `VARCHAR2`/`NVARCHAR2`→`VARCHAR`, `CLOB`/`NCLOB`→`TEXT`, `BLOB`/`RAW`→`BYTEA`)
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
@@ -255,6 +259,110 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         if (endPos === -1) { endPos = masked3.length; }
         result = result.substring(0, intoPos) + ' '.repeat(endPos - intoPos) + result.substring(endPos);
         changed = true;
+    }
+
+    // 8. Strip Oracle physical/storage options trailing CREATE TABLE column definitions.
+    //    Examples:
+    //    - CREATE TABLE t (...) TABLESPACE users PCTFREE 10 INITRANS 2 STORAGE (...)
+    //    - CREATE TABLE t (...) SEGMENT CREATION IMMEDIATE LOGGING NOCOMPRESS PARALLEL 4
+    //    - CREATE TABLE t (...) LOB (c) STORE AS (...)
+    //    If this is CTAS-like tail (`... AS SELECT ...`), preserve the AS SELECT payload and
+    //    only strip the prefix options before AS.
+    masked3 = changed ? maskStringsAndComments(result) : masked3;
+    const createTableRegex = /\bCREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE\s+\S+/gi;
+    while ((match = createTableRegex.exec(masked3)) !== null) {
+        const afterName = match.index + match[0].length;
+        let openParen = afterName;
+        while (openParen < masked3.length && masked3[openParen] !== '(' && masked3[openParen] !== ';') { openParen++; }
+        if (openParen >= masked3.length || masked3[openParen] !== '(') { continue; }
+
+        const closeParen = findMatchingParen(result, openParen);
+        if (closeParen === -1) { continue; }
+
+        const tailStart = closeParen + 1;
+        const tailEnd = findStatementTerminatorAtDepth0(masked3, tailStart);
+        if (tailEnd <= tailStart) { continue; }
+
+        const tailMasked = masked3.substring(tailStart, tailEnd);
+        if (tailMasked.trim().length === 0) { continue; }
+
+        let asPos = findKeywordAtDepth0(tailMasked, 'AS', 0);
+        if (asPos !== -1) {
+            let afterAs = asPos + 2;
+            while (afterAs < tailMasked.length && /\s/.test(tailMasked[afterAs])) { afterAs++; }
+            const remaining = tailMasked.substring(afterAs);
+            const upperRemaining = remaining.toUpperCase();
+            let isCtasPayload = upperRemaining.startsWith('SELECT') || upperRemaining.startsWith('WITH');
+            if (!isCtasPayload && upperRemaining.startsWith('(')) {
+                let p = 1;
+                while (p < upperRemaining.length && /\s/.test(upperRemaining[p])) { p++; }
+                isCtasPayload = upperRemaining.startsWith('SELECT', p) || upperRemaining.startsWith('WITH', p);
+            }
+            // Treat non-CTAS "AS" (e.g., LOB (...) STORE AS (...)) as removable DDL options.
+            if (!isCtasPayload) {
+                asPos = -1;
+            }
+        }
+
+        if (asPos === -1) {
+            result = result.substring(0, tailStart) + ' '.repeat(tailEnd - tailStart) + result.substring(tailEnd);
+            changed = true;
+            masked3 = maskStringsAndComments(result);
+            continue;
+        }
+
+        // Strip only the physical options before AS, preserve CTAS payload.
+        if (tailMasked.substring(0, asPos).trim().length > 0) {
+            const optionEnd = tailStart + asPos;
+            result = result.substring(0, tailStart) + ' '.repeat(optionEnd - tailStart) + result.substring(optionEnd);
+            changed = true;
+            masked3 = maskStringsAndComments(result);
+        }
+    }
+
+    // 9. Rewrite Oracle-specific DDL data types to PostgreSQL-compatible ones
+    //    so CREATE/ALTER TABLE statements parse via the PostgreSQL proxy.
+    masked3 = changed ? maskStringsAndComments(result) : masked3;
+    const isOracleTableDdl = /^\s*(CREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE|ALTER\s+TABLE)\b/i.test(masked3);
+    if (isOracleTableDdl) {
+        const sizedRawRegex = /\bRAW\s*\(\s*\d+\s*\)/gi;
+        const sizedRawRewrites: Array<{ start: number; end: number }> = [];
+        while ((match = sizedRawRegex.exec(masked3)) !== null) {
+            sizedRawRewrites.push({ start: match.index, end: match.index + match[0].length });
+        }
+        for (let i = sizedRawRewrites.length - 1; i >= 0; i--) {
+            const m = sizedRawRewrites[i];
+            result = result.substring(0, m.start) + 'BYTEA' + result.substring(m.end);
+            changed = true;
+        }
+        if (sizedRawRewrites.length > 0) {
+            masked3 = maskStringsAndComments(result);
+        }
+
+        const typeReplacements: Array<{ pattern: RegExp; replacement: string }> = [
+            { pattern: /\bNVARCHAR2\b/gi, replacement: 'VARCHAR' },
+            { pattern: /\bVARCHAR2\b/gi, replacement: 'VARCHAR' },
+            { pattern: /\bNUMBER\b/gi, replacement: 'NUMERIC' },
+            { pattern: /\bNCLOB\b/gi, replacement: 'TEXT' },
+            { pattern: /\bCLOB\b/gi, replacement: 'TEXT' },
+            { pattern: /\bBLOB\b/gi, replacement: 'BYTEA' },
+            { pattern: /\bRAW\b/gi, replacement: 'BYTEA' },
+        ];
+
+        for (const replacement of typeReplacements) {
+            const rewrites: Array<{ start: number; end: number }> = [];
+            while ((match = replacement.pattern.exec(masked3)) !== null) {
+                rewrites.push({ start: match.index, end: match.index + match[0].length });
+            }
+            for (let i = rewrites.length - 1; i >= 0; i--) {
+                const m = rewrites[i];
+                result = result.substring(0, m.start) + replacement.replacement + result.substring(m.end);
+                changed = true;
+            }
+            if (rewrites.length > 0) {
+                masked3 = maskStringsAndComments(result);
+            }
+        }
     }
 
     return changed ? result : null;
@@ -1310,6 +1418,11 @@ function stripDoubleColonCasts(sql: string): string | null {
  * 8. `NORMALIZE` / `NORMALIZE ON MEETS OR OVERLAPS` — stripped
  * 9. `WITH DATA` / `WITH NO DATA` from CTAS — stripped
  * 10. QUALIFY — delegated to existing stripQualifyClauses logic
+ * 19. DDL table attributes between table name and column list — stripped
+ *     (NO FALLBACK, NO BEFORE/AFTER JOURNAL, CHECKSUM, MERGEBLOCKRATIO, etc.)
+ * 20. `CHARACTER SET ... NOT CASESPECIFIC` / `CASESPECIFIC` from column defs — stripped
+ * 21. Trailing CREATE TABLE options after column list — stripped in DDL context
+ *     (`NO PRIMARY INDEX`, `FALLBACK`, `MAP = ...`, `PARTITION BY ...`)
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
@@ -1691,6 +1804,112 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         changed = true;
     }
 
+    // 19. Strip DDL table attributes between table name and column definition list.
+    //     Teradata CREATE TABLE can have comma-separated options after the table name:
+    //     CREATE TABLE t ,NO FALLBACK ,NO BEFORE JOURNAL ,CHECKSUM = DEFAULT ,(...)
+    //     Strip everything between the table name and the opening paren of column defs.
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const createTableStart = /\bCREATE\s+TABLE\s+\S+/gi;
+    while ((match = createTableStart.exec(masked)) !== null) {
+        const afterName = match.index + match[0].length;
+        // Find the opening paren for column definitions
+        let pos = afterName;
+        while (pos < masked.length && masked[pos] !== '(' && masked[pos] !== ';') { pos++; }
+        if (pos >= masked.length || masked[pos] !== '(') { continue; }
+        // If there's content between table name and '(', it's DDL attributes — strip it
+        const betweenText = masked.substring(afterName, pos).trim();
+        if (betweenText.length > 0) {
+            result = result.substring(0, afterName) + ' ' + result.substring(pos);
+            masked = maskStringsAndComments(result);
+            changed = true;
+        }
+    }
+
+    // 20. Strip CHARACTER SET ... NOT CASESPECIFIC / CASESPECIFIC from column definitions
+    //     e.g., VARCHAR(6) CHARACTER SET UNICODE NOT CASESPECIFIC → VARCHAR(6)
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const charSetRegex = /\bCHARACTER\s+SET\s+\w+(\s+NOT)?\s+CASESPECIFIC\b/gi;
+    const charSetRewrites: Array<{ start: number; end: number }> = [];
+    while ((match = charSetRegex.exec(masked)) !== null) {
+        charSetRewrites.push({ start: match.index, end: match.index + match[0].length });
+    }
+    // Also handle standalone NOT CASESPECIFIC / CASESPECIFIC without CHARACTER SET
+    const casespRegex = /\b(?:NOT\s+)?CASESPECIFIC\b/gi;
+    while ((match = casespRegex.exec(masked)) !== null) {
+        // Skip if already covered by CHARACTER SET match
+        const alreadyCovered = charSetRewrites.some(r => match!.index >= r.start && match!.index < r.end);
+        if (!alreadyCovered) {
+            charSetRewrites.push({ start: match.index, end: match.index + match[0].length });
+        }
+    }
+    charSetRewrites.sort((a, b) => b.start - a.start);
+    for (const m of charSetRewrites) {
+        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    // 21. Strip trailing CREATE TABLE options after the column list:
+    //     NO PRIMARY INDEX, (NO) FALLBACK, MAP = <map>, PARTITION BY ...
+    //     Restrict this rewrite to CREATE TABLE DDL tails to avoid touching
+    //     SELECT window clauses (e.g., PARTITION BY in OVER()).
+    masked = changed ? maskStringsAndComments(result) : masked;
+    const createTableDdlStart = /\bCREATE\s+TABLE\s+\S+/gi;
+    while ((match = createTableDdlStart.exec(masked)) !== null) {
+        const afterName = match.index + match[0].length;
+        let openParen = afterName;
+        while (openParen < masked.length && masked[openParen] !== '(' && masked[openParen] !== ';') { openParen++; }
+        if (openParen >= masked.length || masked[openParen] !== '(') { continue; }
+
+        const closeParen = findMatchingParen(result, openParen);
+        if (closeParen === -1) { continue; }
+
+        const tailStart = closeParen + 1;
+        const tailEnd = findStatementTerminatorAtDepth0(masked, tailStart);
+        if (tailEnd <= tailStart) { continue; }
+
+        const tailMasked = masked.substring(tailStart, tailEnd);
+        const hasAsAtDepth0 = findKeywordAtDepth0(tailMasked, 'AS', 0) !== -1;
+        if (!hasAsAtDepth0 && tailMasked.trim().length > 0) {
+            result = result.substring(0, tailStart) + ' '.repeat(tailEnd - tailStart) + result.substring(tailEnd);
+            changed = true;
+            masked = maskStringsAndComments(result);
+            continue;
+        }
+
+        const tailRewrites: Array<{ start: number; end: number }> = [];
+
+        const optionRegex = /\bNO\s+PRIMARY\s+INDEX\b|\bNO\s+FALLBACK(?:\s+PROTECTION)?\b|\bFALLBACK(?:\s+PROTECTION)?\b|\b(?:NO\s+)?BEFORE\s+JOURNAL\b|\b(?:NO\s+)?AFTER\s+JOURNAL\b|\bCHECKSUM\s*=\s*[^\s,;()]+\b|\b(?:DEFAULT\s+)?MERGEBLOCKRATIO\b|\bFREESPACE\s*=\s*\d+\s+PERCENT\b|\bDATABLOCKSIZE\s*=\s*\d+\s+[A-Z]+\b|\bWITH\s+JOURNAL\s+TABLE\s*=\s*[^\s,;()]+\b|\b(?:NO\s+)?LOG\b|\bMAP\s*=\s*[^\s,;()]+/gi;
+        let optionMatch: RegExpExecArray | null;
+        while ((optionMatch = optionRegex.exec(tailMasked)) !== null) {
+            tailRewrites.push({
+                start: tailStart + optionMatch.index,
+                end: tailStart + optionMatch.index + optionMatch[0].length
+            });
+        }
+
+        const partitionPos = findKeywordAtDepth0(tailMasked, 'PARTITION', 0);
+        if (partitionPos !== -1) {
+            let byPos = partitionPos + 'PARTITION'.length;
+            while (byPos < tailMasked.length && /\s/.test(tailMasked[byPos])) { byPos++; }
+            if (tailMasked.substring(byPos, byPos + 2).toUpperCase() === 'BY') {
+                tailRewrites.push({
+                    start: tailStart + partitionPos,
+                    end: tailEnd
+                });
+            }
+        }
+
+        tailRewrites.sort((a, b) => b.start - a.start);
+        for (const rewrite of tailRewrites) {
+            result = result.substring(0, rewrite.start) + ' '.repeat(rewrite.end - rewrite.start) + result.substring(rewrite.end);
+            changed = true;
+        }
+
+        if (tailRewrites.length > 0) {
+            masked = maskStringsAndComments(result);
+        }
+    }
+
     return changed ? result : null;
 }
 
@@ -1774,6 +1993,22 @@ function findOrderByAtDepth0(maskedSegment: string): number {
     }
 
     return -1;
+}
+
+function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
+    let depth = 0;
+    for (let i = pos; i < masked.length; i++) {
+        const ch = masked[i];
+        if (ch === '(') { depth++; continue; }
+        if (ch === ')') {
+            if (depth > 0) { depth--; }
+            continue;
+        }
+        if (depth === 0 && ch === ';') {
+            return i;
+        }
+    }
+    return masked.length;
 }
 
 export function preprocessForParsing(sql: string, dialect: SqlDialect): string {

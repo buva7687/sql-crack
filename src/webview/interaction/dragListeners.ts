@@ -10,19 +10,24 @@ export function registerDragListeners(
         return;
     }
 
-    svg.addEventListener('mousedown', (e) => {
-        const target = e.target as Element;
+    const canStartCanvasDrag = (target: Element): boolean => {
         const cloudGroup = target.closest('.cloud-container');
         const nodeGroup = target.closest('.node[data-id]');
         if (cloudGroup || nodeGroup) {
+            return false;
+        }
+        return target === svg || target.tagName.toLowerCase() === 'svg';
+    };
+
+    svg.addEventListener('mousedown', (e) => {
+        const target = e.target as Element;
+        if (!canStartCanvasDrag(target)) {
             return;
         }
-        if (e.target === svg || target.tagName === 'svg') {
-            state.isDragging = true;
-            state.dragStartX = e.clientX - state.offsetX;
-            state.dragStartY = e.clientY - state.offsetY;
-            svg.style.cursor = 'grabbing';
-        }
+        state.isDragging = true;
+        state.dragStartX = e.clientX - state.offsetX;
+        state.dragStartY = e.clientY - state.offsetY;
+        svg.style.cursor = 'grabbing';
     });
 
     svg.addEventListener('mousemove', (e) => {
@@ -108,4 +113,49 @@ export function registerDragListeners(
 
     svg.addEventListener('mouseup', completeDrag);
     svg.addEventListener('mouseleave', completeDrag);
+
+    let activePointerId: number | null = null;
+    svg.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' || e.pointerType === 'touch') {
+            return;
+        }
+        const target = e.target as Element;
+        if (!canStartCanvasDrag(target)) {
+            return;
+        }
+        activePointerId = e.pointerId;
+        state.isDragging = true;
+        state.dragStartX = e.clientX - state.offsetX;
+        state.dragStartY = e.clientY - state.offsetY;
+        svg.style.cursor = 'grabbing';
+        if (svg.setPointerCapture) {
+            svg.setPointerCapture(e.pointerId);
+        }
+        e.preventDefault();
+    });
+
+    svg.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'mouse' || e.pointerType === 'touch' || activePointerId !== e.pointerId || !state.isDragging) {
+            return;
+        }
+        state.offsetX = e.clientX - state.dragStartX;
+        state.offsetY = e.clientY - state.dragStartY;
+        callbacks.updateTransform();
+        e.preventDefault();
+    });
+
+    const completePointerDrag = (e: PointerEvent) => {
+        if (e.pointerType === 'mouse' || e.pointerType === 'touch' || activePointerId !== e.pointerId) {
+            return;
+        }
+        if (svg.releasePointerCapture && svg.hasPointerCapture?.(e.pointerId)) {
+            svg.releasePointerCapture(e.pointerId);
+        }
+        activePointerId = null;
+        completeDrag();
+        e.preventDefault();
+    };
+
+    svg.addEventListener('pointerup', completePointerDrag);
+    svg.addEventListener('pointercancel', completePointerDrag);
 }

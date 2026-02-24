@@ -34,6 +34,7 @@ export function createSearchBox(
     searchInput.type = 'text';
     searchInput.placeholder = 'Search nodes... (Ctrl+F)';
     searchInput.title = 'Search by table name, type, or column. Supports regex patterns.';
+    searchInput.setAttribute('aria-label', 'Search nodes');
     searchInput.style.cssText = `
         background: transparent;
         border: none;
@@ -61,19 +62,30 @@ export function createSearchBox(
 
     const prevBtn = document.createElement('button');
     prevBtn.innerHTML = '↑';
+    prevBtn.setAttribute('aria-label', 'Previous match');
+    prevBtn.title = 'Previous match';
     prevBtn.style.cssText = `
         background: transparent;
         border: none;
         color: #94a3b8;
         cursor: pointer;
-        padding: 2px 6px;
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        padding: 0;
         font-size: 12px;
+        touch-action: manipulation;
     `;
     prevBtn.addEventListener('click', callbacks.onPrevSearchResult, listenerOptions);
     searchNav.appendChild(prevBtn);
 
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '↓';
+    nextBtn.setAttribute('aria-label', 'Next match');
+    nextBtn.title = 'Next match';
     nextBtn.style.cssText = prevBtn.style.cssText;
     nextBtn.addEventListener('click', callbacks.onNextSearchResult, listenerOptions);
     searchNav.appendChild(nextBtn);
