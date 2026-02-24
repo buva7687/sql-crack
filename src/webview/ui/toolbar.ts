@@ -527,7 +527,15 @@ export function markRefreshButtonStale(): void {
     const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) {
         refreshBtn.style.background = 'rgba(234, 179, 8, 0.3)';
-        refreshBtn.title = 'Query changed - click to refresh';
+        refreshBtn.title = 'Visualization may be stale - click to refresh';
+    }
+}
+
+export function markRefreshButtonInactive(): void {
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.style.background = 'rgba(148, 163, 184, 0.28)';
+        refreshBtn.title = 'Active editor is not SQL - refresh when you return to SQL';
     }
 }
 

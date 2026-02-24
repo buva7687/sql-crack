@@ -92,6 +92,25 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
     vscode.commands.executeCommand('setContext', 'sqlCrack.isAdditionalSqlFile', isSqlLike);
 }
 
+function stripSqlComments(sql: string): string {
+    return sql
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/--[^\n\r]*/g, ' ')
+        .replace(/#[^\n\r]*/g, ' ');
+}
+
+function hasExecutableSql(sql: string): boolean {
+    return stripSqlComments(sql).trim().length > 0;
+}
+
+function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+        return fallback;
+    }
+    const rounded = Math.round(raw);
+    return Math.max(min, Math.min(max, rounded));
+}
+
 export function activate(context: vscode.ExtensionContext) {
     // Initialize logger first
     logger.initialize(context);
@@ -132,18 +151,22 @@ export function activate(context: vscode.ExtensionContext) {
             diagnosticsCollection.delete(document.uri);
             return;
         }
+        if (!hasExecutableSql(sql)) {
+            diagnosticsCollection.delete(document.uri);
+            return;
+        }
 
         try {
             const config = getConfig();
             const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
-            const maxFileSizeKB = config.get<number>('advanced.maxFileSizeKB', 100);
-            const maxStatements = config.get<number>('advanced.maxStatements', 50);
+            const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
+            const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
             const batch = parseSqlBatch(
                 sql,
                 defaultDialect as any,
                 {
-                    maxSqlSizeBytes: (maxFileSizeKB || 100) * 1024,
+                    maxSqlSizeBytes: maxFileSizeKB * 1024,
                     maxQueryCount: maxStatements || DEFAULT_VALIDATION_LIMITS.maxQueryCount,
                 },
                 {
@@ -159,7 +182,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Track active SQL document and update context for menu visibility
     let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && isSqlLikeDocument(editor.document)) {
+        const isSqlLike = Boolean(editor && isSqlLikeDocument(editor.document));
+        VisualizationPanel.setActiveEditorActivity(isSqlLike);
+        if (isSqlLike && editor) {
             lastActiveSqlDocument = editor.document;
         }
         // Update context for additional file extensions (used in when clauses)
@@ -173,6 +198,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Set initial context for menu visibility
     updateSqlLikeFileContext(vscode.window.activeTextEditor);
+    VisualizationPanel.setActiveEditorActivity(Boolean(
+        vscode.window.activeTextEditor && isSqlLikeDocument(vscode.window.activeTextEditor.document)
+    ));
 
     // Command: Visualize SQL
     let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
@@ -216,6 +244,10 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showWarningMessage('No SQL code found to visualize');
             return;
         }
+        if (!hasExecutableSql(sqlCode)) {
+            vscode.window.showWarningMessage('Only comments or whitespace found. Add at least one SQL statement to visualize.');
+            return;
+        }
 
         // Get default dialect from settings
         const config = getConfig();
@@ -227,6 +259,7 @@ export function activate(context: vscode.ExtensionContext) {
             fileName: path.basename(document.fileName) || 'Query',
             documentUri: document.uri
         });
+        VisualizationPanel.setActiveEditorActivity(isSqlLikeDocument(document));
     });
 
     // Command: Refresh visualization
@@ -243,9 +276,39 @@ export function activate(context: vscode.ExtensionContext) {
                 fileName: path.basename(document.fileName) || 'Query',
                 documentUri: document.uri
             });
+            VisualizationPanel.setActiveEditorActivity(true);
         } else {
             vscode.window.showWarningMessage('No SQL file to refresh. Please open a SQL file first.');
         }
+    });
+
+    // Command: Restore/open pinned SQL Flow tabs
+    let restorePinnedTabsCommand = vscode.commands.registerCommand('sql-crack.restorePinnedTabs', async () => {
+        const pinnedTabs = VisualizationPanel.getPinnedTabs()
+            .slice()
+            .sort((a, b) => b.timestamp - a.timestamp);
+        if (pinnedTabs.length === 0) {
+            vscode.window.showInformationMessage('No pinned SQL Flow tabs found in this workspace.');
+            return;
+        }
+
+        const selection = await vscode.window.showQuickPick(
+            pinnedTabs.map(pin => ({
+                label: pin.name,
+                description: pin.dialect,
+                detail: `Pinned ${new Date(pin.timestamp).toLocaleString()}`,
+                pinId: pin.id,
+            })),
+            {
+                placeHolder: 'Select a pinned SQL Flow tab to reopen',
+                matchOnDescription: true,
+                matchOnDetail: true,
+            }
+        );
+        if (!selection) {
+            return;
+        }
+        VisualizationPanel.openPinnedTab(selection.pinId, context.extensionUri);
     });
 
     // Command: Analyze Workspace Dependencies
@@ -502,6 +565,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(visualizeCommand);
     context.subscriptions.push(refreshCommand);
+    context.subscriptions.push(restorePinnedTabsCommand);
     context.subscriptions.push(cursorChangeListener);
     context.subscriptions.push(documentOpenListener);
     context.subscriptions.push(documentSaveListener);
