@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-24
+
+### Added
+
+- Added Q10/Q11 showcase queries in `examples/demo-showcase.sql` to exercise complex CTE UNION convergence and recursive chaining patterns.
+
+### Fixed
+
+- **CTE/subquery UNION convergence**: UNION, UNION ALL, INTERSECT, and EXCEPT branches inside CTEs now properly converge — both left and right branches connect to the set operation node instead of only the left branch. Chained set operations (A UNION B UNION C) cascade correctly.
+- **CTE subquery→outer clause connectivity**: When a CTE wraps a subquery (e.g., `FROM (SELECT ...) GROUP BY`), downstream nodes like GROUP BY and AGGREGATE are now connected to the subquery output instead of floating disconnected. `parseCteOrSubqueryInternals()` now returns the last node ID (`string | null`) so callers can chain from it.
+- **Cloud child node details panel not showing**: Clicking a child node inside a CTE cloud container (e.g., AGGREGATE, GROUP BY, WHERE) now opens the Node Details side panel for that specific node. Previously, clicks bubbled up to the parent cloud and always showed the CTE node info. Added `selectNode` callback with `stopPropagation` to cloud subflow child nodes.
+- **Details panel and navigation not finding child nodes**: The Node Details panel and Ctrl+click source navigation now recursively search through `node.children` to find cloud child nodes, instead of only searching the top-level `currentNodes` array.
+- **Oracle/Teradata parser compatibility for DDL-heavy files**: Expanded preprocessing rewrites for Oracle and Teradata CREATE/ALTER table patterns (including Oracle physical/storage tails and data-type rewrites, plus Teradata table-option tails) to reduce partial fallback parsing.
+- **Audit sections 1/3 UX and reliability fixes**: Addressed debug-log recursion crash, comments-only SQL guidance, loading overlay timing, non-SQL editor toolbar state, pinned-tab URI restore, and persisted SQL Flow UI state recovery.
+- **Audit section 2 performance/memory hardening**: Removed repeated line-splitting in batch parsing, optimized splitter keyword matching hot paths, cached undo serialization checks, diffed virtualized edges instead of rebuilding, debounced workspace index persistence, and added deferred hydration for large batch queries.
+- **Audit sections 4/5 accessibility and parser edge cases**: Improved keyboard and ARIA behavior for SQL Flow canvas/tooling, strengthened theme contrast tokens, hardened fallback parser Unicode handling, and added parser guards for statement scanning/UNION column mismatch scenarios.
+
+### Tests
+
+- Added CTE UNION convergence regression tests (UNION, UNION ALL, INTERSECT, EXCEPT two-branch edge convergence; chained UNION cascading; `parseCteOrSubqueryInternals` return type guard).
+- Added CTE subquery→outer clause connectivity tests (GROUP BY downstream of FROM, UNION+GROUP BY chaining, WHERE+JOIN flow chain completeness).
+- Added cloud child node selection regression tests (click handler with `stopPropagation`, `selectNode` callback wiring through renderer, `findNodeById` recursive search in both details panel and node selection).
+- Added audit section 1/3 regression coverage for SQL Flow state persistence, restore flows, and toolbar/editor-state behavior.
+- Added audit section 2 regression guards (`tests/unit/section2PerformanceRegressions.test.ts`) and behavioral tests for parser async yielding, undo serialization caching, and index persistence debounce/flush paths.
+- Added accessibility/parser-hardening regression coverage for audit sections 4/5.
+
 ## [0.4.0] - 2026-02-22
 
 ### Added
@@ -842,6 +868,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.4.1]: https://github.com/buva7687/sql-crack/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/buva7687/sql-crack/compare/v0.3.7...v0.4.0
 
 [0.3.7]: https://github.com/buva7687/sql-crack/compare/v0.3.6...v0.3.7

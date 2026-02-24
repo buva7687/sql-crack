@@ -21,6 +21,9 @@ function showExportToast(message: string, isDarkTheme: boolean, isError = false)
     const toast = document.createElement('div');
     toast.id = 'sql-flow-export-toast';
     toast.textContent = message;
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.setAttribute('aria-atomic', 'true');
     toast.style.cssText = `
         position: fixed;
         top: 72px;

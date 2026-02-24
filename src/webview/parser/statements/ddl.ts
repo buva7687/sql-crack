@@ -70,7 +70,7 @@ export function tryProcessCreateStatement(
     if (stmt.keyword === 'view' && stmt.select && objectName) {
         const selectRootId = processSelect(context, stmt.select, nodes, edges);
 
-        const viewNodeWidth = Math.max(160, objectName.length * 10 + 60);
+        const viewNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
         nodes.push({
             id: rootId,
             type: 'result',
@@ -100,7 +100,7 @@ export function tryProcessCreateStatement(
         const innerSelect = stmt.select || stmt.as;
         const selectRootId = processSelect(context, innerSelect, nodes, edges);
 
-        const tableNodeWidth = Math.max(160, objectName.length * 10 + 60);
+        const tableNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
         nodes.push({
             id: rootId,
             type: 'result',
@@ -145,6 +145,7 @@ const SESSION_COMMAND_PATTERNS: Array<{
     { pattern: /^UNSET\s+(\w+)/i, type: 'UNSET', description: (m) => `Unset variable: ${m[1]}` },
     { pattern: /^ALTER\s+SESSION\s+SET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Alter session: ${m[1]}`, dialects: ['Snowflake'] },
     { pattern: /^ALTER\s+SESSION\s+UNSET\s+(.+)/i, type: 'ALTER SESSION', description: (m) => `Unset session param: ${m[1]}`, dialects: ['Snowflake'] },
+    { pattern: /^ALTER\s+TABLE\s+(\S+)\s+(ENABLE|DISABLE)\s+ROW\s+MOVEMENT\b/i, type: 'ALTER TABLE', description: (m) => `${m[2]} ROW MOVEMENT on table: ${m[1]}`, dialects: ['Oracle'] },
     { pattern: /^EXEC(?:UTE)?\s+(.+)/i, type: 'EXECUTE', description: (m) => `Execute: ${m[1]}`, dialects: ['TransactSQL'] },
     { pattern: /^PRINT\s+(.+)/i, type: 'PRINT', description: (m) => `Print: ${m[1]}`, dialects: ['TransactSQL'] },
     { pattern: /^DECLARE\s+(.+)/i, type: 'DECLARE', description: (m) => `Declare: ${m[1]}` },
@@ -373,7 +374,7 @@ export function createMergedDdlResult(
         accessMode: 'write',
         x: 0,
         y: 0,
-        width: Math.max(220, summaryLabel.length * 8 + 40),
+        width: Math.min(520, Math.max(220, summaryLabel.length * 8 + 40)),
         height: Math.max(80, 40 + commands.length * 18),
         startLine: 1,
         endLine: combinedLineCount,

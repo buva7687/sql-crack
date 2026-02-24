@@ -194,6 +194,8 @@ export function createToolbar(
     // Create a full-width wrapper with horizontal scroll on small screens
     const toolbarWrapper = document.createElement('div');
     toolbarWrapper.id = 'sql-crack-toolbar-wrapper';
+    toolbarWrapper.setAttribute('role', 'navigation');
+    toolbarWrapper.setAttribute('aria-label', 'SQL Flow controls');
     toolbarWrapper.style.cssText = `
         position: absolute;
         top: 12px;
@@ -230,6 +232,8 @@ export function createToolbar(
 
     const toolbar = document.createElement('div');
     toolbar.id = 'sql-crack-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Visualization toolbar');
     toolbar.style.cssText = `
         display: flex;
         gap: 8px;
@@ -527,7 +531,15 @@ export function markRefreshButtonStale(): void {
     const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) {
         refreshBtn.style.background = 'rgba(234, 179, 8, 0.3)';
-        refreshBtn.title = 'Query changed - click to refresh';
+        refreshBtn.title = 'Visualization may be stale - click to refresh';
+    }
+}
+
+export function markRefreshButtonInactive(): void {
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.style.background = 'rgba(148, 163, 184, 0.28)';
+        refreshBtn.title = 'Active editor is not SQL - refresh when you return to SQL';
     }
 }
 

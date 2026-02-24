@@ -9,6 +9,19 @@ export interface FirstRunOverlayCallbacks {
     onDismiss: () => void;
 }
 
+function getFocusableElements(root: HTMLElement): HTMLElement[] {
+    const selector = [
+        'button:not([disabled])',
+        'a[href]',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+    ].join(', ');
+    return Array.from(root.querySelectorAll<HTMLElement>(selector))
+        .filter((el) => el.offsetParent !== null);
+}
+
 /**
  * Show the first-run onboarding overlay.
  * Displays key callouts to help new users get oriented.
@@ -18,6 +31,7 @@ export function showFirstRunOverlay(
     callbacks: FirstRunOverlayCallbacks
 ): void {
     const isDark = callbacks.isDarkTheme();
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const overlay = document.createElement('div');
     overlay.id = 'sql-crack-first-run-overlay';
@@ -119,7 +133,9 @@ export function showFirstRunOverlay(
     container.appendChild(overlay);
 
     const dismiss = () => {
+        document.removeEventListener('keydown', keydownHandler);
         overlay.remove();
+        previouslyFocused?.focus();
         callbacks.onDismiss();
     };
 
@@ -137,14 +153,38 @@ export function showFirstRunOverlay(
     });
 
     // Dismiss on Escape
-    const escHandler = (e: KeyboardEvent) => {
+    const keydownHandler = (e: KeyboardEvent) => {
+        if (!overlay.isConnected) {
+            return;
+        }
+
+        if (e.key === 'Tab') {
+            const focusable = getFocusableElements(overlay);
+            if (focusable.length === 0) {
+                e.preventDefault();
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey && active === first) {
+                e.preventDefault();
+                last.focus();
+                return;
+            }
+            if (!e.shiftKey && active === last) {
+                e.preventDefault();
+                first.focus();
+                return;
+            }
+        }
+
         if (e.key === 'Escape') {
             e.preventDefault();
-            document.removeEventListener('keydown', escHandler);
             dismiss();
         }
     };
-    document.addEventListener('keydown', escHandler);
+    document.addEventListener('keydown', keydownHandler);
 
     // Auto-focus the dismiss button
     requestAnimationFrame(() => { dismissBtn?.focus(); });

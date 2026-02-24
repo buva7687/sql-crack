@@ -8,6 +8,7 @@ export {
     updateHintsSummaryBadge,
     showKeyboardShortcutsHelp,
     markRefreshButtonStale,
+    markRefreshButtonInactive,
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,

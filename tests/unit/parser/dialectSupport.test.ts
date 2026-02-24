@@ -723,6 +723,13 @@ describe('Dialect Support', () => {
       `, dialect);
       expect(result.hints.some(h => h.message.includes('Oracle optimizer hints'))).toBe(true);
     });
+
+    it('handles ALTER TABLE ... ENABLE ROW MOVEMENT as Oracle utility command', () => {
+      const result = parseSql('ALTER TABLE sales ENABLE ROW MOVEMENT', dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('ALTER TABLE statement'))).toBe(true);
+      expect(result.hints.some(h => /partial/i.test(h.message))).toBe(false);
+    });
   });
 
   describe('Teradata', () => {

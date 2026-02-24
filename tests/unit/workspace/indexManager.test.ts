@@ -591,6 +591,70 @@ describe('IndexManager', () => {
 
             expect(callback).toHaveBeenCalled();
         });
+
+        it('coalesces rapid updateFile persists via debounce', async () => {
+            jest.useFakeTimers();
+            try {
+                mockScanner.analyzeWorkspace.mockResolvedValue([
+                    createMockAnalysis('/test.sql', [{ name: 'seed_table' }])
+                ]);
+                await indexManager.buildIndex();
+
+                const workspaceUpdate = mockContext.workspaceState.update as unknown as jest.Mock;
+                workspaceUpdate.mockClear();
+
+                const update1 = createMockAnalysis('/test.sql', [{ name: 'users_v1' }]);
+                update1.contentHash = 'hash-v1';
+                const update2 = createMockAnalysis('/test.sql', [{ name: 'users_v2' }]);
+                update2.contentHash = 'hash-v2';
+                mockScanner.analyzeFile
+                    .mockResolvedValueOnce(update1)
+                    .mockResolvedValueOnce(update2);
+
+                await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+                await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+
+                expect(workspaceUpdate).not.toHaveBeenCalled();
+
+                jest.advanceTimersByTime(999);
+                expect(workspaceUpdate).not.toHaveBeenCalled();
+
+                jest.advanceTimersByTime(1);
+                await Promise.resolve();
+                expect(workspaceUpdate).toHaveBeenCalledTimes(1);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('flushes pending debounced persist when disposed', async () => {
+            jest.useFakeTimers();
+            try {
+                mockScanner.analyzeWorkspace.mockResolvedValue([
+                    createMockAnalysis('/test.sql', [{ name: 'seed_table' }])
+                ]);
+                await indexManager.buildIndex();
+
+                const workspaceUpdate = mockContext.workspaceState.update as unknown as jest.Mock;
+                workspaceUpdate.mockClear();
+
+                const update = createMockAnalysis('/test.sql', [{ name: 'users_after_dispose' }]);
+                update.contentHash = 'hash-dispose';
+                mockScanner.analyzeFile.mockResolvedValue(update);
+
+                await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+                expect(workspaceUpdate).not.toHaveBeenCalled();
+
+                indexManager.dispose();
+                await Promise.resolve();
+                expect(workspaceUpdate).toHaveBeenCalledTimes(1);
+
+                // Prevent double-dispose in afterEach for this test.
+                indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
+            } finally {
+                jest.useRealTimers();
+            }
+        });
     });
 
     // =========================================================================

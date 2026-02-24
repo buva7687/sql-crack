@@ -37,6 +37,8 @@ export class IndexManager {
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
     private _changesSinceIndex: number = 0;
+    private _persistTimer: NodeJS.Timeout | null = null;
+    private _persistDebounceMs: number = 1000;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -179,7 +181,7 @@ export class IndexManager {
         this.index.lastUpdated = Date.now();
 
         // Persist
-        await this.persistIndex();
+        this.schedulePersist();
 
         // Notify listeners
         if (this.onIndexUpdated) {
@@ -199,7 +201,7 @@ export class IndexManager {
             this.index.fileHashes.delete(uri.fsPath);
             this.index.fileCount = this.index.files.size;
             this.index.lastUpdated = Date.now();
-            await this.persistIndex();
+            this.schedulePersist();
 
             // Notify listeners
             if (this.onIndexUpdated) {
@@ -443,6 +445,11 @@ export class IndexManager {
         if (this.updateTimer) {
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
+        }
+        if (this._persistTimer) {
+            clearTimeout(this._persistTimer);
+            this._persistTimer = null;
+            void this.persistIndex();
         }
     }
 
@@ -705,6 +712,51 @@ export class IndexManager {
     /**
      * Persist index to workspace state
      */
+    private schedulePersist(delayMs: number = this._persistDebounceMs): void {
+        if (this._persistTimer) {
+            clearTimeout(this._persistTimer);
+        }
+        this._persistTimer = setTimeout(() => {
+            this._persistTimer = null;
+            void this.persistIndex();
+        }, delayMs);
+    }
+
+    private estimateValueSizeBytes(value: unknown): number {
+        try {
+            return Buffer.byteLength(JSON.stringify(value), 'utf8');
+        } catch {
+            return 0;
+        }
+    }
+
+    private estimateSerializedIndexSizeBytes(serializable: SerializedWorkspaceIndex): number {
+        let total = 256; // object keys, delimiters, and structure overhead
+
+        total += this.estimateValueSizeBytes(serializable.version);
+        total += this.estimateValueSizeBytes(serializable.lastUpdated);
+        total += this.estimateValueSizeBytes(serializable.fileCount);
+
+        for (const [filePath, analysis] of serializable.filesArray) {
+            total += Buffer.byteLength(filePath, 'utf8');
+            total += this.estimateValueSizeBytes(analysis);
+        }
+        for (const [filePath, hash] of serializable.fileHashesArray) {
+            total += Buffer.byteLength(filePath, 'utf8');
+            total += Buffer.byteLength(hash, 'utf8');
+        }
+        for (const [key, defs] of serializable.definitionArray) {
+            total += Buffer.byteLength(key, 'utf8');
+            total += this.estimateValueSizeBytes(defs);
+        }
+        for (const [key, refs] of serializable.referenceArray) {
+            total += Buffer.byteLength(key, 'utf8');
+            total += this.estimateValueSizeBytes(refs);
+        }
+
+        return total;
+    }
+
     private async persistIndex(): Promise<void> {
         if (!this.index) {return;}
 
@@ -720,8 +772,7 @@ export class IndexManager {
         };
 
         // Guard against oversized cache entries that can exceed VS Code storage limits
-        const serialized = JSON.stringify(serializable);
-        const sizeBytes = Buffer.byteLength(serialized, 'utf8');
+        const sizeBytes = this.estimateSerializedIndexSizeBytes(serializable);
         if (sizeBytes > DEFAULT_MAX_CACHE_BYTES) {
             logger.warn(`[IndexManager] Skipping cache persist (${Math.round(sizeBytes / 1024)}KB > ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024)}KB).`);
             vscode.window.showWarningMessage(

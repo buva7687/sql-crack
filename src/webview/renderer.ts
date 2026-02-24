@@ -222,12 +222,14 @@ let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let columnLineageBanner: HTMLDivElement | null = null;
 let nodeFocusLiveRegion: HTMLDivElement | null = null;
+let pendingNavigationAnnouncement: string | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
 let panelResizerCleanup: Array<() => void> = [];
 let legendResizeObserver: ResizeObserver | null = null;
 let legendResizeHandler: (() => void) | null = null;
+let legendResizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererResizeObserver: ResizeObserver | null = null;
 let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
@@ -256,6 +258,7 @@ const layoutHistory = createLayoutHistory();
 // Virtualization state
 let virtualizationEnabled = true;
 let renderedNodeIds: Set<string> = new Set();
+let renderedEdgeIds: Set<string> = new Set();
 let lastVirtualizationResult: VirtualizationResult | null = null;
 let offscreenIndicator: SVGGElement | null = null;
 // Store references to cloud and arrow elements for dynamic updates
@@ -393,20 +396,35 @@ function ensureNodeFocusLiveRegion(container: HTMLElement): void {
     container.appendChild(nodeFocusLiveRegion);
 }
 
-function announceFocusedNode(node: FlowNode): void {
-    if (!nodeFocusLiveRegion) { return; }
-
-    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
-    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
-    const message = `${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
-
-    // Clear then set on next frame so repeated focus announcements are spoken.
+function announceLiveRegionMessage(message: string): void {
+    if (!nodeFocusLiveRegion) {
+        return;
+    }
     nodeFocusLiveRegion.textContent = '';
     requestAnimationFrame(() => {
         if (nodeFocusLiveRegion) {
             nodeFocusLiveRegion.textContent = message;
         }
     });
+}
+
+function getEdgeAnnouncementLabel(edge: FlowEdge | undefined): string {
+    if (!edge) {
+        return 'flow';
+    }
+    const raw = edge.sqlClause || edge.label || edge.clauseType || 'flow';
+    return raw.toString().replace(/_/g, ' ').toLowerCase();
+}
+
+function announceFocusedNode(node: FlowNode): void {
+    if (!nodeFocusLiveRegion) { return; }
+
+    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
+    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
+    const navigationPrefix = pendingNavigationAnnouncement ? `${pendingNavigationAnnouncement}. ` : '';
+    pendingNavigationAnnouncement = null;
+    const message = `${navigationPrefix}${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
+    announceLiveRegionMessage(message);
 }
 
 function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
@@ -818,7 +836,47 @@ function recordLayoutHistorySnapshot(): void {
     syncUndoRedoUiState();
 }
 
+function ensureSkipToGraphLink(container: HTMLElement): void {
+    if (container.querySelector('#sql-crack-skip-to-graph')) {
+        return;
+    }
+
+    const skipLink = document.createElement('button');
+    skipLink.id = 'sql-crack-skip-to-graph';
+    skipLink.textContent = 'Skip to graph';
+    skipLink.type = 'button';
+    skipLink.setAttribute('aria-label', 'Skip to graph canvas');
+    skipLink.style.cssText = `
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: ${Z_INDEX.toolbar + 2};
+        transform: translateY(-180%);
+        opacity: 0;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.35)' : 'rgba(51, 65, 85, 0.25)'};
+        background: ${state.isDarkTheme ? '#111111' : '#ffffff'};
+        color: ${state.isDarkTheme ? '#f1f5f9' : '#0f172a'};
+    `;
+    skipLink.addEventListener('focus', () => {
+        skipLink.style.transform = 'translateY(0)';
+        skipLink.style.opacity = '1';
+    });
+    skipLink.addEventListener('blur', () => {
+        skipLink.style.transform = 'translateY(-180%)';
+        skipLink.style.opacity = '0';
+    });
+    skipLink.addEventListener('click', () => {
+        svg?.focus();
+    });
+    container.appendChild(skipLink);
+}
+
 export function initRenderer(container: HTMLElement): void {
+    container.setAttribute('role', 'main');
+    container.setAttribute('aria-label', 'SQL Flow visualization');
+
     // Use extracted canvas setup module
     const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
@@ -828,6 +886,7 @@ export function initRenderer(container: HTMLElement): void {
     mainGroup = canvas.mainGroup;
     backgroundRect = canvas.backgroundRect;
     ensureNodeFocusLiveRegion(container);
+    ensureSkipToGraphLink(container);
     syncUndoRedoUiState();
 
     const bootstrap = createRendererBootstrap({
@@ -887,9 +946,19 @@ export function initRenderer(container: HTMLElement): void {
     if (legendResizeObserver) {
         legendResizeObserver.disconnect();
     }
+    if (legendResizeDebounceTimer) {
+        clearTimeout(legendResizeDebounceTimer);
+        legendResizeDebounceTimer = null;
+    }
     if (legendPanel) {
         legendResizeObserver = new ResizeObserver(() => {
-            adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+            if (legendResizeDebounceTimer) {
+                clearTimeout(legendResizeDebounceTimer);
+            }
+            legendResizeDebounceTimer = setTimeout(() => {
+                legendResizeDebounceTimer = null;
+                adjustPanelBottoms(isLegendBarVisible() ? getLegendBarHeight() : 0);
+            }, 150);
         });
         legendResizeObserver.observe(legendPanel);
     }
@@ -947,9 +1016,7 @@ export function initRenderer(container: HTMLElement): void {
 
     // Hide context menu on click outside
     const contextMenuClickHandler = () => {
-        if (contextMenuElement) {
-            contextMenuElement.style.display = 'none';
-        }
+        hideContextMenu();
     };
     document.addEventListener('click', contextMenuClickHandler);
     documentListeners.push({ type: 'click', handler: contextMenuClickHandler });
@@ -963,6 +1030,8 @@ export function initRenderer(container: HTMLElement): void {
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
     reducedMotionStyleElement = document.createElement('style');
+    const focusRingColor = state.isDarkTheme ? '#93c5fd' : '#1d4ed8';
+    const focusRingBackground = state.isDarkTheme ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
     const hcStyles = state.isHighContrast ? `
         /* VS Code High Contrast mode overrides */
         .node-rect { stroke-width: 2px !important; }
@@ -980,6 +1049,19 @@ export function initRenderer(container: HTMLElement): void {
         text { font-weight: 600 !important; }
     ` : '';
     reducedMotionStyleElement.textContent = `
+        #sql-crack-skip-to-graph:focus-visible,
+        #sql-crack-toolbar button:focus-visible,
+        #sql-crack-toolbar input:focus-visible,
+        #sql-crack-toolbar select:focus-visible,
+        #sql-crack-command-bar input:focus-visible,
+        #node-context-menu:focus-visible,
+        .ctx-menu-item:focus-visible,
+        svg[tabindex="0"]:focus-visible,
+        .node[tabindex="0"]:focus-visible {
+            outline: 2px solid ${focusRingColor};
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px ${focusRingBackground};
+        }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -1112,6 +1194,10 @@ export function cleanupRenderer(): void {
     }
     legendResizeObserver?.disconnect();
     legendResizeObserver = null;
+    if (legendResizeDebounceTimer) {
+        clearTimeout(legendResizeDebounceTimer);
+        legendResizeDebounceTimer = null;
+    }
     rendererResizeObserver?.disconnect();
     rendererResizeObserver = null;
     if (resizeObserverDebounceTimer) {
@@ -1166,6 +1252,7 @@ function updateVisibleNodes(): void {
         offsetX: state.offsetX,
         offsetY: state.offsetY,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         isDarkTheme: state.isDarkTheme,
         renderNode,
@@ -1188,6 +1275,7 @@ export function setVirtualizationEnabled(enabled: boolean): void {
         currentEdges,
         mainGroup,
         renderedNodeIds,
+        renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         renderNode,
         renderEdge,
@@ -1240,6 +1328,15 @@ function preCalculateExpandableDimensions(nodes: FlowNode[]): void {
     preCalculateExpandableDimensionsFeature(nodes);
 }
 
+function clearMainGroupContent(): void {
+    if (!mainGroup) {
+        return;
+    }
+    while (mainGroup.firstChild) {
+        mainGroup.removeChild(mainGroup.firstChild);
+    }
+}
+
 function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
     return applyClusteringFeature({
         nodes,
@@ -1255,6 +1352,7 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
 export function render(result: ParseResult): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
+    const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
 
     // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
     selectNode(null);
@@ -1283,6 +1381,12 @@ export function render(result: ParseResult): void {
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
+    if (shouldResetCloudState) {
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
+    }
+
     // Reset highlight state
     state.highlightedColumnSources = [];
 
@@ -1292,14 +1396,15 @@ export function render(result: ParseResult): void {
 
     // Reset virtualization state
     renderedNodeIds.clear();
+    renderedEdgeIds.clear();
     lastVirtualizationResult = null;
     if (offscreenIndicator) {
         offscreenIndicator.remove();
         offscreenIndicator = null;
     }
 
-    // Clear previous content
-    mainGroup.innerHTML = '';
+    // Clear previous graph layers without forcing an HTML parser reset.
+    clearMainGroupContent();
 
     if (result.error) {
         renderNodes = [];
@@ -1308,6 +1413,10 @@ export function render(result: ParseResult): void {
         // Clear stale column data so pressing "C" doesn't show previous query's lineage
         currentColumnLineage = [];
         currentColumnFlows = [];
+        // Clear cloud maps to prevent stale SVG DOM references from leaking
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
         renderError(result.error, result.errorSourceLine);
         updateStatsPanel();
         updateHintsPanel();
@@ -1323,6 +1432,10 @@ export function render(result: ParseResult): void {
         // Clear stale column data so pressing "C" doesn't show previous query's lineage
         currentColumnLineage = [];
         currentColumnFlows = [];
+        // Clear cloud maps to prevent stale SVG DOM references from leaking
+        cloudOffsets.clear();
+        cloudElements.clear();
+        cloudViewStates.clear();
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
@@ -1362,6 +1475,7 @@ export function render(result: ParseResult): void {
     edgesGroup.setAttribute('class', 'edges');
     for (const edge of edgesToRender) {
         renderEdge(edge, edgesGroup);
+        renderedEdgeIds.add(edge.id);
     }
     mainGroup.appendChild(edgesGroup);
 
@@ -1586,6 +1700,7 @@ function renderCloudSubflow(
         isDarkTheme: state.isDarkTheme,
         offsetX,
         offsetY,
+        selectNode,
         showTooltip,
         truncate,
         updateTooltipPosition,
@@ -1728,10 +1843,11 @@ function getClauseTypeColor(clauseType: string): string {
 }
 
 function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    // Also escape quotes to keep attribute contexts safe.
-    return div.innerHTML
+    // Pure string escaping avoids per-call DOM element allocations on large hint/detail renders.
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
@@ -1844,6 +1960,7 @@ function moveKeyboardFocusToNode(targetNode: FlowNode): void {
 }
 
 function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
+    const sourceNodeId = fromNodeId || state.selectedNodeId;
     return navigateToConnectedNodeFeature({
         direction,
         fromNodeId,
@@ -1851,6 +1968,11 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
         edges: currentEdges,
         state,
         onMoveToNode: (node) => {
+            const relationEdge = direction === 'upstream'
+                ? currentEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
+                : currentEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
+            const relationLabel = getEdgeAnnouncementLabel(relationEdge);
+            pendingNavigationAnnouncement = `Moved ${direction} via ${relationLabel}`;
             moveKeyboardFocusToNode(node);
         },
     });
@@ -2156,6 +2278,27 @@ export function canRedoLayoutChanges(): boolean {
     return layoutHistory.canRedo();
 }
 
+export interface LayoutHistoryStateSnapshot {
+    history: LayoutHistorySnapshot[];
+    index: number;
+}
+
+export function getLayoutHistoryState(): LayoutHistoryStateSnapshot {
+    return layoutHistory.exportState();
+}
+
+export function restoreLayoutHistoryState(snapshot: LayoutHistoryStateSnapshot | null | undefined): void {
+    if (!snapshot) {
+        return;
+    }
+    layoutHistory.importState(snapshot);
+    const current = layoutHistory.getCurrent();
+    if (current) {
+        restoreLayoutHistorySnapshot(current);
+    }
+    syncUndoRedoUiState();
+}
+
 export function clearUndoHistory(): void {
     layoutHistory.clear();
     syncUndoRedoUiState();
@@ -2429,6 +2572,10 @@ export function toggleLegend(show?: boolean): void {
     state.legendVisible = isLegendBarVisible();
 }
 
+export function isLegendVisible(): boolean {
+    return state.legendVisible;
+}
+
 let statsVisible = true;
 
 export function toggleStats(show?: boolean): void {
@@ -2451,6 +2598,10 @@ export function toggleHints(show?: boolean): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
     }
+}
+
+export function isHintsVisible(): boolean {
+    return hintsVisible;
 }
 
 const PANEL_BASE_BOTTOM = PANEL_LAYOUT_DEFAULTS.baseBottom;
@@ -2492,7 +2643,7 @@ function adjustPanelBottoms(legendHeight: number): void {
 const LAYOUT_ORDER: LayoutType[] = ['vertical', 'horizontal', 'compact', 'force', 'radial'];
 
 // Loading state helpers
-function showLoading(message?: string): void {
+export function showGlobalLoading(message?: string): void {
     if (!loadingOverlay) { return; }
     const textEl = loadingOverlay.querySelector('span');
     if (textEl && message) {
@@ -2501,7 +2652,7 @@ function showLoading(message?: string): void {
     loadingOverlay.style.display = 'flex';
 }
 
-function hideLoading(): void {
+export function hideGlobalLoading(): void {
     if (!loadingOverlay) { return; }
     loadingOverlay.style.display = 'none';
 }
@@ -2521,7 +2672,7 @@ export function switchLayout(layoutType: LayoutType): void {
     // Show loading for larger graphs
     const showLoadingIndicator = currentNodes.length > 15;
     if (showLoadingIndicator) {
-        showLoading('Calculating layout...');
+        showGlobalLoading('Calculating layout...');
     }
 
     // Use requestAnimationFrame to allow UI to update before heavy computation
@@ -2595,11 +2746,12 @@ export function switchLayout(layoutType: LayoutType): void {
         }
 
         fitView();
+        announceLiveRegionMessage(`Layout switched to ${layoutType}`);
 
         // Hide loading after a brief delay to ensure UI updates are visible
         if (showLoadingIndicator) {
             requestAnimationFrame(() => {
-                hideLoading();
+                hideGlobalLoading();
             });
         }
 
@@ -2609,6 +2761,10 @@ export function switchLayout(layoutType: LayoutType): void {
 
 export function getCurrentLayout(): LayoutType {
     return state.layoutType || 'vertical';
+}
+
+export function isFocusModeEnabled(): boolean {
+    return state.focusModeEnabled;
 }
 
 /**
@@ -2717,6 +2873,13 @@ export function toggleSqlPreview(show?: boolean): void {
             toggleSqlPreview(nextShow);
         },
     }, show);
+}
+
+export function isSqlPreviewVisible(): boolean {
+    if (!sqlPreviewPanel) {
+        return false;
+    }
+    return !(sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0');
 }
 
 function updateSqlPreview(): void {
@@ -3210,6 +3373,10 @@ export function toggleColumnFlows(show?: boolean): void {
 
     // Update legend
     updateLegendPanel();
+}
+
+export function isColumnFlowsVisible(): boolean {
+    return state.showColumnFlows;
 }
 
 /**

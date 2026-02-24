@@ -35,14 +35,14 @@ export const UI_COLORS = {
     // Text colors - Dark theme
     text: '#f1f5f9',
     textMuted: '#71717a',
-    textDim: '#64748b',
+    textDim: '#93a4bd',
     textSubtle: '#cbd5e1',
     textBright: '#e2e8f0',
 
     // Text colors - Light theme
     textLight: '#1e293b',
     textLightMuted: '#64748b',
-    textLightDim: '#94a3b8',
+    textLightDim: '#475569',
     textLightSubtle: '#334155',
 
     // Focus/Selection
@@ -217,7 +217,7 @@ export const COMPONENT_UI_COLORS = {
         text: '#f1f5f9',
         textBright: '#e2e8f0',
         textMuted: '#71717a',
-        textDim: '#64748b',
+        textDim: '#93a4bd',
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
         accent: '#818cf8',
@@ -245,7 +245,7 @@ export const COMPONENT_UI_COLORS = {
         text: '#1e293b',
         textBright: '#1e293b',
         textMuted: '#64748b',
-        textDim: '#94a3b8',
+        textDim: '#475569',
         hover: 'rgba(0, 0, 0, 0.04)',
         hoverStrong: 'rgba(15, 23, 42, 0.06)',
         accent: '#6366f1',

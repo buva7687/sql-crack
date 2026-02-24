@@ -5,7 +5,7 @@ import process from 'process/browser';
 import { parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
-import { BatchParseResult, LayoutType, ParseError, QueryLineRange, SqlDialect } from './types';
+import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
     render,
@@ -39,12 +39,22 @@ import {
     toggleLayout,
     switchLayout,
     getCurrentLayout,
+    isLegendVisible,
+    isHintsVisible,
+    isSqlPreviewVisible,
+    isColumnFlowsVisible,
+    isFocusModeEnabled,
     isFullscreen,
     toggleTheme,
     isDarkTheme,
     getKeyboardShortcuts,
     highlightNodeAtLine,
     copyMermaidToClipboard,
+    showGlobalLoading,
+    hideGlobalLoading,
+    getLayoutHistoryState,
+    restoreLayoutHistoryState,
+    LayoutHistoryStateSnapshot,
     setColorblindMode as setRendererColorblindMode,
 } from './renderer';
 import type { ColorblindMode } from '../shared/theme';
@@ -52,6 +62,7 @@ import type { ColorblindMode } from '../shared/theme';
 import {
     createToolbar,
     markRefreshButtonStale,
+    markRefreshButtonInactive,
     clearRefreshButtonStale,
     updateErrorBadge,
     clearErrorBadge,
@@ -60,7 +71,6 @@ import {
     createBatchTabs,
     updateBatchTabs,
     getScopedAdjacentQueryIndex,
-    switchToTab,
     getActiveTabId,
     showFirstRunOverlay,
     showCompareView,
@@ -93,7 +103,8 @@ declare global {
         maxStatements?: number;
         parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
-        persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>;
+        persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
+        initialUiState?: unknown;
         debugLogging?: boolean;
         vscodeApi?: {
             postMessage: (message: any) => void;
@@ -104,7 +115,7 @@ declare global {
 /** Debug log helper - only outputs when debugLogging is enabled */
 function debugLog(...args: unknown[]): void {
     if (window.debugLogging) {
-        debugLog(...args);
+        console.log(...args);
     }
 }
 
@@ -117,9 +128,413 @@ let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
 let userExplicitlySetDialect = false;
 let compareModeActive = false;
+let isInactiveEditor = false;
+let persistStateIntervalId: number | null = null;
+let persistStateDebounceId: number | null = null;
+let applyInitialStatePending = true;
+let cleanupDialectSuggestion: (() => void) | null = null;
+const deferredQueryIndexes: Set<number> = new Set();
+const hydrationPromises: Map<number, Promise<void>> = new Map();
+const DEFERRED_QUERY_THRESHOLD = 12;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
+
+interface PersistedRendererUiState {
+    viewState: TabViewState;
+    layout: LayoutType;
+    legendVisible: boolean;
+    hintsVisible: boolean;
+    sqlPreviewVisible: boolean;
+    columnFlowsVisible: boolean;
+    focusMode: ReturnType<typeof getFocusMode>;
+    focusModeEnabled: boolean;
+    layoutHistory: LayoutHistoryStateSnapshot;
+}
+
+interface PersistedWebviewState {
+    version: 1;
+    currentDialect: SqlDialect;
+    currentQueryIndex: number;
+    userExplicitlySetDialect: boolean;
+    compareModeActive: boolean;
+    activeTabId: string | null;
+    queryViewStates: Array<{ queryIndex: number; viewState: TabViewState }>;
+    renderer: PersistedRendererUiState;
+}
+
+function stripSqlComments(sql: string): string {
+    return sql
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/--[^\n\r]*/g, ' ')
+        .replace(/#[^\n\r]*/g, ' ');
+}
+
+function hasExecutableSql(sql: string): boolean {
+    return stripSqlComments(sql).trim().length > 0;
+}
+
+function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+        return fallback;
+    }
+    const rounded = Math.round(raw);
+    return Math.min(max, Math.max(min, rounded));
+}
+
+function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; parseTimeoutSeconds: number } {
+    const maxFileSizeKB = normalizeAdvancedLimit(window.maxFileSizeKB, 100, 10, 10000);
+    const maxStatements = normalizeAdvancedLimit(window.maxStatements, 50, 1, 500);
+    const parseTimeoutSeconds = normalizeAdvancedLimit(window.parseTimeoutSeconds, 5, 1, 60);
+
+    window.maxFileSizeKB = maxFileSizeKB;
+    window.maxStatements = maxStatements;
+    window.parseTimeoutSeconds = parseTimeoutSeconds;
+
+    return { maxFileSizeKB, maxStatements, parseTimeoutSeconds };
+}
+
+function syncRefreshButtonState(): void {
+    if (isInactiveEditor) {
+        markRefreshButtonInactive();
+        return;
+    }
+    if (isStale) {
+        markRefreshButtonStale();
+        return;
+    }
+    clearRefreshButtonStale();
+}
+
+function buildFallbackQueryErrorResult(sql: string, message: string) {
+    return {
+        nodes: [],
+        edges: [],
+        stats: {
+            tables: 0,
+            joins: 0,
+            subqueries: 0,
+            ctes: 0,
+            aggregations: 0,
+            windowFunctions: 0,
+            unions: 0,
+            conditions: 0,
+            complexity: 'Simple' as const,
+            complexityScore: 0,
+        },
+        hints: [],
+        sql,
+        columnLineage: [],
+        columnFlows: [],
+        tableUsage: new Map<string, number>(),
+        error: message,
+    };
+}
+
+function normalizeSqlDialect(token: string): SqlDialect | null {
+    const normalized = token.trim().toLowerCase();
+    const map: Record<string, SqlDialect> = {
+        mysql: 'MySQL',
+        postgresql: 'PostgreSQL',
+        postgres: 'PostgreSQL',
+        transactsql: 'TransactSQL',
+        'sql server': 'TransactSQL',
+        sqlserver: 'TransactSQL',
+        snowflake: 'Snowflake',
+        bigquery: 'BigQuery',
+        redshift: 'Redshift',
+        hive: 'Hive',
+        athena: 'Athena',
+        trino: 'Trino',
+        mariadb: 'MariaDB',
+        sqlite: 'SQLite',
+        oracle: 'Oracle',
+        teradata: 'Teradata',
+    };
+    return map[normalized] ?? null;
+}
+
+function getSuggestedDialectFromMessage(message: string): SqlDialect | null {
+    const candidates = [
+        ...Array.from(message.matchAll(/try\s+([a-zA-Z ]+?)\s+dialect/gi)).map(match => match[1]),
+        ...Array.from(message.matchAll(/try\s+([a-zA-Z ]+?)\s+or\s+([a-zA-Z ]+?)\s+dialect/gi)).flatMap(match => [match[1], match[2]]),
+    ];
+    for (const candidate of candidates) {
+        const dialect = normalizeSqlDialect(candidate);
+        if (dialect) {
+            return dialect;
+        }
+    }
+    return null;
+}
+
+function clearDialectSwitchSuggestion(): void {
+    cleanupDialectSuggestion?.();
+    cleanupDialectSuggestion = null;
+}
+
+function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
+    clearDialectSwitchSuggestion();
+    const root = document.getElementById('root');
+    if (!root) {
+        return;
+    }
+
+    const card = document.createElement('div');
+    card.id = 'dialect-switch-suggestion';
+    card.style.cssText = `
+        position: absolute;
+        top: 56px;
+        right: 12px;
+        z-index: 3000;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        background: rgba(15, 23, 42, 0.92);
+        color: #e2e8f0;
+        font-size: 12px;
+        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+    `;
+
+    const message = document.createElement('span');
+    message.textContent = `Parser hint: switch to ${dialect}?`;
+    card.appendChild(message);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `Switch to ${dialect}`;
+    button.style.cssText = `
+        border: 1px solid rgba(129, 140, 248, 0.7);
+        border-radius: 6px;
+        background: rgba(99, 102, 241, 0.25);
+        color: #eef2ff;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+    `;
+    card.appendChild(button);
+
+    const onClick = (): void => {
+        currentDialect = dialect;
+        userExplicitlySetDialect = true;
+        updateAutoDetectIndicator(null);
+        const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+        if (dialectSelect) {
+            dialectSelect.value = dialect;
+        }
+        clearDialectSwitchSuggestion();
+        void visualize(sql);
+    };
+    button.addEventListener('click', onClick);
+    root.appendChild(card);
+
+    cleanupDialectSuggestion = () => {
+        button.removeEventListener('click', onClick);
+        card.remove();
+    };
+}
+
+function capturePersistedState(): PersistedWebviewState {
+    queryViewStates.set(currentQueryIndex, getViewState());
+    return {
+        version: 1,
+        currentDialect,
+        currentQueryIndex,
+        userExplicitlySetDialect,
+        compareModeActive,
+        activeTabId: getActiveTabId(),
+        queryViewStates: Array.from(queryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
+        renderer: {
+            viewState: getViewState(),
+            layout: getCurrentLayout(),
+            legendVisible: isLegendVisible(),
+            hintsVisible: isHintsVisible(),
+            sqlPreviewVisible: isSqlPreviewVisible(),
+            columnFlowsVisible: isColumnFlowsVisible(),
+            focusMode: getFocusMode(),
+            focusModeEnabled: isFocusModeEnabled(),
+            layoutHistory: getLayoutHistoryState(),
+        },
+    };
+}
+
+function persistUiStateNow(): void {
+    if (!window.vscodeApi) {
+        return;
+    }
+    window.vscodeApi.postMessage({
+        command: 'persistUiState',
+        state: capturePersistedState(),
+    });
+}
+
+function schedulePersistUiState(delayMs = 150): void {
+    if (!window.vscodeApi) {
+        return;
+    }
+    if (persistStateDebounceId !== null) {
+        window.clearTimeout(persistStateDebounceId);
+    }
+    persistStateDebounceId = window.setTimeout(() => {
+        persistStateDebounceId = null;
+        persistUiStateNow();
+    }, delayMs);
+}
+
+function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+    const candidate = raw as Partial<PersistedWebviewState>;
+    if (candidate.version !== 1 || !candidate.renderer || !Array.isArray(candidate.queryViewStates)) {
+        return null;
+    }
+    return candidate as PersistedWebviewState;
+}
+
+async function applyInitialUiStateIfAvailable(): Promise<void> {
+    if (!applyInitialStatePending || !batchResult) {
+        return;
+    }
+    applyInitialStatePending = false;
+
+    const state = parseInitialUiState(window.initialUiState);
+    if (!state || batchResult.queries.length === 0) {
+        return;
+    }
+
+    currentDialect = state.currentDialect;
+    userExplicitlySetDialect = state.userExplicitlySetDialect;
+    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+    if (dialectSelect) {
+        dialectSelect.value = currentDialect;
+    }
+
+    queryViewStates.clear();
+    for (const entry of state.queryViewStates) {
+        if (entry.queryIndex >= 0 && entry.queryIndex < batchResult.queries.length) {
+            queryViewStates.set(entry.queryIndex, entry.viewState);
+        }
+    }
+
+    const targetIndex = Math.max(0, Math.min(state.currentQueryIndex, batchResult.queries.length - 1));
+    if (targetIndex !== currentQueryIndex) {
+        await switchToQueryIndex(targetIndex);
+    }
+
+    const activeQueryViewState = queryViewStates.get(currentQueryIndex) || state.renderer.viewState;
+    if (activeQueryViewState) {
+        setViewState(activeQueryViewState);
+    }
+
+    if (state.renderer.layout !== getCurrentLayout()) {
+        switchLayout(state.renderer.layout);
+    }
+    toggleLegend(state.renderer.legendVisible);
+    toggleHints(state.renderer.hintsVisible);
+    toggleSqlPreview(state.renderer.sqlPreviewVisible);
+    toggleColumnFlows(state.renderer.columnFlowsVisible);
+    if (state.renderer.focusModeEnabled) {
+        setFocusMode(state.renderer.focusMode);
+        toggleFocusMode(true);
+    } else {
+        toggleFocusMode(false);
+    }
+    restoreLayoutHistoryState(state.renderer.layoutHistory);
+
+}
+
+function clearDeferredQueryState(): void {
+    deferredQueryIndexes.clear();
+    hydrationPromises.clear();
+}
+
+function compactBatchResultMemory(result: BatchParseResult, activeIndex: number): void {
+    clearDeferredQueryState();
+    if (result.queries.length <= DEFERRED_QUERY_THRESHOLD) {
+        return;
+    }
+
+    result.queries.forEach((query, index) => {
+        if (index === activeIndex || query.error) {
+            return;
+        }
+
+        const compacted: ParseResult = {
+            ...query,
+            nodes: [],
+            edges: [],
+            hints: [],
+            columnLineage: [],
+            columnFlows: [],
+            tableUsage: new Map<string, number>(),
+        };
+        result.queries[index] = compacted;
+        deferredQueryIndexes.add(index);
+    });
+}
+
+async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
+    if (!batchResult || !deferredQueryIndexes.has(queryIndex)) {
+        return;
+    }
+
+    const existingPromise = hydrationPromises.get(queryIndex);
+    if (existingPromise) {
+        await existingPromise;
+        return;
+    }
+
+    const parseToken = parseRequestId;
+    const query = batchResult.queries[queryIndex];
+    const querySql = query?.sql;
+    if (!querySql) {
+        deferredQueryIndexes.delete(queryIndex);
+        return;
+    }
+
+    const hydrationPromise = (async () => {
+        const runtimeConfig = normalizeRuntimeConfig();
+        const hydrated = await parseBatchAsync(
+            querySql,
+            currentDialect,
+            {
+                maxSqlSizeBytes: Math.max(runtimeConfig.maxFileSizeKB * 1024, querySql.length + 1024),
+                maxQueryCount: Number.POSITIVE_INFINITY,
+            },
+            {
+                combineDdlStatements: window.combineDdlStatements === true
+            }
+        );
+
+        if (!batchResult || parseToken !== parseRequestId || !deferredQueryIndexes.has(queryIndex)) {
+            return;
+        }
+
+        const hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, 'Failed to hydrate deferred query');
+        hydratedQuery.sql = querySql;
+        if (query.partial) {
+            hydratedQuery.partial = true;
+        }
+        if (query.error && !hydratedQuery.error) {
+            hydratedQuery.error = query.error;
+        }
+
+        batchResult.queries[queryIndex] = hydratedQuery;
+        deferredQueryIndexes.delete(queryIndex);
+    })();
+
+    hydrationPromises.set(queryIndex, hydrationPromise);
+    try {
+        await hydrationPromise;
+    } finally {
+        hydrationPromises.delete(queryIndex);
+    }
+}
 
 function truncateSourceLine(line: string, maxLength = 120): string {
     return line.length > maxLength ? `${line.substring(0, maxLength)}...` : line;
@@ -188,6 +603,10 @@ function setupVSCodeMessageListener(): void {
             case 'markStale':
                 markAsStale();
                 break;
+            case 'setEditorActivity':
+                isInactiveEditor = message.isSqlLikeActiveEditor !== true;
+                syncRefreshButtonState();
+                break;
             case 'viewLocationOptions':
                 // Response from extension with current view location and pinned tabs
                 // Currently informational — the toolbar reads initial location from options
@@ -215,6 +634,7 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
     setCompareModeState(false);
     void visualize(sql);
     clearStaleIndicator();
+    schedulePersistUiState();
 }
 
 function handleSwitchToQuery(queryIndex: number): void {
@@ -223,22 +643,18 @@ function handleSwitchToQuery(queryIndex: number): void {
     }
 
     if (currentQueryIndex !== queryIndex) {
-        currentQueryIndex = queryIndex;
-        hideCompareView();
-        setCompareModeState(false);
-        renderCurrentQuery();
-        updateBatchTabsUI();
+        void switchToQueryIndex(queryIndex);
     }
 }
 
 function markAsStale(): void {
     isStale = true;
-    markRefreshButtonStale();
+    syncRefreshButtonState();
 }
 
 function clearStaleIndicator(): void {
     isStale = false;
-    clearRefreshButtonStale();
+    syncRefreshButtonState();
 }
 
 // ============================================================
@@ -248,6 +664,7 @@ function clearStaleIndicator(): void {
 function init(): void {
     const container = document.getElementById('root');
     if (!container) { return; }
+    const runtimeConfig = normalizeRuntimeConfig();
 
     // Setup container styles
     container.style.cssText = `
@@ -280,9 +697,7 @@ function init(): void {
     setMinimapMode(minimapMode);
 
     // Apply configurable parse timeout
-    if (window.parseTimeoutSeconds) {
-        setParseTimeout(window.parseTimeoutSeconds * 1000);
-    }
+    setParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
@@ -294,18 +709,19 @@ function init(): void {
         isFirstRun: window.isFirstRun || false
     });
     toolbarCleanup = toolbarResult.cleanup;
+    syncRefreshButtonState();
 
     // Create batch tabs
     createBatchTabs(container, {
         onQuerySelect: (index: number) => {
-            switchToQueryIndex(index);
+            void switchToQueryIndex(index);
         },
         isDarkTheme
     });
 
     // Wire error badge click to switch to the errored query
     setErrorBadgeClickHandler((queryIndex: number) => {
-        switchToQueryIndex(queryIndex);
+        void switchToQueryIndex(queryIndex);
     });
 
     // Keyboard shortcuts for query navigation
@@ -323,7 +739,7 @@ function init(): void {
             e.preventDefault();
             const prevIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'prev');
             if (prevIndex !== null) {
-                switchToQueryIndex(prevIndex);
+                void switchToQueryIndex(prevIndex);
             }
         }
         // ] for next query
@@ -331,7 +747,7 @@ function init(): void {
             e.preventDefault();
             const nextIndex = getScopedAdjacentQueryIndex(batchResult, currentQueryIndex, 'next');
             if (nextIndex !== null) {
-                switchToQueryIndex(nextIndex);
+                void switchToQueryIndex(nextIndex);
             }
         }
     });
@@ -341,6 +757,30 @@ function init(): void {
     if (sql) {
         void visualize(sql);
     }
+
+    if (persistStateIntervalId !== null) {
+        window.clearInterval(persistStateIntervalId);
+    }
+    persistStateIntervalId = window.setInterval(() => {
+        if (batchResult) {
+            persistUiStateNow();
+        }
+    }, 1500);
+
+    window.addEventListener('beforeunload', () => {
+        if (persistStateIntervalId !== null) {
+            window.clearInterval(persistStateIntervalId);
+            persistStateIntervalId = null;
+        }
+        if (persistStateDebounceId !== null) {
+            window.clearTimeout(persistStateDebounceId);
+            persistStateDebounceId = null;
+        }
+        clearDialectSwitchSuggestion();
+        persistUiStateNow();
+        toolbarCleanup?.();
+        toolbarCleanup = null;
+    });
 
     // Show first-run onboarding overlay
     if (window.isFirstRun) {
@@ -446,12 +886,24 @@ async function toggleCompareMode(): Promise<void> {
 
 function createToolbarCallbacks(): ToolbarCallbacks {
     return {
-        onUndo: undoLayoutChange,
-        onRedo: redoLayoutChange,
+        onUndo: () => {
+            undoLayoutChange();
+            schedulePersistUiState();
+        },
+        onRedo: () => {
+            redoLayoutChange();
+            schedulePersistUiState();
+        },
         canUndo: canUndoLayoutChanges,
         canRedo: canRedoLayoutChanges,
-        onZoomIn: zoomIn,
-        onZoomOut: zoomOut,
+        onZoomIn: () => {
+            zoomIn();
+            schedulePersistUiState();
+        },
+        onZoomOut: () => {
+            zoomOut();
+            schedulePersistUiState();
+        },
         onResetView: resetView,
         getZoomLevel: getZoomLevel,
         onExportPng: exportToPng,
@@ -459,16 +911,38 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onExportMermaid: exportToMermaid,
         onCopyToClipboard: copyToClipboard,
         onCopyMermaidToClipboard: copyMermaidToClipboard,
-        onToggleLegend: toggleLegend,
-        onToggleFocusMode: toggleFocusMode,
-        onFocusModeChange: setFocusMode,
+        onToggleLegend: (show?: boolean) => {
+            toggleLegend(show);
+            schedulePersistUiState();
+        },
+        onToggleFocusMode: (enable?: boolean) => {
+            toggleFocusMode(enable);
+            schedulePersistUiState();
+        },
+        onFocusModeChange: (mode) => {
+            setFocusMode(mode);
+            schedulePersistUiState();
+        },
         getFocusMode: getFocusMode,
-        onToggleSqlPreview: toggleSqlPreview,
-        onToggleColumnFlows: toggleColumnFlows,
-        onToggleHints: toggleHints,
-        onToggleLayout: toggleLayout,
+        onToggleSqlPreview: (show?: boolean) => {
+            toggleSqlPreview(show);
+            schedulePersistUiState();
+        },
+        onToggleColumnFlows: (show?: boolean) => {
+            toggleColumnFlows(show);
+            schedulePersistUiState();
+        },
+        onToggleHints: (show?: boolean) => {
+            toggleHints(show);
+            schedulePersistUiState();
+        },
+        onToggleLayout: () => {
+            toggleLayout();
+            schedulePersistUiState();
+        },
         onLayoutChange: (layout: LayoutType) => {
             switchLayout(layout);
+            schedulePersistUiState();
         },
         getCurrentLayout: getCurrentLayout,
         onToggleTheme: toggleTheme,
@@ -555,6 +1029,35 @@ async function visualize(sql: string): Promise<void> {
     setCompareModeState(false);
     queryViewStates.clear();
     clearUndoHistory();
+    clearDialectSwitchSuggestion();
+    clearDeferredQueryState();
+
+    if (!hasExecutableSql(sql)) {
+        const message = 'No executable SQL found. File appears to contain only comments or whitespace.';
+        updateErrorBadge(1, [{ queryIndex: 0, message }]);
+        batchResult = {
+            queries: [buildFallbackQueryErrorResult(sql, message)],
+            errorCount: 1,
+            parseErrors: [{ queryIndex: 0, message, sql }],
+            totalStats: {
+                tables: 0,
+                joins: 0,
+                subqueries: 0,
+                ctes: 0,
+                aggregations: 0,
+                windowFunctions: 0,
+                unions: 0,
+                conditions: 0,
+                complexity: 'Simple',
+                complexityScore: 0
+            }
+        };
+        currentQueryIndex = 0;
+        updateBatchTabsUI();
+        renderCurrentQuery();
+        schedulePersistUiState();
+        return;
+    }
 
     if (!userExplicitlySetDialect) {
         const detection = detectDialect(sql);
@@ -569,11 +1072,19 @@ async function visualize(sql: string): Promise<void> {
         }
     }
 
+    showGlobalLoading('Parsing SQL...');
+    await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+        });
+    });
+
     try {
         const t0 = performance.now();
+        const runtimeConfig = normalizeRuntimeConfig();
         const customLimits = {
-            maxSqlSizeBytes: (window.maxFileSizeKB || 100) * 1024,
-            maxQueryCount: window.maxStatements || 50,
+            maxSqlSizeBytes: runtimeConfig.maxFileSizeKB * 1024,
+            maxQueryCount: runtimeConfig.maxStatements,
         };
         const result = await parseBatchAsync(
             sql,
@@ -588,6 +1099,7 @@ async function visualize(sql: string): Promise<void> {
         if (requestId !== parseRequestId) {
             return;
         }
+        compactBatchResultMemory(result, 0);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {
@@ -596,9 +1108,9 @@ async function visualize(sql: string): Promise<void> {
         const message = error instanceof Error ? error.message : 'Failed to parse SQL';
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
         batchResult = {
-            queries: [],
+            queries: [buildFallbackQueryErrorResult(sql, message)],
             errorCount: 1,
-            parseErrors: [{ queryIndex: 0, message, sql: '' }],
+            parseErrors: [{ queryIndex: 0, message, sql }],
             totalStats: {
                 tables: 0,
                 joins: 0,
@@ -612,7 +1124,10 @@ async function visualize(sql: string): Promise<void> {
                 complexityScore: 0
             }
         };
-        return;
+    } finally {
+        if (requestId === parseRequestId) {
+            hideGlobalLoading();
+        }
     }
 
     // Filter out dead column hints/warnings if the setting is disabled
@@ -632,6 +1147,20 @@ async function visualize(sql: string): Promise<void> {
         });
     }
 
+    if (!batchResult) {
+        return;
+    }
+
+    if (batchResult.queries.length === 0) {
+        const message = hasExecutableSql(sql)
+            ? 'No SQL statements could be parsed from this input.'
+            : 'No executable SQL found. File appears to contain only comments or whitespace.';
+        updateErrorBadge(1, [{ queryIndex: 0, message }]);
+        render(buildFallbackQueryErrorResult(sql, message));
+        schedulePersistUiState();
+        return;
+    }
+
     // Update error badge in toolbar if there are parse errors
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
         const errorDetails = batchResult.parseErrors?.map(e => {
@@ -645,13 +1174,23 @@ async function visualize(sql: string): Promise<void> {
             };
         });
         updateErrorBadge(batchResult.errorCount, errorDetails);
+
+        const suggestedDialect = batchResult.parseErrors
+            ?.map(error => getSuggestedDialectFromMessage(error.message))
+            .find((dialect): dialect is SqlDialect => Boolean(dialect)) ?? null;
+        if (suggestedDialect && suggestedDialect !== currentDialect) {
+            showDialectSwitchSuggestion(suggestedDialect, sql);
+        }
     } else {
         clearErrorBadge();
+        clearDialectSwitchSuggestion();
     }
 
     currentQueryIndex = 0;
     updateBatchTabsUI();
     renderCurrentQuery();
+    await applyInitialUiStateIfAvailable();
+    schedulePersistUiState();
 }
 
 function renderCurrentQuery(): void {
@@ -669,12 +1208,13 @@ function renderCurrentQuery(): void {
     }
 
     render(query);
+    schedulePersistUiState();
 }
 
 /**
  * Switch to a different query index, preserving view state
  */
-function switchToQueryIndex(newIndex: number): void {
+async function switchToQueryIndex(newIndex: number): Promise<void> {
     if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }
@@ -687,6 +1227,19 @@ function switchToQueryIndex(newIndex: number): void {
     hideCompareView();
     setCompareModeState(false);
     clearUndoHistory();
+
+    if (deferredQueryIndexes.has(newIndex)) {
+        showGlobalLoading('Loading query details...');
+        try {
+            await hydrateQueryIfNeeded(newIndex);
+        } finally {
+            hideGlobalLoading();
+        }
+        if (currentQueryIndex !== newIndex) {
+            return;
+        }
+    }
+
     renderCurrentQuery();
     updateBatchTabsUI();
 
@@ -696,14 +1249,16 @@ function switchToQueryIndex(newIndex: number): void {
         // Use requestAnimationFrame to ensure render completes first
         requestAnimationFrame(() => {
             setViewState(savedState);
+            schedulePersistUiState();
         });
     }
+    schedulePersistUiState();
 }
 
 function updateBatchTabsUI(): void {
     updateBatchTabs(batchResult, currentQueryIndex, {
         onQuerySelect: (index: number) => {
-            switchToQueryIndex(index);
+            void switchToQueryIndex(index);
         },
         isDarkTheme
     });

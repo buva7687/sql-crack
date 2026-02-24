@@ -28,26 +28,36 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     const cteNames = new Set<string>();
     const cteBodies = new Map<string, string>();
+    const identifierPart = '[\\p{L}\\p{N}_$]+';
+    const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
+    const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
+    const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;
+    const identifierWrapperPattern = /[`"'\[\]]/g;
+    const normalizeObjectName = (raw: string): string => {
+        const parts = raw.split('.').map((part) => part.replace(identifierWrapperPattern, '')).filter(Boolean);
+        return parts[parts.length - 1] || raw.replace(identifierWrapperPattern, '');
+    };
 
-    const firstCtePattern = /\bWITH\s+(\w+)\s+AS\s*\(/gi;
+    const firstCtePattern = new RegExp(`\\bWITH\\s+(${identifier})\\s+AS\\s*\\(`, 'giu');
     let cteMatch = firstCtePattern.exec(commentStripped);
     if (cteMatch) {
-        cteNames.add(cteMatch[1]);
+        cteNames.add(normalizeObjectName(cteMatch[1]));
         const openParenIdx = cteMatch.index + cteMatch[0].length - 1;
         const bodyClose = findMatchingParen(commentStripped, openParenIdx);
         if (bodyClose !== -1) {
-            cteBodies.set(cteMatch[1], commentStripped.substring(openParenIdx + 1, bodyClose));
+            cteBodies.set(normalizeObjectName(cteMatch[1]), commentStripped.substring(openParenIdx + 1, bodyClose));
         }
 
-        const subsequentCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
+        const subsequentCtePattern = new RegExp(`,\\s*(${identifier})\\s+AS\\s*\\(`, 'giu');
         subsequentCtePattern.lastIndex = bodyClose !== -1 ? bodyClose + 1 : firstCtePattern.lastIndex;
         let subMatch;
         while ((subMatch = subsequentCtePattern.exec(commentStripped)) !== null) {
-            cteNames.add(subMatch[1]);
+            const normalizedName = normalizeObjectName(subMatch[1]);
+            cteNames.add(normalizedName);
             const subOpenParen = subMatch.index + subMatch[0].length - 1;
             const subBodyClose = findMatchingParen(commentStripped, subOpenParen);
             if (subBodyClose !== -1) {
-                cteBodies.set(subMatch[1], commentStripped.substring(subOpenParen + 1, subBodyClose));
+                cteBodies.set(normalizedName, commentStripped.substring(subOpenParen + 1, subBodyClose));
                 subsequentCtePattern.lastIndex = subBodyClose + 1;
             }
         }
@@ -70,19 +80,18 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     }
 
     const tablePatterns = [
-        /\bFROM\s+([`"']?[\w.]+[`"']?)/gi,
-        /\bJOIN\s+([`"']?[\w.]+[`"']?)/gi,
-        /\bINTO\s+([`"']?[\w.]+[`"']?)/gi,
-        /\bUPDATE\s+(?!SET\b)([`"']?[\w.]+[`"']?)/gi,
-        /\bMERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/gi,
-        /\bUSING\s+([`"']?[\w.]+[`"']?)/gi,
+        new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})`, 'giu'),
+        new RegExp(`\\bJOIN\\s+(${qualifiedIdentifier})`, 'giu'),
+        new RegExp(`\\bINTO\\s+(${qualifiedIdentifier})`, 'giu'),
+        new RegExp(`\\bUPDATE\\s+(?!SET\\b)(${qualifiedIdentifier})`, 'giu'),
+        new RegExp(`\\bMERGE\\s+INTO\\s+(${qualifiedIdentifier})`, 'giu'),
+        new RegExp(`\\bUSING\\s+(${qualifiedIdentifier})`, 'giu'),
     ];
 
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
-            let tableName = match[1].replace(/[`"']/g, '');
-            tableName = tableName.split('.').pop() || tableName;
+            const tableName = normalizeObjectName(match[1]);
             if (tableName && !tableNames.has(tableName)) {
                 tableNames.add(tableName);
                 nodes.push({
@@ -101,13 +110,13 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         }
     }
 
-    const tableRefPattern = /\b(FROM|JOIN)\s+([`"']?[\w.]+[`"']?)/gi;
+    const tableRefPattern = new RegExp(`\\b(FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
     let refMatch;
     const tableRefs: { keyword: string; table: string; pos: number }[] = [];
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
-        const table = refMatch[2].replace(/[`"']/g, '').split('.').pop() || refMatch[2];
+        const table = normalizeObjectName(refMatch[2]);
         tableRefs.push({ keyword, table, pos: refMatch.index });
     }
 
@@ -128,10 +137,10 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     }
 
     for (const [cteName, body] of cteBodies) {
-        const bodyRefPattern = /\b(?:FROM|JOIN)\s+([`"']?[\w.]+[`"']?)/gi;
+        const bodyRefPattern = new RegExp(`\\b(?:FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
         let bodyRef;
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
-            const srcTable = bodyRef[1].replace(/[`"']/g, '').split('.').pop() || bodyRef[1];
+            const srcTable = normalizeObjectName(bodyRef[1]);
             if (srcTable && tableNames.has(srcTable) && srcTable !== cteName) {
                 const srcNode = nodes.find(n => n.label === srcTable);
                 const cteNode = nodes.find(n => n.label === cteName);
@@ -174,12 +183,12 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             });
         }
 
-        const mergeTargetMatch = commentStripped.match(/MERGE\s+INTO\s+([`"']?[\w.]+[`"']?)/i);
-        const mergeSourceMatch = commentStripped.match(/USING\s+([`"']?[\w.]+[`"']?)/i);
+        const mergeTargetMatch = commentStripped.match(new RegExp(`MERGE\\s+INTO\\s+(${qualifiedIdentifier})`, 'iu'));
+        const mergeSourceMatch = commentStripped.match(new RegExp(`USING\\s+(${qualifiedIdentifier})`, 'iu'));
 
         if (mergeTargetMatch && mergeSourceMatch) {
-            const targetTable = mergeTargetMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeTargetMatch[1];
-            const sourceTable = mergeSourceMatch[1].replace(/[`"']/g, '').split('.').pop() || mergeSourceMatch[1];
+            const targetTable = normalizeObjectName(mergeTargetMatch[1]);
+            const sourceTable = normalizeObjectName(mergeSourceMatch[1]);
 
             // Extract ON condition
             const onMatch = commentStripped.match(/\bON\s+(.+?)(?=\s*WHEN\b)/is);

@@ -9,6 +9,12 @@
 import { ParseResult, BatchParseResult, SqlDialect, ValidationError, ValidationLimits } from './types';
 import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS } from './sqlParser';
 
+function yieldToMainLoop(): Promise<void> {
+    return new Promise(resolve => {
+        setTimeout(resolve, 0);
+    });
+}
+
 /**
  * Parse SQL asynchronously
  *
@@ -20,8 +26,8 @@ export async function parseAsync(
     sql: string,
     dialect: SqlDialect = 'MySQL'
 ): Promise<ParseResult> {
-    // Use Promise.resolve to make it async without blocking
-    return Promise.resolve(parseSql(sql, dialect));
+    await yieldToMainLoop();
+    return parseSql(sql, dialect);
 }
 
 /**
@@ -38,7 +44,8 @@ export async function parseBatchAsync(
     options?: { combineDdlStatements?: boolean }
 ): Promise<BatchParseResult> {
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
-    return Promise.resolve(parseSqlBatch(sql, dialect, appliedLimits, options ?? {}));
+    await yieldToMainLoop();
+    return parseSqlBatch(sql, dialect, appliedLimits, options ?? {});
 }
 
 /**
@@ -59,7 +66,8 @@ export async function validateAsync(
         maxQueryCount: maxQueryCount ?? DEFAULT_VALIDATION_LIMITS.maxQueryCount
     };
 
-    return Promise.resolve(validateSql(sql, limits));
+    await yieldToMainLoop();
+    return validateSql(sql, limits);
 }
 
 /**

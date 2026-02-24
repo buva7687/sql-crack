@@ -331,6 +331,95 @@ describe('parser preprocessing transforms', () => {
         });
     });
 
+    describe('preprocessOracleSyntax — CREATE TABLE physical options', () => {
+        it('strips trailing Oracle storage/physical options after column list', () => {
+            const sql = `CREATE TABLE employees (
+                employee_id NUMBER,
+                first_name VARCHAR2(50)
+            ) TABLESPACE users PCTFREE 10 INITRANS 2 STORAGE (INITIAL 64K NEXT 1M) SEGMENT CREATION IMMEDIATE LOGGING NOCOMPRESS PARALLEL 4`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bTABLESPACE\b/i);
+            expect(rewritten).not.toMatch(/\bPCTFREE\b/i);
+            expect(rewritten).not.toMatch(/\bINITRANS\b/i);
+            expect(rewritten).not.toMatch(/\bSTORAGE\s*\(/i);
+            expect(rewritten).not.toMatch(/\bSEGMENT\s+CREATION\b/i);
+            expect(rewritten).not.toMatch(/\bLOGGING\b/i);
+            expect(rewritten).not.toMatch(/\bNOCOMPRESS\b/i);
+            expect(rewritten).not.toMatch(/\bPARALLEL\b/i);
+        });
+
+        it('rewrites Oracle CREATE TABLE data types for PostgreSQL proxy compatibility', () => {
+            const sql = `CREATE TABLE docs (
+                id NUMBER,
+                title VARCHAR2(100),
+                body CLOB,
+                payload RAW(16)
+            )`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toMatch(/\bid\s+NUMERIC\b/i);
+            expect(rewritten).toMatch(/\btitle\s+VARCHAR\(100\)/i);
+            expect(rewritten).toMatch(/\bbody\s+TEXT\b/i);
+            expect(rewritten).toMatch(/\bpayload\s+BYTEA\b/i);
+            expect(rewritten).not.toMatch(/\bNUMBER\b/i);
+            expect(rewritten).not.toMatch(/\bVARCHAR2\b/i);
+            expect(rewritten).not.toMatch(/\bCLOB\b/i);
+            expect(rewritten).not.toMatch(/\bRAW\s*\(/i);
+        });
+
+        it('preserves CTAS payload while stripping options before AS', () => {
+            const sql = `CREATE TABLE new_sales (
+                id, amount
+            ) TABLESPACE users PCTFREE 10 AS SELECT id, amount FROM sales_source`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bTABLESPACE\b/i);
+            expect(rewritten).not.toMatch(/\bPCTFREE\b/i);
+            expect(rewritten).toMatch(/\bAS\s+SELECT\b/i);
+            expect(rewritten).toContain('FROM sales_source');
+        });
+
+        it('parses Oracle CREATE TABLE with physical options without partial fallback', () => {
+            const { parseSqlBatch } = require('../../../src/webview/sqlParser');
+            const sql = `CREATE TABLE employees (
+                employee_id NUMBER,
+                first_name VARCHAR2(50)
+            ) TABLESPACE users PCTFREE 10 INITRANS 2 STORAGE (INITIAL 64K NEXT 1M);`;
+            const batch = parseSqlBatch(sql, 'Oracle');
+            expect(batch.queries.length).toBeGreaterThanOrEqual(1);
+            expect(batch.queries[0].error).toBeUndefined();
+            expect(batch.queries[0].hints.some((h: { message: string }) => /partial/i.test(h.message))).toBe(false);
+        });
+
+        it('strips Oracle LOB STORE AS clause after CREATE TABLE column list', () => {
+            const sql = `CREATE TABLE docs (
+                id NUMBER,
+                body CLOB
+            ) LOB (body) STORE AS (TABLESPACE users CHUNK 8192)`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bLOB\s*\(/i);
+            expect(rewritten).not.toMatch(/\bSTORE\s+AS\b/i);
+        });
+
+        it('parses Oracle CREATE TABLE with LOB STORE AS without partial fallback', () => {
+            const { parseSqlBatch } = require('../../../src/webview/sqlParser');
+            const sql = `CREATE TABLE docs (
+                id NUMBER,
+                body CLOB
+            ) LOB (body) STORE AS (TABLESPACE users CHUNK 8192);`;
+            const batch = parseSqlBatch(sql, 'Oracle');
+            expect(batch.queries.length).toBeGreaterThanOrEqual(1);
+            expect(batch.queries[0].error).toBeUndefined();
+            expect(batch.queries[0].hints.some((h: { message: string }) => /partial/i.test(h.message))).toBe(false);
+        });
+    });
+
     describe('hoistNestedCtes — quoted CTE names', () => {
         it('hoists two nested ( WITH ... ) blocks with unquoted names', () => {
             const sql = `SELECT * FROM (WITH cte1 AS (SELECT 1 AS x) SELECT * FROM cte1) a JOIN (WITH cte2 AS (SELECT 2 AS y) SELECT * FROM cte2) b ON a.x = b.y`;
@@ -785,6 +874,93 @@ QUALIFY ROW_NUMBER() OVER (ORDER BY customer_id) <= 10`;
             expect(result).not.toBeNull();
             expect(result).not.toMatch(/\.RETREI?VE\s*\(/i);
             expect(result).toContain('FROM employees');
+        });
+
+        it('strips DDL table attributes (NO FALLBACK, JOURNAL, CHECKSUM, MERGEBLOCKRATIO)', () => {
+            const sql = `create multiset table abc.xyz ,no fallback ,\nno before journal,\nno after journal,\nchecksum = default,\ndefault mergeblockratio\n(\n    emp varchar(6),\n    id char(6)\n)\nprimary index (emp) ;`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            // DDL attributes between table name and '(' should be stripped
+            expect(result).not.toMatch(/NO\s+FALLBACK/i);
+            expect(result).not.toMatch(/NO\s+BEFORE\s+JOURNAL/i);
+            expect(result).not.toMatch(/NO\s+AFTER\s+JOURNAL/i);
+            expect(result).not.toMatch(/CHECKSUM/i);
+            expect(result).not.toMatch(/MERGEBLOCKRATIO/i);
+            // Column definitions should be preserved
+            expect(result).toMatch(/emp\s+varchar/i);
+        });
+
+        it('strips CHARACTER SET UNICODE NOT CASESPECIFIC from column definitions', () => {
+            const sql = `CREATE TABLE t1 (\n    emp varchar(6) character set unicode not casespecific,\n    id char(6) character set unicode not casespecific,\n    qty decimal(18,3)\n)`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/CHARACTER\s+SET/i);
+            expect(result).not.toMatch(/CASESPECIFIC/i);
+            // Columns and types should survive
+            expect(result).toMatch(/emp\s+varchar\(6\)/i);
+            expect(result).toMatch(/id\s+char\(6\)/i);
+            expect(result).toMatch(/qty\s+decimal\(18,3\)/i);
+        });
+
+        it('strips trailing NO PRIMARY INDEX in CREATE TABLE', () => {
+            const sql = `CREATE MULTISET TABLE t1 (\n  id INTEGER,\n  emp VARCHAR(20)\n) NO PRIMARY INDEX;`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/NO\s+PRIMARY\s+INDEX/i);
+        });
+
+        it('strips trailing FALLBACK and MAP options after column list', () => {
+            const sql = `CREATE TABLE t2 (\n  id INTEGER\n) FALLBACK MAP = TD_MAP1;`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bFALLBACK\b/i);
+            expect(result).not.toMatch(/\bMAP\s*=/i);
+        });
+
+        it('strips trailing PARTITION BY clause in CREATE TABLE', () => {
+            const sql = `CREATE TABLE t4 (\n  id INTEGER,\n  dt DATE\n) PRIMARY INDEX (id)\nPARTITION BY RANGE_N(dt BETWEEN DATE '2024-01-01' AND DATE '2024-12-31' EACH INTERVAL '1' MONTH);`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/\bPARTITION\s+BY\b/i);
+        });
+
+        it('parses CREATE TABLE with trailing Teradata options without partial fallback', () => {
+            const { parseSqlBatch } = require('../../../src/webview/sqlParser');
+            const sql = `CREATE TABLE t2 (\n  id INTEGER\n) FALLBACK MAP = TD_MAP1 NO PRIMARY INDEX;`;
+            const batch = parseSqlBatch(sql, 'Teradata');
+            expect(batch.queries.length).toBeGreaterThanOrEqual(1);
+            expect(batch.queries[0].error).toBeUndefined();
+            expect(batch.queries[0].hints.some((h: { message: string }) => /partial/i.test(h.message))).toBe(false);
+        });
+
+        it('strips broader trailing Teradata table options after column list', () => {
+            const sql = `CREATE TABLE t_opts (\n  id INTEGER\n) NO FALLBACK PROTECTION BEFORE JOURNAL AFTER JOURNAL CHECKSUM = ON DEFAULT MERGEBLOCKRATIO FREESPACE = 10 PERCENT DATABLOCKSIZE = 64 KBYTES WITH JOURNAL TABLE = jt1 LOG;`;
+            const result = preprocessTeradataSyntax(sql, 'Teradata');
+            expect(result).not.toBeNull();
+            expect(result).not.toMatch(/FALLBACK/i);
+            expect(result).not.toMatch(/JOURNAL/i);
+            expect(result).not.toMatch(/CHECKSUM/i);
+            expect(result).not.toMatch(/MERGEBLOCKRATIO/i);
+            expect(result).not.toMatch(/FREESPACE/i);
+            expect(result).not.toMatch(/DATABLOCKSIZE/i);
+            expect(result).not.toMatch(/\bLOG\b/i);
+        });
+
+        it('parses broader trailing Teradata table options without partial fallback', () => {
+            const { parseSqlBatch } = require('../../../src/webview/sqlParser');
+            const sql = `CREATE TABLE t_opts (\n  id INTEGER\n) NO FALLBACK PROTECTION BEFORE JOURNAL AFTER JOURNAL CHECKSUM = ON DEFAULT MERGEBLOCKRATIO FREESPACE = 10 PERCENT DATABLOCKSIZE = 64 KBYTES WITH JOURNAL TABLE = jt1 LOG;`;
+            const batch = parseSqlBatch(sql, 'Teradata');
+            expect(batch.queries.length).toBeGreaterThanOrEqual(1);
+            expect(batch.queries[0].error).toBeUndefined();
+            expect(batch.queries[0].hints.some((h: { message: string }) => /partial/i.test(h.message))).toBe(false);
+        });
+
+        it('full Teradata DDL from test.sql parses without error', () => {
+            const { parseSqlBatch } = require('../../../src/webview/sqlParser');
+            const sql = `create multiset table abc.xyz ,no fallback ,\nno before journal,\nno after journal,\nchecksum = default,\ndefault mergeblockratio\n(\n    emp varchar(6) character set unicode not casespecific,\n    id char(6) character set unicode not casespecific,\n    qty decimal(18,3)\n)\nprimary index (emp) ;`;
+            const batch = parseSqlBatch(sql, 'Teradata');
+            expect(batch.queries.length).toBeGreaterThanOrEqual(1);
+            expect(batch.queries[0].error).toBeUndefined();
         });
     });
 });

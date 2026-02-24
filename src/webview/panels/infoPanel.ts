@@ -13,6 +13,22 @@ import {
     getNodeColor,
 } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
+
+/** Recursively search for a node by ID, including inside children of cloud/CTE nodes. */
+function findNodeById(nodes: FlowNode[], nodeId: string): FlowNode | undefined {
+    for (const node of nodes) {
+        if (node.id === nodeId) {
+            return node;
+        }
+        if (node.children && node.children.length > 0) {
+            const found = findNodeById(node.children, nodeId);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return undefined;
+}
 import { ICONS } from '../../shared';
 import { getHintBadgeState, getTopHints, sortHintsByImpact } from '../hintsHierarchy';
 import { updateHintsSummaryBadge } from '../ui';
@@ -82,7 +98,7 @@ export function updateDetailsPanelContent(options: DetailsPanelOptions): void {
         return;
     }
 
-    const node = currentNodes.find((n) => n.id === nodeId);
+    const node = findNodeById(currentNodes, nodeId);
     if (!node) {
         return;
     }

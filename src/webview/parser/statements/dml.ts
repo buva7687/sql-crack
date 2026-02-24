@@ -139,7 +139,7 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
 
         const uniqueSourceRootIds = Array.from(new Set(sourceRootIds));
         if (uniqueSourceRootIds.length > 0) {
-            const labelWidth = Math.max(160, label.length * 10 + 40);
+            const labelWidth = Math.min(420, Math.max(160, label.length * 10 + 40));
             nodes.push({
                 id: rootId,
                 type: 'result',

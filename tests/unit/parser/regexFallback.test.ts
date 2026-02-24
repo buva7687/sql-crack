@@ -247,6 +247,16 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
             expect(labels).toContain('table2');
         });
 
+        it('handles unquoted unicode identifiers in fallback table extraction', () => {
+            const sql = 'SELECT * FROM 顧客 JOIN 注文 ON 顧客.id = 注文.customer_id WHERE :=: INVALID';
+            const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+            expect(result.partial).toBe(true);
+            const labels = result.nodes.map((n: any) => n.label);
+            expect(labels).toContain('顧客');
+            expect(labels).toContain('注文');
+        });
+
         it('should handle completely mangled SQL', () => {
             const sql = 'INVALID SYNTAX EVERYWHERE @#$%^&*()';
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);

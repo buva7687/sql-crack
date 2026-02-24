@@ -5,6 +5,7 @@ import { getNodeAccentColor, NODE_SURFACE } from '../constants/colors';
 export interface CloudSubflowRenderCallbacks {
     getNodeIcon: (type: FlowNode['type']) => string;
     hideTooltip: () => void;
+    selectNode: (nodeId: string, options?: { skipNavigation?: boolean }) => void;
     showTooltip: (node: FlowNode, event: MouseEvent) => void;
     truncate: (value: string, maxLen: number) => string;
     updateTooltipPosition: (event: MouseEvent) => void;
@@ -49,7 +50,7 @@ export function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { w
     g.setDefaultEdgeLabel(() => ({}));
 
     for (const child of children) {
-        const labelWidth = Math.max(80, child.label.length * 7 + 30);
+        const labelWidth = Math.min(280, Math.max(80, child.label.length * 7 + 30));
         child.width = labelWidth;
         child.height = 36;
         g.setNode(child.id, { width: child.width, height: child.height });
@@ -134,6 +135,7 @@ export function renderCloudSubflow(options: RenderCloudSubflowOptions): void {
         isDarkTheme,
         offsetX,
         offsetY,
+        selectNode,
         showTooltip,
         truncate,
         updateTooltipPosition,
@@ -235,6 +237,13 @@ export function renderCloudSubflow(options: RenderCloudSubflowOptions): void {
         });
         childGroup.addEventListener('mouseleave', () => {
             rect.setAttribute('fill', cloudChildSurface.fill);
+            hideTooltip();
+        });
+
+        childGroup.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const skipNav = !(event.ctrlKey || event.metaKey);
+            selectNode(child.id, { skipNavigation: skipNav });
             hideTooltip();
         });
 
