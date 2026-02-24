@@ -70,8 +70,7 @@ export function initCanvas(
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
-    svg.setAttribute('tabindex', '-1');
-    svg.setAttribute('role', 'img');
+    svg.setAttribute('tabindex', '0');
     svg.setAttribute('aria-label', 'SQL query flow diagram');
     svg.style.background = isDark ? CANVAS.dark.background : CANVAS.light.background;
     svg.style.cursor = 'grab';
@@ -80,6 +79,7 @@ export function initCanvas(
     svg.style.left = '0';
     svg.style.zIndex = '1';
     svg.style.outline = 'none';
+    svg.style.touchAction = 'none';
 
     // Defs
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');

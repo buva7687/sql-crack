@@ -50,7 +50,7 @@ export function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { w
     g.setDefaultEdgeLabel(() => ({}));
 
     for (const child of children) {
-        const labelWidth = Math.max(80, child.label.length * 7 + 30);
+        const labelWidth = Math.min(280, Math.max(80, child.label.length * 7 + 30));
         child.width = labelWidth;
         child.height = 36;
         g.setNode(child.id, { width: child.width, height: child.height });

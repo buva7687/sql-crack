@@ -36,9 +36,7 @@ export function stripLeadingComments(sql: string): string {
     return result;
 }
 
-// Split SQL into individual statements
-export function splitSqlStatements(sql: string): string[] {
-    const statements: string[] = [];
+function scanSqlStatements(sql: string, onStatement: (statement: string) => void): void {
     let current = '';
     let inString = false;
     let stringChar = '';
@@ -207,7 +205,7 @@ export function splitSqlStatements(sql: string): string[] {
             if (trimmed) {
                 const withoutComments = stripLeadingComments(trimmed).trim();
                 if (withoutComments) {
-                    statements.push(trimmed);
+                    onStatement(trimmed);
                 }
             }
             current = '';
@@ -224,9 +222,24 @@ export function splitSqlStatements(sql: string): string[] {
     if (trimmed) {
         const withoutComments = stripLeadingComments(trimmed).trim();
         if (withoutComments) {
-            statements.push(trimmed);
+            onStatement(trimmed);
         }
     }
+}
 
+// Split SQL into individual statements
+export function splitSqlStatements(sql: string): string[] {
+    const statements: string[] = [];
+    scanSqlStatements(sql, (statement) => {
+        statements.push(statement);
+    });
     return statements;
+}
+
+export function countSqlStatements(sql: string): number {
+    let count = 0;
+    scanSqlStatements(sql, () => {
+        count++;
+    });
+    return count;
 }

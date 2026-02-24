@@ -598,6 +598,7 @@ function processSelect(
         if (nextResultId) {
             const unionId = genId(runtime, 'union');
             const setOp = stmt.set_op || 'UNION';
+            maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
 
             // Collect tables from both sides for details
             const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
@@ -634,6 +635,44 @@ function processSelect(
     }
 
     return resultId;
+}
+
+function getProjectedColumnCount(stmt: any): number | null {
+    if (!stmt?.columns || stmt.columns === '*' || !Array.isArray(stmt.columns)) {
+        return null;
+    }
+    return stmt.columns.length;
+}
+
+function maybeAddSetOperationColumnCountHint(
+    context: ParserContext,
+    setOp: string,
+    leftStmt: any,
+    rightStmt: any
+): void {
+    const leftCount = getProjectedColumnCount(leftStmt);
+    const rightCount = getProjectedColumnCount(rightStmt);
+    if (leftCount === null || rightCount === null || leftCount === rightCount) {
+        return;
+    }
+
+    const signature = `${setOp.toUpperCase()}:${leftCount}:${rightCount}`;
+    const mutableContext = context as ParserContext & { setOpColumnCountHints?: Set<string> };
+    if (!mutableContext.setOpColumnCountHints) {
+        mutableContext.setOpColumnCountHints = new Set<string>();
+    }
+    if (mutableContext.setOpColumnCountHints.has(signature)) {
+        return;
+    }
+    mutableContext.setOpColumnCountHints.add(signature);
+
+    context.hints.push({
+        type: 'warning',
+        severity: 'medium',
+        category: 'quality',
+        message: `${setOp.toUpperCase()} branches project different column counts (${leftCount} vs ${rightCount}).`,
+        suggestion: 'Set operations should return the same number of columns in each branch. Align the SELECT lists to avoid runtime errors.',
+    });
 }
 
 function getCteStatementAst(cte: any): any {
@@ -1089,6 +1128,7 @@ function parseCteOrSubqueryInternals(
     if (stmt._next) {
         ctx.stats.unions++;
         const setOp = stmt.set_op || 'UNION';
+        maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
         const unionId = genId(runtime, 'child_union');
 
         // Collect tables from both sides for details
@@ -1408,12 +1448,18 @@ function collectTablesFromSelectTree(
 }
 
 // Helper function to find subqueries in expressions (for counting nested subqueries)
-function findSubqueriesInExpression(expr: any): any[] {
+function findSubqueriesInExpression(expr: any, visited: WeakSet<object> = new WeakSet<object>()): any[] {
     const subqueries: any[] = [];
     if (!expr) { return subqueries; }
+    if (typeof expr === 'object') {
+        if (visited.has(expr)) {
+            return subqueries;
+        }
+        visited.add(expr);
+    }
     if (Array.isArray(expr)) {
         for (const item of expr) {
-            subqueries.push(...findSubqueriesInExpression(item));
+            subqueries.push(...findSubqueriesInExpression(item, visited));
         }
         return subqueries;
     }
@@ -1424,44 +1470,44 @@ function findSubqueriesInExpression(expr: any): any[] {
     } else if (expr.ast && expr.ast.type === 'select') {
         subqueries.push(expr.ast);
     } else if (expr.ast && typeof expr.ast === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.ast));
+        subqueries.push(...findSubqueriesInExpression(expr.ast, visited));
     }
 
     if (expr.expr) {
-        subqueries.push(...findSubqueriesInExpression(expr.expr));
+        subqueries.push(...findSubqueriesInExpression(expr.expr, visited));
     }
 
     if (expr.value && typeof expr.value === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.value));
+        subqueries.push(...findSubqueriesInExpression(expr.value, visited));
     }
 
     // Recursively check left and right sides of binary expressions
     if (expr.left) {
-        subqueries.push(...findSubqueriesInExpression(expr.left));
+        subqueries.push(...findSubqueriesInExpression(expr.left, visited));
     }
     if (expr.right) {
-        subqueries.push(...findSubqueriesInExpression(expr.right));
+        subqueries.push(...findSubqueriesInExpression(expr.right, visited));
     }
 
     // Check function arguments
     if (expr.args && Array.isArray(expr.args)) {
         for (const arg of expr.args) {
-            subqueries.push(...findSubqueriesInExpression(arg));
+            subqueries.push(...findSubqueriesInExpression(arg, visited));
         }
     } else if (Array.isArray(expr.args?.value)) {
         for (const arg of expr.args.value) {
-            subqueries.push(...findSubqueriesInExpression(arg));
+            subqueries.push(...findSubqueriesInExpression(arg, visited));
         }
     } else if (expr.args && expr.args.expr) {
-        subqueries.push(...findSubqueriesInExpression(expr.args.expr));
+        subqueries.push(...findSubqueriesInExpression(expr.args.expr, visited));
     } else if (expr.args && typeof expr.args === 'object') {
-        subqueries.push(...findSubqueriesInExpression(expr.args));
+        subqueries.push(...findSubqueriesInExpression(expr.args, visited));
     }
 
     if (Array.isArray(expr.columns)) {
         for (const col of expr.columns) {
             if (col?.expr) {
-                subqueries.push(...findSubqueriesInExpression(col.expr));
+                subqueries.push(...findSubqueriesInExpression(col.expr, visited));
             }
         }
     }

@@ -3,6 +3,7 @@ import {
     BADGE_COLORS,
     GLOW_COLORS,
     NODE_STROKE_COLORS,
+    UI_COLORS,
     getSeverityIcon,
 } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
@@ -69,7 +70,7 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
     const accentColor = getNodeAccentColor(node.type, isDark);
     const textColor = surface.text;
     const textColorMuted = surface.textMuted;
-    const textColorDim = isDark ? '#64748B' : '#94A3B8';
+    const textColorDim = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
@@ -265,7 +266,7 @@ export function renderJoinNodeVisual(node: FlowNode, group: SVGGElement, deps: N
     const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
     const textColor = surface.text;
     const textColorMuted = surface.textMuted;
-    const textColorDim = isDark ? '#64748B' : '#94A3B8';
+    const textColorDim = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));

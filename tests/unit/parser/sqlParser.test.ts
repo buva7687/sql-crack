@@ -66,6 +66,24 @@ describe('SQL Parser', () => {
       expect(result?.details?.actual).toBe(2);
     });
 
+    it('uses splitter-consistent counting for custom delimiters and procedural bodies', () => {
+      const sql = `
+DELIMITER $$
+CREATE PROCEDURE p()
+BEGIN
+  SELECT 1;
+  SELECT 2;
+END$$
+DELIMITER ;
+SELECT 3;
+`;
+      const result = validateSql(sql, {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 2,
+      });
+      expect(result).toBeNull();
+    });
+
     it('uses DEFAULT_VALIDATION_LIMITS when limits not provided', () => {
       const result = validateSql('SELECT 1');
       expect(result).toBeNull();
@@ -922,6 +940,25 @@ SELECT * FROM product_sales LIMIT 10
       expect(result.tableUsage).toBeDefined();
       expect(result.tableUsage!.has('products')).toBe(true);
       expect(result.tableUsage!.has('brands')).toBe(true);
+    });
+  });
+
+  describe('Set operations and long identifiers', () => {
+    it('adds a quality hint when UNION branches project different column counts', () => {
+      const result = parseSql('SELECT 1 AS a UNION SELECT 1 AS a, 2 AS b', 'PostgreSQL');
+      const mismatchHint = result.hints.find((hint) =>
+        hint.message.includes('project different column counts')
+      );
+      expect(mismatchHint).toBeDefined();
+      expect(mismatchHint?.severity).toBe('medium');
+      expect(mismatchHint?.category).toBe('quality');
+    });
+
+    it('caps wide result nodes for very long identifiers', () => {
+      const longIdentifier = `tbl_${'x'.repeat(500)}`;
+      const result = parseSql(`UPDATE ${longIdentifier} SET amount = 1`, 'PostgreSQL');
+      const maxWidth = result.nodes.reduce((currentMax, node) => Math.max(currentMax, node.width), 0);
+      expect(maxWidth).toBeLessThanOrEqual(420);
     });
   });
 });

@@ -18,6 +18,20 @@ let isVisible = false;
 let registeredActions: CommandBarAction[] = [];
 let commandBarThemeResolver: (() => boolean) | null = null;
 let commandBarAbortController: AbortController | null = null;
+let previousFocusedElement: HTMLElement | null = null;
+
+function getFocusableElements(root: HTMLElement): HTMLElement[] {
+    const selector = [
+        'button:not([disabled])',
+        'a[href]',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+    ].join(', ');
+    return Array.from(root.querySelectorAll<HTMLElement>(selector))
+        .filter((el) => el.offsetParent !== null);
+}
 
 /**
  * Register a list of actions that the command bar can execute.
@@ -42,6 +56,7 @@ export function createCommandBar(
     commandBarElement = document.createElement('div');
     commandBarElement.id = 'sql-crack-command-bar';
     commandBarElement.setAttribute('role', 'dialog');
+    commandBarElement.setAttribute('aria-modal', 'true');
     commandBarElement.setAttribute('aria-label', 'Command palette');
     const reducedMotion = prefersReducedMotion();
     commandBarElement.style.cssText = `
@@ -140,6 +155,30 @@ export function createCommandBar(
     commandBarElement.addEventListener('click', (e) => {
         if (e.target === commandBarElement) {
             hideCommandBar();
+        }
+    }, { signal });
+
+    commandBarElement.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab') {
+            return;
+        }
+        const focusable = getFocusableElements(commandBarElement!);
+        if (focusable.length === 0) {
+            e.preventDefault();
+            return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+            return;
+        }
+        if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
         }
     }, { signal });
 
@@ -263,6 +302,7 @@ function navigateResults(container: HTMLElement, direction: number, isDarkTheme:
  */
 export function showCommandBar(): void {
     if (!commandBarElement || !commandPaletteElement) { return; }
+    previousFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     isVisible = true;
     commandBarElement.style.display = 'flex';
     if (prefersReducedMotion()) {
@@ -302,6 +342,7 @@ export function hideCommandBar(): void {
         commandBarElement.style.opacity = '0';
         commandPaletteElement.style.opacity = '0';
         commandPaletteElement.style.transform = 'translateY(-8px)';
+        previousFocusedElement?.focus();
         return;
     }
 
@@ -311,6 +352,7 @@ export function hideCommandBar(): void {
     window.setTimeout(() => {
         if (isVisible || !commandBarElement) { return; }
         commandBarElement.style.display = 'none';
+        previousFocusedElement?.focus();
     }, 150);
 }
 

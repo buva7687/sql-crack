@@ -1,4 +1,5 @@
 import type { ValidationError, ValidationLimits } from '../../types';
+import { countSqlStatements } from './splitting';
 
 /**
  * Default validation limits for SQL parsing.
@@ -59,22 +60,7 @@ export function validateSql(
 }
 
 function countStatements(sql: string): number {
-    let cleaned = sql.replace(/'[^']*'/g, '').replace(/"[^"]*"/g, '');
-
-    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
-
-    cleaned = cleaned.replace(/--[^\n]*/g, '');
-    cleaned = cleaned.replace(/#[^\n]*/g, '');
-
-    const semicolons = (cleaned.match(/;/g) || []).length;
-    const trimmed = cleaned.trim();
-    if (!trimmed) {
-        return 0;
-    }
-    if (semicolons === 0) {
-        return 1;
-    }
-    return trimmed.endsWith(';') ? semicolons : semicolons + 1;
+    return countSqlStatements(sql);
 }
 
 export function formatBytes(bytes: number): string {

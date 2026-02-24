@@ -234,6 +234,8 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
 
     const contextMenuElement = document.createElement('div');
     contextMenuElement.id = 'node-context-menu';
+    contextMenuElement.setAttribute('role', 'menu');
+    contextMenuElement.setAttribute('aria-label', 'Node actions');
     contextMenuElement.style.cssText = `
         position: fixed;
         background: ${UI_COLORS.backgroundPanelSolid};

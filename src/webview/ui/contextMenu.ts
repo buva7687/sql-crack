@@ -1,4 +1,5 @@
 import type { FlowNode } from '../types';
+import { prefersReducedMotion } from './motion';
 
 export interface ContextMenuIcons {
     clipboard: string;
@@ -27,11 +28,27 @@ export interface ShowContextMenuOptions {
     onAction: (action: string | null, node: FlowNode) => void;
 }
 
+const contextMenuCleanupMap = new WeakMap<HTMLDivElement, () => void>();
+
+function cleanupContextMenu(menu: HTMLDivElement): void {
+    const cleanup = contextMenuCleanupMap.get(menu);
+    if (cleanup) {
+        cleanup();
+        contextMenuCleanupMap.delete(menu);
+    }
+}
+
+function closeContextMenu(menu: HTMLDivElement): void {
+    cleanupContextMenu(menu);
+    menu.style.display = 'none';
+}
+
 export function showContextMenu(options: ShowContextMenuOptions): void {
     const { colors, contextMenuElement, event, icons, isDarkTheme, node, onAction } = options;
     if (!contextMenuElement) {
         return;
     }
+    cleanupContextMenu(contextMenuElement);
 
     event.preventDefault();
     event.stopPropagation();
@@ -52,29 +69,29 @@ export function showContextMenu(options: ShowContextMenuOptions): void {
     `;
 
     let menuItems = `
-        <div class="ctx-menu-item" data-action="zoom" style="${menuItemStyle}">
+        <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="zoom" style="${menuItemStyle}">
             <span style="width: 16px; display: inline-flex;">${icons.search}</span>
             <span>Zoom to node</span>
         </div>
-        <div class="ctx-menu-item" data-action="focus-upstream" style="${menuItemStyle}">
+        <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="focus-upstream" style="${menuItemStyle}">
             <span style="width: 16px;">↑</span>
             <span>Focus upstream</span>
         </div>
-        <div class="ctx-menu-item" data-action="focus-downstream" style="${menuItemStyle}">
+        <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="focus-downstream" style="${menuItemStyle}">
             <span style="width: 16px;">↓</span>
             <span>Focus downstream</span>
         </div>
-        <div class="ctx-menu-item" data-action="reset-view" style="${menuItemStyle}">
+        <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="reset-view" style="${menuItemStyle}">
             <span style="width: 16px;">⊡</span>
             <span>Reset view (Esc)</span>
         </div>
-        <div style="${separatorStyle}"></div>
+        <div role="separator" style="${separatorStyle}"></div>
     `;
 
     if ((node.type === 'cte' || node.type === 'subquery') && node.collapsible && node.children && node.children.length > 0) {
         const isExpanded = node.expanded !== false;
         menuItems += `
-            <div class="ctx-menu-item" data-action="toggle-expand" style="${menuItemStyle}">
+            <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="toggle-expand" style="${menuItemStyle}">
                 <span style="width: 16px; display: inline-flex;">${isExpanded ? icons.folderOpen : icons.folderClosed}</span>
                 <span>${isExpanded ? 'Collapse children' : 'Expand children'}</span>
             </div>
@@ -82,7 +99,7 @@ export function showContextMenu(options: ShowContextMenuOptions): void {
     }
 
     menuItems += `
-        <div class="ctx-menu-item" data-action="copy-label" style="${menuItemStyle}">
+        <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="copy-label" style="${menuItemStyle}">
             <span style="width: 16px; display: inline-flex;">${icons.clipboard}</span>
             <span>Copy node name</span>
         </div>
@@ -90,7 +107,7 @@ export function showContextMenu(options: ShowContextMenuOptions): void {
 
     if (node.details && node.details.length > 0) {
         menuItems += `
-            <div class="ctx-menu-item" data-action="copy-details" style="${menuItemStyle}">
+            <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="copy-details" style="${menuItemStyle}">
                 <span style="width: 16px; display: inline-flex;">${icons.document}</span>
                 <span>Copy details</span>
             </div>
@@ -117,36 +134,101 @@ export function showContextMenu(options: ShowContextMenuOptions): void {
     contextMenuElement.style.background = isDarkTheme ? colors.backgroundDark : colors.backgroundLight;
     contextMenuElement.style.color = isDarkTheme ? colors.textDark : colors.textLight;
     contextMenuElement.style.borderColor = isDarkTheme ? colors.borderDark : colors.borderLight;
+    contextMenuElement.setAttribute('role', 'menu');
+    contextMenuElement.setAttribute('aria-label', `Actions for ${node.label}`);
+    contextMenuElement.tabIndex = 0;
 
-    const items = contextMenuElement.querySelectorAll('.ctx-menu-item');
-    items.forEach(item => {
+    const itemElements = Array.from(contextMenuElement.querySelectorAll('.ctx-menu-item')) as HTMLElement[];
+    if (itemElements.length === 0) {
+        return;
+    }
+
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+    let activeIndex = 0;
+
+    const setActiveItem = (index: number): void => {
+        activeIndex = (index + itemElements.length) % itemElements.length;
+        itemElements.forEach((itemEl, itemIndex) => {
+            itemEl.style.background = itemIndex === activeIndex ? menuItemHoverBg : 'transparent';
+        });
+        itemElements[activeIndex].focus();
+    };
+
+    const triggerAction = (itemEl: HTMLElement): void => {
+        const action = itemEl.getAttribute('data-action');
+        onAction(action, node);
+        closeContextMenu(contextMenuElement);
+    };
+
+    itemElements.forEach((item, index) => {
         const itemEl = item as HTMLElement;
         itemEl.addEventListener('mouseenter', () => {
-            itemEl.style.background = menuItemHoverBg;
-        });
+            setActiveItem(index);
+        }, { signal });
         itemEl.addEventListener('mouseleave', () => {
-            itemEl.style.background = 'transparent';
-        });
-        itemEl.addEventListener('click', clickEvent => {
-            clickEvent.stopPropagation();
-            const action = itemEl.getAttribute('data-action');
-            onAction(action, node);
-            if (contextMenuElement) {
-                contextMenuElement.style.display = 'none';
+            if (index !== activeIndex) {
+                itemEl.style.background = 'transparent';
             }
-        });
+        }, { signal });
+        itemEl.addEventListener('click', (clickEvent) => {
+            clickEvent.stopPropagation();
+            triggerAction(itemEl);
+        }, { signal });
     });
+
+    contextMenuElement.addEventListener('keydown', (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key === 'ArrowDown') {
+            keyEvent.preventDefault();
+            setActiveItem(activeIndex + 1);
+            return;
+        }
+        if (keyEvent.key === 'ArrowUp') {
+            keyEvent.preventDefault();
+            setActiveItem(activeIndex - 1);
+            return;
+        }
+        if (keyEvent.key === 'Home') {
+            keyEvent.preventDefault();
+            setActiveItem(0);
+            return;
+        }
+        if (keyEvent.key === 'End') {
+            keyEvent.preventDefault();
+            setActiveItem(itemElements.length - 1);
+            return;
+        }
+        if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+            keyEvent.preventDefault();
+            triggerAction(itemElements[activeIndex]);
+            return;
+        }
+        if (keyEvent.key === 'Escape' || keyEvent.key === 'Tab') {
+            keyEvent.preventDefault();
+            closeContextMenu(contextMenuElement);
+        }
+    }, { signal });
+
+    contextMenuCleanupMap.set(contextMenuElement, () => {
+        abortController.abort();
+    });
+    contextMenuElement.focus();
+    setActiveItem(0);
 }
 
 export function hideContextMenu(contextMenuElement: HTMLDivElement | null): void {
     if (contextMenuElement) {
-        contextMenuElement.style.display = 'none';
+        closeContextMenu(contextMenuElement);
     }
 }
 
 export function showCopyFeedback(message: string, zIndex: number): void {
     const feedback = document.createElement('div');
     feedback.textContent = message;
+    feedback.setAttribute('role', 'status');
+    feedback.setAttribute('aria-live', 'polite');
+    feedback.setAttribute('aria-atomic', 'true');
+    const reduceMotion = prefersReducedMotion();
     feedback.style.cssText = `
         position: fixed;
         bottom: 20px;
@@ -158,7 +240,8 @@ export function showCopyFeedback(message: string, zIndex: number): void {
         border-radius: 6px;
         font-size: 12px;
         z-index: ${zIndex};
-        animation: fadeInOut 1.5s ease forwards;
+        animation: ${reduceMotion ? 'none' : 'fadeInOut 1.5s ease forwards'};
+        opacity: ${reduceMotion ? '1' : '0'};
     `;
 
     if (!document.getElementById('copy-feedback-style')) {
@@ -176,5 +259,5 @@ export function showCopyFeedback(message: string, zIndex: number): void {
     }
 
     document.body.appendChild(feedback);
-    setTimeout(() => feedback.remove(), 1500);
+    setTimeout(() => feedback.remove(), reduceMotion ? 1400 : 1500);
 }

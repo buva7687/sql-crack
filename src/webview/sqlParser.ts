@@ -1173,7 +1173,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
     }
 
     // Calculate width based on label length
-    const labelWidth = Math.max(160, label.length * 10 + 40);
+    const labelWidth = Math.min(420, Math.max(160, label.length * 10 + 40));
 
     nodes.push({
         id: rootId,

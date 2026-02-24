@@ -222,6 +222,7 @@ let breadcrumbPanel: HTMLDivElement | null = null;
 let contextMenuElement: HTMLDivElement | null = null;
 let columnLineageBanner: HTMLDivElement | null = null;
 let nodeFocusLiveRegion: HTMLDivElement | null = null;
+let pendingNavigationAnnouncement: string | null = null;
 let containerElement: HTMLElement | null = null;
 let searchBox: HTMLInputElement | null = null;
 let loadingOverlay: HTMLDivElement | null = null;
@@ -393,20 +394,35 @@ function ensureNodeFocusLiveRegion(container: HTMLElement): void {
     container.appendChild(nodeFocusLiveRegion);
 }
 
-function announceFocusedNode(node: FlowNode): void {
-    if (!nodeFocusLiveRegion) { return; }
-
-    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
-    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
-    const message = `${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
-
-    // Clear then set on next frame so repeated focus announcements are spoken.
+function announceLiveRegionMessage(message: string): void {
+    if (!nodeFocusLiveRegion) {
+        return;
+    }
     nodeFocusLiveRegion.textContent = '';
     requestAnimationFrame(() => {
         if (nodeFocusLiveRegion) {
             nodeFocusLiveRegion.textContent = message;
         }
     });
+}
+
+function getEdgeAnnouncementLabel(edge: FlowEdge | undefined): string {
+    if (!edge) {
+        return 'flow';
+    }
+    const raw = edge.sqlClause || edge.label || edge.clauseType || 'flow';
+    return raw.toString().replace(/_/g, ' ').toLowerCase();
+}
+
+function announceFocusedNode(node: FlowNode): void {
+    if (!nodeFocusLiveRegion) { return; }
+
+    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
+    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
+    const navigationPrefix = pendingNavigationAnnouncement ? `${pendingNavigationAnnouncement}. ` : '';
+    pendingNavigationAnnouncement = null;
+    const message = `${navigationPrefix}${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
+    announceLiveRegionMessage(message);
 }
 
 function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
@@ -818,7 +834,47 @@ function recordLayoutHistorySnapshot(): void {
     syncUndoRedoUiState();
 }
 
+function ensureSkipToGraphLink(container: HTMLElement): void {
+    if (container.querySelector('#sql-crack-skip-to-graph')) {
+        return;
+    }
+
+    const skipLink = document.createElement('button');
+    skipLink.id = 'sql-crack-skip-to-graph';
+    skipLink.textContent = 'Skip to graph';
+    skipLink.type = 'button';
+    skipLink.setAttribute('aria-label', 'Skip to graph canvas');
+    skipLink.style.cssText = `
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: ${Z_INDEX.toolbar + 2};
+        transform: translateY(-180%);
+        opacity: 0;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid ${state.isDarkTheme ? 'rgba(148, 163, 184, 0.35)' : 'rgba(51, 65, 85, 0.25)'};
+        background: ${state.isDarkTheme ? '#111111' : '#ffffff'};
+        color: ${state.isDarkTheme ? '#f1f5f9' : '#0f172a'};
+    `;
+    skipLink.addEventListener('focus', () => {
+        skipLink.style.transform = 'translateY(0)';
+        skipLink.style.opacity = '1';
+    });
+    skipLink.addEventListener('blur', () => {
+        skipLink.style.transform = 'translateY(-180%)';
+        skipLink.style.opacity = '0';
+    });
+    skipLink.addEventListener('click', () => {
+        svg?.focus();
+    });
+    container.appendChild(skipLink);
+}
+
 export function initRenderer(container: HTMLElement): void {
+    container.setAttribute('role', 'main');
+    container.setAttribute('aria-label', 'SQL Flow visualization');
+
     // Use extracted canvas setup module
     const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
@@ -828,6 +884,7 @@ export function initRenderer(container: HTMLElement): void {
     mainGroup = canvas.mainGroup;
     backgroundRect = canvas.backgroundRect;
     ensureNodeFocusLiveRegion(container);
+    ensureSkipToGraphLink(container);
     syncUndoRedoUiState();
 
     const bootstrap = createRendererBootstrap({
@@ -947,9 +1004,7 @@ export function initRenderer(container: HTMLElement): void {
 
     // Hide context menu on click outside
     const contextMenuClickHandler = () => {
-        if (contextMenuElement) {
-            contextMenuElement.style.display = 'none';
-        }
+        hideContextMenu();
     };
     document.addEventListener('click', contextMenuClickHandler);
     documentListeners.push({ type: 'click', handler: contextMenuClickHandler });
@@ -963,6 +1018,8 @@ export function initRenderer(container: HTMLElement): void {
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
     reducedMotionStyleElement = document.createElement('style');
+    const focusRingColor = state.isDarkTheme ? '#93c5fd' : '#1d4ed8';
+    const focusRingBackground = state.isDarkTheme ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
     const hcStyles = state.isHighContrast ? `
         /* VS Code High Contrast mode overrides */
         .node-rect { stroke-width: 2px !important; }
@@ -980,6 +1037,19 @@ export function initRenderer(container: HTMLElement): void {
         text { font-weight: 600 !important; }
     ` : '';
     reducedMotionStyleElement.textContent = `
+        #sql-crack-skip-to-graph:focus-visible,
+        #sql-crack-toolbar button:focus-visible,
+        #sql-crack-toolbar input:focus-visible,
+        #sql-crack-toolbar select:focus-visible,
+        #sql-crack-command-bar input:focus-visible,
+        #node-context-menu:focus-visible,
+        .ctx-menu-item:focus-visible,
+        svg[tabindex="0"]:focus-visible,
+        .node[tabindex="0"]:focus-visible {
+            outline: 2px solid ${focusRingColor};
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px ${focusRingBackground};
+        }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -1845,6 +1915,7 @@ function moveKeyboardFocusToNode(targetNode: FlowNode): void {
 }
 
 function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
+    const sourceNodeId = fromNodeId || state.selectedNodeId;
     return navigateToConnectedNodeFeature({
         direction,
         fromNodeId,
@@ -1852,6 +1923,11 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
         edges: currentEdges,
         state,
         onMoveToNode: (node) => {
+            const relationEdge = direction === 'upstream'
+                ? currentEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
+                : currentEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
+            const relationLabel = getEdgeAnnouncementLabel(relationEdge);
+            pendingNavigationAnnouncement = `Moved ${direction} via ${relationLabel}`;
             moveKeyboardFocusToNode(node);
         },
     });
@@ -2625,6 +2701,7 @@ export function switchLayout(layoutType: LayoutType): void {
         }
 
         fitView();
+        announceLiveRegionMessage(`Layout switched to ${layoutType}`);
 
         // Hide loading after a brief delay to ensure UI updates are visible
         if (showLoadingIndicator) {

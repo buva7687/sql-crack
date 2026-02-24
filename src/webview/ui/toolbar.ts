@@ -194,6 +194,8 @@ export function createToolbar(
     // Create a full-width wrapper with horizontal scroll on small screens
     const toolbarWrapper = document.createElement('div');
     toolbarWrapper.id = 'sql-crack-toolbar-wrapper';
+    toolbarWrapper.setAttribute('role', 'navigation');
+    toolbarWrapper.setAttribute('aria-label', 'SQL Flow controls');
     toolbarWrapper.style.cssText = `
         position: absolute;
         top: 12px;
@@ -230,6 +232,8 @@ export function createToolbar(
 
     const toolbar = document.createElement('div');
     toolbar.id = 'sql-crack-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Visualization toolbar');
     toolbar.style.cssText = `
         display: flex;
         gap: 8px;
