@@ -48,6 +48,8 @@ export function createSearchBox(
 
     const searchCount = document.createElement('span');
     searchCount.id = 'search-count';
+    searchCount.setAttribute('aria-live', 'polite');
+    searchCount.setAttribute('aria-atomic', 'true');
     searchCount.style.cssText = `
         color: #64748b;
         font-size: 11px;

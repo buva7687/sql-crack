@@ -199,6 +199,8 @@ function createZoomGroup(
     `;
     zoomLevel.textContent = `${callbacks.getZoomLevel()}%`;
     zoomLevel.title = 'Current zoom level';
+    zoomLevel.setAttribute('aria-live', 'polite');
+    zoomLevel.setAttribute('aria-atomic', 'true');
     zoomGroup.appendChild(zoomLevel);
 
     const zoomInBtn = createToolbarButton({
