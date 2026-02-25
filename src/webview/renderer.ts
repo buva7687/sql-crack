@@ -8,6 +8,7 @@ import {
     QueryStats,
     OptimizationHint,
     ColumnLineage,
+    SqlDialect,
     ViewState,
     CloudViewState,
     FocusMode,
@@ -201,6 +202,7 @@ import {
     updateHintsPanelContent,
     updateStatsPanelContent,
 } from './panels/infoPanel';
+import { dispatchHintAction } from './hintActions';
 import {
     showSqlClausePanelContent,
     toggleSqlPreviewPanel,
@@ -419,11 +421,25 @@ function getEdgeAnnouncementLabel(edge: FlowEdge | undefined): string {
 function announceFocusedNode(node: FlowNode): void {
     if (!nodeFocusLiveRegion) { return; }
 
-    const upstream = currentEdges.filter(edge => edge.target === node.id).length;
-    const downstream = currentEdges.filter(edge => edge.source === node.id).length;
+    const upstreamEdges = currentEdges.filter(edge => edge.target === node.id);
+    const downstreamEdges = currentEdges.filter(edge => edge.source === node.id);
+
+    // Summarize edge types for richer screen reader announcements
+    const summarizeEdgeTypes = (edges: typeof currentEdges): string => {
+        if (edges.length === 0) { return '0'; }
+        const typeCounts = new Map<string, number>();
+        for (const edge of edges) {
+            const label = getEdgeAnnouncementLabel(edge);
+            typeCounts.set(label, (typeCounts.get(label) || 0) + 1);
+        }
+        return Array.from(typeCounts.entries())
+            .map(([type, count]) => `${count} ${type}`)
+            .join(', ');
+    };
+
     const navigationPrefix = pendingNavigationAnnouncement ? `${pendingNavigationAnnouncement}. ` : '';
     pendingNavigationAnnouncement = null;
-    const message = `${navigationPrefix}${node.label}. ${node.type} node. ${upstream} upstream, ${downstream} downstream connections.`;
+    const message = `${navigationPrefix}${node.label}. ${node.type} node. ${summarizeEdgeTypes(upstreamEdges)} upstream, ${summarizeEdgeTypes(downstreamEdges)} downstream.`;
     announceLiveRegionMessage(message);
 }
 
@@ -906,6 +922,7 @@ export function initRenderer(container: HTMLElement): void {
     loadingOverlay = bootstrap.loadingOverlay;
     spinnerStyleElement = bootstrap.spinnerStyleElement;
     ensureHintsPanelScrollbarStyles();
+    ensureStatsPanelScrollbarStyles();
 
     // Add drag-to-resize + collapse controls for docked panels
     panelResizerCleanup = [
@@ -2114,6 +2131,10 @@ function navigateToTable(tableName: string): void {
     });
 }
 
+function executeHintAction(command: string): void {
+    dispatchHintAction(command, document);
+}
+
 function updateHintsPanel(): void {
     if (!hintsPanel) {
         return;
@@ -2143,6 +2164,9 @@ function updateHintsPanel(): void {
             selectNode(node.id, { skipNavigation: true });
             zoomToNode(node);
             pulseNode(node.id);
+        },
+        onExecuteHintAction: (command) => {
+            executeHintAction(command);
         },
         onRequestRerender: () => {
             updateHintsPanel();
@@ -3106,6 +3130,7 @@ function applyTheme(dark: boolean): void {
     });
     updateColumnLineageBannerStyle();
     ensureHintsPanelScrollbarStyles();
+    ensureStatsPanelScrollbarStyles();
     if (columnLineageRuntime.columnLineagePanel) {
         ensureColumnLineagePanelScrollbarStyles();
     }
@@ -3335,6 +3360,40 @@ function ensureHintsPanelScrollbarStyles(): void {
 
 function ensureColumnLineagePanelScrollbarStyles(): void {
     ensureColumnLineagePanelScrollbarStylesFeature(state.isDarkTheme, getScrollbarColors);
+}
+
+function ensureStatsPanelScrollbarStyles(): void {
+    const styleId = 'stats-panel-scroll-style';
+    let style = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+    const { thumb, thumbHover, track } = getScrollbarColors(state.isDarkTheme);
+    style.textContent = `
+        #table-list {
+            scrollbar-width: thin;
+            scrollbar-color: ${thumb} ${track};
+        }
+        #table-list::-webkit-scrollbar {
+            width: 10px;
+        }
+        #table-list::-webkit-scrollbar-track {
+            background: ${track};
+            border-radius: 8px;
+        }
+        #table-list::-webkit-scrollbar-thumb {
+            background: ${thumb};
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        #table-list::-webkit-scrollbar-thumb:hover {
+            background: ${thumbHover};
+            background-clip: padding-box;
+        }
+    `;
 }
 
 /**

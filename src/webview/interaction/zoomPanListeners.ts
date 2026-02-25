@@ -25,7 +25,7 @@ export function registerZoomPanListeners(
 
         callbacks.updateTransform();
         callbacks.updateZoomIndicator();
-    });
+    }, { passive: false });
 
     svg.addEventListener('click', (e) => {
         if (e.target === svg) {

@@ -393,3 +393,15 @@ locking row for access
 sel * from emp
 where id=1;
 
+REPLACE VIEW Employee_View 
+AS 
+SELECT 
+EmployeeNo, 
+FirstName, 
+BirthDate,
+JoinedDate,
+DepartmentNo
+FROM  
+Employee e 
+inner join dept d 
+on e.id=d.id; 

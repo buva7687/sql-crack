@@ -122,6 +122,25 @@ describe('parserClient', () => {
     });
 
     describe('parseBatchAsync', () => {
+        it('defers batch parsing to a macrotask so UI can paint loading states', async () => {
+            jest.useFakeTimers();
+            try {
+                let resolved = false;
+                const pending = parseBatchAsync('SELECT 1; SELECT 2;', 'MySQL').then(() => {
+                    resolved = true;
+                });
+
+                await Promise.resolve();
+                expect(resolved).toBe(false);
+
+                jest.runOnlyPendingTimers();
+                await pending;
+                expect(resolved).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('should parse batch SQL with multiple statements', async () => {
             const result = await parseBatchAsync(multiStatementSql, 'MySQL');
 
@@ -160,6 +179,25 @@ describe('parserClient', () => {
     });
 
     describe('validateAsync', () => {
+        it('defers validation to a macrotask so UI can paint loading states', async () => {
+            jest.useFakeTimers();
+            try {
+                let resolved = false;
+                const pending = validateAsync('SELECT 1').then(() => {
+                    resolved = true;
+                });
+
+                await Promise.resolve();
+                expect(resolved).toBe(false);
+
+                jest.runOnlyPendingTimers();
+                await pending;
+                expect(resolved).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('should validate normal SQL without errors', async () => {
             const error = await validateAsync(testSql);
 

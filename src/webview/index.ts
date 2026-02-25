@@ -79,6 +79,11 @@ import {
     ToolbarCallbacks,
     ToolbarCleanup
 } from './ui';
+import {
+    HINT_ACTION_EVENT_NAME,
+    HintActionEventDetail,
+    parseHintActionCommand,
+} from './hintActions';
 
 // Global type declarations
 declare global {
@@ -133,6 +138,7 @@ let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
 let applyInitialStatePending = true;
 let cleanupDialectSuggestion: (() => void) | null = null;
+let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
 const DEFERRED_QUERY_THRESHOLD = 12;
@@ -254,6 +260,23 @@ function normalizeSqlDialect(token: string): SqlDialect | null {
     return map[normalized] ?? null;
 }
 
+function setDialectAndVisualize(dialect: SqlDialect): void {
+    if (currentDialect === dialect) {
+        return;
+    }
+    userExplicitlySetDialect = true;
+    currentDialect = dialect;
+    updateAutoDetectIndicator(null);
+    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+    if (dialectSelect) {
+        dialectSelect.value = dialect;
+    }
+    const sql = window.initialSqlCode || '';
+    if (sql) {
+        void visualize(sql);
+    }
+}
+
 function getSuggestedDialectFromMessage(message: string): SqlDialect | null {
     const candidates = [
         ...Array.from(message.matchAll(/try\s+([a-zA-Z ]+?)\s+dialect/gi)).map(match => match[1]),
@@ -319,15 +342,8 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
     card.appendChild(button);
 
     const onClick = (): void => {
-        currentDialect = dialect;
-        userExplicitlySetDialect = true;
-        updateAutoDetectIndicator(null);
-        const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
-        if (dialectSelect) {
-            dialectSelect.value = dialect;
-        }
         clearDialectSwitchSuggestion();
-        void visualize(sql);
+        setDialectAndVisualize(dialect);
     };
     button.addEventListener('click', onClick);
     root.appendChild(card);
@@ -571,8 +587,29 @@ function extractSourceLineFromParseError(parseError: ParseError, lineRange?: Que
     return firstNonEmpty ? truncateSourceLine(firstNonEmpty) : undefined;
 }
 
+function handleHintActionCommand(command: string): void {
+    const parsedAction = parseHintActionCommand(command, normalizeSqlDialect);
+    if (parsedAction.type !== 'switchDialect') {
+        return;
+    }
+    setDialectAndVisualize(parsedAction.dialect);
+}
+
+function setupHintActionListener(): void {
+    if (hintActionListenerRegistered) {
+        return;
+    }
+    hintActionListenerRegistered = true;
+
+    document.addEventListener(HINT_ACTION_EVENT_NAME, (event: Event) => {
+        const detail = (event as CustomEvent<HintActionEventDetail>).detail;
+        handleHintActionCommand(detail?.command || '');
+    });
+}
+
 // Initialize when DOM is ready (guard against cached webview where DOMContentLoaded already fired)
 function setup(): void {
+    setupHintActionListener();
     init();
     setupVSCodeMessageListener();
 }
@@ -951,13 +988,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         onNextSearchResult: nextSearchResult,
         onPrevSearchResult: prevSearchResult,
         onDialectChange: (dialect: SqlDialect) => {
-            userExplicitlySetDialect = true;
-            currentDialect = dialect;
-            updateAutoDetectIndicator(null);
-            const sql = window.initialSqlCode || '';
-            if (sql) {
-                void visualize(sql);
-            }
+            setDialectAndVisualize(dialect);
         },
         onRefresh: () => {
             if (window.vscodeApi) {

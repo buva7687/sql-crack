@@ -3,6 +3,13 @@ import type { ParserContext } from '../context';
 import { detectDialectSyntaxPatterns } from './detection';
 import { stripSqlComments } from './preprocessing';
 
+function getSwitchDialectAction(dialect: SqlDialect): { label: string; command: string } {
+    return {
+        label: `Switch to ${dialect}`,
+        command: `switchDialect:${dialect}`,
+    };
+}
+
 /**
  * Detect dialect-specific syntax patterns and add appropriate hints.
  * This helps users identify when they're using syntax that's specific to a certain dialect.
@@ -22,7 +29,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
                 ? 'This query uses Snowflake syntax (e.g., : path operator or => named arguments). Try Snowflake dialect for full support.'
                 : 'This query uses Snowflake-specific syntax. Consider switching to Snowflake dialect.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('Snowflake'),
         });
     }
 
@@ -37,7 +45,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'BigQuery-specific syntax detected',
             suggestion: 'This query uses BigQuery syntax (e.g., STRUCT, UNNEST, or ARRAY<>). Try BigQuery dialect for full support.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('BigQuery'),
         });
     }
 
@@ -52,7 +61,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'PostgreSQL-specific syntax detected',
             suggestion: 'This query uses PostgreSQL syntax (e.g., INTERVAL \'...\', $$ quotes, or JSON operators). Try PostgreSQL dialect.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('PostgreSQL'),
         });
     }
 
@@ -66,7 +76,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'MySQL-specific syntax detected',
             suggestion: 'This query uses MySQL syntax (e.g., backtick identifiers or WITH ROLLUP). Try MySQL dialect.',
             category: 'best-practice',
-            severity: 'low'
+            severity: 'low',
+            action: getSwitchDialectAction('MySQL'),
         });
     }
 
@@ -82,7 +93,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'SQL Server (T-SQL) syntax detected',
             suggestion: 'This query uses SQL Server syntax (e.g., CROSS APPLY, TOP, or PIVOT). Try TransactSQL dialect.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('TransactSQL'),
         });
     }
 
@@ -97,7 +109,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'Oracle-specific syntax detected',
             suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, (+) joins, or NVL/DECODE). Try Oracle dialect.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('Oracle'),
         });
     }
 
@@ -113,7 +126,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
             message: 'Teradata-specific syntax detected',
             suggestion: 'This query uses Teradata syntax (e.g., VOLATILE TABLE, PRIMARY INDEX, MULTISET, HASHROW). Try Teradata dialect for full support.',
             category: 'best-practice',
-            severity: 'medium'
+            severity: 'medium',
+            action: getSwitchDialectAction('Teradata'),
         });
     }
 

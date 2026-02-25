@@ -41,4 +41,17 @@ SELECT * FROM customer_segments;
         expect(refNames).toContain('customers');
         expect(refNames).toContain('orders');
     });
+
+    it('ignores MySQL hash comments during regex fallback extraction', () => {
+        const sql = `
+# FROM fake_table
+SEL * FROM real_table;
+`;
+        const extractor = new ReferenceExtractor();
+        const refs = extractor.extractReferences(sql, 'hash-comment.sql', 'MySQL');
+        const refNames = refs.map((r: any) => r.tableName.toLowerCase());
+
+        expect(refNames).toContain('real_table');
+        expect(refNames).not.toContain('fake_table');
+    });
 });

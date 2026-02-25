@@ -419,7 +419,7 @@ function attachCloudPanZoomListeners(
         cloudState.scale = newScale;
 
         subflowGroup.setAttribute('transform', `translate(${cloudState.offsetX}, ${cloudState.offsetY}) scale(${cloudState.scale})`);
-    });
+    }, { passive: false });
 }
 
 function addCloudCloseButton(

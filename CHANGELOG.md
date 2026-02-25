@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-02-24
+
+### Added
+
+- **Column lineage for DDL statements**: CREATE VIEW, REPLACE VIEW, and CREATE TABLE AS SELECT now support column lineage tracing (C key) and column flow highlighting. Previously these features only worked for standalone SELECT queries.
+- **Performance hints for DDL statements**: Filter pushdown, non-sargable expression detection, join order analysis, and other performance hints now fire for the inner SELECT of DDL statements.
+- **One-click "Switch dialect" action in syntax hints**: Dialect-specific syntax warnings now include a clickable action to switch to the suggested dialect directly from the hint panel, instead of text-only suggestions.
+
+### Fixed
+
+- **Stats panel black scrollbar**: Added themed scrollbar styles for the stats panel's table list, matching the existing hints and column lineage panel scrollbar styling. Fixes unstyled browser-default (black) scrollbars.
+- **Wheel handler missing `{ passive: false }`**: Added `{ passive: false }` to wheel event listeners in the main SVG zoom/pan and cloud node zoom handlers, so `preventDefault()` is respected and page scroll doesn't leak through.
+
+### Accessibility
+
+- **SVG `role="group"`**: Main SVG canvas now has an explicit `role="group"` attribute for screen readers.
+- **`aria-live` on search count and zoom level**: Search result count and zoom level indicators now have `aria-live="polite"` so screen readers announce changes.
+- **Edge types announced during keyboard navigation**: `announceFocusedNode()` now reports edge types (e.g., "2 join, 1 from upstream") instead of just connection counts.
+
 ## [0.4.2] - 2026-02-24
 
 ### Fixed
