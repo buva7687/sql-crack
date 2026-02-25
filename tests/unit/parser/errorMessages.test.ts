@@ -38,6 +38,23 @@ describe('Item #2: Better Error Messages for Parse Failures', () => {
             expect(snowflakeHint).toBeDefined();
         });
 
+        it('should include a switch-dialect action for Snowflake syntax warnings', () => {
+            const sql = `
+                SELECT payload:items:sku
+                FROM orders
+            `;
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
+            const snowflakeHint = result.hints.find((h: any) =>
+                h.message?.toLowerCase().includes('snowflake')
+            );
+
+            expect(snowflakeHint).toBeDefined();
+            expect(snowflakeHint?.action).toEqual({
+                label: 'Switch to Snowflake',
+                command: 'switchDialect:Snowflake',
+            });
+        });
+
         it('should parse Snowflake syntax correctly with Snowflake dialect', () => {
             const sql = `
                 SELECT payload:items:sku
@@ -154,6 +171,10 @@ describe('Item #2: Better Error Messages for Parse Failures', () => {
                 h.message?.toLowerCase().includes('mysql')
             );
             expect(mysqlHint).toBeDefined();
+            expect(mysqlHint?.action).toEqual({
+                label: 'Switch to MySQL',
+                command: 'switchDialect:MySQL',
+            });
         });
     });
 

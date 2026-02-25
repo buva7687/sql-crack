@@ -33,6 +33,7 @@ export type {
     HintCategory,
     HintSeverity,
     ComplexityBreakdown,
+    HintAction,
     QueryStats,
     OptimizationHint,
     QueryLineRange,

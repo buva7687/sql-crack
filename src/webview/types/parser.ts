@@ -15,6 +15,11 @@ export type HintSeverity = 'low' | 'medium' | 'high';
 
 export type FunctionCategory = 'scalar' | 'aggregate' | 'window' | 'tvf' | 'unknown';
 
+export interface HintAction {
+    label: string;
+    command: string;
+}
+
 export interface FunctionUsage {
     name: string;
     category: FunctionCategory;
@@ -59,6 +64,7 @@ export interface OptimizationHint {
     category?: HintCategory;
     nodeId?: string;
     severity?: HintSeverity;
+    action?: HintAction;
 }
 
 export interface QueryLineRange {

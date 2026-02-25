@@ -8,6 +8,7 @@ import {
     QueryStats,
     OptimizationHint,
     ColumnLineage,
+    SqlDialect,
     ViewState,
     CloudViewState,
     FocusMode,
@@ -2129,6 +2130,32 @@ function navigateToTable(tableName: string): void {
     });
 }
 
+function executeHintAction(command: string): void {
+    const trimmed = command.trim();
+    const switchDialectPrefix = 'switchDialect:';
+    if (!trimmed.startsWith(switchDialectPrefix)) {
+        return;
+    }
+
+    const dialectValue = trimmed.slice(switchDialectPrefix.length).trim();
+    if (!dialectValue) {
+        return;
+    }
+
+    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+    if (!dialectSelect) {
+        return;
+    }
+
+    const hasDialectOption = Array.from(dialectSelect.options).some((option) => option.value === dialectValue);
+    if (!hasDialectOption || dialectSelect.value === dialectValue) {
+        return;
+    }
+
+    dialectSelect.value = dialectValue as SqlDialect;
+    dialectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function updateHintsPanel(): void {
     if (!hintsPanel) {
         return;
@@ -2158,6 +2185,9 @@ function updateHintsPanel(): void {
             selectNode(node.id, { skipNavigation: true });
             zoomToNode(node);
             pulseNode(node.id);
+        },
+        onExecuteHintAction: (command) => {
+            executeHintAction(command);
         },
         onRequestRerender: () => {
             updateHintsPanel();

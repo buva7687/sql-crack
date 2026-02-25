@@ -71,6 +71,7 @@ export interface HintsPanelOptions {
     setHintsShowAll: (value: boolean) => void;
     escapeHtml: (text: string) => string;
     onSelectNode: (nodeId: string) => void;
+    onExecuteHintAction: (command: string) => void;
     onRequestRerender: () => void;
     onSyncViewportBounds: (bottomPx: number) => void;
 }
@@ -620,6 +621,7 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
         setHintsShowAll,
         escapeHtml,
         onSelectNode,
+        onExecuteHintAction,
         onRequestRerender,
         onSyncViewportBounds,
     } = options;
@@ -666,15 +668,17 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
                 const style = HINT_COLORS[hint.type] || HINT_COLORS.info;
                 const severity = hint.severity || 'low';
                 const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
+                const hasNodeTarget = Boolean(hint.nodeId);
+                const hasAction = Boolean(hint.action?.command && hint.action?.label);
                 return `
-                    <div role="button" tabindex="0" class="hint-item" data-node-id="${hint.nodeId || ''}" style="
+                    <div ${hasNodeTarget ? 'role="button" tabindex="0"' : ''} class="hint-item" data-node-id="${hint.nodeId || ''}" style="
                         text-align: left;
                         border: 1px solid ${style.border};
                         border-left-width: 3px;
                         background: ${style.bg};
                         border-radius: 6px;
                         padding: 8px 10px;
-                        cursor: ${hint.nodeId ? 'pointer' : 'default'};
+                        cursor: ${hasNodeTarget ? 'pointer' : 'default'};
                         user-select: text;
                     ">
                         <div style="font-size: 12px; color: ${textColor}; display: flex; align-items: center; gap: 6px;">
@@ -683,6 +687,25 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
                             <span style="margin-left: auto; color: ${severityColor}; font-size: 9px; text-transform: uppercase;">${severity}</span>
                         </div>
                         ${hint.suggestion ? `<div style="font-size: 11px; color: ${textColorMuted}; margin-top: 4px;">${escapeHtml(hint.suggestion)}</div>` : ''}
+                        ${hasAction ? `
+                            <div style="margin-top: 6px;">
+                                <button
+                                    type="button"
+                                    class="hint-action-btn"
+                                    data-command="${escapeHtml(hint.action!.command)}"
+                                    style="
+                                        border: 1px solid ${isDarkTheme ? 'rgba(148,163,184,0.4)' : 'rgba(100,116,139,0.4)'};
+                                        background: ${isDarkTheme ? 'rgba(37, 99, 235, 0.22)' : 'rgba(37, 99, 235, 0.1)'};
+                                        color: ${isDarkTheme ? '#bfdbfe' : '#1d4ed8'};
+                                        border-radius: 4px;
+                                        padding: 4px 8px;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        cursor: pointer;
+                                    "
+                                >${escapeHtml(hint.action!.label)}</button>
+                            </div>
+                        ` : ''}
                     </div>
                 `;
             }).join('')}
@@ -724,6 +747,26 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
                 return;
             }
             onSelectNode(node.id);
+        });
+        el.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
+            }
+            event.preventDefault();
+            const node = currentNodes.find((n) => n.id === nodeId);
+            if (!node) {
+                return;
+            }
+            onSelectNode(node.id);
+        });
+    });
+
+    hintsPanel.querySelectorAll('.hint-action-btn').forEach((actionButton) => {
+        const button = actionButton as HTMLButtonElement;
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onExecuteHintAction(button.dataset.command || '');
         });
     });
 
