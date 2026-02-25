@@ -17,6 +17,19 @@
 --   10) Stored procedure calls
 -- ============================================================
 
+REPLACE VIEW Employee_View 
+AS 
+SELECT 
+EmployeeNo, 
+FirstName, 
+BirthDate,
+JoinedDate 
+DepartmentNo 
+FROM  
+Employee e 
+inner join dept d 
+on e.id=d.id; 
+
 -- Q1: MERGE INTO (Teradata upsert)
 MERGE INTO target_customers AS t
 USING source_updates AS s

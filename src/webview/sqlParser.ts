@@ -997,11 +997,22 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(ctx, nodes, edges);
 
+        // Extract the inner SELECT from DDL statements (CREATE/REPLACE VIEW, CREATE TABLE AS SELECT)
+        // so column lineage and performance analysis can operate on the SELECT's structure
+        let innerSelectStmt = statements[0];
+        if (innerSelectStmt && innerSelectStmt.type?.toLowerCase() === 'create') {
+            if (innerSelectStmt.select) {
+                innerSelectStmt = innerSelectStmt.select;
+            } else if (innerSelectStmt.as) {
+                innerSelectStmt = innerSelectStmt.as;
+            }
+        }
+
         // Phase 3: Static performance analysis
         // Pass existing hints so performance analyzer can merge overlapping hints
         // (e.g., duplicate subquery hints + repeated table scan hints)
         if (statements[0]) {
-            const perfAnalysis = analyzePerformance(statements[0], nodes, edges, ctx.tableUsageMap, ctx.hints);
+            const perfAnalysis = analyzePerformance(innerSelectStmt, nodes, edges, ctx.tableUsageMap, ctx.hints);
             ctx.hints.push(...perfAnalysis.hints);
 
             // Filter out hints that were merged into performance hints
@@ -1036,10 +1047,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         assignLineNumbers(nodes, sql);
 
         // Extract column lineage
-        const columnLineage = extractColumnLineage(statements[0], nodes);
+        const columnLineage = extractColumnLineage(innerSelectStmt, nodes);
 
         // Generate column flows for visualization
-        const columnFlows = generateColumnFlows(statements[0], nodes, edges);
+        const columnFlows = generateColumnFlows(innerSelectStmt, nodes, edges);
 
         // Calculate column positions on nodes
         calculateColumnPositions(nodes);
