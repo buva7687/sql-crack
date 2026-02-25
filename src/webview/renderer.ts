@@ -202,6 +202,7 @@ import {
     updateHintsPanelContent,
     updateStatsPanelContent,
 } from './panels/infoPanel';
+import { dispatchHintAction } from './hintActions';
 import {
     showSqlClausePanelContent,
     toggleSqlPreviewPanel,
@@ -2131,29 +2132,7 @@ function navigateToTable(tableName: string): void {
 }
 
 function executeHintAction(command: string): void {
-    const trimmed = command.trim();
-    const switchDialectPrefix = 'switchDialect:';
-    if (!trimmed.startsWith(switchDialectPrefix)) {
-        return;
-    }
-
-    const dialectValue = trimmed.slice(switchDialectPrefix.length).trim();
-    if (!dialectValue) {
-        return;
-    }
-
-    const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
-    if (!dialectSelect) {
-        return;
-    }
-
-    const hasDialectOption = Array.from(dialectSelect.options).some((option) => option.value === dialectValue);
-    if (!hasDialectOption || dialectSelect.value === dialectValue) {
-        return;
-    }
-
-    dialectSelect.value = dialectValue as SqlDialect;
-    dialectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    dispatchHintAction(command, document);
 }
 
 function updateHintsPanel(): void {

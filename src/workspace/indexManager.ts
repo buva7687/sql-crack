@@ -1,6 +1,8 @@
 // Index Manager - Cache and manage workspace SQL index
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     WorkspaceIndex,
     SerializedWorkspaceIndex,
@@ -519,6 +521,31 @@ export class IndexManager {
         }
     }
 
+    private normalizePathForComparison(filePath: string): string {
+        const normalized = path.normalize(filePath);
+        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    }
+
+    private canonicalizePathForComparison(filePath: string): string {
+        const resolved = path.resolve(filePath);
+        try {
+            return this.normalizePathForComparison(fs.realpathSync(resolved));
+        } catch {
+            return this.normalizePathForComparison(resolved);
+        }
+    }
+
+    private isInScope(filePath: string): boolean {
+        if (!this.scopeUri) {
+            return true;
+        }
+
+        const scopePath = this.canonicalizePathForComparison(this.scopeUri.fsPath);
+        const candidatePath = this.canonicalizePathForComparison(filePath);
+
+        return candidatePath === scopePath || candidatePath.startsWith(scopePath + path.sep);
+    }
+
     /**
      * Build the file watcher glob pattern from configured extensions.
      * Always includes .sql, plus any additionalFileExtensions from settings.
@@ -549,10 +576,27 @@ export class IndexManager {
             return false;
         }
         // When scoped to a subfolder, only index files within that folder
-        if (this.scopeUri && !uri.fsPath.startsWith(this.scopeUri.fsPath)) {
+        if (!this.isInScope(uri.fsPath)) {
             return false;
         }
         return true;
+    }
+
+    private queueFullReindex(reason: string): void {
+        const rebuild = async () => {
+            await this.buildIndex();
+        };
+
+        if (this._buildPromise) {
+            void this._buildPromise
+                .finally(() => rebuild())
+                .catch(error => logger.warn(`[IndexManager] Failed to rebuild index after ${reason}: ${error instanceof Error ? error.message : String(error)}`));
+            return;
+        }
+
+        void rebuild().catch(error =>
+            logger.warn(`[IndexManager] Failed to rebuild index after ${reason}: ${error instanceof Error ? error.message : String(error)}`)
+        );
     }
 
     /**
@@ -606,6 +650,7 @@ export class IndexManager {
                         });
                     }
                 });
+                this.queueFullReindex('additionalFileExtensions change');
             }
         });
     }

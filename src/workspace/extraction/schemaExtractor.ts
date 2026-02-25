@@ -307,13 +307,15 @@ export class SchemaExtractor {
 
     /**
      * Strip SQL comments from a string to prevent false matches
-     * Handles both single-line (--) and multi-line comments
+     * Handles single-line (--, #) and multi-line comments
      */
     private stripSqlComments(sql: string): string {
         // Remove multi-line comments first (/* ... */)
         let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
         // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n]*/g, ' ');
+        result = result.replace(/--[^\n\r]*/g, ' ');
+        // Remove MySQL-style hash comments (# ... until end of line)
+        result = result.replace(/#[^\n\r]*/g, ' ');
         return result;
     }
 

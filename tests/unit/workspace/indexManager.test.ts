@@ -1004,6 +1004,60 @@ describe('IndexManager', () => {
                 expect.objectContaining({ fsPath: '/workspace/other_folder/query.sql' })
             );
         });
+
+        it('should reject sibling folder paths that share a scope prefix', async () => {
+            indexManager.dispose();
+            const scopeUri = vscode.Uri.file('/workspace/subfolder');
+            indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL', scopeUri);
+
+            mockScanner.getFileCount.mockResolvedValue(3);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/subfolder/q1.sql', [{ name: 'orders' }])
+            ]);
+            await indexManager.initialize();
+
+            const watcher = __getFileSystemWatcher();
+            watcher?.__triggerChange(vscode.Uri.file('/workspace/subfolder_backup/query.sql'));
+
+            await new Promise(resolve => setTimeout(resolve, 1100));
+
+            expect(mockScanner.analyzeFile).not.toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/workspace/subfolder_backup/query.sql' })
+            );
+        });
+
+        it('should rebuild index when additional extensions configuration changes', async () => {
+            indexManager.dispose();
+            jest.clearAllMocks();
+
+            type ConfigChangeHandler = (event: { affectsConfiguration: (key: string) => boolean }) => void;
+            let configChangeHandler: ConfigChangeHandler | undefined;
+            (vscode.workspace.onDidChangeConfiguration as jest.Mock).mockImplementation((handler: ConfigChangeHandler) => {
+                configChangeHandler = handler;
+                return { dispose: jest.fn() };
+            });
+
+            mockScanner.getFileCount.mockResolvedValue(100); // avoid auto-index on initialize
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+            indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
+            await indexManager.initialize();
+
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+
+            __setMockConfig('sqlCrack', { additionalFileExtensions: ['hql'] });
+            if (!configChangeHandler) {
+                throw new Error('Expected configuration change handler to be registered');
+            }
+            configChangeHandler({
+                affectsConfiguration: (key: string) => key === 'sqlCrack.additionalFileExtensions',
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+        });
     });
 
     // =========================================================================

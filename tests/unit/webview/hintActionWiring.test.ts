@@ -1,20 +1,62 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { dispatchHintAction, parseHintActionCommand, HINT_ACTION_EVENT_NAME } from '../../../src/webview/hintActions';
+import { SqlDialect } from '../../../src/webview/types';
 
 describe('hint action wiring', () => {
-    it('renders hint action buttons and routes commands from the hints panel', () => {
-        const infoPanelSource = readFileSync(join(__dirname, '../../../src/webview/panels/infoPanel.ts'), 'utf8');
+    beforeAll(() => {
+        if (typeof globalThis.CustomEvent === 'undefined') {
+            class TestCustomEvent<T = unknown> extends Event {
+                detail: T;
 
-        expect(infoPanelSource).toContain('class="hint-action-btn"');
-        expect(infoPanelSource).toContain('onExecuteHintAction: (command: string) => void;');
-        expect(infoPanelSource).toContain("onExecuteHintAction(button.dataset.command || '')");
+                constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+                    super(type, eventInitDict);
+                    this.detail = eventInitDict?.detail as T;
+                }
+            }
+            (globalThis as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent = TestCustomEvent as unknown as typeof CustomEvent;
+        }
     });
 
-    it('executes switchDialect hint commands via the existing dialect select change flow', () => {
-        const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const normalizeDialect = (token: string): SqlDialect | null => {
+        const map: Record<string, SqlDialect> = {
+            mysql: 'MySQL',
+            postgresql: 'PostgreSQL',
+            postgres: 'PostgreSQL',
+            transactsql: 'TransactSQL',
+            'sql server': 'TransactSQL',
+            sqlserver: 'TransactSQL',
+            snowflake: 'Snowflake',
+            bigquery: 'BigQuery',
+            redshift: 'Redshift',
+            hive: 'Hive',
+            athena: 'Athena',
+            trino: 'Trino',
+            mariadb: 'MariaDB',
+            sqlite: 'SQLite',
+            oracle: 'Oracle',
+            teradata: 'Teradata',
+        };
+        return map[token.trim().toLowerCase()] ?? null;
+    };
 
-        expect(rendererSource).toContain("const switchDialectPrefix = 'switchDialect:';");
-        expect(rendererSource).toContain("const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;");
-        expect(rendererSource).toContain("dialectSelect.dispatchEvent(new Event('change', { bubbles: true }));");
+    it('parses switchDialect commands into a typed action', () => {
+        const parsed = parseHintActionCommand('switchDialect: PostgreSQL', normalizeDialect);
+        expect(parsed).toEqual({ type: 'switchDialect', dialect: 'PostgreSQL' });
+    });
+
+    it('treats unknown commands as unsupported', () => {
+        expect(parseHintActionCommand('focusNode:users', normalizeDialect)).toEqual({ type: 'unsupported' });
+        expect(parseHintActionCommand('switchDialect: unknown', normalizeDialect)).toEqual({ type: 'unsupported' });
+    });
+
+    it('dispatches normalized hint action events to the provided event target', () => {
+        const dispatchEvent = jest.fn((event: Event) => Boolean(event));
+        const target = { dispatchEvent } as unknown as EventTarget;
+
+        dispatchHintAction('  switchDialect:MySQL  ', target);
+
+        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+        const event = dispatchEvent.mock.calls[0]?.[0] as unknown as CustomEvent<{ command: string }>;
+        expect(event.type).toBe(HINT_ACTION_EVENT_NAME);
+        expect(event.detail.command).toBe('switchDialect:MySQL');
     });
 });
