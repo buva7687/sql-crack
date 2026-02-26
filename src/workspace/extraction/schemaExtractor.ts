@@ -9,7 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex } from '../../shared';
+import { escapeRegex, stripSqlComments } from '../../shared';
 import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
 
 // SQL reserved words that should never be treated as table/view names
@@ -305,19 +305,6 @@ export class SchemaExtractor {
         return SQL_RESERVED_WORDS.has(name.toLowerCase());
     }
 
-    /**
-     * Strip SQL comments from a string to prevent false matches
-     * Handles single-line (--, #) and multi-line comments
-     */
-    private stripSqlComments(sql: string): string {
-        // Remove multi-line comments first (/* ... */)
-        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
-        // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n\r]*/g, ' ');
-        // Remove MySQL-style hash comments (# ... until end of line)
-        result = result.replace(/#[^\n\r]*/g, ' ');
-        return result;
-    }
 
     /**
      * Regex-based fallback for extracting schema definitions
@@ -326,7 +313,7 @@ export class SchemaExtractor {
         const definitions: SchemaDefinition[] = [];
 
         // Strip comments to prevent false matches like "CREATE TABLE AS SELECT" in comments
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
 
         // CREATE TABLE pattern - capture table name and body
         // Use a simpler approach: find CREATE TABLE, then extract body separately

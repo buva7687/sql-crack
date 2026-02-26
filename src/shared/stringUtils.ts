@@ -39,3 +39,102 @@ export function escapeHtml(value: string): string {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
+/**
+ * Strip SQL comments while preserving quoted content (strings and identifiers).
+ * Handles single-quoted strings (with '' escape), double-quoted identifiers,
+ * and backtick-quoted identifiers. Strips --, /* *​/, and # comments.
+ */
+export function stripSqlComments(sql: string): string {
+    const len = sql.length;
+    let out = '';
+    let i = 0;
+
+    while (i < len) {
+        const ch = sql[i];
+
+        // Single-quoted string: pass through verbatim ('' escape)
+        if (ch === "'") {
+            let j = i + 1;
+            out += ch;
+            while (j < len) {
+                if (sql[j] === "'" && j + 1 < len && sql[j + 1] === "'") {
+                    out += "''";
+                    j += 2;
+                } else if (sql[j] === "'") {
+                    out += "'";
+                    j++;
+                    break;
+                } else {
+                    out += sql[j];
+                    j++;
+                }
+            }
+            i = j;
+            continue;
+        }
+
+        // Double-quoted identifier: pass through verbatim
+        if (ch === '"') {
+            let j = i + 1;
+            out += ch;
+            while (j < len) {
+                if (sql[j] === '"') {
+                    out += '"';
+                    j++;
+                    break;
+                } else {
+                    out += sql[j];
+                    j++;
+                }
+            }
+            i = j;
+            continue;
+        }
+
+        // Backtick-quoted identifier: pass through verbatim
+        if (ch === '`') {
+            let j = i + 1;
+            out += ch;
+            while (j < len) {
+                if (sql[j] === '`') {
+                    out += '`';
+                    j++;
+                    break;
+                } else {
+                    out += sql[j];
+                    j++;
+                }
+            }
+            i = j;
+            continue;
+        }
+
+        // Block comment: /* ... */
+        if (ch === '/' && i + 1 < len && sql[i + 1] === '*') {
+            const end = sql.indexOf('*/', i + 2);
+            i = end === -1 ? len : end + 2;
+            out += ' ';
+            continue;
+        }
+
+        // Line comment: --
+        if (ch === '-' && i + 1 < len && sql[i + 1] === '-') {
+            while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+            out += ' ';
+            continue;
+        }
+
+        // Hash line comment: #
+        if (ch === '#') {
+            while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+            out += ' ';
+            continue;
+        }
+
+        out += ch;
+        i++;
+    }
+
+    return out;
+}

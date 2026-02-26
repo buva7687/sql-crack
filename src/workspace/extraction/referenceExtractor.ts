@@ -12,7 +12,7 @@ import {
     ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
-import { escapeRegex } from '../../shared';
+import { escapeRegex, stripSqlComments } from '../../shared';
 import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
 import type {
     AstStatement,
@@ -95,19 +95,6 @@ export class ReferenceExtractor {
         return false;
     }
 
-    /**
-     * Strip SQL comments from a string to simplify pattern matching
-     * Handles single-line (--, #) and multi-line comments
-     */
-    private stripSqlComments(sql: string): string {
-        // Remove multi-line comments first (/* ... */)
-        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
-        // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n\r]*/g, ' ');
-        // Remove MySQL-style hash comments (# ... until end of line)
-        result = result.replace(/#[^\n\r]*/g, ' ');
-        return result;
-    }
 
     /**
      * Extract all table references from SQL
@@ -123,7 +110,7 @@ export class ReferenceExtractor {
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const globalCteNames = new Set<string>();
 
@@ -1068,7 +1055,7 @@ export class ReferenceExtractor {
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
         // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
 
         // Build statement boundary map for comment-stripped SQL
         // Split on semicolons that aren't inside strings

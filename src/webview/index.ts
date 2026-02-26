@@ -58,6 +58,7 @@ import {
     setColorblindMode as setRendererColorblindMode,
 } from './renderer';
 import type { ColorblindMode } from '../shared/theme';
+import { stripSqlComments } from '../shared/stringUtils';
 
 import {
     createToolbar,
@@ -136,6 +137,7 @@ let compareModeActive = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
+let persistStateDirty = false;
 let applyInitialStatePending = true;
 let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
@@ -167,13 +169,6 @@ interface PersistedWebviewState {
     activeTabId: string | null;
     queryViewStates: Array<{ queryIndex: number; viewState: TabViewState }>;
     renderer: PersistedRendererUiState;
-}
-
-function stripSqlComments(sql: string): string {
-    return sql
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ')
-        .replace(/#[^\n\r]*/g, ' ');
 }
 
 function hasExecutableSql(sql: string): boolean {
@@ -392,13 +387,19 @@ function schedulePersistUiState(delayMs = 150): void {
     if (!window.vscodeApi) {
         return;
     }
+    persistStateDirty = true;
     if (persistStateDebounceId !== null) {
         window.clearTimeout(persistStateDebounceId);
     }
     persistStateDebounceId = window.setTimeout(() => {
         persistStateDebounceId = null;
+        persistStateDirty = false;
         persistUiStateNow();
     }, delayMs);
+}
+
+export function markPersistDirty(): void {
+    persistStateDirty = true;
 }
 
 function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
@@ -799,10 +800,16 @@ function init(): void {
         window.clearInterval(persistStateIntervalId);
     }
     persistStateIntervalId = window.setInterval(() => {
-        if (batchResult) {
+        if (batchResult && persistStateDirty) {
+            persistStateDirty = false;
             persistUiStateNow();
         }
     }, 1500);
+
+    // Mark persist dirty when renderer-side keyboard shortcuts mutate view state directly.
+    document.addEventListener('layout-state-changed', () => {
+        persistStateDirty = true;
+    });
 
     window.addEventListener('beforeunload', () => {
         if (persistStateIntervalId !== null) {
@@ -824,10 +831,7 @@ function init(): void {
         requestAnimationFrame(() => {
             showFirstRunOverlay(container, {
                 isDarkTheme,
-                onDismiss: () => {
-                    // Notify extension to persist dismissal
-                    window.vscodeApi?.postMessage({ type: 'firstRunDismissed' });
-                },
+                onDismiss: () => {},
             });
         });
     }
@@ -1261,8 +1265,17 @@ async function switchToQueryIndex(newIndex: number): Promise<void> {
 
     if (deferredQueryIndexes.has(newIndex)) {
         showGlobalLoading('Loading query details...');
+        const hydrateToken = parseRequestId;
         try {
             await hydrateQueryIfNeeded(newIndex);
+        } catch (error) {
+            // Only mutate if this is still the same parse cycle
+            if (batchResult && parseRequestId === hydrateToken) {
+                const querySql = batchResult.queries[newIndex]?.sql || '';
+                const msg = error instanceof Error ? error.message : 'Failed to load query details';
+                batchResult.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+            }
+            deferredQueryIndexes.delete(newIndex);
         } finally {
             hideGlobalLoading();
         }

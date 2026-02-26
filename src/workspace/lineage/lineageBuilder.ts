@@ -9,7 +9,7 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
-import { escapeRegex } from '../../shared';
+import { escapeRegex, stripSqlComments } from '../../shared';
 import {
     LineageNode,
     LineageEdge,
@@ -952,17 +952,6 @@ export class LineageBuilder implements LineageGraph {
         return 1;
     }
 
-    /**
-     * Strip SQL comments from a string to simplify pattern matching
-     * Handles both single-line (--) and multi-line comments
-     */
-    private stripSqlComments(sql: string): string {
-        // Remove multi-line comments first (/* ... */)
-        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
-        // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n]*/g, ' ');
-        return result;
-    }
 
     /**
      * Extract CTE names and subquery aliases from SQL content
@@ -973,7 +962,7 @@ export class LineageBuilder implements LineageGraph {
         let match;
 
         // Strip comments for cleaner pattern matching on CTE detection
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
 
         // Use regex to find CTE names: WITH name AS or WITH RECURSIVE name AS
         // Also handle multi-CTE: WITH name1 AS (...), name2 AS (...)
