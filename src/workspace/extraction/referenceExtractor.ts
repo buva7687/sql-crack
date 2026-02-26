@@ -1547,9 +1547,10 @@ export class ReferenceExtractor {
      * More efficient than regex with large ranges that can cause catastrophic backtracking
      */
     private extractUpdateFromAliases(sql: string, cteNames: Set<string>, reservedWords: Set<string>): void {
+        const normalizedSql = sql.toUpperCase();
         let updateIndex = 0;
-        while ((updateIndex = sql.indexOf('UPDATE', updateIndex)) !== -1) {
-            const fromIndex = sql.indexOf('FROM', updateIndex);
+        while ((updateIndex = normalizedSql.indexOf('UPDATE', updateIndex)) !== -1) {
+            const fromIndex = normalizedSql.indexOf('FROM', updateIndex);
             if (fromIndex === -1 || fromIndex > updateIndex + 500) {
                 updateIndex += 6;
                 continue;
@@ -1578,11 +1579,12 @@ export class ReferenceExtractor {
             }
 
             if (closeParenIndex !== -1) {
-                // Check for AS alias after the closing paren
+                // Check for alias after the closing paren. SQL allows both
+                // "AS alias" and bare "alias" forms.
                 const afterParen = sql.substring(closeParenIndex + 1, closeParenIndex + 50).trim();
-                const asMatch = afterParen.match(/^AS\s+(\w+)/i);
-                if (asMatch) {
-                    const aliasName = asMatch[1].toLowerCase();
+                const aliasMatch = afterParen.match(/^(?:AS\s+)?(\w+)/i);
+                if (aliasMatch) {
+                    const aliasName = aliasMatch[1].toLowerCase();
                     if (!reservedWords.has(aliasName)) {
                         cteNames.add(aliasName);
                     }

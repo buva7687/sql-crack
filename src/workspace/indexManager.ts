@@ -38,6 +38,7 @@ export class IndexManager {
     private onIndexUpdated: (() => void) | null = null;
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
+    private _queueProcessingPromise: Promise<void> | null = null;
     private _changesSinceIndex: number = 0;
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
@@ -80,6 +81,10 @@ export class IndexManager {
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
+        if (this._buildPromise) {
+            return this._buildPromise;
+        }
+        await this.waitForQueueToDrain();
         if (this._buildPromise) {
             return this._buildPromise;
         }
@@ -401,7 +406,7 @@ export class IndexManager {
     /**
      * Set callback for index updates
      */
-    setOnIndexUpdated(callback: () => void): void {
+    setOnIndexUpdated(callback: (() => void) | null): void {
         this.onIndexUpdated = callback;
     }
 
@@ -618,7 +623,8 @@ export class IndexManager {
                 clearTimeout(this.updateTimer);
             }
             this.updateTimer = setTimeout(() => {
-                this.processUpdateQueue();
+                this.updateTimer = null;
+                void this.processUpdateQueue();
             }, this.updateDebounceMs);
         };
 
@@ -660,35 +666,60 @@ export class IndexManager {
      * Skips processing while a full build is in progress to avoid race conditions.
      */
     private async processUpdateQueue(): Promise<void> {
-        if (this._buildPromise) {
-            // A full build is in progress — defer queue processing until it completes
-            await this._buildPromise;
+        if (this._queueProcessingPromise) {
+            await this._queueProcessingPromise;
+            return;
         }
 
-        const files = [...this.updateQueue];
-        this.updateQueue.clear();
-
-        for (const filePath of files) {
-            const uri = vscode.Uri.file(filePath);
-            if (!this.shouldIndexFile(uri)) {
-                this.markChangeProcessed();
-                continue;
-            }
-            try {
-                // Guard: skip if file was deleted while queued
-                try {
-                    await vscode.workspace.fs.stat(uri);
-                } catch (e) {
-                    logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
-                    await this.removeFile(uri);
-                    continue;
+        const run = async () => {
+            while (this.updateQueue.size > 0) {
+                if (this._buildPromise) {
+                    // A full build is in progress — defer queue processing until it completes
+                    await this._buildPromise;
                 }
-                await this.updateFile(uri);
-            } catch (err) {
-                logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
-            } finally {
-                this.markChangeProcessed();
+
+                const files = [...this.updateQueue];
+                this.updateQueue.clear();
+
+                for (const filePath of files) {
+                    const uri = vscode.Uri.file(filePath);
+                    if (!this.shouldIndexFile(uri)) {
+                        this.markChangeProcessed();
+                        continue;
+                    }
+                    try {
+                        // Guard: skip if file was deleted while queued
+                        try {
+                            await vscode.workspace.fs.stat(uri);
+                        } catch (e) {
+                            logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
+                            await this.removeFile(uri);
+                            continue;
+                        }
+                        await this.updateFile(uri);
+                    } catch (err) {
+                        logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
+                    } finally {
+                        this.markChangeProcessed();
+                    }
+                }
             }
+        };
+
+        this._queueProcessingPromise = run();
+        try {
+            await this._queueProcessingPromise;
+        } finally {
+            this._queueProcessingPromise = null;
+            if (this.updateQueue.size > 0) {
+                void this.processUpdateQueue();
+            }
+        }
+    }
+
+    private async waitForQueueToDrain(): Promise<void> {
+        while (this._queueProcessingPromise) {
+            await this._queueProcessingPromise;
         }
     }
 

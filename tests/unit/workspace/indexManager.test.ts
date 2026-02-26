@@ -255,6 +255,40 @@ describe('IndexManager', () => {
 
             expect(callback).toHaveBeenCalled();
         });
+
+        it('waits for in-flight queued updates before starting a full rebuild', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/baseline.sql', [{ name: 'baseline' }]),
+            ]);
+            await indexManager.buildIndex();
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+
+            let releaseAnalyzeFile: ((analysis: FileAnalysis) => void) | undefined;
+            const analyzeFileGate = new Promise<FileAnalysis>(resolve => {
+                releaseAnalyzeFile = resolve;
+            });
+            mockScanner.analyzeFile.mockImplementation(() => analyzeFileGate);
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/rebuilt.sql', [{ name: 'rebuilt' }]),
+            ]);
+
+            (indexManager as any).updateQueue.add('/queued.sql');
+            const queueRun = (indexManager as any).processUpdateQueue();
+            await new Promise(resolve => setTimeout(resolve, 0));
+
+            const rebuildPromise = indexManager.buildIndex();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+
+            if (!releaseAnalyzeFile) {
+                throw new Error('Expected queued analyzeFile gate to be created');
+            }
+            releaseAnalyzeFile(createMockAnalysis('/queued.sql', [{ name: 'queued' }]));
+
+            await queueRun;
+            await rebuildPromise;
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(2);
+        });
     });
 
     // =========================================================================

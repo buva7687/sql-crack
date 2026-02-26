@@ -162,9 +162,14 @@ function createEmptyLineageGraph(): LineageGraph {
 
 export class MessageHandler {
     private _context: MessageHandlerContext;
+    private _disposed = false;
 
     constructor(context: MessageHandlerContext) {
         this._context = context;
+    }
+
+    public markDisposed(): void {
+        this._disposed = true;
     }
 
     private resolveRequestedDepth(depth: unknown): number {
@@ -240,10 +245,23 @@ export class MessageHandler {
      * Main message router - dispatches messages to appropriate handlers
      */
     private postMessage(msg: WorkspaceHostMessage): void {
+        if (this._disposed) {
+            return;
+        }
         this._context.panel.webview.postMessage(msg);
     }
 
+    private setPanelHtml(html: string): void {
+        if (this._disposed) {
+            return;
+        }
+        this._context.panel.webview.html = html;
+    }
+
     public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
+        if (this._disposed) {
+            return;
+        }
         try {
             switch (message.command) {
                 case 'switchView':
@@ -449,7 +467,7 @@ export class MessageHandler {
 
         const graph = this._context.getCurrentGraph();
         if (graph) {
-            this._context.panel.webview.html = this._context.getWebviewHtml(graph, filter);
+            this.setPanelHtml(this._context.getWebviewHtml(graph, filter));
             return;
         }
         this._context.renderCurrentView();
@@ -485,7 +503,7 @@ export class MessageHandler {
         this._context.setCurrentSearchFilter(filter);
         const graph = this._context.getCurrentGraph();
         if (graph) {
-            this._context.panel.webview.html = this._context.getWebviewHtml(graph, filter);
+            this.setPanelHtml(this._context.getWebviewHtml(graph, filter));
         }
     }
 
@@ -499,7 +517,7 @@ export class MessageHandler {
         this._context.setCurrentSearchFilter(clearFilter);
         const graph = this._context.getCurrentGraph();
         if (graph) {
-            this._context.panel.webview.html = this._context.getWebviewHtml(graph, clearFilter);
+            this.setPanelHtml(this._context.getWebviewHtml(graph, clearFilter));
         }
     }
 
