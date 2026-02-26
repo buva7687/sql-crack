@@ -713,6 +713,7 @@ function tryParseTeradataMergeCompatibility(sql: string, dialect: SqlDialect): P
     }));
 
     layoutGraph(result.nodes, result.edges);
+    assignLineNumbers(result.nodes, sql);
     return result;
 }
 
@@ -963,6 +964,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             const fallbackResult = regexFallbackParse(sql, dialect);
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
+            assignLineNumbers(fallbackResult.nodes, sql);
             return fallbackResult;
         }
 
@@ -1151,6 +1153,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         fallbackResult.hints.push(...ctx.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
+        assignLineNumbers(fallbackResult.nodes, sql);
         return fallbackResult;
     }
 }

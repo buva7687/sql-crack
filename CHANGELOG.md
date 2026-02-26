@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Panel teardown now detaches index update callbacks and marks handler disposed.
 - **Lineage read-failure visibility**: `LineageBuilder` now logs warning-level diagnostics when SQL file reads fail during CTE/alias extraction, instead of silently swallowing failures.
 - **Runtime config normalization compatibility**: Webview runtime limit normalization now prefers typed config values with fallback to legacy window fields.
+- **Fallback navigation line metadata**:
+  - Added `assignLineNumbers(...)` to all regex-fallback early-return paths (Teradata MERGE compatibility, timeout fallback, and parse-error fallback) so editor sync and node navigation retain source line mapping.
+  - Extended line-number assignment heuristics for fallback/DML contexts (`MERGE`, `INTO`, `USING`, `INSERT`, `UPDATE`, `DELETE`) to improve non-SELECT node mapping.
 
 ### Tests
 
@@ -44,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added boundary tests ensuring workspace extraction modules route through the parser adapter contract.
 - Added runtime config contract source tests for typed bootstrap wiring and renderer no-`window as any` usage on key bootstrap fields.
 - Updated audit source-read regression expectations for advanced runtime limit normalization to match the new typed config path.
+- Added fallback line-number regression tests covering Teradata MERGE compatibility path, timeout fallback path, and parse-error fallback path.
 
 ## [0.4.3] - 2026-02-24
 
