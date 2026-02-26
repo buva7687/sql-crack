@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - Unreleased
+
+### Added
+
+- **Typed SQL Flow bootstrap contract**: Introduced `window.sqlCrackConfig` to carry webview bootstrap settings in a structured object while retaining legacy `window.*` fields for backward compatibility.
+- **Workspace parser boundary adapter**: Added `src/workspace/parserConfig.ts` so workspace extraction modules consume a single workspace-facing parser bridge rather than importing deep webview parser internals directly.
+- **Parser worker migration prep coverage**: Added characterization tests for parser worker migration paths (supersession/timeout/cancellation contracts and CSP/URI wiring expectations).
+- **Dialect-switch smoke examples**: Added U6-focused example coverage to exercise one-click dialect-switch hint actions.
+
+### Changed
+
+- **Shared SQL comment stripping**: Consolidated multiple `stripSqlComments` implementations to a single shared, quote-aware implementation in `src/shared/stringUtils.ts`.
+- **Webview state persistence behavior**: Persist interval now uses dirty-flag gating to avoid redundant `postMessage` churn; renderer keyboard-driven state changes now dispatch persistence events.
+- **Workspace extraction keyword management**: Moved reserved-word sets into shared extraction constants used by both reference and schema extractors.
+- **Timer test determinism**: Replaced wall-clock watcher sleeps with fake-timer driven flows and isolated timer scopes to reduce suite-order coupling.
+
+### Fixed
+
+- **Workspace UPDATE...FROM alias leakage**:
+  - `extractUpdateFromAliases` now handles mixed/lowercase `UPDATE/FROM` detection.
+  - Subquery aliases are captured with or without `AS`, preventing false table-reference leakage.
+- **Workspace index race conditions**:
+  - `buildIndex()` now waits for in-flight queued incremental updates before full rebuild.
+  - Queue processing is serialized and safely re-runs if new updates arrive mid-flight.
+- **Workspace disposal races**:
+  - Added disposal guards in `WorkspacePanel` and `MessageHandler` to prevent post-dispose HTML writes and message posts from async callbacks.
+  - Panel teardown now detaches index update callbacks and marks handler disposed.
+- **Lineage read-failure visibility**: `LineageBuilder` now logs warning-level diagnostics when SQL file reads fail during CTE/alias extraction, instead of silently swallowing failures.
+- **Runtime config normalization compatibility**: Webview runtime limit normalization now prefers typed config values with fallback to legacy window fields.
+
+### Tests
+
+- Added workspace regressions for:
+  - UPDATE...FROM alias parsing (case-insensitive and bare alias forms),
+  - index rebuild vs queued update serialization,
+  - post-dispose message/html guard behavior in workspace panel handlers.
+- Added boundary tests ensuring workspace extraction modules route through the parser adapter contract.
+- Added runtime config contract source tests for typed bootstrap wiring and renderer no-`window as any` usage on key bootstrap fields.
+- Updated audit source-read regression expectations for advanced runtime limit normalization to match the new typed config path.
+
 ## [0.4.3] - 2026-02-24
 
 ### Added
