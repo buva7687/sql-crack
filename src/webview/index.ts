@@ -85,6 +85,7 @@ import {
     HintActionEventDetail,
     parseHintActionCommand,
 } from './hintActions';
+import { applyLineOffsetToResult } from './state/lineOffsets';
 
 type HostPostMessagePayload = { command: string; [key: string]: unknown };
 
@@ -575,6 +576,12 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
         }
         if (query.error && !hydratedQuery.error) {
             hydratedQuery.error = query.error;
+        }
+
+        const lineRange = batchResult.queryLineRanges?.[queryIndex];
+        if (lineRange?.startLine && lineRange.startLine > 0) {
+            const lineOffset = lineRange.startLine - 1;
+            applyLineOffsetToResult(hydratedQuery, lineOffset);
         }
 
         batchResult.queries[queryIndex] = hydratedQuery;

@@ -34,6 +34,9 @@ describe('audit section 2 performance regression guards', () => {
         expect(source).toContain('const DEFERRED_QUERY_THRESHOLD = 50;');
         expect(source).toContain('function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void');
         expect(source).toContain('window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold');
+        expect(source).toContain("import { applyLineOffsetToResult } from './state/lineOffsets';");
+        expect(source).toContain('const lineRange = batchResult.queryLineRanges?.[queryIndex];');
+        expect(source).toContain('applyLineOffsetToResult(hydratedQuery, lineOffset);');
         expect(source).toContain('async function hydrateQueryIfNeeded(queryIndex: number): Promise<void>');
         expect(source).toContain('deferredQueryIndexes.has(newIndex)');
         expect(source).toContain("showGlobalLoading('Loading query details...');");

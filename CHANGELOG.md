@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Panel teardown now detaches index update callbacks and marks handler disposed.
 - **Lineage read-failure visibility**: `LineageBuilder` now logs warning-level diagnostics when SQL file reads fail during CTE/alias extraction, instead of silently swallowing failures.
 - **Runtime config normalization compatibility**: Webview runtime limit normalization now prefers typed config values with fallback to legacy window fields.
+- **Deferred-query hydration line mapping**:
+  - Hydrated deferred queries now apply the statement's absolute file-line offset from `queryLineRanges` after standalone re-parse.
+  - Restores correct cursor sync and Cmd/Ctrl+click navigation for deferred queries in large SQL files.
 - **Fallback navigation line metadata**:
   - Added `assignLineNumbers(...)` to all regex-fallback early-return paths (Teradata MERGE compatibility, timeout fallback, and parse-error fallback) so editor sync and node navigation retain source line mapping.
   - Extended line-number assignment heuristics for fallback/DML contexts (`MERGE`, `INTO`, `USING`, `INSERT`, `UPDATE`, `DELETE`) to improve non-SELECT node mapping.
