@@ -13,7 +13,7 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { escapeRegex, stripSqlComments } from '../../shared';
-import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
+import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
 import type {
     AstStatement,
@@ -112,7 +112,7 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const sqlToParse = preprocessForParsing(sql, dialect);
+            const sqlToParse = preprocessSqlForWorkspaceParsing(sql, dialect);
             const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 

@@ -10,7 +10,7 @@ import {
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
 import { escapeRegex, stripSqlComments } from '../../shared';
-import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
+import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 /**
@@ -37,7 +37,7 @@ export class SchemaExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const sqlToParse = preprocessForParsing(sql, dialect);
+            const sqlToParse = preprocessSqlForWorkspaceParsing(sql, dialect);
             const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 

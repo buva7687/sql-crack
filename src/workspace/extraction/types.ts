@@ -1,7 +1,7 @@
 // Extraction Types - Core interfaces for SQL extraction
 // These types support column-level lineage tracking
 
-import { SqlDialect } from '../../webview/types/parser';
+import { SqlDialect } from '../parserConfig';
 
 // Re-export SqlDialect for convenience
 export type { SqlDialect };
