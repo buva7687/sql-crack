@@ -232,6 +232,30 @@ describe('LineageBuilder', () => {
             debugSpy.mockRestore();
         });
 
+        it('logs warning when SQL read fails during CTE/alias extraction in edge building', () => {
+            const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+            mockedFs.existsSync.mockReturnValue(true);
+            mockedFs.readFileSync.mockImplementation(() => {
+                throw new Error('EACCES');
+            });
+
+            // queries present => skips earlier CTE-on-disk fallback pass and targets addFileEdges() path
+            const fileAnalysis = makeFileAnalysis(
+                'restricted.sql',
+                [],
+                [makeRef('orders', 'select', { filePath: 'restricted.sql', statementIndex: 0 })],
+                [{ ctes: [], transformations: [] }]
+            );
+            const files = new Map([['restricted.sql', fileAnalysis]]);
+            const index = makeIndex([], files);
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('CTE/alias extraction (restricted.sql)'));
+            warnSpy.mockRestore();
+        });
+
         it('deduplicates nodes with same ID (first definition wins)', () => {
             const def1 = makeDef('users', 'table', [], { filePath: 'a.sql' });
             const def2 = makeDef('users', 'table', [], { filePath: 'b.sql' });

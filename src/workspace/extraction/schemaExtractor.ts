@@ -11,21 +11,7 @@ import {
 } from './types';
 import { escapeRegex, stripSqlComments } from '../../shared';
 import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
-
-// SQL reserved words that should never be treated as table/view names
-const SQL_RESERVED_WORDS = new Set([
-    'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'truncate',
-    'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null', 'like', 'between',
-    'join', 'inner', 'outer', 'left', 'right', 'full', 'cross', 'on', 'using',
-    'group', 'by', 'having', 'order', 'asc', 'desc', 'limit', 'offset',
-    'union', 'intersect', 'except', 'all', 'distinct', 'as',
-    'case', 'when', 'then', 'else', 'end', 'if', 'exists',
-    'values', 'set', 'into', 'table', 'view', 'index', 'database', 'schema',
-    'primary', 'foreign', 'key', 'references', 'constraint', 'unique', 'check',
-    'default', 'auto_increment', 'identity', 'serial',
-    'with', 'recursive', 'over', 'partition', 'rows', 'range',
-    'true', 'false', 'unknown'
-]);
+import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
@@ -302,7 +288,7 @@ export class SchemaExtractor {
      * Check if a name is a SQL reserved word
      */
     private isReservedWord(name: string): boolean {
-        return SQL_RESERVED_WORDS.has(name.toLowerCase());
+        return SCHEMA_SQL_RESERVED_WORDS.has(name.toLowerCase());
     }
 
 

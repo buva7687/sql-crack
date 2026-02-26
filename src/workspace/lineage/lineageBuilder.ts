@@ -285,7 +285,7 @@ export class LineageBuilder implements LineageGraph {
                 this.extractCTEAndAliasNames(sql, fileCteNames);
             }
         } catch (error) {
-            // File read error - skip
+            logger.warn(`[LineageBuilder] Failed reading SQL file for CTE/alias extraction (${filePath}): ${error instanceof Error ? error.message : String(error)}`);
         }
 
         // Group references by statement index for per-statement lineage
