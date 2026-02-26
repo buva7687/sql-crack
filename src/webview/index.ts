@@ -86,6 +86,34 @@ import {
     parseHintActionCommand,
 } from './hintActions';
 
+type HostPostMessagePayload = { command: string; [key: string]: unknown };
+
+interface SqlCrackWebviewBootstrapConfig {
+    initialSqlCode: string;
+    vscodeTheme: string;
+    isHighContrast: boolean;
+    defaultDialect: string;
+    fileName: string;
+    isPinnedView: boolean;
+    pinId: string | null;
+    viewLocation: string;
+    defaultLayout: string;
+    flowDirection: string;
+    persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
+    initialUiState: unknown;
+    showDeadColumnHints: boolean;
+    combineDdlStatements: boolean;
+    gridStyle: string;
+    nodeAccentPosition: string;
+    showMinimap: string;
+    colorblindMode: ColorblindMode;
+    maxFileSizeKB: number;
+    maxStatements: number;
+    parseTimeoutSeconds: number;
+    isFirstRun: boolean;
+    debugLogging: boolean;
+}
+
 // Global type declarations
 declare global {
     interface Window {
@@ -112,8 +140,9 @@ declare global {
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
         initialUiState?: unknown;
         debugLogging?: boolean;
+        sqlCrackConfig?: Partial<SqlCrackWebviewBootstrapConfig>;
         vscodeApi?: {
-            postMessage: (message: any) => void;
+            postMessage: (message: HostPostMessagePayload) => void;
         };
     }
 }
@@ -126,7 +155,10 @@ function debugLog(...args: unknown[]): void {
 }
 
 // Current state
-let currentDialect: SqlDialect = (window.defaultDialect as SqlDialect) || 'MySQL';
+let currentDialect: SqlDialect =
+    (window.sqlCrackConfig?.defaultDialect as SqlDialect) ||
+    (window.defaultDialect as SqlDialect) ||
+    'MySQL';
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
@@ -184,9 +216,9 @@ function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max
 }
 
 function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; parseTimeoutSeconds: number } {
-    const maxFileSizeKB = normalizeAdvancedLimit(window.maxFileSizeKB, 100, 10, 10000);
-    const maxStatements = normalizeAdvancedLimit(window.maxStatements, 50, 1, 500);
-    const parseTimeoutSeconds = normalizeAdvancedLimit(window.parseTimeoutSeconds, 5, 1, 60);
+    const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);
+    const maxStatements = normalizeAdvancedLimit(window.sqlCrackConfig?.maxStatements ?? window.maxStatements, 50, 1, 500);
+    const parseTimeoutSeconds = normalizeAdvancedLimit(window.sqlCrackConfig?.parseTimeoutSeconds ?? window.parseTimeoutSeconds, 5, 1, 60);
 
     window.maxFileSizeKB = maxFileSizeKB;
     window.maxStatements = maxStatements;

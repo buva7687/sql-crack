@@ -894,9 +894,9 @@ export function initRenderer(container: HTMLElement): void {
     container.setAttribute('aria-label', 'SQL Flow visualization');
 
     // Use extracted canvas setup module
-    const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
+    const configuredColorblindMode = ((window.colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
-    const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
+    const gridStyle = (window.gridStyle || 'lines') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
@@ -1042,7 +1042,7 @@ export function initRenderer(container: HTMLElement): void {
     containerElement = container;
 
     // Set high-contrast state from VS Code theme kind
-    state.isHighContrast = !!(window as any).isHighContrast;
+    state.isHighContrast = !!window.isHighContrast;
 
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
@@ -1616,7 +1616,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
 function getNodeVisualRendererDeps(): NodeVisualRendererDeps {
     return {
         state,
-        getNodeAccentPosition: () => (((window as any).nodeAccentPosition || 'left') as 'left' | 'bottom'),
+        getNodeAccentPosition: () => ((window.nodeAccentPosition || 'left') as 'left' | 'bottom'),
         getNodeVisualIcon,
         getJoinColor,
         getJoinVennDiagram,
@@ -1831,7 +1831,7 @@ function handleEdgeClick(edge: FlowEdge): void {
 
     // Jump to line if available
     if (edge.startLine && typeof window !== 'undefined') {
-        const vscodeApi = (window as any).vscodeApi;
+        const vscodeApi = window.vscodeApi;
         if (vscodeApi && vscodeApi.postMessage) {
             vscodeApi.postMessage({
                 command: 'goToLine',
@@ -3048,8 +3048,8 @@ export function toggleFullscreen(enable?: boolean): void {
         isDarkTheme: state.isDarkTheme,
         onExitRequested: () => toggleFullscreen(false),
         onRequestFullscreen: (nextEnable: boolean) => {
-            if (typeof window !== 'undefined' && (window as any).vscodeApi) {
-                (window as any).vscodeApi.postMessage({
+            if (typeof window !== 'undefined' && window.vscodeApi) {
+                window.vscodeApi.postMessage({
                     command: 'requestFullscreen',
                     enable: nextEnable,
                 });
@@ -3086,7 +3086,7 @@ function applyColorblindModeToRenderedGraph(): void {
 
 export function setColorblindMode(mode: ColorblindMode): void {
     setGlobalColorblindMode(mode);
-    (window as any).colorblindMode = mode;
+    window.colorblindMode = mode;
     applyColorblindModeToRenderedGraph();
 }
 
@@ -3126,7 +3126,7 @@ function applyTheme(dark: boolean): void {
 
     // Apply canvas theme using extracted module
     if (svg && backgroundRect) {
-        const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
+        const gridStyle = (window.gridStyle || 'lines') as GridStyle;
         updateCanvasTheme(svg, backgroundRect, dark, gridStyle);
     }
 
