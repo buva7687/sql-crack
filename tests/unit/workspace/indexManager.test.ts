@@ -883,12 +883,31 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('file watcher', () => {
+        const flushMicrotasks = async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        };
+
+        const flushWatcherDebounce = async () => {
+            jest.advanceTimersByTime(1100);
+            await flushMicrotasks();
+        };
+
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
         beforeEach(async () => {
             mockScanner.getFileCount.mockResolvedValue(5);
             mockScanner.analyzeWorkspace.mockResolvedValue([
                 createMockAnalysis('/test.sql', [{ name: 'users' }])
             ]);
             await indexManager.initialize();
+        });
+
+        afterEach(() => {
+            jest.runOnlyPendingTimers();
+            jest.useRealTimers();
         });
 
         it('should trigger update on file change', async () => {
@@ -903,8 +922,7 @@ describe('IndexManager', () => {
             // Simulate file change
             watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
 
-            // Wait for debounce (1 second in implementation)
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
 
             expect(mockScanner.analyzeFile).toHaveBeenCalled();
         });
@@ -918,7 +936,7 @@ describe('IndexManager', () => {
 
             watcher?.__triggerCreate(vscode.Uri.file('/new.sql'));
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
 
             expect(mockScanner.analyzeFile).toHaveBeenCalled();
         });
@@ -935,7 +953,7 @@ describe('IndexManager', () => {
             watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
             expect(indexManager.getChangesSinceIndex()).toBe(1);
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
             expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 
@@ -952,7 +970,7 @@ describe('IndexManager', () => {
             watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
             expect(indexManager.getChangesSinceIndex()).toBe(1);
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
             expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 
@@ -964,7 +982,7 @@ describe('IndexManager', () => {
             watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
             expect(indexManager.getChangesSinceIndex()).toBe(1);
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
             expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 
@@ -984,7 +1002,7 @@ describe('IndexManager', () => {
             watcher?.__triggerDelete(vscode.Uri.file('/delete.sql'));
 
             // Delete is not debounced
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await flushMicrotasks();
 
             expect(indexManager.findDefinition('delete_table')).toBeUndefined();
             expect(indexManager.getChangesSinceIndex()).toBe(0);
@@ -996,7 +1014,7 @@ describe('IndexManager', () => {
             watcher?.__triggerChange(vscode.Uri.file('/workspace/node_modules/ignored.sql'));
             watcher?.__triggerCreate(vscode.Uri.file('/workspace/dist/generated.sql'));
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
 
             expect(mockScanner.analyzeFile).not.toHaveBeenCalled();
         });
@@ -1008,7 +1026,7 @@ describe('IndexManager', () => {
             watcher?.__triggerDelete(vscode.Uri.file('/workspace/.git/ignored.sql'));
             watcher?.__triggerDelete(vscode.Uri.file('/workspace/build/output.sql'));
 
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await flushMicrotasks();
 
             expect(removeSpy).not.toHaveBeenCalled();
         });
@@ -1030,7 +1048,7 @@ describe('IndexManager', () => {
             // File outside scope — should be ignored
             watcher?.__triggerChange(vscode.Uri.file('/workspace/other_folder/query.sql'));
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
 
             // analyzeFile should NOT be called for the out-of-scope file
             // (it was called once during initialize for the in-scope file)
@@ -1053,7 +1071,7 @@ describe('IndexManager', () => {
             const watcher = __getFileSystemWatcher();
             watcher?.__triggerChange(vscode.Uri.file('/workspace/subfolder_backup/query.sql'));
 
-            await new Promise(resolve => setTimeout(resolve, 1100));
+            await flushWatcherDebounce();
 
             expect(mockScanner.analyzeFile).not.toHaveBeenCalledWith(
                 expect.objectContaining({ fsPath: '/workspace/subfolder_backup/query.sql' })
@@ -1086,8 +1104,8 @@ describe('IndexManager', () => {
                 affectsConfiguration: (key: string) => key === 'sqlCrack.additionalFileExtensions',
             });
 
-            await new Promise(resolve => setTimeout(resolve, 0));
-            await new Promise(resolve => setTimeout(resolve, 0));
+            jest.advanceTimersByTime(0);
+            await flushMicrotasks();
 
             expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);

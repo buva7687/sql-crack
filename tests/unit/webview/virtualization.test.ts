@@ -295,7 +295,14 @@ describe('virtualization', () => {
     });
 
     describe('debounce', () => {
-        jest.useFakeTimers();
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
+        afterEach(() => {
+            jest.runOnlyPendingTimers();
+            jest.useRealTimers();
+        });
 
         it('should delay function execution', () => {
             const fn = jest.fn();
@@ -338,7 +345,14 @@ describe('virtualization', () => {
     });
 
     describe('throttle', () => {
-        jest.useFakeTimers();
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
+        afterEach(() => {
+            jest.runOnlyPendingTimers();
+            jest.useRealTimers();
+        });
 
         it('should execute immediately on first call', () => {
             const fn = jest.fn();
