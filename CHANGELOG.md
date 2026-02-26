@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace parser boundary adapter**: Added `src/workspace/parserConfig.ts` so workspace extraction modules consume a single workspace-facing parser bridge rather than importing deep webview parser internals directly.
 - **Parser worker migration prep coverage**: Added characterization tests for parser worker migration paths (supersession/timeout/cancellation contracts and CSP/URI wiring expectations).
 - **Dialect-switch smoke examples**: Added U6-focused example coverage to exercise one-click dialect-switch hint actions.
+- **Configurable deferred query hydration threshold**: Added `sqlCrack.advanced.deferredQueryThreshold` (default `50`) to control when SQL Flow compacts non-active batch queries and hydrates them on demand.
 
 ### Changed
 

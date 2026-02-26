@@ -17,6 +17,7 @@ describe('webview runtime config contract', () => {
         expect(indexSource).toContain('interface SqlCrackWebviewBootstrapConfig');
         expect(indexSource).toContain('sqlCrackConfig?: Partial<SqlCrackWebviewBootstrapConfig>');
         expect(indexSource).toContain('window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB');
+        expect(indexSource).toContain('window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold');
         expect(indexSource).toContain('window.sqlCrackConfig?.defaultDialect');
     });
 

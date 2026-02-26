@@ -109,6 +109,7 @@ interface SqlCrackWebviewBootstrapConfig {
     colorblindMode: ColorblindMode;
     maxFileSizeKB: number;
     maxStatements: number;
+    deferredQueryThreshold: number;
     parseTimeoutSeconds: number;
     isFirstRun: boolean;
     debugLogging: boolean;
@@ -135,6 +136,7 @@ declare global {
         colorblindMode?: ColorblindMode;
         maxFileSizeKB?: number;
         maxStatements?: number;
+        deferredQueryThreshold?: number;
         parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
@@ -215,16 +217,18 @@ function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max
     return Math.min(max, Math.max(min, rounded));
 }
 
-function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; parseTimeoutSeconds: number } {
+function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; deferredQueryThreshold: number; parseTimeoutSeconds: number } {
     const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);
     const maxStatements = normalizeAdvancedLimit(window.sqlCrackConfig?.maxStatements ?? window.maxStatements, 50, 1, 500);
+    const deferredQueryThreshold = normalizeAdvancedLimit(window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold, DEFERRED_QUERY_THRESHOLD, 1, 500);
     const parseTimeoutSeconds = normalizeAdvancedLimit(window.sqlCrackConfig?.parseTimeoutSeconds ?? window.parseTimeoutSeconds, 5, 1, 60);
 
     window.maxFileSizeKB = maxFileSizeKB;
     window.maxStatements = maxStatements;
+    window.deferredQueryThreshold = deferredQueryThreshold;
     window.parseTimeoutSeconds = parseTimeoutSeconds;
 
-    return { maxFileSizeKB, maxStatements, parseTimeoutSeconds };
+    return { maxFileSizeKB, maxStatements, deferredQueryThreshold, parseTimeoutSeconds };
 }
 
 function syncRefreshButtonState(): void {
@@ -502,9 +506,9 @@ function clearDeferredQueryState(): void {
     hydrationPromises.clear();
 }
 
-function compactBatchResultMemory(result: BatchParseResult, activeIndex: number): void {
+function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void {
     clearDeferredQueryState();
-    if (result.queries.length <= DEFERRED_QUERY_THRESHOLD) {
+    if (result.queries.length <= deferredQueryThreshold) {
         return;
     }
 
@@ -1166,7 +1170,7 @@ async function visualize(sql: string): Promise<void> {
         if (requestId !== parseRequestId) {
             return;
         }
-        compactBatchResultMemory(result, 0);
+        compactBatchResultMemory(result, 0, runtimeConfig.deferredQueryThreshold);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {

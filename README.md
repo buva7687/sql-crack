@@ -308,6 +308,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
 | `sqlCrack.advanced.maxFileSizeKB` | `100` | Max SQL file size before truncation handling (10-10000) |
 | `sqlCrack.advanced.maxStatements` | `50` | Max statements parsed per file (1-500) |
+| `sqlCrack.advanced.deferredQueryThreshold` | `50` | Query count threshold before SQL Flow compacts non-active query graphs and hydrates them on demand (1-500) |
 | `sqlCrack.advanced.parseTimeoutSeconds` | `5` | Parser timeout in seconds (1-60) |
 | `sqlCrack.advanced.debugLogging` | `false` | Enable verbose SQL Crack output-channel logs |
 | `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |

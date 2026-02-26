@@ -23,4 +23,15 @@ describe('diagnostics problems setting config', () => {
         expect(setting.type).toBe('boolean');
         expect(setting.default).toBe(false);
     });
+
+    it('registers deferredQueryThreshold with default 50', () => {
+        const packageJson = JSON.parse(
+            readFileSync(join(__dirname, '../../package.json'), 'utf8')
+        );
+
+        const setting = packageJson?.contributes?.configuration?.properties?.['sqlCrack.advanced.deferredQueryThreshold'];
+        expect(setting).toBeDefined();
+        expect(setting.type).toBe('number');
+        expect(setting.default).toBe(50);
+    });
 });

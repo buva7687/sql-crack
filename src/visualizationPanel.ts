@@ -552,6 +552,7 @@ export class VisualizationPanel {
         const colorblindMode = config.get<string>('colorblindMode') || 'off';
         const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
         const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
+        const deferredQueryThreshold = normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500);
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
@@ -612,6 +613,7 @@ export class VisualizationPanel {
             colorblindMode: ${this._escapeForInlineScript(colorblindMode)},
             maxFileSizeKB: ${this._escapeForInlineScript(maxFileSizeKB)},
             maxStatements: ${this._escapeForInlineScript(maxStatements)},
+            deferredQueryThreshold: ${this._escapeForInlineScript(deferredQueryThreshold)},
             parseTimeoutSeconds: ${this._escapeForInlineScript(parseTimeoutSeconds)},
             isFirstRun: ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())},
             debugLogging: ${this._escapeForInlineScript(debugLogging)}
@@ -637,6 +639,7 @@ export class VisualizationPanel {
         window.colorblindMode = ${this._escapeForInlineScript(colorblindMode)};
         window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
         window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
+        window.deferredQueryThreshold = ${this._escapeForInlineScript(deferredQueryThreshold)};
         window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
         window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
         window.debugLogging = ${this._escapeForInlineScript(debugLogging)};
