@@ -31,7 +31,7 @@ describe('audit section 2 performance regression guards', () => {
 
     it('P7: batch rendering supports deferred query hydration to reduce peak in-memory query payloads', () => {
         const source = readFileSync(join(__dirname, '../../src/webview/index.ts'), 'utf8');
-        expect(source).toContain('const DEFERRED_QUERY_THRESHOLD = 12;');
+        expect(source).toContain('const DEFERRED_QUERY_THRESHOLD = 50;');
         expect(source).toContain('function compactBatchResultMemory(result: BatchParseResult, activeIndex: number): void');
         expect(source).toContain('async function hydrateQueryIfNeeded(queryIndex: number): Promise<void>');
         expect(source).toContain('deferredQueryIndexes.has(newIndex)');

@@ -175,7 +175,7 @@ let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
-const DEFERRED_QUERY_THRESHOLD = 12;
+const DEFERRED_QUERY_THRESHOLD = 50;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
