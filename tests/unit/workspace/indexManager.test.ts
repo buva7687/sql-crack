@@ -13,6 +13,7 @@
  * This lets us control exactly what "files" exist and what they "contain".
  */
 
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { IndexManager } from '../../../src/workspace/indexManager';
 import { WorkspaceScanner } from '../../../src/workspace/scanner';
@@ -32,6 +33,9 @@ jest.mock('vscode');
 // Mock WorkspaceScanner so we control what "files" are found
 jest.mock('../../../src/workspace/scanner');
 
+/** Drain the microtask queue so pending promise continuations execute. */
+const flushPromises = (): Promise<void> => new Promise(resolve => process.nextTick(resolve));
+
 describe('IndexManager', () => {
     let indexManager: IndexManager;
     let mockContext: ExtensionContext;
@@ -44,7 +48,7 @@ describe('IndexManager', () => {
         references: Partial<TableReference>[] = []
     ): FileAnalysis => ({
         filePath,
-        fileName: filePath.split('/').pop() || '',
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: `hash-${filePath}`,
         definitions: definitions.map(d => ({
@@ -274,10 +278,10 @@ describe('IndexManager', () => {
 
             (indexManager as any).updateQueue.add('/queued.sql');
             const queueRun = (indexManager as any).processUpdateQueue();
-            await new Promise(resolve => setTimeout(resolve, 0));
+            await flushPromises();
 
             const rebuildPromise = indexManager.buildIndex();
-            await new Promise(resolve => setTimeout(resolve, 0));
+            await flushPromises();
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
 
             if (!releaseAnalyzeFile) {
@@ -661,7 +665,7 @@ describe('IndexManager', () => {
             }
         });
 
-        it('flushes pending debounced persist when disposed', async () => {
+        it('flushes pending debounced persist via flushPersist()', async () => {
             jest.useFakeTimers();
             try {
                 mockScanner.analyzeWorkspace.mockResolvedValue([
@@ -679,9 +683,11 @@ describe('IndexManager', () => {
                 await indexManager.updateFile(vscode.Uri.file('/test.sql'));
                 expect(workspaceUpdate).not.toHaveBeenCalled();
 
-                indexManager.dispose();
-                await Promise.resolve();
+                // flushPersist should clear the timer and persist immediately
+                await indexManager.flushPersist();
                 expect(workspaceUpdate).toHaveBeenCalledTimes(1);
+
+                indexManager.dispose();
 
                 // Prevent double-dispose in afterEach for this test.
                 indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');

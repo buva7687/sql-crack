@@ -8,6 +8,7 @@
 jest.mock('fs');
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
 import { logger } from '../../../../src/logger';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
@@ -91,7 +92,7 @@ function makeFileAnalysis(
 ): FileAnalysis {
     return {
         filePath,
-        fileName: filePath.split('/').pop() || filePath,
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: 'abc123',
         definitions: defs,

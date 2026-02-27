@@ -438,6 +438,20 @@ export class IndexManager {
     }
 
     /**
+     * Flush any pending index persistence to workspace state.
+     * Call before dispose() to ensure data is not lost on shutdown.
+     */
+    async flushPersist(): Promise<void> {
+        if (this._persistTimer) {
+            clearTimeout(this._persistTimer);
+            this._persistTimer = null;
+        }
+        if (this.index) {
+            await this.persistIndex();
+        }
+    }
+
+    /**
      * Dispose resources
      */
     dispose(): void {
@@ -456,7 +470,6 @@ export class IndexManager {
         if (this._persistTimer) {
             clearTimeout(this._persistTimer);
             this._persistTimer = null;
-            void this.persistIndex();
         }
     }
 

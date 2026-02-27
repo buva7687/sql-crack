@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { buildDependencyGraph } from '../../../src/workspace/dependencyGraph';
 import { WorkspaceIndex, FileAnalysis, SchemaDefinition, TableReference } from '../../../src/workspace/types';
 
@@ -25,7 +26,7 @@ function createReference(filePath: string, tableName: string): TableReference {
 function createFileAnalysis(filePath: string, definition: SchemaDefinition, references: TableReference[]): FileAnalysis {
     return {
         filePath,
-        fileName: filePath.split('/').pop() || filePath,
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: `${filePath}-hash`,
         definitions: [definition],

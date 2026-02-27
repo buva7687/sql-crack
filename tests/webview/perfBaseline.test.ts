@@ -20,11 +20,13 @@ const fixtureSql = fs.readFileSync(fixturePath, 'utf-8');
 
 // Performance thresholds (in milliseconds) - these are upper bounds
 // If parsing takes longer than these, there may be a regression
+// CI environments are typically slower — use wider margins when PERF_BASELINE_MULTIPLIER is set
+const perfMultiplier = Number(process.env.PERF_BASELINE_MULTIPLIER) || 1;
 const THRESHOLDS = {
-    singleSimpleQuery: 50,      // Simple SELECT should be < 50ms
-    singleComplexQuery: 200,    // Complex CTE query should be < 200ms
-    batch20Queries: 1000,       // Full batch of 20 queries should be < 1s
-    batchMemoryMB: 50,          // Memory usage should be < 50MB
+    singleSimpleQuery: 50 * perfMultiplier,       // Simple SELECT should be < 50ms
+    singleComplexQuery: 200 * perfMultiplier,      // Complex CTE query should be < 200ms
+    batch20Queries: 1000 * perfMultiplier,         // Full batch of 20 queries should be < 1s
+    batchMemoryMB: 50,                             // Memory usage should be < 50MB
 };
 
 describe('Performance Baseline - Parsing Speed', () => {

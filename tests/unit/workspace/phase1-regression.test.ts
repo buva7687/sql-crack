@@ -8,6 +8,7 @@
  * 4. Concurrency guard on buildIndex()
  */
 
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { IndexManager } from '../../../src/workspace/indexManager';
 import { WorkspaceScanner } from '../../../src/workspace/scanner';
@@ -179,7 +180,7 @@ describe('File watcher custom extensions', () => {
 
     const createMockAnalysis = (filePath: string, definitions: Partial<SchemaDefinition>[] = []): FileAnalysis => ({
         filePath,
-        fileName: filePath.split('/').pop() || '',
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: `hash-${filePath}`,
         definitions: definitions.map(d => ({
@@ -276,7 +277,7 @@ describe('buildIndex concurrency guard', () => {
 
     const createMockAnalysis = (filePath: string): FileAnalysis => ({
         filePath,
-        fileName: filePath.split('/').pop() || '',
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: `hash-${filePath}`,
         definitions: [{ name: 'users', type: 'table' as const, filePath, lineNumber: 1, columns: [], sql: 'CREATE TABLE users' }] as SchemaDefinition[],

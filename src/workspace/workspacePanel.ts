@@ -261,7 +261,9 @@ export class WorkspacePanel {
             if (this._isDisposed) {
                 return;
             }
-            void this.rebuildAndRenderGraph();
+            void this.rebuildAndRenderGraph().catch(err =>
+                logger.warn(`[WorkspacePanel] rebuildAndRenderGraph failed: ${err instanceof Error ? err.message : String(err)}`)
+            );
         });
 
         // Listen for VS Code theme changes — hot-swap CSS to avoid flicker
@@ -916,7 +918,12 @@ ${bodyContent}
 
         this._messageHandler?.markDisposed();
         this._indexManager.setOnIndexUpdated(null);
-        this._indexManager.dispose();
+        // Flush pending index persistence before disposing resources
+        void this._indexManager.flushPersist().catch(err =>
+            logger.warn(`[WorkspacePanel] flushPersist failed during dispose: ${err instanceof Error ? err.message : String(err)}`)
+        ).finally(() => {
+            this._indexManager.dispose();
+        });
         this._messageHandler = null;
         this._panel.dispose();
 
