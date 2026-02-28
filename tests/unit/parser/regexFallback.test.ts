@@ -77,8 +77,9 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
         });
 
         it('should handle MERGE with subquery source', () => {
+            // Use MySQL to exercise the regex fallback path (PostgreSQL now uses the compatibility parser)
             const sql = 'MERGE INTO target USING (SELECT * FROM source_table WHERE active = true) AS src ON target.id = src.id WHEN MATCHED THEN UPDATE SET target.value = src.value';
-            const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
 
             expect(result.partial).toBe(true);
             expect(result.nodes.length).toBeGreaterThan(0);

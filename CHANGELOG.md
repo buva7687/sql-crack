@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MERGE compatibility parser**: Added a structured MERGE statement parser (`src/webview/parser/statements/merge.ts`) for TransactSQL, Oracle, Snowflake, BigQuery, Teradata, and PostgreSQL. Extracts target table, source tables (including subquery sources), WHEN branches, SET/INSERT columns, and ON condition, producing real `merge_source`/`merge_target` edges and non-partial result nodes. Wired ahead of AST parsing in sqlParser.ts so MERGE statements no longer fall through to the generic regex fallback.
 - **Typed SQL Flow bootstrap contract**: Introduced `window.sqlCrackConfig` to carry webview bootstrap settings in a structured object while retaining legacy `window.*` fields for backward compatibility.
 - **Workspace parser boundary adapter**: Added `src/workspace/parserConfig.ts` so workspace extraction modules consume a single workspace-facing parser bridge rather than importing deep webview parser internals directly.
 - **Parser worker migration prep coverage**: Added characterization tests for parser worker migration paths (supersession/timeout/cancellation contracts and CSP/URI wiring expectations).
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fallback navigation line metadata**:
   - Added `assignLineNumbers(...)` to all regex-fallback early-return paths (Teradata MERGE compatibility, timeout fallback, and parse-error fallback) so editor sync and node navigation retain source line mapping.
   - Extended line-number assignment heuristics for fallback/DML contexts (`MERGE`, `INTO`, `USING`, `INSERT`, `UPDATE`, `DELETE`) to improve non-SELECT node mapping.
+- **Session/utility command dialect gating**: `tryParseSessionCommand()` and `getSessionCommandInfo()` now enforce the `dialects` restriction on session command patterns. Previously, dialect-scoped commands (e.g., Snowflake `USE WAREHOUSE`) matched on all dialects. Non-matching patterns now fall through to generic handlers instead of silently dropping the command.
 
 ### Tests
 
@@ -52,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added runtime config contract source tests for typed bootstrap wiring and renderer no-`window as any` usage on key bootstrap fields.
 - Updated audit source-read regression expectations for advanced runtime limit normalization to match the new typed config path.
 - Added fallback line-number regression tests covering Teradata MERGE compatibility path, timeout fallback path, and parse-error fallback path.
+- Added MERGE compatibility parser tests covering all 6 supported dialects, subquery/CTE sources, multiple WHEN clauses, schema-qualified/quoted table names, SET/INSERT column extraction, and dialect-specific hint content.
+- Added session command dialect gating regressions: Snowflake-only `USE WAREHOUSE` correctly falls through to generic `USE` on PostgreSQL; batch parsing preserves non-Snowflake session commands.
 
 ## [0.4.3] - 2026-02-24
 

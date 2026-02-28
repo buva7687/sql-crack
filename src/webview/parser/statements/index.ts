@@ -9,6 +9,7 @@ export {
     type StatementPresentation
 } from './ddl';
 export { tryProcessDmlStatements, type ProcessDmlStatementsArgs } from './dml';
+export { tryParseCompatibleMergeStatement } from './merge';
 export {
     processSelectStatement,
     type SelectRuntimeDependencies

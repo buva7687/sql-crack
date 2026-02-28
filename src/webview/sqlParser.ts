@@ -48,6 +48,7 @@ import {
     getStatementPresentation,
     getTableName,
     processSelectStatement,
+    tryParseCompatibleMergeStatement,
     tryParseSessionCommand,
     tryProcessCreateStatement,
     tryProcessDmlStatements
@@ -349,7 +350,7 @@ export function parseSqlBatch(
         const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
         // Check if this is a session command
-        const sessionInfo = getSessionCommandInfo(stmt);
+        const sessionInfo = getSessionCommandInfo(stmt, dialect);
 
         if (sessionInfo) {
             // Calculate actual start line by counting lines in leading comments
@@ -661,57 +662,11 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     }
 }
 
-function tryParseTeradataMergeCompatibility(sql: string, dialect: SqlDialect): ParseResult | null {
-    if (dialect !== 'Teradata') {
+function tryParseMergeCompatibility(sql: string, dialect: SqlDialect): ParseResult | null {
+    const result = tryParseCompatibleMergeStatement(sql, dialect);
+    if (!result) {
         return null;
     }
-
-    const keyword = getLeadingKeyword(sql);
-    if (keyword !== 'MERGE') {
-        return null;
-    }
-
-    const result = regexFallbackParse(sql, dialect);
-
-    // MERGE is unsupported by the proxy AST parser, but we can still provide a
-    // deterministic structural graph (source/target/branches) without marking
-    // this as a degraded/partial parse.
-    delete result.partial;
-    result.hints = result.hints.filter(h =>
-        h.message !== 'Partial visualization - SQL parser could not parse this query'
-    );
-    result.hints = result.hints.map(h => {
-        if (h.message.includes('MERGE statement detected (using fallback parser)')) {
-            return {
-                ...h,
-                message: 'MERGE statement detected (Teradata compatibility parser)',
-            };
-        }
-        return h;
-    });
-    result.hints.unshift({
-        type: 'info',
-        message: 'Parsed Teradata MERGE using compatibility parser',
-        suggestion: 'MERGE is structurally mapped (source/target/WHEN branches) because this Teradata MERGE form is unsupported by the proxy AST parser.',
-        category: 'best-practice',
-        severity: 'low',
-    });
-    result.nodes = result.nodes.map(node => ({
-        ...node,
-        description: node.description
-            ? node.description
-                .replace('detected by fallback parser', 'detected by Teradata compatibility parser')
-                .replace('Partial visualization - parsing failed', 'Compatibility-parsed Teradata MERGE')
-            : node.description,
-        details: Array.isArray(node.details)
-            ? node.details.map(detail =>
-                detail === 'Partial visualization - parsing failed'
-                    ? 'Compatibility-parsed Teradata MERGE'
-                    : detail
-            )
-            : node.details,
-    }));
-
     layoutGraph(result.nodes, result.edges);
     assignLineNumbers(result.nodes, sql);
     return result;
@@ -876,9 +831,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return sessionResult;
     }
 
-    const teradataMergeResult = tryParseTeradataMergeCompatibility(sql, dialect);
-    if (teradataMergeResult) {
-        return teradataMergeResult;
+    const mergeCompatibilityResult = tryParseMergeCompatibility(sql, dialect);
+    if (mergeCompatibilityResult) {
+        return mergeCompatibilityResult;
     }
 
     // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)

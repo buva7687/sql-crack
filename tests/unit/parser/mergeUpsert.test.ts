@@ -32,7 +32,7 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             expect(result.hints?.length).toBeGreaterThan(0);
         });
 
-        it('should suggest PostgreSQL ON CONFLICT as alternative to MERGE', () => {
+        it('should parse PostgreSQL MERGE via compatibility parser', () => {
             const sql = `
                 MERGE INTO target_table t
                 USING source_table s
@@ -41,10 +41,11 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            // Should suggest ON CONFLICT alternative
-            const mergeHint = result.hints?.find((h: any) => 
+            // PostgreSQL MERGE now goes through the compatibility parser
+            expect(result.partial).toBeUndefined();
+            const mergeHint = result.hints?.find((h: any) =>
                 h.message?.toLowerCase().includes('merge') &&
-                h.suggestion?.toLowerCase().includes('on conflict')
+                h.suggestion?.toLowerCase().includes('postgresql')
             );
             expect(mergeHint).toBeDefined();
         });

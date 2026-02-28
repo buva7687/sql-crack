@@ -208,7 +208,10 @@ export function tryParseSessionCommand(
 
     for (const cmd of SESSION_COMMAND_PATTERNS) {
         const match = trimmedSql.match(cmd.pattern);
-        if (match) {
+        if (!match || (cmd.dialects && !cmd.dialects.includes(context.dialect))) {
+            continue;
+        }
+        {
             const nodeId = genId('session');
             const nodes: FlowNode[] = [{
                 id: nodeId,
@@ -243,12 +246,15 @@ export function tryParseSessionCommand(
     return null;
 }
 
-export function getSessionCommandInfo(sql: string): { type: string; description: string } | null {
+export function getSessionCommandInfo(sql: string, dialect: SqlDialect): { type: string; description: string } | null {
     const trimmedSql = stripLeadingComments(sql);
 
     for (const cmd of SESSION_COMMAND_PATTERNS) {
         const match = trimmedSql.match(cmd.pattern);
-        if (match) {
+        if (!match || (cmd.dialects && !cmd.dialects.includes(dialect))) {
+            continue;
+        }
+        {
             return {
                 type: cmd.type,
                 description: cmd.description(match)

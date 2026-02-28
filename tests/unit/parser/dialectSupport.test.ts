@@ -9,7 +9,8 @@
  * - SQL Server (TransactSQL) specific features
  */
 
-import { parseSql, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
+import { parseSql, parseSqlBatch, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
+import { getSessionCommandInfo } from '../../../src/webview/parser/statements/ddl';
 
 describe('Dialect Support', () => {
   describe('MySQL', () => {
@@ -307,6 +308,25 @@ describe('Dialect Support', () => {
       expect(result.error).toBeUndefined();
       expect(result.hints.some(h => h.message.includes('Rewrote GROUPING SETS'))).toBe(true);
     });
+
+    it('does not classify Snowflake-only utility commands as PostgreSQL session commands', () => {
+      // Should fall through to generic USE, not match Snowflake-specific USE WAREHOUSE
+      const info = getSessionCommandInfo('USE WAREHOUSE analytics_wh', dialect);
+      expect(info).not.toBeNull();
+      expect(info!.type).toBe('USE');
+      expect(info!.type).not.toBe('USE WAREHOUSE');
+
+      const result = parseSql('USE WAREHOUSE analytics_wh', dialect);
+      expect(result.hints.some(h => h.message.includes('USE WAREHOUSE statement'))).toBe(false);
+    });
+
+    it('does not merge Snowflake-only utility commands into PostgreSQL session batches', () => {
+      const batch = parseSqlBatch('USE WAREHOUSE analytics_wh;\nSELECT 1;', dialect);
+
+      expect(batch.queries).toHaveLength(2);
+      expect(batch.queries[0].hints.some(h => h.message.includes('USE WAREHOUSE statement'))).toBe(false);
+      expect(batch.queries[1].error).toBeUndefined();
+    });
   });
 
   describe('Snowflake', () => {
@@ -358,6 +378,13 @@ describe('Dialect Support', () => {
       expect(result.partial).not.toBe(true);
       expect(result.error).toBeUndefined();
       expect(result.hints.some(h => h.message.includes('Collapsed deep Snowflake path expressions'))).toBe(true);
+    });
+
+    it('matches USE WAREHOUSE only for Snowflake dialect', () => {
+      const result = parseSql('USE WAREHOUSE analytics_wh', dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.hints.some(h => h.message.includes('USE WAREHOUSE statement'))).toBe(true);
     });
   });
 
