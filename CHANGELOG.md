@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - INSERT...SELECT source flow is preserved when conflict clauses are attached.
   - Dialect-specific info hints explain the conflict handling model.
   - SQLite `ON CONFLICT` proxies through the PostgreSQL grammar when the bundled SQLite grammar rejects it.
+- **Bulk data operation parser**: Added a dedicated bulk-operation compatibility parser (`src/webview/parser/statements/bulk.ts`) that renders real source/target flow graphs instead of collapsing bulk statements into utility-command boxes.
+  - PostgreSQL/Redshift `COPY ... FROM` and `COPY ... TO` (file, S3, STDOUT).
+  - PostgreSQL `COPY (SELECT ...) TO` — preserves inner SELECT flow graph.
+  - Snowflake `COPY INTO <table> FROM <stage>` and `COPY INTO <stage> FROM (SELECT ...)`.
+  - Redshift `UNLOAD ('SELECT ...') TO` — preserves embedded SELECT flow.
+  - BigQuery `EXPORT DATA OPTIONS(...) AS SELECT` — extracts URI destination and SELECT source.
+  - MySQL `LOAD DATA [LOCAL] INFILE` and Hive `LOAD DATA INPATH`.
+  - Hive `INSERT OVERWRITE TABLE ... SELECT` and `INSERT OVERWRITE DIRECTORY ... SELECT`.
+  - Removed overlapping `COPY`, `EXPORT DATA`, and `LOAD DATA` patterns from session-command classifier so batch parsing no longer merges these as "Session Setup".
 - **Typed SQL Flow bootstrap contract**: Introduced `window.sqlCrackConfig` to carry webview bootstrap settings in a structured object while retaining legacy `window.*` fields for backward compatibility.
 - **Workspace parser boundary adapter**: Added `src/workspace/parserConfig.ts` so workspace extraction modules consume a single workspace-facing parser bridge rather than importing deep webview parser internals directly.
 - **Parser worker migration prep coverage**: Added characterization tests for parser worker migration paths (supersession/timeout/cancellation contracts and CSP/URI wiring expectations).
@@ -64,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added MERGE compatibility parser tests covering all 6 supported dialects, subquery/CTE sources, multiple WHEN clauses, schema-qualified/quoted table names, SET/INSERT column extraction, and dialect-specific hint content.
 - Added session command dialect gating regressions: Snowflake-only `USE WAREHOUSE` correctly falls through to generic `USE` on PostgreSQL; batch parsing preserves non-Snowflake session commands.
 - Added UPSERT visualization tests covering PostgreSQL ON CONFLICT (DO NOTHING, DO UPDATE, INSERT...SELECT), MySQL/MariaDB ON DUPLICATE KEY UPDATE, SQLite INSERT OR REPLACE/IGNORE, and SQLite ON CONFLICT via PostgreSQL proxy AST.
+- Added bulk operation visualization tests covering PostgreSQL COPY FROM/TO (including COPY query export and STDOUT), Snowflake COPY INTO (stage load and SELECT export), Redshift UNLOAD and COPY import, BigQuery EXPORT DATA, MySQL LOAD DATA INFILE, Hive LOAD DATA INPATH, Hive INSERT OVERWRITE TABLE/DIRECTORY, session-command misclassification regressions, and batch separation regressions.
 
 ## [0.4.3] - 2026-02-24
 

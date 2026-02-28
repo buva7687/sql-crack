@@ -49,6 +49,7 @@ import {
     getStatementPresentation,
     getTableName,
     processSelectStatement,
+    tryParseBulkDataStatement,
     tryParseCompatibleMergeStatement,
     tryParseSessionCommand,
     tryProcessCreateStatement,
@@ -836,6 +837,18 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
 
     if (!sql || !sql.trim()) {
         return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
+    }
+
+    const bulkResult = tryParseBulkDataStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+    });
+    if (bulkResult) {
+        layoutGraph(bulkResult.nodes, bulkResult.edges);
+        assignLineNumbers(bulkResult.nodes, sql);
+        return bulkResult;
     }
 
     // Check if this is a session/utility command that node-sql-parser doesn't support

@@ -8,6 +8,7 @@ export {
     tryProcessCreateStatement,
     type StatementPresentation
 } from './ddl';
+export { tryParseBulkDataStatement } from './bulk';
 export { tryProcessDmlStatements, type ProcessDmlStatementsArgs } from './dml';
 export { tryParseCompatibleMergeStatement } from './merge';
 export {
