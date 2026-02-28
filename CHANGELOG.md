@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BigQuery ARRAY type detection regex hardening**: Replaced greedy `ARRAY<.*>` pattern with `ARRAY<[^>]*>` in dialect detection to prevent regex backtracking on nested angle brackets (e.g., `ARRAY<STRUCT<ARRAY<INT64>>>`).
 - **Workspace UPDATE...FROM alias leakage**:
   - `extractUpdateFromAliases` now handles mixed/lowercase `UPDATE/FROM` detection.
   - Subquery aliases are captured with or without `AS`, preventing false table-reference leakage.
@@ -86,6 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `assignLineNumbers(...)` to all regex-fallback early-return paths (Teradata MERGE compatibility, timeout fallback, and parse-error fallback) so editor sync and node navigation retain source line mapping.
   - Extended line-number assignment heuristics for fallback/DML contexts (`MERGE`, `INTO`, `USING`, `INSERT`, `UPDATE`, `DELETE`) to improve non-SELECT node mapping.
 - **Session/utility command dialect gating**: `tryParseSessionCommand()` and `getSessionCommandInfo()` now enforce the `dialects` restriction on session command patterns. Previously, dialect-scoped commands (e.g., Snowflake `USE WAREHOUSE`) matched on all dialects. Non-matching patterns now fall through to generic handlers instead of silently dropping the command.
+- **Mixed-dialect batch query visualization**:
+  - `parseSqlBatch()` now honors per-statement `-- Dialect: ...` directives during batch parsing instead of forcing the file-level dialect across all statements.
+  - Session and merged-DDL batch grouping now flush on dialect boundaries so mixed files do not incorrectly merge statements across dialect scopes.
+  - Plain non-CTAS `CREATE TABLE` now renders as a single created-table result node with foreign-key reference flow, instead of showing a duplicate target-to-result chain.
+- **Redshift generic DDL compatibility fallback**: Redshift now proxies generic `CREATE`, `ALTER`, `DROP`, and `TRUNCATE` statements through the PostgreSQL grammar when the bundled Redshift grammar rejects structurally compatible DDL. This fixes example-file cases such as multi-target `DROP TABLE IF EXISTS ...` rendering as empty partial results.
+- **Empty executable query recovery in SQL Flow**: When a batch query tab contains executable SQL but reaches the renderer with `nodes.length === 0`, the webview now reparses the stored statement payload before showing an empty-state error. Unrecoverable reparses now degrade to an explicit query error instead of the generic "No visualization data" blank state.
 
 ### Tests
 
@@ -101,6 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added session command dialect gating regressions: Snowflake-only `USE WAREHOUSE` correctly falls through to generic `USE` on PostgreSQL; batch parsing preserves non-Snowflake session commands.
 - Added UPSERT visualization tests covering PostgreSQL ON CONFLICT (DO NOTHING, DO UPDATE, INSERT...SELECT), MySQL/MariaDB ON DUPLICATE KEY UPDATE, SQLite INSERT OR REPLACE/IGNORE, and SQLite ON CONFLICT via PostgreSQL proxy AST.
 - Added bulk operation visualization tests covering PostgreSQL COPY FROM/TO (including COPY query export and STDOUT), Snowflake COPY INTO (stage load and SELECT export), Redshift UNLOAD and COPY import, BigQuery EXPORT DATA, MySQL LOAD DATA INFILE, Hive LOAD DATA INPATH, Hive INSERT OVERWRITE TABLE/DIRECTORY, session-command misclassification regressions, and batch separation regressions.
+- Added mixed-dialect batch regressions covering per-statement dialect directives, DDL/session merge boundaries, and the `examples/ddl-warehouse-operations.sql` Q8 multi-target DROP TABLE case under autodetected Redshift entry dialect.
+- Added SQL Flow recovery wiring regressions to ensure empty executable batch queries reparse before rendering and convert unrecoverable empty reparses into explicit query errors.
 
 ## [0.4.3] - 2026-02-24
 
