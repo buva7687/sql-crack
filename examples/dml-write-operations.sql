@@ -1,5 +1,5 @@
 -- ============================================================
--- DML Write Operations - INSERT, UPDATE, DELETE, MERGE
+-- DML Write Operations - INSERT, UPDATE, DELETE, MERGE, UPSERT
 -- ============================================================
 -- This file demonstrates write operations for visualization
 --
@@ -12,11 +12,18 @@
 --   6. DELETE with subqueries
 --   7. MERGE (upsert) operations
 --   8. CREATE TABLE AS SELECT (CTAS)
+--   9. UPSERT: PostgreSQL ON CONFLICT DO NOTHING / DO UPDATE
+--  10. UPSERT: MySQL/MariaDB ON DUPLICATE KEY UPDATE
+--  11. UPSERT: SQLite INSERT OR REPLACE / INSERT OR IGNORE
+--  12. MERGE: multi-dialect structured parsing (TransactSQL,
+--      Oracle, Snowflake, BigQuery, Teradata, PostgreSQL)
 --
 -- Use these examples to test:
 --   - Write operation badges (INSERT=green, UPDATE=yellow, DELETE=red)
 --   - Data flow visualization for writes
 --   - Anti-pattern warnings (DELETE without WHERE)
+--   - UPSERT result nodes with conflict semantics
+--   - MERGE compatibility parser (non-partial, real edges)
 -- ============================================================
 
 -- ============================================================
@@ -268,3 +275,239 @@ archived AS (
 )
 DELETE FROM orders
 WHERE order_id IN (SELECT order_id FROM archived);
+
+-- ============================================================
+-- UPSERT EXAMPLES
+-- ============================================================
+-- The following queries demonstrate first-class UPSERT
+-- visualization. Each renders an explicit UPSERT result node
+-- with conflict target, action, and SET columns in the
+-- description — not a generic INSERT node.
+-- ============================================================
+
+-- ============================================================
+-- 18. PostgreSQL ON CONFLICT DO NOTHING
+-- ============================================================
+-- Dialect: PostgreSQL
+-- Expected: UPSERT node with "ON CONFLICT (email) | DO NOTHING"
+INSERT INTO subscribers (email, name, subscribed_at)
+VALUES ('alice@example.com', 'Alice', NOW())
+ON CONFLICT (email) DO NOTHING;
+
+-- ============================================================
+-- 19. PostgreSQL ON CONFLICT DO UPDATE
+-- ============================================================
+-- Dialect: PostgreSQL
+-- Expected: UPSERT node with "ON CONFLICT (user_id) | DO UPDATE | SET: login_count, last_login"
+INSERT INTO user_sessions (user_id, login_count, last_login, ip_address)
+VALUES (42, 1, NOW(), '10.0.0.1')
+ON CONFLICT (user_id) DO UPDATE SET
+    login_count = user_sessions.login_count + 1,
+    last_login = EXCLUDED.last_login,
+    ip_address = EXCLUDED.ip_address;
+
+-- ============================================================
+-- 20. PostgreSQL ON CONFLICT with INSERT ... SELECT
+-- ============================================================
+-- Dialect: PostgreSQL
+-- Expected: Source flow from orders → UPSERT node, preserving
+--           the full SELECT graph upstream of the conflict clause
+INSERT INTO daily_revenue (report_date, region, total_revenue, order_count)
+SELECT
+    DATE(o.order_date) AS report_date,
+    c.region,
+    SUM(o.total_amount) AS total_revenue,
+    COUNT(*) AS order_count
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE o.status = 'completed'
+    AND o.order_date >= CURRENT_DATE - INTERVAL '1 day'
+GROUP BY DATE(o.order_date), c.region
+ON CONFLICT (report_date, region) DO UPDATE SET
+    total_revenue = EXCLUDED.total_revenue,
+    order_count = EXCLUDED.order_count,
+    updated_at = NOW();
+
+-- ============================================================
+-- 21. MySQL ON DUPLICATE KEY UPDATE
+-- ============================================================
+-- Dialect: MySQL or MariaDB
+-- Expected: UPSERT node with "ON DUPLICATE KEY UPDATE | SET: view_count, last_viewed"
+INSERT INTO page_views (page_id, view_count, last_viewed)
+VALUES (101, 1, NOW())
+ON DUPLICATE KEY UPDATE
+    view_count = view_count + 1,
+    last_viewed = NOW();
+
+-- ============================================================
+-- 22. SQLite INSERT OR REPLACE
+-- ============================================================
+-- Dialect: SQLite
+-- Expected: INSERT OR REPLACE node with "SQLite conflict resolution: REPLACE"
+INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+VALUES ('theme', 'dark', datetime('now'));
+
+-- ============================================================
+-- 23. SQLite INSERT OR IGNORE
+-- ============================================================
+-- Dialect: SQLite
+-- Expected: INSERT OR IGNORE node with "SQLite conflict resolution: IGNORE"
+INSERT OR IGNORE INTO migration_log (version, applied_at)
+VALUES ('v2.3.0', datetime('now'));
+
+-- ============================================================
+-- 24. SQLite ON CONFLICT DO UPDATE (proxied via PostgreSQL)
+-- ============================================================
+-- Dialect: SQLite
+-- Expected: UPSERT node with "ON CONFLICT (key) | DO UPDATE | SET: value, updated_at"
+--           Hint: "parsed using PostgreSQL-compatible conflict AST"
+INSERT INTO cache_entries (key, value, updated_at)
+VALUES ('user:42:profile', '{"name":"Alice"}', datetime('now'))
+ON CONFLICT (key) DO UPDATE SET
+    value = excluded.value,
+    updated_at = excluded.updated_at;
+
+-- ============================================================
+-- MERGE EXAMPLES (Compatibility Parser)
+-- ============================================================
+-- The following queries demonstrate the structured MERGE
+-- compatibility parser. Each renders real merge_source and
+-- merge_target edges, WHEN branch descriptions, and a
+-- non-partial result — not the generic regex fallback.
+-- ============================================================
+
+-- ============================================================
+-- 25. MERGE with direct table source (TransactSQL)
+-- ============================================================
+-- Dialect: TransactSQL
+-- Expected: source_table → MERGE INTO inventory, with
+--           merge_source/merge_target edges, WHEN branches,
+--           and SET/INSERT columns in the description
+MERGE INTO inventory AS tgt
+USING warehouse_shipments AS src
+ON tgt.sku = src.sku
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.stock_quantity = tgt.stock_quantity + src.shipped_qty,
+        tgt.last_restock = GETDATE()
+WHEN NOT MATCHED THEN
+    INSERT (sku, stock_quantity, warehouse_id, last_restock)
+    VALUES (src.sku, src.shipped_qty, src.warehouse_id, GETDATE());
+
+-- ============================================================
+-- 26. MERGE with subquery source (Snowflake)
+-- ============================================================
+-- Dialect: Snowflake
+-- Expected: orders + customers extracted from the subquery as
+--           source nodes flowing into the MERGE result
+MERGE INTO customer_metrics AS tgt
+USING (
+    SELECT
+        o.customer_id,
+        COUNT(*) AS order_count,
+        SUM(o.total_amount) AS lifetime_value,
+        MAX(o.order_date) AS last_order_date
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    WHERE o.status = 'completed'
+    GROUP BY o.customer_id
+) AS src
+ON tgt.customer_id = src.customer_id
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.order_count = src.order_count,
+        tgt.lifetime_value = src.lifetime_value,
+        tgt.last_order_date = src.last_order_date
+WHEN NOT MATCHED THEN
+    INSERT (customer_id, order_count, lifetime_value, last_order_date)
+    VALUES (src.customer_id, src.order_count, src.lifetime_value, src.last_order_date);
+
+-- ============================================================
+-- 27. MERGE with CTE source (TransactSQL)
+-- ============================================================
+-- Dialect: TransactSQL
+-- Expected: CTE node for active_subscriptions flowing into
+--           the MERGE result via merge_source edge
+WITH active_subscriptions AS (
+    SELECT
+        user_id,
+        plan_name,
+        renewal_date,
+        monthly_rate
+    FROM subscriptions
+    WHERE status = 'active'
+        AND renewal_date <= DATEADD(DAY, 7, GETDATE())
+)
+MERGE INTO billing_queue AS tgt
+USING active_subscriptions AS src
+ON tgt.user_id = src.user_id AND tgt.billing_month = MONTH(GETDATE())
+WHEN MATCHED AND tgt.status = 'pending' THEN
+    UPDATE SET
+        tgt.amount = src.monthly_rate,
+        tgt.plan_name = src.plan_name,
+        tgt.updated_at = GETDATE()
+WHEN NOT MATCHED THEN
+    INSERT (user_id, billing_month, amount, plan_name, status, created_at)
+    VALUES (src.user_id, MONTH(GETDATE()), src.monthly_rate, src.plan_name, 'pending', GETDATE());
+
+-- ============================================================
+-- 28. MERGE with multiple WHEN branches (BigQuery)
+-- ============================================================
+-- Dialect: BigQuery
+-- Expected: WHEN branches include MATCHED→UPDATE,
+--           NOT MATCHED BY TARGET→INSERT, NOT MATCHED BY SOURCE→DELETE
+MERGE INTO product_catalog AS tgt
+USING supplier_feed AS src
+ON tgt.product_id = src.product_id
+WHEN MATCHED AND src.discontinued = TRUE THEN
+    DELETE
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.price = src.price,
+        tgt.description = src.description,
+        tgt.updated_at = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (product_id, name, price, description, created_at)
+    VALUES (src.product_id, src.name, src.price, src.description, CURRENT_TIMESTAMP())
+WHEN NOT MATCHED BY SOURCE THEN
+    DELETE;
+
+-- ============================================================
+-- 29. MERGE with schema-qualified tables (Oracle)
+-- ============================================================
+-- Dialect: Oracle
+-- Expected: Table names extracted without schema prefix,
+--           ON condition displayed in the MERGE description
+MERGE INTO sales.monthly_targets tgt
+USING staging.sales_actuals src
+ON tgt.sales_rep_id = src.sales_rep_id
+    AND tgt.month = src.month
+    AND tgt.year = src.year
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.actual_revenue = src.actual_revenue,
+        tgt.quota_pct = src.actual_revenue / tgt.target_revenue * 100
+WHEN NOT MATCHED THEN
+    INSERT (sales_rep_id, month, year, target_revenue, actual_revenue)
+    VALUES (src.sales_rep_id, src.month, src.year, 0, src.actual_revenue);
+
+-- ============================================================
+-- 30. PostgreSQL MERGE (v15+)
+-- ============================================================
+-- Dialect: PostgreSQL
+-- Expected: Compatibility parser (not fallback), with
+--           merge_source/merge_target edges and non-partial result
+MERGE INTO employee_directory AS tgt
+USING hr_updates AS src
+ON tgt.employee_id = src.employee_id
+WHEN MATCHED AND src.action = 'terminate' THEN
+    DELETE
+WHEN MATCHED THEN
+    UPDATE SET
+        tgt.department = src.department,
+        tgt.title = src.title,
+        tgt.salary = src.salary,
+        tgt.updated_at = NOW()
+WHEN NOT MATCHED THEN
+    INSERT (employee_id, name, department, title, salary, hire_date)
+    VALUES (src.employee_id, src.name, src.department, src.title, src.salary, NOW());
