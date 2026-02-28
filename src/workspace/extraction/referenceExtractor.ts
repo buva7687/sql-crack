@@ -903,6 +903,19 @@ export class ReferenceExtractor {
             this.extractFromStatement(expr.ast, filePath, sql, references, aliasMap, depth + 1, statementIndex);
         }
 
+        // Expression lists can contain select wrappers under `.ast`, such as IN (SELECT ...)
+        if (Array.isArray(expr.value)) {
+            for (const item of expr.value) {
+                if (item?.ast?.type === 'select') {
+                    this.extractFromStatement(item.ast, filePath, sql, references, aliasMap, depth + 1, statementIndex);
+                    continue;
+                }
+                if (item && typeof item === 'object') {
+                    this.extractFromExpression(item, filePath, sql, references, aliasMap, depth, statementIndex);
+                }
+            }
+        }
+
         // Nested expression in parentheses
         if (expr.expr?.type === 'select') {
             this.extractFromStatement(expr.expr, filePath, sql, references, aliasMap, depth + 1, statementIndex);

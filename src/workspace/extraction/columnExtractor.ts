@@ -164,20 +164,16 @@ export class ColumnExtractor {
     ): void {
         if (!tableRef) {return;}
 
-        const table = tableRef.table || tableRef;
+        const tableName = this.getTableName(tableRef);
+        const alias = tableRef.as;
 
-        if (table && table.type === 'table') {
-            const tableName = this.getTableName(table);
-            const alias = tableRef.as;
+        if (alias && tableName) {
+            aliasMap.set(alias, tableName);
+        }
 
-            if (alias && tableName) {
-                aliasMap.set(alias, tableName);
-            }
-
-            // Also register the table name itself
-            if (tableName) {
-                aliasMap.set(tableName, tableName);
-            }
+        // Also register the table name itself
+        if (tableName) {
+            aliasMap.set(tableName, tableName);
         }
     }
 
@@ -186,6 +182,10 @@ export class ColumnExtractor {
      */
     private getTableName(table: any): string | null {
         if (!table) {return null;}
+
+        if (typeof table === 'string') {
+            return table;
+        }
 
         if (table.table) {
             return this.getTableName(table.table);
@@ -287,8 +287,56 @@ export class ColumnExtractor {
             return sql || '';
         } catch (e) {
             logger.debug('[columnExtractor] sqlify failed, using type fallback: ' + String(e));
-            return expr.type || 'expression';
+            return this.expressionToFallbackString(expr);
         }
+    }
+
+    private expressionToFallbackString(expr: any): string {
+        if (!expr) {
+            return 'expression';
+        }
+
+        if (expr.type === 'column_ref') {
+            if (expr.table && expr.column) {
+                return `${expr.table}.${expr.column}`;
+            }
+            return expr.column || expr.value || 'column';
+        }
+
+        if (expr.type === 'star') {
+            return '*';
+        }
+
+        if (expr.type === 'number' || expr.type === 'string' || expr.type === 'single_quote_string') {
+            return String(expr.value ?? '');
+        }
+
+        if (expr.type === 'aggr_func' || expr.type === 'function') {
+            const args = expr.args?.expr;
+            const argList = Array.isArray(args) ? args : args ? [args] : [];
+            const renderedArgs = argList.length > 0
+                ? argList.map((arg: any) => this.expressionToFallbackString(arg)).join(', ')
+                : '';
+            return `${expr.name || 'func'}(${renderedArgs})`;
+        }
+
+        if (expr.type === 'binary_expr') {
+            const left = this.expressionToFallbackString(expr.left);
+            const right = this.expressionToFallbackString(expr.right);
+            return `${left} ${expr.operator || ''} ${right}`.trim();
+        }
+
+        if (expr.type === 'unary_expr') {
+            return `${expr.operator || ''}${this.expressionToFallbackString(expr.expr)}`;
+        }
+
+        if (expr.type === 'cast') {
+            const inner = this.expressionToFallbackString(expr.expr);
+            const targetType = expr.target?.dataType || expr.target?.type || 'type';
+            return `CAST(${inner} AS ${targetType})`;
+        }
+
+        return expr.type || 'expression';
     }
 
     /**
@@ -385,7 +433,11 @@ export class ColumnExtractor {
     ): void {
         if (!list) {return;}
 
-        const items = Array.isArray(list) ? list : [list];
+        const items = Array.isArray(list)
+            ? list
+            : Array.isArray(list.columns)
+                ? list.columns
+                : [list];
 
         for (const item of items) {
             if (item.type === 'column_ref') {
