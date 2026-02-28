@@ -12,12 +12,6 @@ describe('DDL visualization', () => {
         `;
         const result = parseSql(sql, 'MySQL' as SqlDialect);
 
-        const targetTable = result.nodes.find((node: any) =>
-            node.type === 'table'
-            && node.label === 'orders'
-            && node.accessMode === 'write'
-            && node.operationType === 'CREATE_TABLE'
-        );
         const referencedTable = result.nodes.find((node: any) =>
             node.type === 'table'
             && node.label === 'customers'
@@ -25,16 +19,17 @@ describe('DDL visualization', () => {
         );
         const createNode = result.nodes.find((node: any) =>
             node.type === 'result'
-            && node.label === 'CREATE TABLE orders'
+            && node.label === 'TABLE orders'
         );
 
         expect(result.error).toBeUndefined();
         expect(result.partial).toBeUndefined();
-        expect(targetTable).toBeDefined();
         expect(referencedTable).toBeDefined();
+        expect(createNode?.accessMode).toBe('write');
+        expect(createNode?.operationType).toBe('CREATE_TABLE');
         expect(createNode?.details).toContain('Definitions: 3');
         expect(createNode?.details?.some((detail: string) => detail.includes('customer_id INT REFERENCES customers(id)'))).toBe(true);
-        expect(result.edges.some((edge: any) => edge.source === referencedTable?.id && edge.target === targetTable?.id && edge.sqlClause === 'REFERENCES')).toBe(true);
+        expect(result.edges.some((edge: any) => edge.source === referencedTable?.id && edge.target === createNode?.id && edge.sqlClause === 'REFERENCES')).toBe(true);
     });
 
     it('renders ALTER TABLE column actions and referenced tables', () => {
@@ -275,7 +270,7 @@ describe('DDL visualization', () => {
             expect(result.error).toBeUndefined();
             expect(result.partial).toBeUndefined();
             const target = result.nodes.find((n: any) =>
-                n.type === 'table' && n.label === 'orders' && n.operationType === 'CREATE_TABLE'
+                n.type === 'result' && n.label === 'TABLE orders' && n.operationType === 'CREATE_TABLE'
             );
             expect(target).toBeDefined();
         });

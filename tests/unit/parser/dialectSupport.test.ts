@@ -553,6 +553,19 @@ describe('Dialect Support', () => {
       const result = parseSql('SELECT APPROXIMATE COUNT(DISTINCT user_id) FROM events', dialect);
       // Document behavior
     });
+
+    it('parses CREATE TABLE AS SELECT via PostgreSQL proxy fallback', () => {
+      const result = parseSql(`
+        CREATE TABLE archived_orders AS
+        SELECT * FROM orders
+        WHERE status = 'completed'
+      `, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).toBeUndefined();
+      expect(result.nodes.some(n => n.type === 'result' && n.label === 'TABLE archived_orders')).toBe(true);
+      expect(result.nodes.some(n => n.type === 'table' && n.label === 'orders')).toBe(true);
+    });
   });
 
   describe('Athena', () => {

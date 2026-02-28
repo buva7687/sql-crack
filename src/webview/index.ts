@@ -537,6 +537,14 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
         return;
     }
 
+    await reparseStoredQuery(queryIndex, 'Failed to hydrate deferred query');
+}
+
+async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): Promise<void> {
+    if (!batchResult) {
+        return;
+    }
+
     const existingPromise = hydrationPromises.get(queryIndex);
     if (existingPromise) {
         await existingPromise;
@@ -565,11 +573,14 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
             }
         );
 
-        if (!batchResult || parseToken !== parseRequestId || !deferredQueryIndexes.has(queryIndex)) {
+        if (!batchResult || parseToken !== parseRequestId) {
             return;
         }
 
-        const hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, 'Failed to hydrate deferred query');
+        let hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, fallbackMessage);
+        if (!hydratedQuery.error && hydratedQuery.nodes.length === 0 && hasExecutableSql(querySql)) {
+            hydratedQuery = buildFallbackQueryErrorResult(querySql, fallbackMessage);
+        }
         hydratedQuery.sql = querySql;
         if (query.partial) {
             hydratedQuery.partial = true;
@@ -594,6 +605,37 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
     } finally {
         hydrationPromises.delete(queryIndex);
     }
+}
+
+function recoverQueryVisualization(queryIndex: number): void {
+    if (!batchResult) {
+        return;
+    }
+
+    const recoverToken = parseRequestId;
+    const querySql = batchResult.queries[queryIndex]?.sql || '';
+    const fallbackMessage = deferredQueryIndexes.has(queryIndex)
+        ? 'Failed to hydrate deferred query'
+        : 'Failed to recover query visualization';
+
+    showGlobalLoading('Loading query details...');
+    void reparseStoredQuery(queryIndex, fallbackMessage)
+        .catch((error) => {
+            if (!batchResult || parseRequestId !== recoverToken) {
+                return;
+            }
+            const message = error instanceof Error ? error.message : fallbackMessage;
+            batchResult.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
+            deferredQueryIndexes.delete(queryIndex);
+        })
+        .finally(() => {
+            if (parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
+                return;
+            }
+            hideGlobalLoading();
+            updateBatchTabsUI();
+            renderCurrentQuery();
+        });
 }
 
 function truncateSourceLine(line: string, maxLength = 120): string {
@@ -1275,6 +1317,11 @@ function renderCurrentQuery(): void {
     if (!batchResult || batchResult.queries.length === 0) { return; }
 
     const query = batchResult.queries[currentQueryIndex];
+
+    if (!query.error && query.nodes.length === 0 && hasExecutableSql(query.sql)) {
+        recoverQueryVisualization(currentQueryIndex);
+        return;
+    }
 
     // If this query has a parse error, attach the source line for the renderer's error overlay
     if (query.error && batchResult.parseErrors) {

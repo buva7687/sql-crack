@@ -181,6 +181,82 @@ export interface BatchParseOptions {
     combineDdlStatements?: boolean;
 }
 
+const DIALECT_DIRECTIVE_MATCHERS: Array<{ pattern: RegExp; dialect: SqlDialect }> = [
+    { pattern: /\bpostgre(?:s|sql)\b/i, dialect: 'PostgreSQL' },
+    { pattern: /\bsnowflake\b/i, dialect: 'Snowflake' },
+    { pattern: /\bbigquery\b/i, dialect: 'BigQuery' },
+    { pattern: /\bredshift\b/i, dialect: 'Redshift' },
+    { pattern: /\btransactsql\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bsql\s+server\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bt-?sql\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bmariadb\b/i, dialect: 'MariaDB' },
+    { pattern: /\bmysql\b/i, dialect: 'MySQL' },
+    { pattern: /\bsqlite\b/i, dialect: 'SQLite' },
+    { pattern: /\bhive\b/i, dialect: 'Hive' },
+    { pattern: /\bathena\b/i, dialect: 'Athena' },
+    { pattern: /\btrino\b/i, dialect: 'Trino' },
+    { pattern: /\boracle\b/i, dialect: 'Oracle' },
+    { pattern: /\bpl\/sql\b/i, dialect: 'Oracle' },
+    { pattern: /\bteradata\b/i, dialect: 'Teradata' },
+];
+
+function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
+    const lines = stmt.split('\n');
+    let inBlockComment = false;
+    const commentLines: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+            continue;
+        }
+
+        if (inBlockComment) {
+            commentLines.push(line);
+            if (line.includes('*/')) {
+                inBlockComment = false;
+            }
+            continue;
+        }
+
+        if (line.startsWith('--')) {
+            commentLines.push(line.replace(/^--\s?/, ''));
+            continue;
+        }
+
+        if (line.startsWith('/*')) {
+            commentLines.push(line);
+            if (!line.includes('*/')) {
+                inBlockComment = true;
+            }
+            continue;
+        }
+
+        break;
+    }
+
+    const directiveText = commentLines.join('\n');
+    const directiveMatch = directiveText.match(/dialect\s*:\s*([^\n]+)/i);
+    if (!directiveMatch) {
+        return null;
+    }
+
+    const body = directiveMatch[1];
+    let selected: { index: number; dialect: SqlDialect } | null = null;
+
+    for (const matcher of DIALECT_DIRECTIVE_MATCHERS) {
+        const match = matcher.pattern.exec(body);
+        if (!match || match.index < 0) {
+            continue;
+        }
+        if (!selected || match.index < selected.index) {
+            selected = { index: match.index, dialect: matcher.dialect };
+        }
+    }
+
+    return selected?.dialect ?? null;
+}
+
 // Parse multiple SQL statements
 export function parseSqlBatch(
     sql: string,
@@ -271,6 +347,7 @@ export function parseSqlBatch(
         sql: string;
         type: string;
         description: string;
+        dialect: SqlDialect;
         startLine: number;
         endLine: number;
     }> = [];
@@ -281,6 +358,7 @@ export function parseSqlBatch(
         type: string;
         keyword: string;
         objectName: string;
+        dialect: SqlDialect;
         startLine: number;
         endLine: number;
     }> = [];
@@ -291,7 +369,7 @@ export function parseSqlBatch(
 
         const mergedResult = createMergedSessionResult(
             pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
-            dialect
+            pendingSessionCommands[0].dialect
         );
 
         // Get line range for tracking (absolute lines in original file)
@@ -313,7 +391,7 @@ export function parseSqlBatch(
 
         const mergedResult = createMergedDdlResult(
             pendingDdlCommands.map(c => ({ sql: c.sql, type: c.type, keyword: c.keyword, objectName: c.objectName })),
-            dialect
+            pendingDdlCommands[0].dialect
         );
 
         // Get line range for tracking (absolute lines in original file)
@@ -337,6 +415,7 @@ export function parseSqlBatch(
     };
 
     for (const stmt of statements) {
+        const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
         const stmtTrimmed = stmt.trim();
         const firstNewlineIdx = stmtTrimmed.indexOf('\n');
         const stmtFirstLine = firstNewlineIdx === -1
@@ -356,9 +435,13 @@ export function parseSqlBatch(
         const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
         // Check if this is a session command
-        const sessionInfo = getSessionCommandInfo(stmt, dialect);
+        const sessionInfo = getSessionCommandInfo(stmt, statementDialect);
 
         if (sessionInfo) {
+            if (pendingSessionCommands.length > 0 && pendingSessionCommands[0].dialect !== statementDialect) {
+                flushSessionCommands();
+            }
+
             // Calculate actual start line by counting lines in leading comments
             const strippedSql = stripLeadingComments(stmt);
             const strippedLineCount = countLines(strippedSql);
@@ -370,6 +453,7 @@ export function parseSqlBatch(
                 sql: strippedSql,
                 type: sessionInfo.type,
                 description: sessionInfo.description,
+                dialect: statementDialect,
                 startLine: actualStartLine,
                 endLine: stmtEndLine,
             });
@@ -381,6 +465,10 @@ export function parseSqlBatch(
             const ddlInfo = options.combineDdlStatements ? getDdlStatementInfo(stmt) : null;
 
             if (ddlInfo) {
+                if (pendingDdlCommands.length > 0 && pendingDdlCommands[0].dialect !== statementDialect) {
+                    flushDdlCommands();
+                }
+
                 // Calculate actual start line by counting lines in leading comments
                 const strippedSql = stripLeadingComments(stmt);
                 const strippedLineCount = countLines(strippedSql);
@@ -393,6 +481,7 @@ export function parseSqlBatch(
                     type: ddlInfo.type,
                     keyword: ddlInfo.keyword,
                     objectName: ddlInfo.objectName,
+                    dialect: statementDialect,
                     startLine: actualStartLine,
                     endLine: stmtEndLine,
                 });
@@ -401,7 +490,7 @@ export function parseSqlBatch(
                 flushDdlCommands();
 
                 // Parse the regular statement
-                const result = parseSql(stmt, dialect);
+                const result = parseSql(stmt, statementDialect);
 
                 // Adjust line numbers by adding the offset
                 const lineOffset = stmtStartLine - 1;
@@ -692,6 +781,12 @@ function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: S
 
     // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
     if (dialect === 'Snowflake' && ['DELETE', 'MERGE'].includes(keyword)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    // Redshift shares PostgreSQL structure for most generic DDL, but the bundled
+    // Redshift grammar still rejects some CREATE/ALTER/DROP/TRUNCATE forms.
+    if (dialect === 'Redshift' && ['CREATE', 'ALTER', 'DROP', 'TRUNCATE'].includes(keyword)) {
         proxyDialect = 'PostgreSQL';
     }
 

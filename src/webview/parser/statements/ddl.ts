@@ -499,25 +499,17 @@ export function tryProcessDdlStatement(
         }
 
         if (stmt.keyword === 'table' && objectName) {
-            const targetId = createWriteTargetNode(
-                context,
-                nodes,
-                genId,
-                objectName,
-                'Create table target',
-                'CREATE_TABLE'
-            );
+            trackSchemaObject(context, objectName);
             const details = [
                 ...getCreateTableDetails(stmt),
                 ...getCreateTableOptionDetails(stmt)
             ];
             const referenceTables = collectReferenceTablesFromDefinitions(Array.isArray(stmt.create_definitions) ? stmt.create_definitions : []);
-            attachReferenceSources(context, nodes, edges, genId, targetId, referenceTables);
 
             nodes.push({
                 id: rootId,
                 type: 'result',
-                label: `CREATE TABLE ${objectName}`,
+                label: `TABLE ${objectName}`,
                 description: `Create table: ${objectName}`,
                 details,
                 accessMode: 'write',
@@ -527,11 +519,7 @@ export function tryProcessDdlStatement(
                 width: Math.min(420, Math.max(180, objectName.length * 10 + 80)),
                 height: 60
             });
-            edges.push({
-                id: genId('e'),
-                source: targetId,
-                target: rootId
-            });
+            attachReferenceSources(context, nodes, edges, genId, rootId, referenceTables);
             return rootId;
         }
     }
