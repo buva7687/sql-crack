@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - INSERT...SELECT source flow is preserved when conflict clauses are attached.
   - Dialect-specific info hints explain the conflict handling model.
   - SQLite `ON CONFLICT` proxies through the PostgreSQL grammar when the bundled SQLite grammar rejects it.
+- **DELETE join and USING visualization**: Added a DELETE compatibility parser (`src/webview/parser/statements/delete.ts`) and enhanced `dml.ts` to correctly visualize joined DELETE statements across dialects.
+  - PostgreSQL `DELETE ... USING` — compatibility parser builds source flow via synthetic SELECT AST, with regex fallback for unparseable USING clauses.
+  - PostgreSQL `DELETE ... USING (SELECT ...)` — extracts subquery sources from USING clause.
+  - PostgreSQL `DELETE ... RETURNING` — annotates RETURNING columns on the DELETE result node.
+  - MySQL/MariaDB/TransactSQL joined DELETE (`DELETE alias FROM ... JOIN ...`) — resolves alias targets to actual table names so write nodes display real table names, not aliases.
+  - MySQL multi-table DELETE (`DELETE a, b FROM ... JOIN ...`) — each target resolved independently.
+  - TransactSQL `DELETE ... OUTPUT` — strips OUTPUT clause, re-parses sanitized SQL, annotates OUTPUT columns on result node.
+  - TransactSQL `DELETE ... OUTPUT INTO` — creates an additional write-target table node for the output sink.
+  - `getDeleteSourceFromItems` now filters out target tables from source items (matching the UPDATE equivalent) to prevent duplicate read nodes.
 - **Bulk data operation parser**: Added a dedicated bulk-operation compatibility parser (`src/webview/parser/statements/bulk.ts`) that renders real source/target flow graphs instead of collapsing bulk statements into utility-command boxes.
   - PostgreSQL/Redshift `COPY ... FROM` and `COPY ... TO` (file, S3, STDOUT).
   - PostgreSQL `COPY (SELECT ...) TO` — preserves inner SELECT flow graph.

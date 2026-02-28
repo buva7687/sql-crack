@@ -49,7 +49,9 @@ import {
     getStatementPresentation,
     getTableName,
     processSelectStatement,
+    resolveDeleteTargetTableNames,
     tryParseBulkDataStatement,
+    tryParseCompatibleDeleteStatement,
     tryParseCompatibleMergeStatement,
     tryParseSessionCommand,
     tryProcessCreateStatement,
@@ -638,6 +640,41 @@ function offsetErrorLineNumber(message: string, lineOffset: number): string {
     return `Line ${absoluteLine}${columnPart}: ${remainder}`;
 }
 
+function getReturningColumns(stmt: any): string[] {
+    if (!stmt?.returning || !Array.isArray(stmt.returning.columns)) {
+        return [];
+    }
+
+    return Array.from(new Set(stmt.returning.columns
+        .map((column: any) => {
+            const alias = typeof column?.as === 'string' ? column.as.trim() : '';
+            if (alias) {
+                return alias;
+            }
+            const expr = column?.expr || column;
+            return getAstString(expr)?.trim() || '';
+        })
+        .filter(Boolean)
+        .map((value: string) => value.replace(/\s+/g, ' '))));
+}
+
+function applyReturningDetails(stmt: any, rootNode: FlowNode | undefined): void {
+    if (!rootNode) {
+        return;
+    }
+
+    const returningColumns = getReturningColumns(stmt);
+    if (returningColumns.length === 0) {
+        return;
+    }
+
+    const detail = `RETURNING: ${returningColumns.join(', ')}`;
+    rootNode.description = rootNode.description
+        ? `${rootNode.description} | ${detail}`
+        : detail;
+    rootNode.details = [...(rootNode.details || []), detail];
+}
+
 function isDebugLoggingEnabled(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).debugLogging);
 }
@@ -860,6 +897,19 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
     const mergeCompatibilityResult = tryParseMergeCompatibility(sql, dialect);
     if (mergeCompatibilityResult) {
         return mergeCompatibilityResult;
+    }
+
+    const deleteCompatibilityResult = tryParseCompatibleDeleteStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+        parseSql,
+    });
+    if (deleteCompatibilityResult) {
+        layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
+        assignLineNumbers(deleteCompatibilityResult.nodes, sql);
+        return deleteCompatibilityResult;
     }
 
     // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
@@ -1182,6 +1232,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         extractConditions
     });
     if (dmlRootId) {
+        applyReturningDetails(stmt, nodes.find(node => node.id === dmlRootId));
         return dmlRootId;
     }
 
@@ -1195,12 +1246,15 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         description: description,
         x: 0, y: 0, width: labelWidth, height: 60
     });
+    applyReturningDetails(stmt, nodes[nodes.length - 1]);
 
     // Process table for UPDATE/DELETE/INSERT
     // Phase 1 Feature: Read vs Write Differentiation
     // Mark write operations with accessMode and operationType for visual distinction
     if (stmt.table) {
-        const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        const tables = ctx.statementType === 'delete'
+            ? resolveDeleteTargetTableNames(stmt, getTableName)
+            : (Array.isArray(stmt.table) ? stmt.table : [stmt.table]);
         // Determine operation type and access mode for write operations
         const opType = ctx.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
         const accessMode: 'write' = 'write';
@@ -1208,7 +1262,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         for (const t of tables) {
             ctx.stats.tables++;
             const tableId = genId('table');
-            const tableName = t.table || t.name || t;
+            const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
             nodes.push({
                 id: tableId,
                 type: 'table',

@@ -409,6 +409,19 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                     sourceRootIds.push(updateSourceRootId);
                 }
             }
+        } else if (context.statementType === 'delete') {
+            const fromItems = getDeleteSourceFromItems(stmt, getTableName);
+            if (fromItems.length > 0) {
+                const deleteSourceRootId = processSelect(
+                    context,
+                    buildSyntheticSelectFromFromItems(fromItems),
+                    nodes,
+                    edges
+                );
+                if (deleteSourceRootId) {
+                    sourceRootIds.push(deleteSourceRootId);
+                }
+            }
         }
 
         const whereSelects = extractSelectSubqueriesFromExpression(stmt.where);
@@ -433,12 +446,14 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                 height: 60
             });
 
-            const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+            const targetTables = context.statementType === 'delete'
+                ? resolveDeleteTargetTableNames(stmt, getTableName)
+                : (stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]).map((tableRef: any) => getTableName(tableRef)).filter(Boolean) : []);
             const opType = context.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
             const targetIds: string[] = [];
 
             for (const t of targetTables) {
-                const tableName = getTableName(t);
+                const tableName = typeof t === 'string' ? t : getTableName(t);
                 if (!tableName) {
                     continue;
                 }
@@ -529,6 +544,44 @@ function getInsertSelectAst(stmt: any): any | null {
     return values;
 }
 
+function getNormalizedAlias(item: any): string | null {
+    const rawAlias = typeof item?.as === 'string' ? normalizeIdentifier(item.as.trim()) : '';
+    return rawAlias || null;
+}
+
+export function resolveDeleteTargetTableNames(stmt: any, getTableName: GetTableNameFn): string[] {
+    const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+    if (targetTables.length === 0) {
+        return [];
+    }
+
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : [];
+    const aliasToTable = new Map<string, string>();
+
+    for (const fromItem of fromItems) {
+        const tableName = getTableName(fromItem);
+        if (!tableName) {
+            continue;
+        }
+
+        aliasToTable.set(normalizeIdentifier(tableName).toLowerCase(), tableName);
+        const alias = getNormalizedAlias(fromItem);
+        if (alias) {
+            aliasToTable.set(alias.toLowerCase(), tableName);
+        }
+    }
+
+    return dedupe(targetTables.map((targetRef: any) => {
+        const rawName = getTableName(targetRef);
+        if (!rawName) {
+            return null;
+        }
+
+        const lookupKey = normalizeIdentifier(rawName).toLowerCase();
+        return aliasToTable.get(lookupKey) || rawName;
+    }));
+}
+
 function getUpdateSourceFromItems(stmt: any, getTableName: GetTableNameFn): any[] {
     if (!stmt || stmt.type?.toLowerCase() !== 'update' || !Array.isArray(stmt.from)) {
         return [];
@@ -553,6 +606,62 @@ function getUpdateSourceFromItems(stmt: any, getTableName: GetTableNameFn): any[
         const alias = (typeof fromItem?.as === 'string' ? fromItem.as : '').toLowerCase();
         const fingerprint = `${name}::${alias}`;
         return !targetFingerprints.has(fingerprint);
+    });
+}
+
+function getDeleteSourceFromItems(stmt: any, getTableName: GetTableNameFn): any[] {
+    if (!stmt || stmt.type?.toLowerCase() !== 'delete' || !Array.isArray(stmt.from)) {
+        return [];
+    }
+
+    const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+    if (targetTables.length === 0) {
+        return stmt.from;
+    }
+
+    const fromFingerprints = stmt.from.map((fromItem: any) => {
+        const tableName = getTableName(fromItem);
+        const normalizedName = tableName ? normalizeIdentifier(tableName).toLowerCase() : '';
+        const alias = getNormalizedAlias(fromItem)?.toLowerCase() || '';
+        return { normalizedName, alias };
+    });
+
+    // Match DELETE target aliases back to FROM items so joined deletes do not
+    // duplicate the write target as a read source.
+    const targetFingerprints = new Set<string>();
+    for (const target of targetTables) {
+        const rawName = getTableName(target);
+        if (!rawName) {
+            continue;
+        }
+
+        const normalizedTarget = normalizeIdentifier(rawName).toLowerCase();
+        const matchingFromItems = fromFingerprints.filter((fromItem: { normalizedName: string; alias: string }) =>
+            fromItem.normalizedName === normalizedTarget || fromItem.alias === normalizedTarget
+        );
+
+        if (matchingFromItems.length > 0) {
+            for (const match of matchingFromItems) {
+                targetFingerprints.add(`${match.normalizedName}::${match.alias}`);
+            }
+            continue;
+        }
+
+        targetFingerprints.add(`${normalizedTarget}::`);
+    }
+
+    return stmt.from.filter((_: any, index: number) => {
+        const fromItem = fromFingerprints[index];
+        if (!fromItem || !fromItem.normalizedName) {
+            return true;
+        }
+
+        const fingerprint = `${fromItem.normalizedName}::${fromItem.alias}`;
+        if (targetFingerprints.has(fingerprint)) {
+            return false;
+        }
+
+        return !targetFingerprints.has(`${fromItem.normalizedName}::`);
     });
 }
 
