@@ -1,4 +1,4 @@
-import type { FlowEdge, FlowNode } from '../../types';
+import type { FlowEdge, FlowNode, OptimizationHint } from '../../types';
 import type { ParserContext } from '../context';
 
 type GenIdFn = (prefix: string) => string;
@@ -25,6 +25,207 @@ export interface ProcessDmlStatementsArgs {
     extractConditions: ExtractConditionsFn;
 }
 
+interface UpsertPresentation {
+    label: string;
+    description: string;
+    details?: string[];
+    hint: OptimizationHint;
+}
+
+const IDENTIFIER_WRAPPER_PATTERN = /[`"'\[\]]/g;
+
+function normalizeIdentifier(value: string): string {
+    return value.replace(IDENTIFIER_WRAPPER_PATTERN, '');
+}
+
+function extractIdentifierName(node: any): string | null {
+    if (typeof node === 'string') {
+        const trimmed = normalizeIdentifier(node.trim());
+        return trimmed || null;
+    }
+    if (typeof node === 'number') {
+        return String(node);
+    }
+    if (!node || typeof node !== 'object') {
+        return null;
+    }
+    if (typeof node.column === 'string' || typeof node.column === 'number') {
+        return extractIdentifierName(node.column);
+    }
+    if (node.column) {
+        return extractIdentifierName(node.column);
+    }
+    if (typeof node.value === 'string' || typeof node.value === 'number') {
+        return extractIdentifierName(node.value);
+    }
+    if (node.value) {
+        return extractIdentifierName(node.value);
+    }
+    if (node.expr) {
+        return extractIdentifierName(node.expr);
+    }
+    if (typeof node.name === 'string' || typeof node.name === 'number') {
+        return extractIdentifierName(node.name);
+    }
+    if (Array.isArray(node.name)) {
+        const parts = node.name.map((part: any) => extractIdentifierName(part)).filter(Boolean);
+        return parts.length > 0 ? parts.join('.') : null;
+    }
+    return null;
+}
+
+function dedupe(values: Array<string | null | undefined>): string[] {
+    return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function extractConflictTargetColumns(target: any): string[] {
+    if (!target || typeof target !== 'object') {
+        return [];
+    }
+
+    if (Array.isArray(target.expr)) {
+        return dedupe(target.expr.map((item: any) => extractIdentifierName(item)));
+    }
+
+    const single = extractIdentifierName(target.expr || target.column || target.value || target);
+    return single ? [single] : [];
+}
+
+function extractSetColumns(assignments: any): string[] {
+    if (!Array.isArray(assignments)) {
+        return [];
+    }
+
+    return dedupe(assignments.map((assignment: any) => {
+        if (!assignment || typeof assignment !== 'object') {
+            return null;
+        }
+        if (typeof assignment.column === 'string' || typeof assignment.column === 'number') {
+            return extractIdentifierName(assignment.column);
+        }
+        if (assignment.column) {
+            return extractIdentifierName(assignment.column);
+        }
+        if (assignment.target) {
+            return extractIdentifierName(assignment.target);
+        }
+        return extractIdentifierName(assignment);
+    }));
+}
+
+function extractInsertOrAction(stmt: any): string | null {
+    if (!Array.isArray(stmt?.or)) {
+        return null;
+    }
+
+    const action = stmt.or
+        .map((part: any) => typeof part?.value === 'string' ? part.value.toUpperCase() : '')
+        .find((value: string) => value && value !== 'OR');
+
+    return action || null;
+}
+
+function pushHintOnce(context: ParserContext, hint: OptimizationHint): void {
+    const exists = context.hints.some(existing =>
+        existing.message === hint.message
+        && existing.suggestion === hint.suggestion
+        && existing.category === hint.category
+    );
+    if (!exists) {
+        context.hints.push(hint);
+    }
+}
+
+function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPresentation | null {
+    if (!stmt || stmt.type?.toLowerCase() !== 'insert') {
+        return null;
+    }
+
+    if (stmt.conflict) {
+        const targetColumns = extractConflictTargetColumns(stmt.conflict.target);
+        const actionExpr = stmt.conflict.action?.expr;
+        const actionType = typeof actionExpr?.type === 'string' ? actionExpr.type.toLowerCase() : '';
+        const action = actionType === 'update'
+            ? 'DO UPDATE'
+            : actionType === 'origin'
+                ? `DO ${String(actionExpr?.value || '').toUpperCase()}`
+                : 'DO UPDATE';
+        const updateColumns = actionType === 'update' ? extractSetColumns(actionExpr?.set) : [];
+        const conflictTarget = targetColumns.length > 0
+            ? `ON CONFLICT (${targetColumns.join(', ')})`
+            : 'ON CONFLICT';
+        const descriptionParts = [conflictTarget, action];
+        if (updateColumns.length > 0) {
+            descriptionParts.push(`SET: ${updateColumns.join(', ')}`);
+        }
+
+        const message = context.dialect === 'SQLite'
+            ? 'Detected SQLite ON CONFLICT upsert'
+            : 'Detected INSERT ... ON CONFLICT upsert';
+        const suggestion = context.dialect === 'SQLite'
+            ? 'SQLite ON CONFLICT was parsed using PostgreSQL-compatible conflict AST because direct SQLite grammar support is incomplete.'
+            : `Conflict handling is modeled directly for ${context.dialect}.`;
+
+        return {
+            label: 'UPSERT',
+            description: descriptionParts.join(' | '),
+            details: descriptionParts,
+            hint: {
+                type: 'info',
+                message,
+                suggestion,
+                category: 'best-practice',
+                severity: 'low',
+            }
+        };
+    }
+
+    if (stmt.on_duplicate_update?.set) {
+        const updateColumns = extractSetColumns(stmt.on_duplicate_update.set);
+        const descriptionParts = ['ON DUPLICATE KEY UPDATE'];
+        if (updateColumns.length > 0) {
+            descriptionParts.push(`SET: ${updateColumns.join(', ')}`);
+        }
+
+        return {
+            label: 'UPSERT',
+            description: descriptionParts.join(' | '),
+            details: descriptionParts,
+            hint: {
+                type: 'info',
+                message: 'Detected ON DUPLICATE KEY UPDATE upsert',
+                suggestion: `${context.dialect} duplicate-key conflict handling is modeled directly.`,
+                category: 'best-practice',
+                severity: 'low',
+            }
+        };
+    }
+
+    const sqliteAction = extractInsertOrAction(stmt);
+    if (sqliteAction) {
+        const description = `SQLite conflict resolution: ${sqliteAction}`;
+        return {
+            label: `INSERT OR ${sqliteAction}`,
+            description,
+            details: [description],
+            hint: {
+                type: 'info',
+                message: `Detected SQLite INSERT OR ${sqliteAction}`,
+                suggestion: `SQLite ${sqliteAction} conflict handling is modeled directly.`,
+                category: 'best-practice',
+                severity: 'low',
+            }
+        };
+    }
+
+    return null;
+}
+
+function trackTargetTable(context: ParserContext, tableName: string): void {
+    const key = tableName.toLowerCase();
+    context.tableUsageMap.set(key, (context.tableUsageMap.get(key) || 0) + 1);
+}
+
 export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string | null {
     const {
         context,
@@ -39,6 +240,86 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
         getTableName,
         extractConditions
     } = args;
+
+    if (context.statementType === 'insert') {
+        const upsertPresentation = buildUpsertPresentation(context, stmt);
+        if (upsertPresentation) {
+            const insertSourceSelect = getInsertSelectAst(stmt);
+            const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+            const firstTargetName = targetTables.length === 1 ? getTableName(targetTables[0]) : '';
+            const rootLabel = firstTargetName ? `${upsertPresentation.label} ${firstTargetName}` : upsertPresentation.label;
+            const rootWidth = Math.min(420, Math.max(180, rootLabel.length * 10 + 40));
+
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: rootLabel,
+                description: upsertPresentation.description,
+                details: upsertPresentation.details,
+                accessMode: 'write',
+                operationType: 'INSERT',
+                x: 0,
+                y: 0,
+                width: rootWidth,
+                height: 60
+            });
+
+            pushHintOnce(context, upsertPresentation.hint);
+
+            const selectRootId = insertSourceSelect
+                ? processSelect(context, insertSourceSelect, nodes, edges)
+                : null;
+
+            if (targetTables.length === 0) {
+                if (selectRootId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: selectRootId,
+                        target: rootId
+                    });
+                }
+                return rootId;
+            }
+
+            for (const tableRef of targetTables) {
+                const tableName = getTableName(tableRef);
+                if (!tableName) {
+                    continue;
+                }
+
+                trackTargetTable(context, tableName);
+                const targetId = genId('table');
+                nodes.push({
+                    id: targetId,
+                    type: 'table',
+                    label: tableName,
+                    description: 'Upsert target table',
+                    accessMode: 'write',
+                    operationType: 'INSERT',
+                    x: 0,
+                    y: 0,
+                    width: 140,
+                    height: 60
+                });
+
+                if (selectRootId) {
+                    edges.push({
+                        id: genId('e'),
+                        source: selectRootId,
+                        target: targetId
+                    });
+                }
+
+                edges.push({
+                    id: genId('e'),
+                    source: targetId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+    }
 
     // INSERT ... SELECT: render inner SELECT flow, then wire it to write target(s).
     if (context.statementType === 'insert') {
@@ -74,6 +355,7 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                 if (!tableName) { continue; }
 
                 context.stats.tables++;
+                trackTargetTable(context, tableName);
                 const targetId = genId('table');
                 nodes.push({
                     id: targetId,
@@ -161,6 +443,7 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                     continue;
                 }
                 context.stats.tables++;
+                trackTargetTable(context, tableName);
                 const targetId = genId('table');
                 nodes.push({
                     id: targetId,

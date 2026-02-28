@@ -16,6 +16,7 @@ import {
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
+    stripSqlComments,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
@@ -640,20 +641,32 @@ function isDebugLoggingEnabled(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).debugLogging);
 }
 
-function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
-    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
-    // Fall back to PostgreSQL AST parsing for these statements so visualization can still render.
-    if (dialect !== 'Snowflake') {
+function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
+    const keyword = getLeadingKeyword(sql);
+    if (!keyword) {
         return null;
     }
 
-    const keyword = getLeadingKeyword(sql);
-    if (!keyword || !['DELETE', 'MERGE'].includes(keyword)) {
+    let proxyDialect: SqlDialect | null = null;
+    const commentStripped = stripSqlComments(sql);
+
+    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
+    if (dialect === 'Snowflake' && ['DELETE', 'MERGE'].includes(keyword)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    // SQLite ON CONFLICT is structurally close to PostgreSQL, but the bundled SQLite grammar
+    // still rejects it. Parse it through PostgreSQL so the insert/upsert processor can model it.
+    if (dialect === 'SQLite' && keyword === 'INSERT' && /\bON\s+CONFLICT\b/i.test(commentStripped)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    if (!proxyDialect) {
         return null;
     }
 
     try {
-        return parser.astify(sql, { database: 'PostgreSQL' });
+        return parser.astify(sql, { database: proxyDialect });
     } catch (e) {
         if (isDebugLoggingEnabled()) {
             console.debug('[sqlParser] AST parse failed:', e);
@@ -865,7 +878,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             try {
                 return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {
-                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sqlText, targetDialect);
+                const fallbackAst = tryParseDialectProxyAstFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;
                 }
