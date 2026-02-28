@@ -50,11 +50,12 @@ import {
     getTableName,
     processSelectStatement,
     resolveDeleteTargetTableNames,
+    tryParseWarehouseDdlStatement,
+    tryProcessDdlStatement,
     tryParseBulkDataStatement,
     tryParseCompatibleDeleteStatement,
     tryParseCompatibleMergeStatement,
     tryParseSessionCommand,
-    tryProcessCreateStatement,
     tryProcessDmlStatements
 } from './parser/statements';
 import { escapeRegex } from '../shared';
@@ -888,6 +889,17 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return bulkResult;
     }
 
+    const warehouseDdlResult = tryParseWarehouseDdlStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+    });
+    if (warehouseDdlResult) {
+        layoutGraph(warehouseDdlResult.nodes, warehouseDdlResult.edges);
+        assignLineNumbers(warehouseDdlResult.nodes, sql);
+        return warehouseDdlResult;
+    }
+
     // Check if this is a session/utility command that node-sql-parser doesn't support
     const sessionResult = tryParseSessionCommand(ctx, sql, (prefix) => genId(ctx, prefix));
     if (sessionResult) {
@@ -1036,7 +1048,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         if (innerSelectStmt && innerSelectStmt.type?.toLowerCase() === 'create') {
             if (innerSelectStmt.select) {
                 innerSelectStmt = innerSelectStmt.select;
-            } else if (innerSelectStmt.as) {
+            } else if (innerSelectStmt.query_expr) {
+                innerSelectStmt = innerSelectStmt.query_expr;
+            } else if (innerSelectStmt.as && typeof innerSelectStmt.as === 'object') {
                 innerSelectStmt = innerSelectStmt.as;
             }
         }
@@ -1204,7 +1218,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
 
     const { label, description, objectName } = getStatementPresentation(stmt, ctx.statementType);
 
-    const createRootId = tryProcessCreateStatement(
+    const ddlRootId = tryProcessDdlStatement(
         context,
         stmt,
         nodes,
@@ -1214,8 +1228,8 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         (prefix) => genId(prefix),
         processSelect
     );
-    if (createRootId) {
-        return createRootId;
+    if (ddlRootId) {
+        return ddlRootId;
     }
 
     const dmlRootId = tryProcessDmlStatements({
@@ -1256,7 +1270,17 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
             ? resolveDeleteTargetTableNames(stmt, getTableName)
             : (Array.isArray(stmt.table) ? stmt.table : [stmt.table]);
         // Determine operation type and access mode for write operations
-        const opType = ctx.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+        const opType = ctx.statementType === 'insert'
+            ? 'INSERT'
+            : ctx.statementType === 'update'
+                ? 'UPDATE'
+                : ctx.statementType === 'delete'
+                    ? 'DELETE'
+                    : ctx.statementType === 'merge'
+                        ? 'MERGE'
+                        : ctx.statementType === 'truncate'
+                            ? 'TRUNCATE'
+                            : undefined;
         const accessMode: 'write' = 'write';
 
         for (const t of tables) {

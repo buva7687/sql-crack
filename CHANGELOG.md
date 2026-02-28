@@ -26,6 +26,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - TransactSQL `DELETE ... OUTPUT` — strips OUTPUT clause, re-parses sanitized SQL, annotates OUTPUT columns on result node.
   - TransactSQL `DELETE ... OUTPUT INTO` — creates an additional write-target table node for the output sink.
   - `getDeleteSourceFromItems` now filters out target tables from source items (matching the UPDATE equivalent) to prevent duplicate read nodes.
+- **Rich DDL visualization**: Expanded `tryProcessDdlStatement` (renamed from `tryProcessCreateStatement`) to produce structured flow graphs for ALTER, DROP, and TRUNCATE in addition to CREATE.
+  - CREATE TABLE with column definitions, constraint details (PK, UNIQUE, NOT NULL), and foreign-key reference flow edges to referenced tables.
+  - CREATE TABLE option details (PARTITION BY, CLUSTER BY, etc.) surfaced from `stmt.table_options`.
+  - ALTER TABLE with per-expression detail extraction (ADD/DROP/RENAME COLUMN, ADD CONSTRAINT) and FK reference edges.
+  - DROP TABLE/INDEX with multi-target support and IF EXISTS / ON table details.
+  - TRUNCATE TABLE with suffix options (RESTART IDENTITY, CASCADE).
+  - TRUNCATE recognized by `getDdlStatementInfo` and included in merged DDL batches (label changed to "Schema Changes").
+  - Expanded CREATE regex to recognize EXTERNAL TABLE, STAGE, STREAM, TASK, PIPE.
+  - New operation type badges: CREATE_TABLE, CREATE_VIEW, CREATE_OBJECT, ALTER, DROP, TRUNCATE with distinct colors.
+- **Warehouse/external DDL parser**: Added a dialect-gated warehouse DDL compatibility parser (`src/webview/parser/statements/warehouseDdl.ts`) for cloud-native DDL that the AST parser cannot handle.
+  - Hive/Athena `CREATE EXTERNAL TABLE` — columns, STORED AS, ROW FORMAT, LOCATION, TBLPROPERTIES.
+  - BigQuery `CREATE EXTERNAL TABLE ... OPTIONS(...)` — format, uris extraction.
+  - Trino `CREATE TABLE ... WITH (...)` — WITH block options, external_location flow.
+  - Snowflake `CREATE STAGE` — URL source flow.
+  - Snowflake `CREATE STREAM ... ON TABLE/VIEW` — source table read flow.
+  - Snowflake `CREATE TASK` — warehouse, schedule, body summary.
+  - Redshift `CREATE TABLE` with DISTSTYLE, DISTKEY, SORTKEY physical options.
+  - Wired before session-command classifier in the parser pipeline.
 - **Bulk data operation parser**: Added a dedicated bulk-operation compatibility parser (`src/webview/parser/statements/bulk.ts`) that renders real source/target flow graphs instead of collapsing bulk statements into utility-command boxes.
   - PostgreSQL/Redshift `COPY ... FROM` and `COPY ... TO` (file, S3, STDOUT).
   - PostgreSQL `COPY (SELECT ...) TO` — preserves inner SELECT flow graph.

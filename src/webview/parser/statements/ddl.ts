@@ -6,6 +6,7 @@ import type {
     FlowNode
 } from '../../types';
 import { createFreshContext, type ParserContext } from '../context';
+import { formatExpressionFromAst, getAstString } from '../extractors/columns';
 import { stripLeadingComments } from '../validation/splitting';
 
 type GenIdFn = (prefix: string) => string;
@@ -22,6 +23,353 @@ export interface StatementPresentation {
     objectName: string;
 }
 
+const IDENTIFIER_WRAPPER_PATTERN = /[`"'\[\]]/g;
+
+function normalizeIdentifier(raw: string): string {
+    return raw
+        .split('.')
+        .map(part => part.replace(IDENTIFIER_WRAPPER_PATTERN, '').trim())
+        .filter(Boolean)
+        .join('.');
+}
+
+function extractIdentifierName(node: any): string | null {
+    if (typeof node === 'string' || typeof node === 'number') {
+        const normalized = normalizeIdentifier(String(node));
+        return normalized || null;
+    }
+    if (!node || typeof node !== 'object') {
+        return null;
+    }
+    if (Array.isArray(node)) {
+        const parts = node.map((part: any) => extractIdentifierName(part)).filter(Boolean);
+        return parts.length > 0 ? parts.join('.') : null;
+    }
+
+    const db = extractIdentifierName(node.db || node.schema);
+    const table = extractIdentifierName(node.table || node.view || node.name);
+    if (db && table) {
+        return `${db}.${table}`;
+    }
+    if (table) {
+        return table;
+    }
+
+    if (node.column) {
+        return extractIdentifierName(node.column);
+    }
+    if (node.value) {
+        return extractIdentifierName(node.value);
+    }
+    if (node.expr) {
+        return extractIdentifierName(node.expr);
+    }
+
+    return null;
+}
+
+function getObjectNames(input: any): string[] {
+    if (Array.isArray(input)) {
+        return input
+            .map((item: any) => extractIdentifierName(item))
+            .filter((value: string | null): value is string => Boolean(value));
+    }
+    const single = extractIdentifierName(input);
+    return single ? [single] : [];
+}
+
+function trackSchemaObject(context: ParserContext, objectName: string): void {
+    if (!objectName) {
+        return;
+    }
+    const key = objectName.toLowerCase();
+    context.tableUsageMap.set(key, (context.tableUsageMap.get(key) || 0) + 1);
+}
+
+function getCreateQueryStatement(stmt: any): any | null {
+    if (!stmt || stmt.type?.toLowerCase() !== 'create') {
+        return null;
+    }
+    if (stmt.select && typeof stmt.select === 'object') {
+        return stmt.select;
+    }
+    if (stmt.query_expr && typeof stmt.query_expr === 'object') {
+        return stmt.query_expr;
+    }
+    if (stmt.as && typeof stmt.as === 'object') {
+        return stmt.as;
+    }
+    return null;
+}
+
+function getReferenceDisplay(referenceDefinition: any): string | null {
+    if (!referenceDefinition || typeof referenceDefinition !== 'object') {
+        return null;
+    }
+
+    const tables = getObjectNames(referenceDefinition.table);
+    if (tables.length === 0) {
+        return null;
+    }
+
+    const columns = Array.isArray(referenceDefinition.definition)
+        ? referenceDefinition.definition
+            .map((item: any) => extractIdentifierName(item))
+            .filter((value: string | null): value is string => Boolean(value))
+        : [];
+    const suffix = columns.length > 0 ? `(${columns.join(', ')})` : '';
+    return `${tables[0]}${suffix}`;
+}
+
+function getReferenceTableNames(referenceDefinition: any): string[] {
+    if (!referenceDefinition || typeof referenceDefinition !== 'object') {
+        return [];
+    }
+    return getObjectNames(referenceDefinition.table);
+}
+
+function describeCreateDefinition(definition: any): string | null {
+    if (!definition || typeof definition !== 'object') {
+        return null;
+    }
+
+    if (definition.resource === 'column') {
+        const columnName = extractIdentifierName(definition.column);
+        if (!columnName) {
+            return null;
+        }
+
+        const dataType = typeof definition.definition?.dataType === 'string'
+            ? ` ${definition.definition.dataType.toUpperCase()}`
+            : '';
+        let summary = `${columnName}${dataType}`;
+        if (definition.primary_key) {
+            summary += ' PRIMARY KEY';
+        }
+        if (definition.unique) {
+            summary += ' UNIQUE';
+        }
+        if (definition.not_null) {
+            summary += ' NOT NULL';
+        }
+
+        const referenceDisplay = getReferenceDisplay(definition.reference_definition);
+        if (referenceDisplay) {
+            summary += ` REFERENCES ${referenceDisplay}`;
+        }
+        return summary;
+    }
+
+    const constraintName = typeof definition.constraint === 'string' ? definition.constraint : '';
+    const constraintType = typeof definition.constraint_type === 'string'
+        ? definition.constraint_type.toUpperCase()
+        : 'CONSTRAINT';
+    const columns = Array.isArray(definition.definition)
+        ? definition.definition
+            .map((item: any) => extractIdentifierName(item))
+            .filter((value: string | null): value is string => Boolean(value))
+        : [];
+
+    let summary = constraintName ? `${constraintName}: ${constraintType}` : constraintType;
+    if (columns.length > 0) {
+        summary += ` (${columns.join(', ')})`;
+    }
+
+    const referenceDisplay = getReferenceDisplay(definition.reference_definition);
+    if (referenceDisplay) {
+        summary += ` REFERENCES ${referenceDisplay}`;
+    }
+    return summary;
+}
+
+function collectReferenceTablesFromDefinitions(definitions: any[]): string[] {
+    const names = new Set<string>();
+    for (const definition of definitions) {
+        for (const tableName of getReferenceTableNames(definition?.reference_definition)) {
+            names.add(tableName);
+        }
+        for (const tableName of getReferenceTableNames(definition?.create_definitions?.reference_definition)) {
+            names.add(tableName);
+        }
+    }
+    return Array.from(names);
+}
+
+function getCreateTableDetails(stmt: any): string[] {
+    const definitions = Array.isArray(stmt.create_definitions) ? stmt.create_definitions : [];
+    if (definitions.length === 0) {
+        return [];
+    }
+
+    const details = definitions
+        .map((definition: any) => describeCreateDefinition(definition))
+        .filter((value: string | null): value is string => Boolean(value));
+    const header = `Definitions: ${details.length}`;
+    return [header, ...details.slice(0, 5), ...(details.length > 5 ? [`+${details.length - 5} more`] : [])];
+}
+
+function formatOptionValue(value: any): string {
+    if (Array.isArray(value)) {
+        return value.map(item => formatOptionValue(item)).join(', ');
+    }
+    if (typeof value === 'string' || typeof value === 'number') {
+        return String(value);
+    }
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    if (typeof value.type === 'string') {
+        const formatted = formatExpressionFromAst(value)?.trim();
+        if (formatted && formatted !== 'expr') {
+            return formatted.replace(/\s+/g, ' ');
+        }
+    }
+
+    const astString = getAstString(value)?.trim();
+    if (astString) {
+        return astString.replace(/\s+/g, ' ');
+    }
+    return '';
+}
+
+function getCreateTableOptionDetails(stmt: any): string[] {
+    const options = Array.isArray(stmt.table_options) ? stmt.table_options : [];
+    return options
+        .map((option: any) => {
+            const keyword = typeof option?.keyword === 'string' ? option.keyword.toUpperCase() : '';
+            const value = formatOptionValue(option?.value);
+            if (!keyword) {
+                return null;
+            }
+            return value ? `${keyword}: ${value}` : keyword;
+        })
+        .filter((value: string | null): value is string => Boolean(value));
+}
+
+function describeAlterExpression(expr: any): string | null {
+    if (!expr || typeof expr !== 'object') {
+        return null;
+    }
+
+    const action = typeof expr.action === 'string' ? expr.action.toUpperCase() : 'ALTER';
+    if (expr.create_definitions) {
+        const definitionSummary = describeCreateDefinition(expr.create_definitions);
+        return definitionSummary ? `${action} ${definitionSummary}` : action;
+    }
+
+    const resource = typeof expr.resource === 'string'
+        ? expr.resource.toUpperCase()
+        : (typeof expr.keyword === 'string' ? expr.keyword.toUpperCase() : 'OBJECT');
+    const target = extractIdentifierName(expr.column || expr.name || expr.old_column || expr.target);
+    const newName = extractIdentifierName(expr.rename || expr.new_column);
+    const dataType = typeof expr.definition?.dataType === 'string'
+        ? ` ${expr.definition.dataType.toUpperCase()}`
+        : '';
+
+    if (action === 'RENAME' && target && newName) {
+        return `RENAME ${resource} ${target} TO ${newName}`;
+    }
+    if (target) {
+        return `${action} ${resource} ${target}${dataType}`.trim();
+    }
+    return `${action} ${resource}`.trim();
+}
+
+function getAlterDetails(stmt: any): string[] {
+    const expressions = Array.isArray(stmt.expr) ? stmt.expr : [];
+    const details = expressions
+        .map((expr: any) => describeAlterExpression(expr))
+        .filter((value: string | null): value is string => Boolean(value));
+
+    return details.length > 0 ? details : [];
+}
+
+function getDropDetails(stmt: any): string[] {
+    const details: string[] = [];
+    if (typeof stmt.prefix === 'string' && stmt.prefix.trim()) {
+        details.push(stmt.prefix.toUpperCase());
+    }
+    const tableName = extractIdentifierName(stmt.table);
+    if (tableName) {
+        details.push(`ON ${tableName}`);
+    }
+    return details;
+}
+
+function getTruncateDetails(stmt: any): string[] {
+    const suffixes = Array.isArray(stmt.suffix)
+        ? stmt.suffix
+            .map((item: any) => typeof item?.value === 'string' ? item.value.toUpperCase() : '')
+            .filter(Boolean)
+        : [];
+    return suffixes.length > 0 ? [`Options: ${suffixes.join(', ')}`] : [];
+}
+
+function createWriteTargetNode(
+    context: ParserContext,
+    nodes: FlowNode[],
+    genId: GenIdFn,
+    label: string,
+    description: string,
+    operationType: FlowNode['operationType']
+): string {
+    trackSchemaObject(context, label);
+    const nodeId = genId('table');
+    nodes.push({
+        id: nodeId,
+        type: 'table',
+        label,
+        description,
+        accessMode: 'write',
+        operationType,
+        x: 0,
+        y: 0,
+        width: Math.min(220, Math.max(140, label.length * 10 + 36)),
+        height: 60,
+    });
+    return nodeId;
+}
+
+function attachReferenceSources(
+    context: ParserContext,
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    genId: GenIdFn,
+    targetId: string,
+    referenceTables: string[]
+): void {
+    const seen = new Set<string>();
+    for (const tableName of referenceTables) {
+        const normalizedName = tableName.toLowerCase();
+        if (seen.has(normalizedName)) {
+            continue;
+        }
+        seen.add(normalizedName);
+        trackSchemaObject(context, tableName);
+
+        const sourceId = genId('table');
+        nodes.push({
+            id: sourceId,
+            type: 'table',
+            label: tableName,
+            description: 'Referenced table',
+            accessMode: 'read',
+            x: 0,
+            y: 0,
+            width: Math.min(220, Math.max(140, tableName.length * 10 + 36)),
+            height: 60,
+        });
+        edges.push({
+            id: genId('e'),
+            source: sourceId,
+            target: targetId,
+            sqlClause: 'REFERENCES',
+            clauseType: 'flow',
+        });
+    }
+}
+
 export function getStatementPresentation(stmt: any, statementType: string): StatementPresentation {
     let label = stmt.type?.toUpperCase() || '';
     let description = `${stmt.type} statement`;
@@ -31,12 +379,11 @@ export function getStatementPresentation(stmt: any, statementType: string): Stat
         const keyword = stmt.keyword.toUpperCase();
 
         if (stmt.keyword === 'view' && stmt.view) {
-            objectName = stmt.view.view || stmt.view.name || '';
+            objectName = getObjectNames(stmt.view)[0] || '';
         } else if (stmt.keyword === 'table' && stmt.table) {
-            const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
-            objectName = tables[0]?.table || tables[0]?.name || '';
+            objectName = getObjectNames(stmt.table)[0] || '';
         } else if (stmt.keyword === 'index' && stmt.index) {
-            objectName = stmt.index || '';
+            objectName = extractIdentifierName(stmt.index) || '';
         } else if (stmt.keyword === 'database' && stmt.database) {
             objectName = stmt.database || '';
         } else if (stmt.keyword === 'schema' && stmt.schema) {
@@ -47,12 +394,33 @@ export function getStatementPresentation(stmt: any, statementType: string): Stat
         description = objectName
             ? `Create ${keyword.toLowerCase()}: ${objectName}`
             : `Create ${keyword.toLowerCase()}`;
+    } else if (statementType === 'alter') {
+        const keyword = stmt.keyword ? String(stmt.keyword).toUpperCase() : 'TABLE';
+        objectName = getObjectNames(stmt.table)[0] || '';
+        label = objectName ? `ALTER ${keyword} ${objectName}` : `ALTER ${keyword}`;
+        description = objectName
+            ? `Alter ${keyword.toLowerCase()}: ${objectName}`
+            : `Alter ${keyword.toLowerCase()}`;
+    } else if (statementType === 'drop') {
+        const keyword = stmt.keyword ? String(stmt.keyword).toUpperCase().replace(/\s+/g, ' ') : 'OBJECT';
+        objectName = getObjectNames(stmt.name)[0] || '';
+        label = objectName ? `DROP ${keyword} ${objectName}` : `DROP ${keyword}`;
+        description = objectName
+            ? `Drop ${keyword.toLowerCase()}: ${objectName}`
+            : `Drop ${keyword.toLowerCase()}`;
+    } else if (statementType === 'truncate') {
+        const keyword = stmt.keyword ? String(stmt.keyword).toUpperCase() : 'TABLE';
+        objectName = getObjectNames(stmt.name)[0] || '';
+        label = objectName ? `TRUNCATE ${keyword} ${objectName}` : `TRUNCATE ${keyword}`;
+        description = objectName
+            ? `Truncate ${keyword.toLowerCase()}: ${objectName}`
+            : `Truncate ${keyword.toLowerCase()}`;
     }
 
     return { label, description, objectName };
 }
 
-export function tryProcessCreateStatement(
+export function tryProcessDdlStatement(
     context: ParserContext,
     stmt: any,
     nodes: FlowNode[],
@@ -62,32 +430,184 @@ export function tryProcessCreateStatement(
     genId: GenIdFn,
     processSelect: ProcessSelectFn
 ): string | null {
-    if (context.statementType !== 'create' || !stmt.keyword) {
-        return null;
+    if (context.statementType === 'create' && stmt.keyword) {
+        // For CREATE VIEW with a SELECT, process the inner SELECT and connect to view
+        if (stmt.keyword === 'view' && stmt.select && objectName) {
+            const selectRootId = processSelect(context, stmt.select, nodes, edges);
+
+            const viewNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `VIEW ${objectName}`,
+                description: `Create view: ${objectName}`,
+                accessMode: 'write',
+                operationType: 'CREATE_VIEW',
+                x: 0,
+                y: 0,
+                width: viewNodeWidth,
+                height: 60
+            });
+
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+
+        // For CREATE TABLE AS SELECT (CTAS), process the inner SELECT for optimization hints
+        const innerSelect = getCreateQueryStatement(stmt);
+        if (stmt.keyword === 'table' && innerSelect && objectName) {
+            const selectRootId = processSelect(context, innerSelect, nodes, edges);
+            const details = getCreateTableOptionDetails(stmt);
+
+            const tableNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `TABLE ${objectName}`,
+                description: `Create table as select: ${objectName}`,
+                details: details.length > 0 ? details : undefined,
+                accessMode: 'write',
+                operationType: 'CREATE_TABLE_AS',
+                x: 0,
+                y: 0,
+                width: tableNodeWidth,
+                height: 60
+            });
+
+            if (selectRootId) {
+                edges.push({
+                    id: genId('e'),
+                    source: selectRootId,
+                    target: rootId
+                });
+            }
+
+            return rootId;
+        }
+
+        if (stmt.keyword === 'table' && objectName) {
+            const targetId = createWriteTargetNode(
+                context,
+                nodes,
+                genId,
+                objectName,
+                'Create table target',
+                'CREATE_TABLE'
+            );
+            const details = [
+                ...getCreateTableDetails(stmt),
+                ...getCreateTableOptionDetails(stmt)
+            ];
+            const referenceTables = collectReferenceTablesFromDefinitions(Array.isArray(stmt.create_definitions) ? stmt.create_definitions : []);
+            attachReferenceSources(context, nodes, edges, genId, targetId, referenceTables);
+
+            nodes.push({
+                id: rootId,
+                type: 'result',
+                label: `CREATE TABLE ${objectName}`,
+                description: `Create table: ${objectName}`,
+                details,
+                accessMode: 'write',
+                operationType: 'CREATE_TABLE',
+                x: 0,
+                y: 0,
+                width: Math.min(420, Math.max(180, objectName.length * 10 + 80)),
+                height: 60
+            });
+            edges.push({
+                id: genId('e'),
+                source: targetId,
+                target: rootId
+            });
+            return rootId;
+        }
     }
 
-    // For CREATE VIEW with a SELECT, process the inner SELECT and connect to view
-    if (stmt.keyword === 'view' && stmt.select && objectName) {
-        const selectRootId = processSelect(context, stmt.select, nodes, edges);
+    if (context.statementType === 'alter') {
+        const targetNames = getObjectNames(stmt.table);
+        const targetName = targetNames[0] || objectName;
+        if (!targetName) {
+            return null;
+        }
 
-        const viewNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
+        const targetId = createWriteTargetNode(
+            context,
+            nodes,
+            genId,
+            targetName,
+            'Alter target object',
+            'ALTER'
+        );
+        const details = getAlterDetails(stmt);
+        const referenceTables = collectReferenceTablesFromDefinitions(Array.isArray(stmt.expr) ? stmt.expr : []);
+        attachReferenceSources(context, nodes, edges, genId, targetId, referenceTables);
+
         nodes.push({
             id: rootId,
             type: 'result',
-            label: `VIEW ${objectName}`,
-            description: `Create view: ${objectName}`,
+            label: `ALTER TABLE ${targetName}`,
+            description: `Alter table: ${targetName}`,
+            details,
             accessMode: 'write',
-            operationType: 'CREATE_VIEW',
+            operationType: 'ALTER',
             x: 0,
             y: 0,
-            width: viewNodeWidth,
+            width: Math.min(420, Math.max(180, targetName.length * 10 + 80)),
+            height: 60
+        });
+        edges.push({
+            id: genId('e'),
+            source: targetId,
+            target: rootId
+        });
+        return rootId;
+    }
+
+    if (context.statementType === 'drop') {
+        const keyword = stmt.keyword ? String(stmt.keyword).toUpperCase().replace(/\s+/g, ' ') : 'OBJECT';
+        const targetNames = getObjectNames(stmt.name);
+        if (targetNames.length === 0) {
+            return null;
+        }
+
+        const details = getDropDetails(stmt);
+        const rootLabel = targetNames.length === 1
+            ? `DROP ${keyword} ${targetNames[0]}`
+            : `DROP ${keyword} (${targetNames.length})`;
+
+        nodes.push({
+            id: rootId,
+            type: 'result',
+            label: rootLabel,
+            description: `Drop ${keyword.toLowerCase()}: ${targetNames.join(', ')}`,
+            details,
+            accessMode: 'write',
+            operationType: 'DROP',
+            x: 0,
+            y: 0,
+            width: Math.min(420, Math.max(180, rootLabel.length * 10 + 40)),
             height: 60
         });
 
-        if (selectRootId) {
+        for (const targetName of targetNames) {
+            const targetId = createWriteTargetNode(
+                context,
+                nodes,
+                genId,
+                targetName,
+                `Drop ${keyword.toLowerCase()} target`,
+                'DROP'
+            );
             edges.push({
                 id: genId('e'),
-                source: selectRootId,
+                source: targetId,
                 target: rootId
             });
         }
@@ -95,29 +615,43 @@ export function tryProcessCreateStatement(
         return rootId;
     }
 
-    // For CREATE TABLE AS SELECT (CTAS), process the inner SELECT for optimization hints
-    if (stmt.keyword === 'table' && (stmt.select || stmt.as) && objectName) {
-        const innerSelect = stmt.select || stmt.as;
-        const selectRootId = processSelect(context, innerSelect, nodes, edges);
+    if (context.statementType === 'truncate') {
+        const targetNames = getObjectNames(stmt.name);
+        if (targetNames.length === 0) {
+            return null;
+        }
 
-        const tableNodeWidth = Math.min(420, Math.max(160, objectName.length * 10 + 60));
+        const details = getTruncateDetails(stmt);
+        const rootLabel = targetNames.length === 1
+            ? `TRUNCATE TABLE ${targetNames[0]}`
+            : `TRUNCATE TABLE (${targetNames.length})`;
+
         nodes.push({
             id: rootId,
             type: 'result',
-            label: `TABLE ${objectName}`,
-            description: `Create table as select: ${objectName}`,
+            label: rootLabel,
+            description: `Truncate table: ${targetNames.join(', ')}`,
+            details,
             accessMode: 'write',
-            operationType: 'CREATE_TABLE_AS',
+            operationType: 'TRUNCATE',
             x: 0,
             y: 0,
-            width: tableNodeWidth,
+            width: Math.min(420, Math.max(180, rootLabel.length * 10 + 40)),
             height: 60
         });
 
-        if (selectRootId) {
+        for (const targetName of targetNames) {
+            const targetId = createWriteTargetNode(
+                context,
+                nodes,
+                genId,
+                targetName,
+                'Truncate target table',
+                'TRUNCATE'
+            );
             edges.push({
                 id: genId('e'),
-                source: selectRootId,
+                source: targetId,
                 target: rootId
             });
         }
@@ -127,6 +661,8 @@ export function tryProcessCreateStatement(
 
     return null;
 }
+
+export const tryProcessCreateStatement = tryProcessDdlStatement;
 
 const SESSION_COMMAND_PATTERNS: Array<{
     pattern: RegExp;
@@ -306,7 +842,7 @@ export function createMergedSessionResult(
 export function getDdlStatementInfo(sql: string): { type: string; keyword: string; objectName: string } | null {
     const trimmedSql = stripLeadingComments(sql).trim();
 
-    const createMatch = trimmedSql.match(/^CREATE\s+(OR\s+REPLACE\s+)?(TABLE|VIEW|INDEX|SCHEMA|DATABASE|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
+    const createMatch = trimmedSql.match(/^CREATE\s+(OR\s+REPLACE\s+)?(EXTERNAL\s+TABLE|TABLE|VIEW|INDEX|SCHEMA|DATABASE|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE|MATERIALIZED\s+VIEW|STAGE|STREAM|TASK|PIPE)\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
     if (createMatch) {
         const keyword = createMatch[2].toUpperCase().replace(/\s+/g, ' ');
         return {
@@ -332,6 +868,15 @@ export function getDdlStatementInfo(sql: string): { type: string; keyword: strin
             type: 'DROP',
             keyword,
             objectName: dropMatch[2].replace(/[`"[\]]/g, ''),
+        };
+    }
+
+    const truncateMatch = trimmedSql.match(/^TRUNCATE\s+(TABLE\s+)?([^\s(;]+)/i);
+    if (truncateMatch) {
+        return {
+            type: 'TRUNCATE',
+            keyword: 'TABLE',
+            objectName: truncateMatch[2].replace(/[`"[\]]/g, ''),
         };
     }
 
@@ -372,7 +917,7 @@ export function createMergedDdlResult(
     const nodes: FlowNode[] = [{
         id: 'ddl_0',
         type: 'result' as NodeType,
-        label: 'Schema Definition',
+        label: 'Schema Changes',
         description: `${summaryLabel}\n\n${descriptions}`,
         accessMode: 'write',
         x: 0,
@@ -393,7 +938,7 @@ export function createMergedDdlResult(
         hints: [{
             type: 'info',
             message: summaryLabel,
-            suggestion: `This block contains ${commands.length} DDL statement${commands.length > 1 ? 's' : ''} defining database schema.`
+            suggestion: `This block contains ${commands.length} DDL statement${commands.length > 1 ? 's' : ''} that change database objects.`
         }],
         sql: combinedSql,
         columnLineage: [],

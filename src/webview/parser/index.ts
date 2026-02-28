@@ -46,6 +46,8 @@ export { generateHints, detectAdvancedIssues, calculateEnhancedMetrics } from '.
 // Statements
 export {
     getStatementPresentation,
+    tryParseWarehouseDdlStatement,
+    tryProcessDdlStatement,
     tryProcessCreateStatement,
     tryProcessDmlStatements,
     processSelectStatement

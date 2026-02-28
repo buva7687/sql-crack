@@ -119,6 +119,12 @@ export const BADGE_COLORS = {
     delete: '#dc2626',     // Dark Red
     merge: '#8b5cf6',      // Violet
     createTableAs: '#06b6d4', // Cyan
+    createTable: '#0891b2', // Cyan/Dark
+    createView: '#0ea5e9', // Sky
+    createObject: '#7c3aed', // Violet
+    alter: '#f97316',      // Orange
+    drop: '#b91c1c',       // Deep Red
+    truncate: '#2563eb',   // Blue
 
     // Syntax highlighting badges
     partitionBy: '#6366f1', // Indigo
