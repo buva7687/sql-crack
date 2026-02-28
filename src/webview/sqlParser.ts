@@ -55,6 +55,7 @@ import {
     tryParseBulkDataStatement,
     tryParseCompatibleDeleteStatement,
     tryParseCompatibleMergeStatement,
+    tryParseCompatibleOracleInsertStatement,
     tryParseSessionCommand,
     tryProcessDmlStatements
 } from './parser/statements';
@@ -924,6 +925,18 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return deleteCompatibilityResult;
     }
 
+    const oracleInsertCompatibilityResult = tryParseCompatibleOracleInsertStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+    });
+    if (oracleInsertCompatibilityResult) {
+        layoutGraph(oracleInsertCompatibilityResult.nodes, oracleInsertCompatibilityResult.edges);
+        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql);
+        return oracleInsertCompatibilityResult;
+    }
+
     // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
     const hoistedSql = hoistNestedCtes(sql);
     if (hoistedSql !== null) {
@@ -1272,6 +1285,8 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         // Determine operation type and access mode for write operations
         const opType = ctx.statementType === 'insert'
             ? 'INSERT'
+            : ctx.statementType === 'replace'
+                ? 'REPLACE'
             : ctx.statementType === 'update'
                 ? 'UPDATE'
                 : ctx.statementType === 'delete'

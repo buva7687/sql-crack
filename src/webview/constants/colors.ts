@@ -115,6 +115,7 @@ export const BADGE_COLORS = {
 
     // DML operations
     insert: '#10b981',     // Green
+    replace: '#14b8a6',    // Teal
     update: '#f59e0b',     // Amber
     delete: '#dc2626',     // Dark Red
     merge: '#8b5cf6',      // Violet

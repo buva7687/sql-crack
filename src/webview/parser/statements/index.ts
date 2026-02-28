@@ -14,6 +14,7 @@ export { tryParseBulkDataStatement } from './bulk';
 export { tryParseWarehouseDdlStatement } from './warehouseDdl';
 export { resolveDeleteTargetTableNames, tryProcessDmlStatements, type ProcessDmlStatementsArgs } from './dml';
 export { tryParseCompatibleMergeStatement } from './merge';
+export { tryParseCompatibleOracleInsertStatement } from './oracleInsert';
 export {
     processSelectStatement,
     type SelectRuntimeDependencies

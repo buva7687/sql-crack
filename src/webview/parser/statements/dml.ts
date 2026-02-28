@@ -25,11 +25,12 @@ export interface ProcessDmlStatementsArgs {
     extractConditions: ExtractConditionsFn;
 }
 
-interface UpsertPresentation {
+interface WritePresentation {
     label: string;
     description: string;
     details?: string[];
-    hint: OptimizationHint;
+    hint?: OptimizationHint;
+    operationType: 'INSERT' | 'REPLACE';
 }
 
 const IDENTIFIER_WRAPPER_PATTERN = /[`"'\[\]]/g;
@@ -113,6 +114,14 @@ function extractSetColumns(assignments: any): string[] {
     }));
 }
 
+function extractColumnNames(columns: any): string[] {
+    if (!Array.isArray(columns)) {
+        return [];
+    }
+
+    return dedupe(columns.map((column: any) => extractIdentifierName(column)));
+}
+
 function extractInsertOrAction(stmt: any): string | null {
     if (!Array.isArray(stmt?.or)) {
         return null;
@@ -136,7 +145,7 @@ function pushHintOnce(context: ParserContext, hint: OptimizationHint): void {
     }
 }
 
-function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPresentation | null {
+function buildUpsertPresentation(context: ParserContext, stmt: any): WritePresentation | null {
     if (!stmt || stmt.type?.toLowerCase() !== 'insert') {
         return null;
     }
@@ -170,6 +179,7 @@ function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPrese
             label: 'UPSERT',
             description: descriptionParts.join(' | '),
             details: descriptionParts,
+            operationType: 'INSERT',
             hint: {
                 type: 'info',
                 message,
@@ -191,6 +201,7 @@ function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPrese
             label: 'UPSERT',
             description: descriptionParts.join(' | '),
             details: descriptionParts,
+            operationType: 'INSERT',
             hint: {
                 type: 'info',
                 message: 'Detected ON DUPLICATE KEY UPDATE upsert',
@@ -208,6 +219,7 @@ function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPrese
             label: `INSERT OR ${sqliteAction}`,
             description,
             details: [description],
+            operationType: 'INSERT',
             hint: {
                 type: 'info',
                 message: `Detected SQLite INSERT OR ${sqliteAction}`,
@@ -219,6 +231,59 @@ function buildUpsertPresentation(context: ParserContext, stmt: any): UpsertPrese
     }
 
     return null;
+}
+
+function buildReplacePresentation(context: ParserContext, stmt: any): WritePresentation | null {
+    if (!stmt || stmt.type?.toLowerCase() !== 'replace') {
+        return null;
+    }
+
+    const descriptionParts = [
+        `${context.dialect} REPLACE INTO`,
+        'Semantics: delete conflicting row, then insert replacement'
+    ];
+    const details = [...descriptionParts];
+
+    const columns = extractColumnNames(stmt.columns);
+    if (columns.length > 0) {
+        const columnDetail = `Columns: ${columns.join(', ')}`;
+        descriptionParts.push(columnDetail);
+        details.push(columnDetail);
+    }
+
+    const setColumns = extractSetColumns(stmt.set);
+    if (setColumns.length > 0) {
+        const setDetail = `SET: ${setColumns.join(', ')}`;
+        descriptionParts.push(setDetail);
+        details.push(setDetail);
+    }
+
+    const rowCount = Array.isArray(stmt.values?.values) ? stmt.values.values.length : 0;
+    if (rowCount > 0) {
+        const rowDetail = `Rows: ${rowCount}`;
+        descriptionParts.push(rowDetail);
+        details.push(rowDetail);
+    }
+
+    if (getInsertLikeSelectAst(stmt)) {
+        const sourceDetail = 'Source: SELECT';
+        descriptionParts.push(sourceDetail);
+        details.push(sourceDetail);
+    }
+
+    return {
+        label: 'REPLACE',
+        description: descriptionParts.join(' | '),
+        details,
+        operationType: 'REPLACE',
+        hint: {
+            type: 'info',
+            message: `Detected ${context.dialect} REPLACE INTO`,
+            suggestion: `${context.dialect} REPLACE INTO is modeled with replace semantics and preserves source-flow when driven by SELECT.`,
+            category: 'best-practice',
+            severity: 'low',
+        }
+    };
 }
 
 function trackTargetTable(context: ParserContext, tableName: string): void {
@@ -241,30 +306,34 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
         extractConditions
     } = args;
 
-    if (context.statementType === 'insert') {
-        const upsertPresentation = buildUpsertPresentation(context, stmt);
-        if (upsertPresentation) {
-            const insertSourceSelect = getInsertSelectAst(stmt);
+    if (context.statementType === 'insert' || context.statementType === 'replace') {
+        const writePresentation = context.statementType === 'insert'
+            ? buildUpsertPresentation(context, stmt)
+            : buildReplacePresentation(context, stmt);
+        if (writePresentation) {
+            const insertSourceSelect = getInsertLikeSelectAst(stmt);
             const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
             const firstTargetName = targetTables.length === 1 ? getTableName(targetTables[0]) : '';
-            const rootLabel = firstTargetName ? `${upsertPresentation.label} ${firstTargetName}` : upsertPresentation.label;
+            const rootLabel = firstTargetName ? `${writePresentation.label} ${firstTargetName}` : writePresentation.label;
             const rootWidth = Math.min(420, Math.max(180, rootLabel.length * 10 + 40));
 
             nodes.push({
                 id: rootId,
                 type: 'result',
                 label: rootLabel,
-                description: upsertPresentation.description,
-                details: upsertPresentation.details,
+                description: writePresentation.description,
+                details: writePresentation.details,
                 accessMode: 'write',
-                operationType: 'INSERT',
+                operationType: writePresentation.operationType,
                 x: 0,
                 y: 0,
                 width: rootWidth,
                 height: 60
             });
 
-            pushHintOnce(context, upsertPresentation.hint);
+            if (writePresentation.hint) {
+                pushHintOnce(context, writePresentation.hint);
+            }
 
             const selectRootId = insertSourceSelect
                 ? processSelect(context, insertSourceSelect, nodes, edges)
@@ -293,9 +362,9 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                     id: targetId,
                     type: 'table',
                     label: tableName,
-                    description: 'Upsert target table',
+                    description: context.statementType === 'replace' ? 'Replace target table' : 'Upsert target table',
                     accessMode: 'write',
-                    operationType: 'INSERT',
+                    operationType: writePresentation.operationType,
                     x: 0,
                     y: 0,
                     width: 140,
@@ -322,17 +391,21 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
     }
 
     // INSERT ... SELECT: render inner SELECT flow, then wire it to write target(s).
-    if (context.statementType === 'insert') {
-        const insertSourceSelect = getInsertSelectAst(stmt);
+    if (context.statementType === 'insert' || context.statementType === 'replace') {
+        const insertSourceSelect = getInsertLikeSelectAst(stmt);
         if (insertSourceSelect) {
             const selectRootId = processSelect(context, insertSourceSelect, nodes, edges);
             const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+            const operationType = context.statementType === 'replace' ? 'REPLACE' : 'INSERT';
+            const rootLabel = context.statementType === 'replace' ? 'REPLACE' : 'INSERT';
 
             nodes.push({
                 id: rootId,
                 type: 'result',
-                label: 'INSERT',
-                description: 'Insert statement',
+                label: rootLabel,
+                description: context.statementType === 'replace' ? 'Replace statement' : 'Insert statement',
+                accessMode: 'write',
+                operationType,
                 x: 0,
                 y: 0,
                 width: 160,
@@ -361,9 +434,9 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                     id: targetId,
                     type: 'table',
                     label: tableName,
-                    description: 'Insert target table',
+                    description: context.statementType === 'replace' ? 'Replace target table' : 'Insert target table',
                     accessMode: 'write',
-                    operationType: 'INSERT',
+                    operationType,
                     x: 0,
                     y: 0,
                     width: 140,
@@ -536,8 +609,8 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
     return null;
 }
 
-function getInsertSelectAst(stmt: any): any | null {
-    if (!stmt || stmt.type?.toLowerCase() !== 'insert') { return null; }
+function getInsertLikeSelectAst(stmt: any): any | null {
+    if (!stmt || (stmt.type?.toLowerCase() !== 'insert' && stmt.type?.toLowerCase() !== 'replace')) { return null; }
     const values = stmt.values;
     if (!values || typeof values !== 'object') { return null; }
     if (values.type?.toLowerCase() !== 'select') { return null; }

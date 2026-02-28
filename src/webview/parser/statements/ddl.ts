@@ -415,6 +415,12 @@ export function getStatementPresentation(stmt: any, statementType: string): Stat
         description = objectName
             ? `Truncate ${keyword.toLowerCase()}: ${objectName}`
             : `Truncate ${keyword.toLowerCase()}`;
+    } else if (statementType === 'replace') {
+        objectName = getObjectNames(stmt.table)[0] || '';
+        label = objectName ? `REPLACE ${objectName}` : 'REPLACE';
+        description = objectName
+            ? `Replace rows in table: ${objectName}`
+            : 'Replace rows';
     }
 
     return { label, description, objectName };

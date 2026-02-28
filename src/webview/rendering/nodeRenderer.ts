@@ -156,6 +156,7 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
     if (node.operationType && node.operationType !== 'SELECT') {
         const opColors: Record<string, string> = {
             INSERT: BADGE_COLORS.insert,
+            REPLACE: BADGE_COLORS.replace,
             UPDATE: BADGE_COLORS.update,
             DELETE: BADGE_COLORS.delete,
             MERGE: BADGE_COLORS.merge,

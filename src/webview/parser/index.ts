@@ -46,6 +46,7 @@ export { generateHints, detectAdvancedIssues, calculateEnhancedMetrics } from '.
 // Statements
 export {
     getStatementPresentation,
+    tryParseCompatibleOracleInsertStatement,
     tryParseWarehouseDdlStatement,
     tryProcessDdlStatement,
     tryProcessCreateStatement,
