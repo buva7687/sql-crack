@@ -169,4 +169,115 @@ describe('DDL visualization', () => {
         expect(batch.queries[0].hints[0]?.suggestion).toMatch(/3 DDL statements/i);
         expect(batch.queries[0].hints[0]?.message).toContain('TRUNCATE TABLE');
     });
+
+    describe('DDL cross-dialect coverage', () => {
+        it('renders ALTER TABLE for PostgreSQL', () => {
+            const sql = `
+                ALTER TABLE users
+                ADD COLUMN email VARCHAR(255),
+                DROP COLUMN legacy_flag
+            `;
+            const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'users' && n.operationType === 'ALTER'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders ALTER TABLE for TransactSQL', () => {
+            const sql = `
+                ALTER TABLE events
+                ADD payload NVARCHAR(MAX)
+            `;
+            const result = parseSql(sql, 'TransactSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'events' && n.operationType === 'ALTER'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders DROP TABLE for MariaDB', () => {
+            const sql = 'DROP TABLE IF EXISTS staging_orders';
+            const result = parseSql(sql, 'MariaDB' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'staging_orders' && n.operationType === 'DROP'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders DROP TABLE for SQLite', () => {
+            const sql = 'DROP TABLE IF EXISTS staging_events';
+            const result = parseSql(sql, 'SQLite' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'staging_events' && n.operationType === 'DROP'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders TRUNCATE for Snowflake', () => {
+            const sql = 'TRUNCATE TABLE raw_events';
+            const result = parseSql(sql, 'Snowflake' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'raw_events' && n.operationType === 'TRUNCATE'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders TRUNCATE for BigQuery', () => {
+            const sql = 'TRUNCATE TABLE dataset.events';
+            const result = parseSql(sql, 'BigQuery' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.operationType === 'TRUNCATE'
+            );
+            expect(target).toBeDefined();
+        });
+
+        it('renders CREATE VIEW for Oracle', () => {
+            const sql = 'CREATE VIEW active_users AS SELECT id, name FROM users WHERE active = 1';
+            const result = parseSql(sql, 'Oracle' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const resultNode = result.nodes.find((n: any) =>
+                n.type === 'result' && n.label?.includes('active_users')
+            );
+            expect(resultNode).toBeDefined();
+        });
+
+        it('renders CREATE TABLE for Teradata', () => {
+            const sql = `
+                CREATE TABLE orders (
+                    id INTEGER NOT NULL,
+                    amount DECIMAL(10,2),
+                    created_at TIMESTAMP
+                )
+            `;
+            const result = parseSql(sql, 'Teradata' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const target = result.nodes.find((n: any) =>
+                n.type === 'table' && n.label === 'orders' && n.operationType === 'CREATE_TABLE'
+            );
+            expect(target).toBeDefined();
+        });
+    });
 });
