@@ -716,6 +716,101 @@ export function getIssuesPanelStyles(): string {
 
         /* Content */
         .content { padding: 24px; max-width: 1000px; margin: 0 auto; width: 100%; }
+        .issues-search-tools {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .issues-search-box {
+            flex: 1 1 320px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            background: var(--bg-secondary);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .issues-search-box:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+        }
+        .issues-search-icon {
+            display: inline-flex;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .issues-search-icon svg {
+            width: 16px;
+            height: 16px;
+            display: block;
+        }
+        .issues-search-input {
+            flex: 1;
+            min-width: 0;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .issues-search-input::placeholder {
+            color: var(--text-dim);
+        }
+        .issues-search-clear {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+        }
+        .issues-search-clear.visible {
+            display: inline-flex;
+        }
+        .issues-search-clear:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+        .issues-search-status {
+            color: var(--text-muted);
+            font-size: 12px;
+            min-height: 18px;
+        }
+        .issues-search-empty {
+            margin-bottom: 20px;
+            padding: 18px 20px;
+            border: 1px dashed var(--border-color);
+            border-radius: var(--radius-lg);
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .issues-search-empty[hidden] {
+            display: none;
+        }
+        @media (max-width: 760px) {
+            .issues-search-tools {
+                align-items: stretch;
+            }
+            .issues-search-status {
+                width: 100%;
+            }
+        }
+
+        /* Hidden attribute override — elements with explicit display values need this */
+        .list-item[hidden],
+        .missing-card[hidden],
+        .section[hidden] { display: none; }
 
         /* Section */
         .section { margin-bottom: 32px; }

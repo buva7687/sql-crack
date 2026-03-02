@@ -170,6 +170,12 @@ export function getIssuesScript(nonce: string): string {
         const sectionFlashDurationMs = 1200;
         const backToTopThreshold = 120;
         const backToTopBtn = document.getElementById('issues-back-to-top');
+        const searchInput = document.getElementById('issues-search-input');
+        const searchClearBtn = document.getElementById('issues-search-clear');
+        const searchStatus = document.getElementById('issues-search-status');
+        const searchEmptyState = document.getElementById('issues-search-empty');
+        const searchableItems = Array.from(document.querySelectorAll('[data-issue-search]'));
+        const issueSections = Array.from(document.querySelectorAll('.section'));
 
         function getIssuesScrollElement() {
             return document.scrollingElement || document.documentElement || document.body;
@@ -259,6 +265,56 @@ export function getIssuesScript(nonce: string): string {
             }
         }
 
+        function normalizeIssueSearchValue(value) {
+            return (value || '').toLowerCase().trim();
+        }
+
+        function applyIssuesSearch() {
+            const query = normalizeIssueSearchValue(searchInput ? searchInput.value : '');
+            let visibleCount = 0;
+
+            searchableItems.forEach(item => {
+                const haystack = normalizeIssueSearchValue(
+                    item.getAttribute('data-issue-search') || item.textContent || ''
+                );
+                const matches = !query || haystack.includes(query);
+                item.hidden = !matches;
+                if (matches) {
+                    visibleCount += 1;
+                }
+            });
+
+            issueSections.forEach(section => {
+                const sectionItems = section.querySelectorAll('[data-issue-search]');
+                const visibleSectionItems = section.querySelectorAll('[data-issue-search]:not([hidden])');
+                section.hidden = sectionItems.length > 0 && visibleSectionItems.length === 0;
+            });
+
+            document.querySelectorAll('.list-more, .missing-more').forEach(item => {
+                item.hidden = query.length > 0;
+            });
+
+            if (searchClearBtn) {
+                searchClearBtn.classList.toggle('visible', query.length > 0);
+            }
+
+            if (searchStatus) {
+                if (searchableItems.length === 0) {
+                    searchStatus.textContent = '';
+                } else if (query) {
+                    searchStatus.textContent = visibleCount + ' of ' + searchableItems.length + ' issues shown';
+                } else {
+                    searchStatus.textContent = searchableItems.length + ' issues available';
+                }
+            }
+
+            if (searchEmptyState) {
+                searchEmptyState.hidden = !(query && visibleCount === 0);
+            }
+
+            updateBackToTopVisibility();
+        }
+
         document.getElementById('btn-back').addEventListener('click', () => {
             vscode.postMessage({ command: 'switchView', view: 'graph' });
         });
@@ -330,6 +386,22 @@ export function getIssuesScript(nonce: string): string {
                 vscode.postMessage({ command: 'showInGraph', query, nodeType });
             });
         });
+
+        if (searchInput) {
+            searchInput.addEventListener('input', applyIssuesSearch);
+        }
+
+        if (searchClearBtn) {
+            searchClearBtn.addEventListener('click', () => {
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.focus();
+                }
+                applyIssuesSearch();
+            });
+        }
+
+        applyIssuesSearch();
 
         const initialTargetId = window.location.hash ? window.location.hash.slice(1) : '';
         if (initialTargetId) {

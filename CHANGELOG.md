@@ -58,8 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parser worker migration prep coverage**: Added characterization tests for parser worker migration paths (supersession/timeout/cancellation contracts and CSP/URI wiring expectations).
 - **Dialect-switch smoke examples**: Added U6-focused example coverage to exercise one-click dialect-switch hint actions.
 - **Configurable deferred query hydration threshold**: Added `sqlCrack.advanced.deferredQueryThreshold` (default `50`) to control when SQL Flow compacts non-active batch queries and hydrates them on demand.
+- **Workspace Issues search**: Added a filter-as-you-type search box to the Workspace Issues page with match count status, clear button, section auto-hide when all items are filtered, and empty-state messaging.
 
 ### Changed
+
+- **Issue banner wording**: Changed "Graph may be partial" to "Results may be incomplete" so the banner reads correctly across Graph, Lineage, and Impact tabs.
 
 - **Shared SQL comment stripping**: Consolidated multiple `stripSqlComments` implementations to a single shared, quote-aware implementation in `src/shared/stringUtils.ts`.
 - **Webview state persistence behavior**: Persist interval now uses dirty-flag gating to avoid redundant `postMessage` churn; renderer keyboard-driven state changes now dispatch persistence events.
@@ -93,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plain non-CTAS `CREATE TABLE` now renders as a single created-table result node with foreign-key reference flow, instead of showing a duplicate target-to-result chain.
 - **Redshift generic DDL compatibility fallback**: Redshift now proxies generic `CREATE`, `ALTER`, `DROP`, and `TRUNCATE` statements through the PostgreSQL grammar when the bundled Redshift grammar rejects structurally compatible DDL. This fixes example-file cases such as multi-target `DROP TABLE IF EXISTS ...` rendering as empty partial results.
 - **Empty executable query recovery in SQL Flow**: When a batch query tab contains executable SQL but reaches the renderer with `nodes.length === 0`, the webview now reparses the stored statement payload before showing an empty-state error. Unrecoverable reparses now degrade to an explicit query error instead of the generic "No visualization data" blank state.
+- **Lineage tooltip/context-menu overlap**: Right-clicking a lineage node now hides the tooltip before showing the context menu, and tooltip hover is suppressed while the context menu is open.
+- **External node "Open file" in lineage context menu**: The "Open file" menu item is now hidden for external reference nodes (which have no file path), and the tooltip hint text is contextual per node type instead of always showing "Double-click to open file".
+- **External node column info**: External nodes now show "Unavailable" for column count in tooltips, and the context menu shows a disabled "Column definitions unavailable" item with an explanatory title attribute.
+- **Issues search hidden attribute override**: Added explicit `[hidden]` CSS selectors for `.list-item`, `.missing-card`, and `.section` elements to prevent `display: flex` from overriding the HTML `hidden` attribute used by the search filter.
 
 ### Tests
 
@@ -110,6 +117,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added bulk operation visualization tests covering PostgreSQL COPY FROM/TO (including COPY query export and STDOUT), Snowflake COPY INTO (stage load and SELECT export), Redshift UNLOAD and COPY import, BigQuery EXPORT DATA, MySQL LOAD DATA INFILE, Hive LOAD DATA INPATH, Hive INSERT OVERWRITE TABLE/DIRECTORY, session-command misclassification regressions, and batch separation regressions.
 - Added mixed-dialect batch regressions covering per-statement dialect directives, DDL/session merge boundaries, and the `examples/ddl-warehouse-operations.sql` Q8 multi-target DROP TABLE case under autodetected Redshift entry dialect.
 - Added SQL Flow recovery wiring regressions to ensure empty executable batch queries reparse before rendering and convert unrecoverable empty reparses into explicit query errors.
+- Added behavioral coverage for extractors and webview helpers.
+- Added rendering tests for dispatcher, canvas setup, and cloud layout helpers.
+- Added webview tests for modal, renderer hooks, pulse animation, and tooltip hooks.
+- Added node selection and analytical node rendering tests.
+- Added interaction tests for keyboard listeners, zoom-pan listeners, and drag listener flows.
+- Added toolbar tests for search box and feature menu interactions.
+- Added UI tests for breadcrumb bar, legend bar, and command bar components.
+- Added UI tests for pinned tabs interactions and compare view lifecycle.
+- Added unit and integration tests for core extension modules: `extension.ts`, `logger.ts`, and `visualizationPanel.ts` (180 new tests).
+- Added unit tests for workspace panel modules: `settings.ts`, `text.ts`, and `impactExport.ts` (67 new tests). Added `ColorThemeKind` enum and `activeColorTheme` to vscode mock.
+- Expanded node navigation test coverage (viewport checks, center/fit/zoom-to-node, connected node cycling).
+- Added workspace issues search wiring tests, lineage discoverability tests for external node context menu and tooltip behavior, and issue banner text regression.
 
 ## [0.4.3] - 2026-02-24
 

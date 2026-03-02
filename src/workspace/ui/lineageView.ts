@@ -374,19 +374,19 @@ export class LineageView {
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                             <polyline points="14 2 14 8 20 8"/>
                         </svg>
-                        Open file
+                        <span class="context-label">Open file</span>
                     </div>
                     <div class="context-item" data-action="focus-upstream">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                             <path d="M12 19V5M5 12l7-7 7 7"/>
                         </svg>
-                        Show upstream only
+                        <span class="context-label">Show upstream only</span>
                     </div>
                     <div class="context-item" data-action="focus-downstream">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                             <path d="M12 5v14M5 12l7 7 7-7"/>
                         </svg>
-                        Show downstream only
+                        <span class="context-label">Show downstream only</span>
                     </div>
                     <div class="context-divider"></div>
                     <div class="context-item" data-action="expand-columns">
@@ -394,14 +394,14 @@ export class LineageView {
                             <rect x="3" y="3" width="18" height="18" rx="2"/>
                             <path d="M3 9h18M9 3v18"/>
                         </svg>
-                        Expand columns
+                        <span class="context-label">Expand columns</span>
                     </div>
                     <div class="context-item" data-action="copy-name">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                             <rect x="9" y="9" width="13" height="13" rx="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
-                        Copy table name
+                        <span class="context-label">Copy table name</span>
                     </div>
                 </div>
 

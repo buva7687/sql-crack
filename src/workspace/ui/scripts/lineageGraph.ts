@@ -20,6 +20,7 @@ export function getLineageGraphScriptFragment(): string {
         let refreshLineageMinimapViewport = null;
         let lineageShortcutHandler = null;
         let lineageOverlayResizeHandler = null;
+        let lineageContextMenuOpen = false;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
         const warnedLineageIconTypes = new Set();
         function finishLineageSetup() {
@@ -257,6 +258,9 @@ export function getLineageGraphScriptFragment(): string {
                 });
 
                 node.addEventListener('mouseenter', (e) => {
+                    if (lineageContextMenuOpen) {
+                        return;
+                    }
                     showLineageTooltip(e, node);
                 });
 
@@ -325,6 +329,7 @@ export function getLineageGraphScriptFragment(): string {
                 node.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    hideLineageTooltip();
                     showLineageContextMenu(e, node);
                 });
             });
@@ -354,7 +359,7 @@ export function getLineageGraphScriptFragment(): string {
             });
 
             document.addEventListener('click', () => {
-                if (contextMenu) contextMenu.style.display = 'none';
+                hideLineageContextMenu();
             });
 
             setTimeout(() => {
@@ -500,6 +505,7 @@ export function getLineageGraphScriptFragment(): string {
             const tooltip = document.getElementById('lineage-tooltip');
             if (!tooltip) return;
             if (window.__workspaceColumnTraceActive) return;
+            if (lineageContextMenuOpen) return;
 
             const nodeId = node.getAttribute('data-node-id') || '';
             const name = node.getAttribute('data-node-name') || '';
@@ -512,7 +518,11 @@ export function getLineageGraphScriptFragment(): string {
                 ? 'Click to focus · Double-click to expand columns'
                 : (isExpanded
                     ? 'Click a column to trace lineage · Right-click for actions'
-                    : 'Click to focus · Double-click to open file');
+                    : (filePath
+                        ? 'Click to focus · Double-click to open file'
+                        : (type === 'external'
+                            ? 'External reference · Right-click for lineage actions'
+                            : 'Click to focus · Right-click for actions')));
 
             const iconEl = tooltip.querySelector('.tooltip-icon');
             if (iconEl) iconEl.innerHTML = getLineageTypeIcon(type);
@@ -525,7 +535,11 @@ export function getLineageGraphScriptFragment(): string {
             const lineEl = tooltip.querySelector('.line-value');
             if (lineEl) lineEl.textContent = lineNumber || 'N/A';
             const columnsEl = tooltip.querySelector('.columns-value');
-            if (columnsEl) columnsEl.textContent = columnCount > 0 ? String(columnCount) : '-';
+            if (columnsEl) {
+                columnsEl.textContent = columnCount > 0
+                    ? String(columnCount)
+                    : (type === 'external' ? 'Unavailable' : '-');
+            }
             const upstreamEl = tooltip.querySelector('.upstream-value');
             if (upstreamEl) upstreamEl.textContent = node.getAttribute('data-upstream-count') || '-';
             const downstreamEl = tooltip.querySelector('.downstream-value');
@@ -571,6 +585,14 @@ export function getLineageGraphScriptFragment(): string {
         function hideLineageTooltip() {
             const tooltip = document.getElementById('lineage-tooltip');
             if (tooltip) tooltip.style.display = 'none';
+        }
+
+        function hideLineageContextMenu() {
+            const contextMenu = document.getElementById('lineage-context-menu');
+            if (contextMenu) {
+                contextMenu.style.display = 'none';
+            }
+            lineageContextMenuOpen = false;
         }
 
         function focusLineageNode(node, allNodes) {
@@ -625,10 +647,37 @@ export function getLineageGraphScriptFragment(): string {
             const nodeId = node.getAttribute('data-node-id');
             const nodeName = node.getAttribute('data-node-name');
             const filePath = node.getAttribute('data-file-path');
+            const nodeType = node.getAttribute('data-node-type') || '';
+            const columnCount = parseInt(node.getAttribute('data-column-count') || '0', 10);
+            const openFileItem = contextMenu.querySelector('[data-action="open-file"]');
+            const expandColumnsItem = contextMenu.querySelector('[data-action="expand-columns"]');
+            const canOpenFile = !!filePath;
+            const canExpandColumns = columnCount > 0;
+
+            if (openFileItem) {
+                openFileItem.hidden = !canOpenFile;
+                openFileItem.classList.remove('is-disabled');
+                openFileItem.setAttribute('aria-disabled', 'false');
+            }
+
+            if (expandColumnsItem) {
+                const label = expandColumnsItem.querySelector('.context-label');
+                const showUnavailableColumns = nodeType === 'external' && !canExpandColumns;
+                expandColumnsItem.hidden = !canExpandColumns && !showUnavailableColumns;
+                expandColumnsItem.classList.toggle('is-disabled', showUnavailableColumns);
+                expandColumnsItem.setAttribute('aria-disabled', showUnavailableColumns ? 'true' : 'false');
+                expandColumnsItem.title = showUnavailableColumns
+                    ? 'External references do not have column definitions in the indexed workspace'
+                    : '';
+                if (label) {
+                    label.textContent = showUnavailableColumns ? 'Column definitions unavailable' : 'Expand columns';
+                }
+            }
 
             contextMenu.style.left = e.clientX + 'px';
             contextMenu.style.top = e.clientY + 'px';
             contextMenu.style.display = 'block';
+            lineageContextMenuOpen = true;
 
             const handlers = {
                 'open-file': () => {
@@ -667,8 +716,11 @@ export function getLineageGraphScriptFragment(): string {
                 const action = item.getAttribute('data-action');
                 item.onclick = (e) => {
                     e.stopPropagation();
+                    if (item.hidden || item.classList.contains('is-disabled')) {
+                        return;
+                    }
                     if (handlers[action]) handlers[action]();
-                    contextMenu.style.display = 'none';
+                    hideLineageContextMenu();
                 };
             });
         }

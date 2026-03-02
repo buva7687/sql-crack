@@ -130,7 +130,7 @@ describe('workspace panel selection sidebar actions', () => {
         expect(warningHtml).toContain('id="graph-explain-panel"');
         expect(warningHtml).toContain('data-graph-action="dismiss-why"');
         expect(warningHtml).toContain('Why am I seeing this graph?');
-        expect(warningHtml).toContain('Graph may be partial (1 issue):');
+        expect(warningHtml).toContain('Results may be incomplete (1 issue):');
         expect(warningHtml).toContain('1 issue detected');
         expect(warningHtml).not.toContain('1 parse issue detected');
 

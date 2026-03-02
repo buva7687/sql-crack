@@ -70,6 +70,30 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
         ` : ''}
 
         <div class="content">
+            ${totalIssues > 0 ? `
+            <div class="issues-search-tools">
+                <label class="issues-search-box" for="issues-search-input">
+                    <span class="issues-search-icon">${ICONS.search}</span>
+                    <input
+                        type="search"
+                        id="issues-search-input"
+                        class="issues-search-input"
+                        placeholder="Search issues, tables, files..."
+                        aria-label="Search workspace issues"
+                    />
+                    <button
+                        type="button"
+                        class="issues-search-clear"
+                        id="issues-search-clear"
+                        aria-label="Clear workspace issues search"
+                    >×</button>
+                </label>
+                <div class="issues-search-status" id="issues-search-status" aria-live="polite"></div>
+            </div>
+            <div class="issues-search-empty" id="issues-search-empty" hidden>
+                No matching issues in the current list.
+            </div>
+            ` : ''}
             ${!detailedStats || detailedStats.orphanedDetails.length === 0 ? '' : `
             <div class="section issues-section-anchor" id="orphaned-definitions-section" tabindex="-1">
                 <div class="section-header">
@@ -89,7 +113,11 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                 </div>
                 <div class="list">
                     ${detailedStats.orphanedDetails.slice(0, 50).map(item => `
-                    <div class="list-item" data-filepath="${escapeHtml(item.filePath)}" data-line="${item.lineNumber}">
+                    <div
+                        class="list-item"
+                        data-filepath="${escapeHtml(item.filePath)}"
+                        data-line="${item.lineNumber}"
+                        data-issue-search="${escapeHtml([item.name, item.type, item.filePath, `line ${item.lineNumber}`].join(' '))}">
                         <span class="item-type ${item.type}">${item.type}</span>
                         <div class="item-info">
                             <div class="item-name">${escapeHtml(item.name)}</div>
@@ -128,7 +156,13 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                 </div>
                 <div class="list">
                     ${detailedStats.missingDetails.slice(0, 30).map(item => `
-                    <div class="missing-card">
+                    <div
+                        class="missing-card"
+                        data-issue-search="${escapeHtml([
+                            item.tableName,
+                            'external',
+                            ...item.references.map(ref => `${ref.filePath} line ${ref.lineNumber}`)
+                        ].join(' '))}">
                         <div class="missing-card-header">
                             <div class="missing-card-icon">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="2">
@@ -179,7 +213,10 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                 </div>
                 <div class="list">
                     ${detailedStats.parseErrorDetails.slice(0, 50).map(item => `
-                    <div class="list-item" data-filepath="${escapeHtml(item.filePath)}">
+                    <div
+                        class="list-item"
+                        data-filepath="${escapeHtml(item.filePath)}"
+                        data-issue-search="${escapeHtml([item.fileName, item.filePath, item.error, 'parse error'].join(' '))}">
                         <span class="item-type file">file</span>
                         <div class="item-info">
                             <div class="item-name">${escapeHtml(item.fileName)}</div>
