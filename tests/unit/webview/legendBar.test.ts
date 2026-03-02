@@ -1,3 +1,14 @@
+// Polyfill CustomEvent for jsdom/node environments
+if (typeof globalThis.CustomEvent !== 'function') {
+    (globalThis as any).CustomEvent = class CustomEvent extends Event {
+        detail: any;
+        constructor(type: string, params?: { detail?: any }) {
+            super(type);
+            this.detail = params?.detail ?? null;
+        }
+    };
+}
+
 import {
     createLegendBar,
     disposeLegendBar,
