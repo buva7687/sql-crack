@@ -17,6 +17,7 @@ export type { DialectDetectionResult } from './dialects/detection';
 export { regexFallbackParse } from './dialects/fallback';
 export {
     hoistNestedCtes,
+    preprocessForParsing,
     preprocessPostgresSyntax,
     preprocessOracleSyntax,
     preprocessSnowflakeSyntax,
@@ -45,6 +46,9 @@ export { generateHints, detectAdvancedIssues, calculateEnhancedMetrics } from '.
 // Statements
 export {
     getStatementPresentation,
+    tryParseCompatibleOracleInsertStatement,
+    tryParseWarehouseDdlStatement,
+    tryProcessDdlStatement,
     tryProcessCreateStatement,
     tryProcessDmlStatements,
     processSelectStatement

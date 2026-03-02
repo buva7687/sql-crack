@@ -2038,9 +2038,4 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
     return result;
 }
 
-export function stripSqlComments(sql: string): string {
-    return sql
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ')
-        .replace(/#[^\n\r]*/g, ' ');
-}
+export { stripSqlComments } from '../../../shared/stringUtils';

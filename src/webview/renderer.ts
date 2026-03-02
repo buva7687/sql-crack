@@ -894,9 +894,9 @@ export function initRenderer(container: HTMLElement): void {
     container.setAttribute('aria-label', 'SQL Flow visualization');
 
     // Use extracted canvas setup module
-    const configuredColorblindMode = (((window as any).colorblindMode || 'off') as ColorblindMode);
+    const configuredColorblindMode = ((window.colorblindMode || 'off') as ColorblindMode);
     setGlobalColorblindMode(configuredColorblindMode);
-    const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
+    const gridStyle = (window.gridStyle || 'lines') as GridStyle;
     const canvas = initCanvas(container, state.isDarkTheme, gridStyle);
     svg = canvas.svg;
     mainGroup = canvas.mainGroup;
@@ -1042,7 +1042,7 @@ export function initRenderer(container: HTMLElement): void {
     containerElement = container;
 
     // Set high-contrast state from VS Code theme kind
-    state.isHighContrast = !!(window as any).isHighContrast;
+    state.isHighContrast = !!window.isHighContrast;
 
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
@@ -1616,7 +1616,7 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
 function getNodeVisualRendererDeps(): NodeVisualRendererDeps {
     return {
         state,
-        getNodeAccentPosition: () => (((window as any).nodeAccentPosition || 'left') as 'left' | 'bottom'),
+        getNodeAccentPosition: () => ((window.nodeAccentPosition || 'left') as 'left' | 'bottom'),
         getNodeVisualIcon,
         getJoinColor,
         getJoinVennDiagram,
@@ -1831,7 +1831,7 @@ function handleEdgeClick(edge: FlowEdge): void {
 
     // Jump to line if available
     if (edge.startLine && typeof window !== 'undefined') {
-        const vscodeApi = (window as any).vscodeApi;
+        const vscodeApi = window.vscodeApi;
         if (vscodeApi && vscodeApi.postMessage) {
             vscodeApi.postMessage({
                 command: 'goToLine',
@@ -2567,6 +2567,10 @@ function lightenColor(hex: string, percent: number): string {
     return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
 }
 
+function notifyRendererStateChanged(): void {
+    document.dispatchEvent(new CustomEvent('layout-state-changed'));
+}
+
 // ============================================================
 // FEATURE: Color Legend
 // ============================================================
@@ -2594,6 +2598,7 @@ function updateLegendPanel(): void {
 export function toggleLegend(show?: boolean): void {
     toggleLegendBar(show);
     state.legendVisible = isLegendBarVisible();
+    notifyRendererStateChanged();
 }
 
 export function isLegendVisible(): boolean {
@@ -2622,6 +2627,7 @@ export function toggleHints(show?: boolean): void {
         hintsPanel.style.visibility = 'hidden';
         hintsPanel.style.transform = 'translateY(8px)';
     }
+    notifyRendererStateChanged();
 }
 
 export function isHintsVisible(): boolean {
@@ -2701,85 +2707,90 @@ export function switchLayout(layoutType: LayoutType): void {
 
     // Use requestAnimationFrame to allow UI to update before heavy computation
     requestAnimationFrame(() => {
-        state.layoutType = layoutType;
+        const previousLayout = state.layoutType;
+        try {
+            state.layoutType = layoutType;
 
-        // Re-run layout with selected algorithm
-        const bottomUp = window.flowDirection === 'bottom-up';
-        switch (layoutType) {
-            case 'horizontal':
-                layoutGraphHorizontal(currentNodes, currentEdges, bottomUp);
-                break;
-            case 'compact':
-                layoutGraphCompact(currentNodes, currentEdges, bottomUp);
-                break;
-            case 'force':
-                layoutGraphForce(currentNodes, currentEdges);
-                break;
-            case 'radial':
-                layoutGraphRadial(currentNodes, currentEdges);
-                break;
-            case 'vertical':
-            default:
-                layoutGraph(currentNodes, currentEdges, bottomUp);
-                break;
-        }
-
-        // Update node positions in DOM
-        currentNodes.forEach(node => {
-            const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
-            if (nodeGroup) {
-                const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-                if (rect) {
-                    const origX = parseFloat(rect.getAttribute('x') || '0');
-                    const origY = parseFloat(rect.getAttribute('y') || '0');
-                    const deltaX = node.x - origX;
-                    const deltaY = node.y - origY;
-                    nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
-                }
+            // Re-run layout with selected algorithm
+            const bottomUp = window.flowDirection === 'bottom-up';
+            switch (layoutType) {
+                case 'horizontal':
+                    layoutGraphHorizontal(currentNodes, currentEdges, bottomUp);
+                    break;
+                case 'compact':
+                    layoutGraphCompact(currentNodes, currentEdges, bottomUp);
+                    break;
+                case 'force':
+                    layoutGraphForce(currentNodes, currentEdges);
+                    break;
+                case 'radial':
+                    layoutGraphRadial(currentNodes, currentEdges);
+                    break;
+                case 'vertical':
+                default:
+                    layoutGraph(currentNodes, currentEdges, bottomUp);
+                    break;
             }
-        });
 
-        // Show all edges first
-        const allEdges = mainGroup!.querySelectorAll('.edge');
-        allEdges.forEach(edgeEl => {
-            (edgeEl as SVGPathElement).style.display = '';
-        });
-
-        // Update edge paths
-        const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
-        edgeElements.forEach(edgeEl => {
-            const sourceId = edgeEl.getAttribute('data-source');
-            const targetId = edgeEl.getAttribute('data-target');
-            if (sourceId && targetId) {
-                const sourceNode = currentNodes.find(n => n.id === sourceId);
-                const targetNode = currentNodes.find(n => n.id === targetId);
-                if (sourceNode && targetNode) {
-                    const path = calculateEdgePath(sourceNode, targetNode, layoutType);
-                    edgeEl.setAttribute('d', path);
-                    (edgeEl as SVGPathElement).style.display = '';
-                } else {
-                    (edgeEl as SVGPathElement).style.display = 'none';
+            // Update node positions in DOM
+            currentNodes.forEach(node => {
+                const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+                if (nodeGroup) {
+                    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
+                    if (rect) {
+                        const origX = parseFloat(rect.getAttribute('x') || '0');
+                        const origY = parseFloat(rect.getAttribute('y') || '0');
+                        const deltaX = node.x - origX;
+                        const deltaY = node.y - origY;
+                        nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
+                    }
                 }
-            }
-        });
-
-        // Update layout selector if present
-        const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
-        if (layoutSelect) {
-            layoutSelect.value = layoutType;
-        }
-
-        fitView();
-        announceLiveRegionMessage(`Layout switched to ${layoutType}`);
-
-        // Hide loading after a brief delay to ensure UI updates are visible
-        if (showLoadingIndicator) {
-            requestAnimationFrame(() => {
-                hideGlobalLoading();
             });
-        }
 
-        recordLayoutHistorySnapshot();
+            // Show all edges first
+            const allEdges = mainGroup!.querySelectorAll('.edge');
+            allEdges.forEach(edgeEl => {
+                (edgeEl as SVGPathElement).style.display = '';
+            });
+
+            // Update edge paths
+            const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
+            edgeElements.forEach(edgeEl => {
+                const sourceId = edgeEl.getAttribute('data-source');
+                const targetId = edgeEl.getAttribute('data-target');
+                if (sourceId && targetId) {
+                    const sourceNode = currentNodes.find(n => n.id === sourceId);
+                    const targetNode = currentNodes.find(n => n.id === targetId);
+                    if (sourceNode && targetNode) {
+                        const path = calculateEdgePath(sourceNode, targetNode, layoutType);
+                        edgeEl.setAttribute('d', path);
+                        (edgeEl as SVGPathElement).style.display = '';
+                    } else {
+                        (edgeEl as SVGPathElement).style.display = 'none';
+                    }
+                }
+            });
+
+            // Update layout selector if present
+            const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+            if (layoutSelect) {
+                layoutSelect.value = layoutType;
+            }
+
+            fitView();
+            announceLiveRegionMessage(`Layout switched to ${layoutType}`);
+            recordLayoutHistorySnapshot();
+
+            // Notify index.ts that layout state changed (covers keyboard shortcut paths)
+            notifyRendererStateChanged();
+        } catch (e) {
+            console.error('[SQL Crack] Layout switch failed:', e);
+            state.layoutType = previousLayout;
+        } finally {
+            if (showLoadingIndicator) {
+                requestAnimationFrame(() => { hideGlobalLoading(); });
+            }
+        }
     });
 }
 
@@ -2820,6 +2831,7 @@ export function toggleFocusMode(enable?: boolean): void {
     }
 
     recordLayoutHistorySnapshot();
+    notifyRendererStateChanged();
 }
 
 function applyFocusMode(nodeId: string): void {
@@ -2851,6 +2863,7 @@ export function setFocusMode(mode: FocusMode): void {
     }
 
     recordLayoutHistorySnapshot();
+    notifyRendererStateChanged();
 }
 
 export function getFocusMode(): FocusMode {
@@ -2897,6 +2910,7 @@ export function toggleSqlPreview(show?: boolean): void {
             toggleSqlPreview(nextShow);
         },
     }, show);
+    notifyRendererStateChanged();
 }
 
 export function isSqlPreviewVisible(): boolean {
@@ -3034,8 +3048,8 @@ export function toggleFullscreen(enable?: boolean): void {
         isDarkTheme: state.isDarkTheme,
         onExitRequested: () => toggleFullscreen(false),
         onRequestFullscreen: (nextEnable: boolean) => {
-            if (typeof window !== 'undefined' && (window as any).vscodeApi) {
-                (window as any).vscodeApi.postMessage({
+            if (typeof window !== 'undefined' && window.vscodeApi) {
+                window.vscodeApi.postMessage({
                     command: 'requestFullscreen',
                     enable: nextEnable,
                 });
@@ -3072,7 +3086,7 @@ function applyColorblindModeToRenderedGraph(): void {
 
 export function setColorblindMode(mode: ColorblindMode): void {
     setGlobalColorblindMode(mode);
-    (window as any).colorblindMode = mode;
+    window.colorblindMode = mode;
     applyColorblindModeToRenderedGraph();
 }
 
@@ -3112,7 +3126,7 @@ function applyTheme(dark: boolean): void {
 
     // Apply canvas theme using extracted module
     if (svg && backgroundRect) {
-        const gridStyle = ((window as any).gridStyle || 'lines') as GridStyle;
+        const gridStyle = (window.gridStyle || 'lines') as GridStyle;
         updateCanvasTheme(svg, backgroundRect, dark, gridStyle);
     }
 
@@ -3432,6 +3446,7 @@ export function toggleColumnFlows(show?: boolean): void {
 
     // Update legend
     updateLegendPanel();
+    notifyRendererStateChanged();
 }
 
 export function isColumnFlowsVisible(): boolean {

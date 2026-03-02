@@ -11,12 +11,17 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
         'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
         'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'CROSS JOIN', 'JOIN',
         'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN',
-        'WITH', 'UNION', 'INTERSECT', 'EXCEPT', 'AS'
+        'WITH', 'UNION', 'INTERSECT', 'EXCEPT', 'AS',
+        'MERGE', 'INTO', 'USING', 'INSERT', 'UPDATE', 'DELETE'
     ];
 
     for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1; // 1-indexed
-        const upperLine = lines[i].toUpperCase();
+        const lineWithoutComments = lines[i].replace(/--.*$/, '').replace(/\/\*.*?\*\//g, ' ');
+        if (!lineWithoutComments.trim()) {
+            continue;
+        }
+        const upperLine = lineWithoutComments.toUpperCase();
 
         for (const keyword of keywords) {
             const regex = new RegExp(`\\b${keyword}\\b`, 'i');
@@ -35,12 +40,13 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
 export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     const keywordLines = extractKeywordLineNumbers(sql);
     const usedJoinLines: number[] = [];
+    const sqlLines = sql.split('\n');
+    const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
 
     for (const node of nodes) {
         switch (node.type) {
             case 'table': {
                 const tableName = node.label.toLowerCase().trim();
-                const sqlLines = sql.split('\n');
                 const fromLines = keywordLines.get('FROM') || [];
                 const joinLines = [
                     ...(keywordLines.get('JOIN') || []),
@@ -50,18 +56,31 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     ...(keywordLines.get('FULL JOIN') || []),
                     ...(keywordLines.get('CROSS JOIN') || [])
                 ];
+                const intoLines = keywordLines.get('INTO') || [];
+                const usingLines = keywordLines.get('USING') || [];
+                const updateLines = keywordLines.get('UPDATE') || [];
+                const deleteLines = keywordLines.get('DELETE') || [];
+
+                const anchorLines = [
+                    ...fromLines,
+                    ...joinLines,
+                    ...intoLines,
+                    ...usingLines,
+                    ...updateLines,
+                    ...deleteLines,
+                ];
 
                 let foundLine: number | undefined;
-                const searchStartLine = Math.min(...fromLines, ...joinLines, sqlLines.length);
+                const searchStartLine = anchorLines.length > 0 ? Math.min(...anchorLines) : 1;
 
                 for (let i = 0; i < sqlLines.length; i++) {
-                    const line = sqlLines[i].toLowerCase();
+                    const line = sqlLines[i].replace(/--.*$/, '').toLowerCase();
                     const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
                     if (tableRegex.test(line)) {
+                        const previousLine = i > 0 ? sqlLines[i - 1].replace(/--.*$/, '').toLowerCase() : '';
                         if (i >= searchStartLine - 1 ||
-                            line.includes('from') ||
-                            line.includes('join') ||
-                            (i > 0 && (sqlLines[i - 1].toLowerCase().includes('from') || sqlLines[i - 1].toLowerCase().includes('join')))) {
+                            clauseRegex.test(line) ||
+                            clauseRegex.test(previousLine)) {
                             foundLine = i + 1;
                             break;
                         }
@@ -132,7 +151,20 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             }
             case 'result': {
                 const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) {node.startLine = selectLines[0];}
+                const mergeLines = keywordLines.get('MERGE') || [];
+                const insertLines = keywordLines.get('INSERT') || [];
+                const updateLines = keywordLines.get('UPDATE') || [];
+                const deleteLines = keywordLines.get('DELETE') || [];
+                const candidateLines = [
+                    ...selectLines,
+                    ...mergeLines,
+                    ...insertLines,
+                    ...updateLines,
+                    ...deleteLines,
+                ];
+                if (candidateLines.length > 0) {
+                    node.startLine = Math.min(...candidateLines);
+                }
                 break;
             }
         }

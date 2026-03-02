@@ -8,6 +8,7 @@
 jest.mock('fs');
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
 import { logger } from '../../../../src/logger';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
@@ -91,7 +92,7 @@ function makeFileAnalysis(
 ): FileAnalysis {
     return {
         filePath,
-        fileName: filePath.split('/').pop() || filePath,
+        fileName: path.basename(filePath),
         lastModified: Date.now(),
         contentHash: 'abc123',
         definitions: defs,
@@ -230,6 +231,30 @@ describe('LineageBuilder', () => {
 
             expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('using regex fallback'));
             debugSpy.mockRestore();
+        });
+
+        it('logs warning when SQL read fails during CTE/alias extraction in edge building', () => {
+            const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+            mockedFs.existsSync.mockReturnValue(true);
+            mockedFs.readFileSync.mockImplementation(() => {
+                throw new Error('EACCES');
+            });
+
+            // queries present => skips earlier CTE-on-disk fallback pass and targets addFileEdges() path
+            const fileAnalysis = makeFileAnalysis(
+                'restricted.sql',
+                [],
+                [makeRef('orders', 'select', { filePath: 'restricted.sql', statementIndex: 0 })],
+                [{ ctes: [], transformations: [] }]
+            );
+            const files = new Map([['restricted.sql', fileAnalysis]]);
+            const index = makeIndex([], files);
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('CTE/alias extraction (restricted.sql)'));
+            warnSpy.mockRestore();
         });
 
         it('deduplicates nodes with same ID (first definition wins)', () => {

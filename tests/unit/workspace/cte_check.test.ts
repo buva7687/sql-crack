@@ -54,4 +54,44 @@ SEL * FROM real_table;
         expect(refNames).toContain('real_table');
         expect(refNames).not.toContain('fake_table');
     });
+
+    it('filters subquery aliases from UPDATE...FROM even when keywords are lowercase', () => {
+        const sql = `
+update sales_target
+set total = subq.total
+from (
+    select customer_id, sum(amount) as total
+    from staging_payments
+    group by customer_id
+) as subq
+join customers c on c.customer_id = subq.customer_id;
+`;
+        const extractor = new ReferenceExtractor();
+        const refs = extractor.extractReferences(sql, 'update-alias.sql', 'MySQL');
+        const refNames = refs.map((r: any) => r.tableName.toLowerCase());
+
+        expect(refNames).toContain('staging_payments');
+        expect(refNames).toContain('customers');
+        expect(refNames).not.toContain('subq');
+    });
+
+    it('filters subquery aliases from UPDATE...FROM when alias omits AS keyword', () => {
+        const sql = `
+UpDaTe sales_target
+SET total = subq.total
+FrOm (
+    select customer_id, sum(amount) as total
+    from staging_payments
+    group by customer_id
+) subq
+join customers c on c.customer_id = subq.customer_id;
+`;
+        const extractor = new ReferenceExtractor();
+        const refs = extractor.extractReferences(sql, 'update-alias-no-as.sql', 'MySQL');
+        const refNames = refs.map((r: any) => r.tableName.toLowerCase());
+
+        expect(refNames).toContain('staging_payments');
+        expect(refNames).toContain('customers');
+        expect(refNames).not.toContain('subq');
+    });
 });

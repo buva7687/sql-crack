@@ -9,23 +9,9 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex } from '../../shared';
-import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
-
-// SQL reserved words that should never be treated as table/view names
-const SQL_RESERVED_WORDS = new Set([
-    'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'truncate',
-    'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null', 'like', 'between',
-    'join', 'inner', 'outer', 'left', 'right', 'full', 'cross', 'on', 'using',
-    'group', 'by', 'having', 'order', 'asc', 'desc', 'limit', 'offset',
-    'union', 'intersect', 'except', 'all', 'distinct', 'as',
-    'case', 'when', 'then', 'else', 'end', 'if', 'exists',
-    'values', 'set', 'into', 'table', 'view', 'index', 'database', 'schema',
-    'primary', 'foreign', 'key', 'references', 'constraint', 'unique', 'check',
-    'default', 'auto_increment', 'identity', 'serial',
-    'with', 'recursive', 'over', 'partition', 'rows', 'range',
-    'true', 'false', 'unknown'
-]);
+import { escapeRegex, stripSqlComments } from '../../shared';
+import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
+import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
@@ -51,7 +37,7 @@ export class SchemaExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const sqlToParse = preprocessForParsing(sql, dialect);
+            const sqlToParse = preprocessSqlForWorkspaceParsing(sql, dialect);
             const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
@@ -302,22 +288,9 @@ export class SchemaExtractor {
      * Check if a name is a SQL reserved word
      */
     private isReservedWord(name: string): boolean {
-        return SQL_RESERVED_WORDS.has(name.toLowerCase());
+        return SCHEMA_SQL_RESERVED_WORDS.has(name.toLowerCase());
     }
 
-    /**
-     * Strip SQL comments from a string to prevent false matches
-     * Handles single-line (--, #) and multi-line comments
-     */
-    private stripSqlComments(sql: string): string {
-        // Remove multi-line comments first (/* ... */)
-        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
-        // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n\r]*/g, ' ');
-        // Remove MySQL-style hash comments (# ... until end of line)
-        result = result.replace(/#[^\n\r]*/g, ' ');
-        return result;
-    }
 
     /**
      * Regex-based fallback for extracting schema definitions
@@ -326,7 +299,7 @@ export class SchemaExtractor {
         const definitions: SchemaDefinition[] = [];
 
         // Strip comments to prevent false matches like "CREATE TABLE AS SELECT" in comments
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
 
         // CREATE TABLE pattern - capture table name and body
         // Use a simpler approach: find CREATE TABLE, then extract body separately

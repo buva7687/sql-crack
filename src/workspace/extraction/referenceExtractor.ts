@@ -12,8 +12,9 @@ import {
     ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
-import { escapeRegex } from '../../shared';
-import { preprocessForParsing } from '../../webview/parser/dialects/preprocessing';
+import { escapeRegex, stripSqlComments } from '../../shared';
+import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
+import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
 import type {
     AstStatement,
     AstTableRef,
@@ -22,45 +23,6 @@ import type {
     AstTableIdentifier,
     AstCTE
 } from './astTypes';
-
-// SQL reserved words that should never be treated as table names
-const SQL_RESERVED_WORDS = new Set([
-    // DML/DDL keywords
-    'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'truncate',
-    'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null', 'like', 'between',
-    'join', 'inner', 'outer', 'left', 'right', 'full', 'cross', 'on', 'using',
-    'group', 'by', 'having', 'order', 'asc', 'desc', 'limit', 'offset',
-    'union', 'intersect', 'except', 'all', 'distinct', 'as',
-    'case', 'when', 'then', 'else', 'end', 'if', 'exists',
-    'values', 'set', 'into', 'table', 'view', 'index', 'database', 'schema',
-    'primary', 'foreign', 'key', 'references', 'constraint', 'unique', 'check',
-    'default', 'auto_increment', 'identity', 'serial',
-    // Data types
-    'int', 'integer', 'bigint', 'smallint', 'tinyint', 'float', 'double', 'decimal',
-    'numeric', 'real', 'char', 'varchar', 'text', 'blob', 'clob', 'date', 'time',
-    'datetime', 'timestamp', 'boolean', 'bool', 'binary', 'varbinary', 'json', 'xml',
-    // Functions (common ones that might be mistaken for tables)
-    'count', 'sum', 'avg', 'min', 'max', 'coalesce', 'nullif', 'cast', 'convert',
-    'concat', 'substring', 'length', 'trim', 'upper', 'lower', 'replace',
-    'now', 'current_date', 'current_time', 'current_timestamp', 'getdate',
-    'year', 'month', 'day', 'hour', 'minute', 'second', 'dateadd', 'datediff',
-    'row_number', 'rank', 'dense_rank', 'ntile', 'lead', 'lag', 'first_value', 'last_value',
-    // Other common keywords
-    'true', 'false', 'unknown', 'query', 'result', 'data', 'temp', 'temporary', 'without',
-    'with', 'recursive', 'over', 'partition', 'rows', 'range', 'unbounded', 'preceding', 'following',
-    'rollup', 'cube', 'grouping', 'sets', 'fetch', 'next', 'only', 'percent',
-    'top', 'dual', 'sysdate', 'rownum', 'rowid', 'level', 'connect', 'start',
-    // Transaction keywords
-    'begin', 'commit', 'rollback', 'transaction', 'savepoint',
-    // Permissions
-    'grant', 'revoke', 'execute', 'procedure', 'function', 'trigger',
-]);
-
-// Teradata-specific reserved words — only applied when dialect is Teradata
-const TERADATA_RESERVED_WORDS = new Set([
-    'sel', 'multiset', 'volatile', 'locking', 'qualify', 'sample', 'normalize',
-    'hashrow', 'hashbucket', 'hashamp'
-]);
 
 /**
  * Extracts table references from SQL queries (SELECT, INSERT, UPDATE, DELETE)
@@ -90,24 +52,11 @@ export class ReferenceExtractor {
      */
     private isReservedWord(name: string): boolean {
         const lower = name.toLowerCase();
-        if (SQL_RESERVED_WORDS.has(lower)) { return true; }
+        if (REFERENCE_SQL_RESERVED_WORDS.has(lower)) { return true; }
         if (this._activeDialect === 'Teradata' && TERADATA_RESERVED_WORDS.has(lower)) { return true; }
         return false;
     }
 
-    /**
-     * Strip SQL comments from a string to simplify pattern matching
-     * Handles single-line (--, #) and multi-line comments
-     */
-    private stripSqlComments(sql: string): string {
-        // Remove multi-line comments first (/* ... */)
-        let result = sql.replace(/\/\*[\s\S]*?\*\//g, ' ');
-        // Remove single-line comments (-- ... until end of line)
-        result = result.replace(/--[^\n\r]*/g, ' ');
-        // Remove MySQL-style hash comments (# ... until end of line)
-        result = result.replace(/#[^\n\r]*/g, ' ');
-        return result;
-    }
 
     /**
      * Extract all table references from SQL
@@ -123,7 +72,7 @@ export class ReferenceExtractor {
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const globalCteNames = new Set<string>();
 
@@ -163,7 +112,7 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const sqlToParse = preprocessForParsing(sql, dialect);
+            const sqlToParse = preprocessSqlForWorkspaceParsing(sql, dialect);
             const ast = this.parser.astify(sqlToParse, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
@@ -954,6 +903,19 @@ export class ReferenceExtractor {
             this.extractFromStatement(expr.ast, filePath, sql, references, aliasMap, depth + 1, statementIndex);
         }
 
+        // Expression lists can contain select wrappers under `.ast`, such as IN (SELECT ...)
+        if (Array.isArray(expr.value)) {
+            for (const item of expr.value) {
+                if (item?.ast?.type === 'select') {
+                    this.extractFromStatement(item.ast, filePath, sql, references, aliasMap, depth + 1, statementIndex);
+                    continue;
+                }
+                if (item && typeof item === 'object') {
+                    this.extractFromExpression(item, filePath, sql, references, aliasMap, depth, statementIndex);
+                }
+            }
+        }
+
         // Nested expression in parentheses
         if (expr.expr?.type === 'select') {
             this.extractFromStatement(expr.expr, filePath, sql, references, aliasMap, depth + 1, statementIndex);
@@ -1068,7 +1030,7 @@ export class ReferenceExtractor {
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
         // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
-        const sqlNoComments = this.stripSqlComments(sql);
+        const sqlNoComments = stripSqlComments(sql);
 
         // Build statement boundary map for comment-stripped SQL
         // Split on semicolons that aren't inside strings
@@ -1560,9 +1522,10 @@ export class ReferenceExtractor {
      * More efficient than regex with large ranges that can cause catastrophic backtracking
      */
     private extractUpdateFromAliases(sql: string, cteNames: Set<string>, reservedWords: Set<string>): void {
+        const normalizedSql = sql.toUpperCase();
         let updateIndex = 0;
-        while ((updateIndex = sql.indexOf('UPDATE', updateIndex)) !== -1) {
-            const fromIndex = sql.indexOf('FROM', updateIndex);
+        while ((updateIndex = normalizedSql.indexOf('UPDATE', updateIndex)) !== -1) {
+            const fromIndex = normalizedSql.indexOf('FROM', updateIndex);
             if (fromIndex === -1 || fromIndex > updateIndex + 500) {
                 updateIndex += 6;
                 continue;
@@ -1591,11 +1554,12 @@ export class ReferenceExtractor {
             }
 
             if (closeParenIndex !== -1) {
-                // Check for AS alias after the closing paren
+                // Check for alias after the closing paren. SQL allows both
+                // "AS alias" and bare "alias" forms.
                 const afterParen = sql.substring(closeParenIndex + 1, closeParenIndex + 50).trim();
-                const asMatch = afterParen.match(/^AS\s+(\w+)/i);
-                if (asMatch) {
-                    const aliasName = asMatch[1].toLowerCase();
+                const aliasMatch = afterParen.match(/^(?:AS\s+)?(\w+)/i);
+                if (aliasMatch) {
+                    const aliasName = aliasMatch[1].toLowerCase();
                     if (!reservedWords.has(aliasName)) {
                         cteNames.add(aliasName);
                     }

@@ -358,6 +358,13 @@ export enum ExtensionMode {
     Test = 3
 }
 
+export enum ColorThemeKind {
+    Light = 1,
+    Dark = 2,
+    HighContrast = 3,
+    HighContrastLight = 4
+}
+
 export enum DiagnosticSeverity {
     Error = 0,
     Warning = 1,
@@ -414,7 +421,8 @@ export const window = {
         report: jest.fn()
     })),
     activeTextEditor: undefined,
-    visibleTextEditors: []
+    visibleTextEditors: [],
+    activeColorTheme: { kind: 2 } // Default: Dark (ColorThemeKind.Dark)
 };
 
 // ============================================================================

@@ -35,6 +35,8 @@ Interactive examples to explore SQL Crack features. Open any file and press `Cmd
 | **Performance hints** | `quality-performance-hints.sql` | Check hints panel (bottom-left) for anti-patterns |
 | **Quality warnings** | `quality-code-warnings.sql` | Look for ⚠ warning badges on nodes |
 | **Write operations** | `dml-write-operations.sql` | See INSERT/UPDATE/DELETE/MERGE badges |
+| **UPSERT conflict handling** | `dml-write-operations.sql` (Q18-24) | ON CONFLICT, ON DUPLICATE KEY, INSERT OR REPLACE/IGNORE with conflict details on UPSERT nodes |
+| **MERGE (multi-dialect)** | `dml-write-operations.sql` (Q25-30) | Structured MERGE with source/target edges, WHEN branches, CTE/subquery sources |
 | **Complex queries** | `complex-analytics-queries.sql` | Press `E` to expand all CTEs at once |
 | **Data pipelines** | `lineage-data-pipeline.sql` | Trace multi-stage ETL transformations |
 

@@ -32,7 +32,7 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             expect(result.hints?.length).toBeGreaterThan(0);
         });
 
-        it('should suggest PostgreSQL ON CONFLICT as alternative to MERGE', () => {
+        it('should parse PostgreSQL MERGE via compatibility parser', () => {
             const sql = `
                 MERGE INTO target_table t
                 USING source_table s
@@ -41,10 +41,11 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
-            // Should suggest ON CONFLICT alternative
-            const mergeHint = result.hints?.find((h: any) => 
+            // PostgreSQL MERGE now goes through the compatibility parser
+            expect(result.partial).toBeUndefined();
+            const mergeHint = result.hints?.find((h: any) =>
                 h.message?.toLowerCase().includes('merge') &&
-                h.suggestion?.toLowerCase().includes('on conflict')
+                h.suggestion?.toLowerCase().includes('postgresql')
             );
             expect(mergeHint).toBeDefined();
         });
@@ -91,7 +92,7 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
     });
 
     describe('PostgreSQL INSERT ... ON CONFLICT', () => {
-        it('should detect ON CONFLICT DO NOTHING', () => {
+        it('renders DO NOTHING conflict handling without fallback', () => {
             const sql = `
                 INSERT INTO users (id, name)
                 VALUES (1, 'Alice')
@@ -100,13 +101,18 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Should have INSERT node with conflict handling noted
-            const insertNode = result.nodes.find((n: any) => n.operationType === 'INSERT');
-            expect(insertNode).toBeDefined();
+            expect(result.partial).toBeUndefined();
+
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT users');
+            const hint = result.hints.find((h: any) => h.message?.includes('ON CONFLICT'));
+
+            expect(upsertNode).toBeDefined();
+            expect(upsertNode?.description).toContain('ON CONFLICT (id)');
+            expect(upsertNode?.description).toContain('DO NOTHING');
+            expect(hint?.suggestion).toMatch(/PostgreSQL/i);
         });
 
-        it('should detect ON CONFLICT DO UPDATE', () => {
+        it('renders DO UPDATE columns on the UPSERT node', () => {
             const sql = `
                 INSERT INTO users (id, name, email)
                 VALUES (1, 'Alice', 'alice@example.com')
@@ -118,39 +124,46 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Should show both INSERT and UPDATE operations
-            const hasInsertOrUpdate = result.nodes.some((n: any) => 
-                n.operationType === 'INSERT' || n.operationType === 'UPDATE'
-            );
-            expect(hasInsertOrUpdate).toBe(true);
+            expect(result.partial).toBeUndefined();
+
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT users');
+            expect(upsertNode).toBeDefined();
+            expect(upsertNode?.description).toContain('ON CONFLICT (id)');
+            expect(upsertNode?.description).toContain('DO UPDATE');
+            expect(upsertNode?.description).toContain('SET: name, email, updated_at');
         });
 
-        it('should show ON CONFLICT in node details', () => {
+        it('keeps SELECT source flow when ON CONFLICT is attached to INSERT ... SELECT', () => {
             const sql = `
-                INSERT INTO users (id, name)
-                VALUES (1, 'Alice')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                INSERT INTO user_summary (id, total_orders)
+                SELECT customer_id, COUNT(*)
+                FROM orders
+                GROUP BY customer_id
+                ON CONFLICT (id) DO UPDATE SET total_orders = EXCLUDED.total_orders
             `;
             const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Node details should mention conflict handling
-            const hasConflictHint = result.hints?.some((h: any) => 
-                h.message?.toLowerCase().includes('conflict') ||
-                h.suggestion?.toLowerCase().includes('conflict')
-            ) || result.nodes.some((n: any) =>
-                n.details?.some((d: string) => d.toLowerCase().includes('conflict'))
+
+            const sourceTable = result.nodes.find((n: any) => n.type === 'table' && n.label === 'orders' && !n.accessMode);
+            const targetTable = result.nodes.find((n: any) =>
+                n.type === 'table' &&
+                n.label === 'user_summary' &&
+                n.accessMode === 'write' &&
+                n.operationType === 'INSERT'
             );
-            
-            // At minimum, should parse without error
-            expect(result.nodes.length).toBeGreaterThan(0);
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT user_summary');
+
+            expect(result.partial).toBeUndefined();
+            expect(sourceTable).toBeDefined();
+            expect(targetTable).toBeDefined();
+            expect(upsertNode).toBeDefined();
+            expect(result.edges.some((e: any) => e.source === targetTable?.id && e.target === upsertNode?.id)).toBe(true);
         });
     });
 
     describe('MySQL INSERT ... ON DUPLICATE KEY UPDATE', () => {
-        it('should detect ON DUPLICATE KEY UPDATE', () => {
+        it('renders duplicate-key update semantics for MySQL', () => {
             const sql = `
                 INSERT INTO users (id, name, email)
                 VALUES (1, 'Alice', 'alice@example.com')
@@ -162,29 +175,40 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             const result = parseSql(sql, 'MySQL' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Should have INSERT node
-            const insertNode = result.nodes.find((n: any) => n.operationType === 'INSERT');
-            expect(insertNode).toBeDefined();
+            expect(result.partial).toBeUndefined();
+
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT users');
+            const hint = result.hints.find((h: any) => h.message?.includes('ON DUPLICATE KEY UPDATE'));
+
+            expect(upsertNode).toBeDefined();
+            expect(upsertNode?.description).toContain('ON DUPLICATE KEY UPDATE');
+            expect(upsertNode?.description).toContain('SET: name, email, updated_at');
+            expect(hint?.suggestion).toMatch(/MySQL/i);
         });
 
-        it('should show duplicate key handling in details', () => {
+        it('renders duplicate-key update semantics for MariaDB', () => {
             const sql = `
                 INSERT INTO users (id, name)
                 VALUES (1, 'Alice')
                 ON DUPLICATE KEY UPDATE name = VALUES(name)
             `;
-            const result = parseSql(sql, 'MySQL' as SqlDialect);
+            const result = parseSql(sql, 'MariaDB' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Should parse successfully and show the operation
-            expect(result.nodes.length).toBeGreaterThan(0);
+            expect(result.partial).toBeUndefined();
+
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT users');
+            const hint = result.hints.find((h: any) => h.message?.includes('ON DUPLICATE KEY UPDATE'));
+
+            expect(upsertNode).toBeDefined();
+            expect(upsertNode?.description).toContain('ON DUPLICATE KEY UPDATE');
+            expect(upsertNode?.description).toContain('SET: name');
+            expect(hint?.suggestion).toMatch(/MariaDB/i);
         });
     });
 
     describe('SQLite UPSERT', () => {
-        it('should detect INSERT OR REPLACE', () => {
+        it('renders INSERT OR REPLACE semantics without fallback', () => {
             const sql = `
                 INSERT OR REPLACE INTO users (id, name)
                 VALUES (1, 'Alice')
@@ -192,13 +216,17 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             const result = parseSql(sql, 'SQLite' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            
-            // Should have INSERT node
-            const insertNode = result.nodes.find((n: any) => n.operationType === 'INSERT');
-            expect(insertNode).toBeDefined();
+            expect(result.partial).toBeUndefined();
+
+            const replaceNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'INSERT OR REPLACE users');
+            const hint = result.hints.find((h: any) => h.message?.includes('INSERT OR REPLACE'));
+
+            expect(replaceNode).toBeDefined();
+            expect(replaceNode?.description).toContain('SQLite conflict resolution: REPLACE');
+            expect(hint).toBeDefined();
         });
 
-        it('should detect INSERT OR IGNORE', () => {
+        it('renders INSERT OR IGNORE semantics without fallback', () => {
             const sql = `
                 INSERT OR IGNORE INTO users (id, name)
                 VALUES (1, 'Alice')
@@ -206,7 +234,32 @@ describe('Item #3: MERGE / UPSERT Statement Visualization', () => {
             const result = parseSql(sql, 'SQLite' as SqlDialect);
 
             expect(result.error).toBeUndefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
+            expect(result.partial).toBeUndefined();
+
+            const ignoreNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'INSERT OR IGNORE users');
+            expect(ignoreNode).toBeDefined();
+            expect(ignoreNode?.description).toContain('SQLite conflict resolution: IGNORE');
+        });
+
+        it('parses SQLite ON CONFLICT via proxy AST and preserves conflict details', () => {
+            const sql = `
+                INSERT INTO users (id, name)
+                VALUES (1, 'Alice')
+                ON CONFLICT (id) DO UPDATE SET name = excluded.name
+            `;
+            const result = parseSql(sql, 'SQLite' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+
+            const upsertNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPSERT users');
+            const hint = result.hints.find((h: any) => h.message?.includes('SQLite ON CONFLICT'));
+
+            expect(upsertNode).toBeDefined();
+            expect(upsertNode?.description).toContain('ON CONFLICT (id)');
+            expect(upsertNode?.description).toContain('DO UPDATE');
+            expect(upsertNode?.description).toContain('SET: name');
+            expect(hint?.suggestion).toMatch(/PostgreSQL-compatible conflict AST/i);
         });
     });
 

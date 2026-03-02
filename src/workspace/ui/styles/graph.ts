@@ -917,6 +917,17 @@ export function getLineageNodeStyles(): string {
             background: var(--accent);
             color: white;
         }
+        .lineage-context-menu .context-item[hidden] {
+            display: none;
+        }
+        .lineage-context-menu .context-item.is-disabled {
+            color: var(--text-dim);
+            cursor: default;
+        }
+        .lineage-context-menu .context-item.is-disabled:hover {
+            background: transparent;
+            color: var(--text-dim);
+        }
         .lineage-context-menu .context-divider {
             height: 1px;
             background: var(--border-subtle);

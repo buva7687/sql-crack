@@ -110,6 +110,8 @@ export class WorkspacePanel {
     private _showHelp: boolean = false;
     /** Guard: true while rebuildAndRenderGraph() is running */
     private _isRebuilding: boolean = false;
+    /** Guard: true after panel disposal starts/completes */
+    private _isDisposed: boolean = false;
 
     // Lineage state
     private _lineageGraph: LineageGraph | null = null;
@@ -138,7 +140,17 @@ export class WorkspacePanel {
     private _isHighContrast: boolean = false;
 
     private _postMessage(msg: WorkspaceHostMessage): void {
+        if (this._isDisposed) {
+            return;
+        }
         this._panel.webview.postMessage(msg);
+    }
+
+    private setWebviewHtml(html: string): void {
+        if (this._isDisposed) {
+            return;
+        }
+        this._panel.webview.html = html;
     }
 
     public getWorkspaceUxMetricsSummaryLine(): string {
@@ -246,7 +258,12 @@ export class WorkspacePanel {
 
         // Listen for index updates
         this._indexManager.setOnIndexUpdated(() => {
-            this.rebuildAndRenderGraph();
+            if (this._isDisposed) {
+                return;
+            }
+            void this.rebuildAndRenderGraph().catch(err =>
+                logger.warn(`[WorkspacePanel] rebuildAndRenderGraph failed: ${err instanceof Error ? err.message : String(err)}`)
+            );
         });
 
         // Listen for VS Code theme changes — hot-swap CSS to avoid flicker
@@ -304,21 +321,27 @@ export class WorkspacePanel {
      * Initialize the panel
      */
     private async initialize(): Promise<void> {
+        if (this._isDisposed) {
+            return;
+        }
         // Show loading state
-        this._panel.webview.html = createLoadingHtml({
+        this.setWebviewHtml(createLoadingHtml({
             isDarkTheme: this._isDarkTheme,
             nonce: generateNonce(),
-        });
+        }));
 
         // Initialize index manager
         const autoIndexThreshold = resolveAutoIndexThresholdFromConfig();
         const { autoIndexed, fileCount } = await this._indexManager.initialize(autoIndexThreshold);
+        if (this._isDisposed) {
+            return;
+        }
 
         if (fileCount === 0) {
-            this._panel.webview.html = createEmptyWorkspaceHtml({
+            this.setWebviewHtml(createEmptyWorkspaceHtml({
                 isDarkTheme: this._isDarkTheme,
                 nonce: generateNonce(),
-            });
+            }));
             return;
         }
 
@@ -329,17 +352,23 @@ export class WorkspacePanel {
                 'Index Now',
                 'Cancel'
             );
+            if (this._isDisposed) {
+                return;
+            }
 
             if (result === 'Index Now') {
                 await this.buildIndexWithProgress();
             } else {
-                this._panel.webview.html = createManualIndexHtml({
+                this.setWebviewHtml(createManualIndexHtml({
                     fileCount,
                     isDarkTheme: this._isDarkTheme,
                     nonce: generateNonce(),
-                });
+                }));
                 return;
             }
+        }
+        if (this._isDisposed) {
+            return;
         }
 
         // Initialize graph mode from settings
@@ -477,12 +506,15 @@ export class WorkspacePanel {
      * Rebuild and render the dependency graph
      */
     private async rebuildAndRenderGraph(): Promise<void> {
+        if (this._isDisposed) {
+            return;
+        }
         const index = this._indexManager.getIndex();
         if (!index) {
-            this._panel.webview.html = this.getErrorHtml(
+            this.setWebviewHtml(this.getErrorHtml(
                 'No workspace index available.',
                 'SQL files need to be scanned before the dependency graph can be built. Click "Refresh" or open SQL files in your workspace to start indexing.'
-            );
+            ));
             return;
         }
 
@@ -511,18 +543,21 @@ export class WorkspacePanel {
      * Render the current view (graph or issues)
      */
     private renderCurrentView(): void {
+        if (this._isDisposed) {
+            return;
+        }
         if (!this._currentGraph) {
-            this._panel.webview.html = this.getErrorHtml(
+            this.setWebviewHtml(this.getErrorHtml(
                 'No graph data available.',
                 'The dependency graph could not be built from the current index. Try refreshing or check that your workspace contains SQL files.'
-            );
+            ));
             return;
         }
 
         if (this._currentView === 'issues') {
-            this._panel.webview.html = this.getIssuesHtml();
+            this.setWebviewHtml(this.getIssuesHtml());
         } else {
-            this._panel.webview.html = this.getWebviewHtml(this._currentGraph, this._currentSearchFilter);
+            this.setWebviewHtml(this.getWebviewHtml(this._currentGraph, this._currentSearchFilter));
         }
     }
 
@@ -532,6 +567,9 @@ export class WorkspacePanel {
      * Build lineage graph from workspace index
      */
     private async buildLineageGraph(): Promise<void> {
+        if (this._isDisposed) {
+            return;
+        }
         if (this._lineageGraph) {return;} // Already built
 
         while (!this._lineageGraph) {
@@ -872,9 +910,21 @@ ${bodyContent}
      * Dispose the panel
      */
     public dispose(): void {
+        if (this._isDisposed) {
+            return;
+        }
+        this._isDisposed = true;
         WorkspacePanel.currentPanel = undefined;
 
-        this._indexManager.dispose();
+        this._messageHandler?.markDisposed();
+        this._indexManager.setOnIndexUpdated(null);
+        // Flush pending index persistence before disposing resources
+        void this._indexManager.flushPersist().catch(err =>
+            logger.warn(`[WorkspacePanel] flushPersist failed during dispose: ${err instanceof Error ? err.message : String(err)}`)
+        ).finally(() => {
+            this._indexManager.dispose();
+        });
+        this._messageHandler = null;
         this._panel.dispose();
 
         while (this._disposables.length) {

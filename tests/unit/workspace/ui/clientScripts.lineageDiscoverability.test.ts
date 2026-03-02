@@ -151,4 +151,24 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('window.__workspaceColumnTraceActive = false;');
         expect(script).toContain('if (window.__workspaceColumnTraceActive) return;');
     });
+
+    it('suppresses tooltip overlap and hides unsupported external-node actions', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('let lineageContextMenuOpen = false;');
+        expect(script).toContain('if (lineageContextMenuOpen) {');
+        expect(script).toContain('hideLineageTooltip();');
+        expect(script).toContain('function hideLineageContextMenu()');
+        expect(script).toContain("openFileItem.hidden = !canOpenFile;");
+        expect(script).toContain("const showUnavailableColumns = nodeType === 'external' && !canExpandColumns;");
+        expect(script).toContain("label.textContent = showUnavailableColumns ? 'Column definitions unavailable' : 'Expand columns';");
+        expect(script).toContain("(type === 'external' ? 'Unavailable' : '-')");
+        expect(script).toContain("External reference · Right-click for lineage actions");
+    });
 });

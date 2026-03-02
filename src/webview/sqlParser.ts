@@ -16,6 +16,7 @@ import {
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
+    stripSqlComments,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
@@ -48,8 +49,14 @@ import {
     getStatementPresentation,
     getTableName,
     processSelectStatement,
+    resolveDeleteTargetTableNames,
+    tryParseWarehouseDdlStatement,
+    tryProcessDdlStatement,
+    tryParseBulkDataStatement,
+    tryParseCompatibleDeleteStatement,
+    tryParseCompatibleMergeStatement,
+    tryParseCompatibleOracleInsertStatement,
     tryParseSessionCommand,
-    tryProcessCreateStatement,
     tryProcessDmlStatements
 } from './parser/statements';
 import { escapeRegex } from '../shared';
@@ -174,6 +181,82 @@ export interface BatchParseOptions {
     combineDdlStatements?: boolean;
 }
 
+const DIALECT_DIRECTIVE_MATCHERS: Array<{ pattern: RegExp; dialect: SqlDialect }> = [
+    { pattern: /\bpostgre(?:s|sql)\b/i, dialect: 'PostgreSQL' },
+    { pattern: /\bsnowflake\b/i, dialect: 'Snowflake' },
+    { pattern: /\bbigquery\b/i, dialect: 'BigQuery' },
+    { pattern: /\bredshift\b/i, dialect: 'Redshift' },
+    { pattern: /\btransactsql\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bsql\s+server\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bt-?sql\b/i, dialect: 'TransactSQL' },
+    { pattern: /\bmariadb\b/i, dialect: 'MariaDB' },
+    { pattern: /\bmysql\b/i, dialect: 'MySQL' },
+    { pattern: /\bsqlite\b/i, dialect: 'SQLite' },
+    { pattern: /\bhive\b/i, dialect: 'Hive' },
+    { pattern: /\bathena\b/i, dialect: 'Athena' },
+    { pattern: /\btrino\b/i, dialect: 'Trino' },
+    { pattern: /\boracle\b/i, dialect: 'Oracle' },
+    { pattern: /\bpl\/sql\b/i, dialect: 'Oracle' },
+    { pattern: /\bteradata\b/i, dialect: 'Teradata' },
+];
+
+function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
+    const lines = stmt.split('\n');
+    let inBlockComment = false;
+    const commentLines: string[] = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+            continue;
+        }
+
+        if (inBlockComment) {
+            commentLines.push(line);
+            if (line.includes('*/')) {
+                inBlockComment = false;
+            }
+            continue;
+        }
+
+        if (line.startsWith('--')) {
+            commentLines.push(line.replace(/^--\s?/, ''));
+            continue;
+        }
+
+        if (line.startsWith('/*')) {
+            commentLines.push(line);
+            if (!line.includes('*/')) {
+                inBlockComment = true;
+            }
+            continue;
+        }
+
+        break;
+    }
+
+    const directiveText = commentLines.join('\n');
+    const directiveMatch = directiveText.match(/dialect\s*:\s*([^\n]+)/i);
+    if (!directiveMatch) {
+        return null;
+    }
+
+    const body = directiveMatch[1];
+    let selected: { index: number; dialect: SqlDialect } | null = null;
+
+    for (const matcher of DIALECT_DIRECTIVE_MATCHERS) {
+        const match = matcher.pattern.exec(body);
+        if (!match || match.index < 0) {
+            continue;
+        }
+        if (!selected || match.index < selected.index) {
+            selected = { index: match.index, dialect: matcher.dialect };
+        }
+    }
+
+    return selected?.dialect ?? null;
+}
+
 // Parse multiple SQL statements
 export function parseSqlBatch(
     sql: string,
@@ -264,6 +347,7 @@ export function parseSqlBatch(
         sql: string;
         type: string;
         description: string;
+        dialect: SqlDialect;
         startLine: number;
         endLine: number;
     }> = [];
@@ -274,6 +358,7 @@ export function parseSqlBatch(
         type: string;
         keyword: string;
         objectName: string;
+        dialect: SqlDialect;
         startLine: number;
         endLine: number;
     }> = [];
@@ -284,7 +369,7 @@ export function parseSqlBatch(
 
         const mergedResult = createMergedSessionResult(
             pendingSessionCommands.map(c => ({ sql: c.sql, type: c.type, description: c.description })),
-            dialect
+            pendingSessionCommands[0].dialect
         );
 
         // Get line range for tracking (absolute lines in original file)
@@ -306,7 +391,7 @@ export function parseSqlBatch(
 
         const mergedResult = createMergedDdlResult(
             pendingDdlCommands.map(c => ({ sql: c.sql, type: c.type, keyword: c.keyword, objectName: c.objectName })),
-            dialect
+            pendingDdlCommands[0].dialect
         );
 
         // Get line range for tracking (absolute lines in original file)
@@ -330,6 +415,7 @@ export function parseSqlBatch(
     };
 
     for (const stmt of statements) {
+        const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
         const stmtTrimmed = stmt.trim();
         const firstNewlineIdx = stmtTrimmed.indexOf('\n');
         const stmtFirstLine = firstNewlineIdx === -1
@@ -349,9 +435,13 @@ export function parseSqlBatch(
         const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
         // Check if this is a session command
-        const sessionInfo = getSessionCommandInfo(stmt);
+        const sessionInfo = getSessionCommandInfo(stmt, statementDialect);
 
         if (sessionInfo) {
+            if (pendingSessionCommands.length > 0 && pendingSessionCommands[0].dialect !== statementDialect) {
+                flushSessionCommands();
+            }
+
             // Calculate actual start line by counting lines in leading comments
             const strippedSql = stripLeadingComments(stmt);
             const strippedLineCount = countLines(strippedSql);
@@ -363,6 +453,7 @@ export function parseSqlBatch(
                 sql: strippedSql,
                 type: sessionInfo.type,
                 description: sessionInfo.description,
+                dialect: statementDialect,
                 startLine: actualStartLine,
                 endLine: stmtEndLine,
             });
@@ -374,6 +465,10 @@ export function parseSqlBatch(
             const ddlInfo = options.combineDdlStatements ? getDdlStatementInfo(stmt) : null;
 
             if (ddlInfo) {
+                if (pendingDdlCommands.length > 0 && pendingDdlCommands[0].dialect !== statementDialect) {
+                    flushDdlCommands();
+                }
+
                 // Calculate actual start line by counting lines in leading comments
                 const strippedSql = stripLeadingComments(stmt);
                 const strippedLineCount = countLines(strippedSql);
@@ -386,6 +481,7 @@ export function parseSqlBatch(
                     type: ddlInfo.type,
                     keyword: ddlInfo.keyword,
                     objectName: ddlInfo.objectName,
+                    dialect: statementDialect,
                     startLine: actualStartLine,
                     endLine: stmtEndLine,
                 });
@@ -394,7 +490,7 @@ export function parseSqlBatch(
                 flushDdlCommands();
 
                 // Parse the regular statement
-                const result = parseSql(stmt, dialect);
+                const result = parseSql(stmt, statementDialect);
 
                 // Adjust line numbers by adding the offset
                 const lineOffset = stmtStartLine - 1;
@@ -635,24 +731,77 @@ function offsetErrorLineNumber(message: string, lineOffset: number): string {
     return `Line ${absoluteLine}${columnPart}: ${remainder}`;
 }
 
+function getReturningColumns(stmt: any): string[] {
+    if (!stmt?.returning || !Array.isArray(stmt.returning.columns)) {
+        return [];
+    }
+
+    return Array.from(new Set(stmt.returning.columns
+        .map((column: any) => {
+            const alias = typeof column?.as === 'string' ? column.as.trim() : '';
+            if (alias) {
+                return alias;
+            }
+            const expr = column?.expr || column;
+            return getAstString(expr)?.trim() || '';
+        })
+        .filter(Boolean)
+        .map((value: string) => value.replace(/\s+/g, ' '))));
+}
+
+function applyReturningDetails(stmt: any, rootNode: FlowNode | undefined): void {
+    if (!rootNode) {
+        return;
+    }
+
+    const returningColumns = getReturningColumns(stmt);
+    if (returningColumns.length === 0) {
+        return;
+    }
+
+    const detail = `RETURNING: ${returningColumns.join(', ')}`;
+    rootNode.description = rootNode.description
+        ? `${rootNode.description} | ${detail}`
+        : detail;
+    rootNode.details = [...(rootNode.details || []), detail];
+}
+
 function isDebugLoggingEnabled(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).debugLogging);
 }
 
-function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
-    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
-    // Fall back to PostgreSQL AST parsing for these statements so visualization can still render.
-    if (dialect !== 'Snowflake') {
+function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
+    const keyword = getLeadingKeyword(sql);
+    if (!keyword) {
         return null;
     }
 
-    const keyword = getLeadingKeyword(sql);
-    if (!keyword || !['DELETE', 'MERGE'].includes(keyword)) {
+    let proxyDialect: SqlDialect | null = null;
+    const commentStripped = stripSqlComments(sql);
+
+    // node-sql-parser has incomplete Snowflake grammar for some DML (notably DELETE ... WHERE).
+    if (dialect === 'Snowflake' && ['DELETE', 'MERGE'].includes(keyword)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    // Redshift shares PostgreSQL structure for most generic DDL, but the bundled
+    // Redshift grammar still rejects some CREATE/ALTER/DROP/TRUNCATE forms.
+    if (dialect === 'Redshift' && ['CREATE', 'ALTER', 'DROP', 'TRUNCATE'].includes(keyword)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    // SQLite ON CONFLICT is structurally close to PostgreSQL, but the bundled SQLite grammar
+    // still rejects it. Parse it through PostgreSQL so the insert/upsert processor can model it.
+    if (dialect === 'SQLite' && keyword === 'INSERT' && /\bON\s+CONFLICT\b/i.test(commentStripped)) {
+        proxyDialect = 'PostgreSQL';
+    }
+
+    if (!proxyDialect) {
         return null;
     }
 
     try {
-        return parser.astify(sql, { database: 'PostgreSQL' });
+        return parser.astify(sql, { database: proxyDialect });
     } catch (e) {
         if (isDebugLoggingEnabled()) {
             console.debug('[sqlParser] AST parse failed:', e);
@@ -661,58 +810,13 @@ function tryParseSnowflakeDmlFallback(parser: Parser, sql: string, dialect: SqlD
     }
 }
 
-function tryParseTeradataMergeCompatibility(sql: string, dialect: SqlDialect): ParseResult | null {
-    if (dialect !== 'Teradata') {
+function tryParseMergeCompatibility(sql: string, dialect: SqlDialect): ParseResult | null {
+    const result = tryParseCompatibleMergeStatement(sql, dialect);
+    if (!result) {
         return null;
     }
-
-    const keyword = getLeadingKeyword(sql);
-    if (keyword !== 'MERGE') {
-        return null;
-    }
-
-    const result = regexFallbackParse(sql, dialect);
-
-    // MERGE is unsupported by the proxy AST parser, but we can still provide a
-    // deterministic structural graph (source/target/branches) without marking
-    // this as a degraded/partial parse.
-    delete result.partial;
-    result.hints = result.hints.filter(h =>
-        h.message !== 'Partial visualization - SQL parser could not parse this query'
-    );
-    result.hints = result.hints.map(h => {
-        if (h.message.includes('MERGE statement detected (using fallback parser)')) {
-            return {
-                ...h,
-                message: 'MERGE statement detected (Teradata compatibility parser)',
-            };
-        }
-        return h;
-    });
-    result.hints.unshift({
-        type: 'info',
-        message: 'Parsed Teradata MERGE using compatibility parser',
-        suggestion: 'MERGE is structurally mapped (source/target/WHEN branches) because this Teradata MERGE form is unsupported by the proxy AST parser.',
-        category: 'best-practice',
-        severity: 'low',
-    });
-    result.nodes = result.nodes.map(node => ({
-        ...node,
-        description: node.description
-            ? node.description
-                .replace('detected by fallback parser', 'detected by Teradata compatibility parser')
-                .replace('Partial visualization - parsing failed', 'Compatibility-parsed Teradata MERGE')
-            : node.description,
-        details: Array.isArray(node.details)
-            ? node.details.map(detail =>
-                detail === 'Partial visualization - parsing failed'
-                    ? 'Compatibility-parsed Teradata MERGE'
-                    : detail
-            )
-            : node.details,
-    }));
-
     layoutGraph(result.nodes, result.edges);
+    assignLineNumbers(result.nodes, sql);
     return result;
 }
 
@@ -869,15 +973,63 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
     }
 
+    const bulkResult = tryParseBulkDataStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+    });
+    if (bulkResult) {
+        layoutGraph(bulkResult.nodes, bulkResult.edges);
+        assignLineNumbers(bulkResult.nodes, sql);
+        return bulkResult;
+    }
+
+    const warehouseDdlResult = tryParseWarehouseDdlStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+    });
+    if (warehouseDdlResult) {
+        layoutGraph(warehouseDdlResult.nodes, warehouseDdlResult.edges);
+        assignLineNumbers(warehouseDdlResult.nodes, sql);
+        return warehouseDdlResult;
+    }
+
     // Check if this is a session/utility command that node-sql-parser doesn't support
     const sessionResult = tryParseSessionCommand(ctx, sql, (prefix) => genId(ctx, prefix));
     if (sessionResult) {
         return sessionResult;
     }
 
-    const teradataMergeResult = tryParseTeradataMergeCompatibility(sql, dialect);
-    if (teradataMergeResult) {
-        return teradataMergeResult;
+    const mergeCompatibilityResult = tryParseMergeCompatibility(sql, dialect);
+    if (mergeCompatibilityResult) {
+        return mergeCompatibilityResult;
+    }
+
+    const deleteCompatibilityResult = tryParseCompatibleDeleteStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+        parseSql,
+    });
+    if (deleteCompatibilityResult) {
+        layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
+        assignLineNumbers(deleteCompatibilityResult.nodes, sql);
+        return deleteCompatibilityResult;
+    }
+
+    const oracleInsertCompatibilityResult = tryParseCompatibleOracleInsertStatement({
+        context: ctx,
+        sql,
+        genId: (prefix) => genId(ctx, prefix),
+        processSelect,
+    });
+    if (oracleInsertCompatibilityResult) {
+        layoutGraph(oracleInsertCompatibilityResult.nodes, oracleInsertCompatibilityResult.edges);
+        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql);
+        return oracleInsertCompatibilityResult;
     }
 
     // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
@@ -909,7 +1061,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             try {
                 return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {
-                const fallbackAst = tryParseSnowflakeDmlFallback(parser, sqlText, targetDialect);
+                const fallbackAst = tryParseDialectProxyAstFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;
                 }
@@ -963,6 +1115,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
             const fallbackResult = regexFallbackParse(sql, dialect);
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
+            assignLineNumbers(fallbackResult.nodes, sql);
             return fallbackResult;
         }
 
@@ -1003,7 +1156,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         if (innerSelectStmt && innerSelectStmt.type?.toLowerCase() === 'create') {
             if (innerSelectStmt.select) {
                 innerSelectStmt = innerSelectStmt.select;
-            } else if (innerSelectStmt.as) {
+            } else if (innerSelectStmt.query_expr) {
+                innerSelectStmt = innerSelectStmt.query_expr;
+            } else if (innerSelectStmt.as && typeof innerSelectStmt.as === 'object') {
                 innerSelectStmt = innerSelectStmt.as;
             }
         }
@@ -1151,6 +1306,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         fallbackResult.hints.push(...ctx.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
+        assignLineNumbers(fallbackResult.nodes, sql);
         return fallbackResult;
     }
 }
@@ -1170,7 +1326,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
 
     const { label, description, objectName } = getStatementPresentation(stmt, ctx.statementType);
 
-    const createRootId = tryProcessCreateStatement(
+    const ddlRootId = tryProcessDdlStatement(
         context,
         stmt,
         nodes,
@@ -1180,8 +1336,8 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         (prefix) => genId(prefix),
         processSelect
     );
-    if (createRootId) {
-        return createRootId;
+    if (ddlRootId) {
+        return ddlRootId;
     }
 
     const dmlRootId = tryProcessDmlStatements({
@@ -1198,6 +1354,7 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         extractConditions
     });
     if (dmlRootId) {
+        applyReturningDetails(stmt, nodes.find(node => node.id === dmlRootId));
         return dmlRootId;
     }
 
@@ -1211,20 +1368,35 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
         description: description,
         x: 0, y: 0, width: labelWidth, height: 60
     });
+    applyReturningDetails(stmt, nodes[nodes.length - 1]);
 
     // Process table for UPDATE/DELETE/INSERT
     // Phase 1 Feature: Read vs Write Differentiation
     // Mark write operations with accessMode and operationType for visual distinction
     if (stmt.table) {
-        const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        const tables = ctx.statementType === 'delete'
+            ? resolveDeleteTargetTableNames(stmt, getTableName)
+            : (Array.isArray(stmt.table) ? stmt.table : [stmt.table]);
         // Determine operation type and access mode for write operations
-        const opType = ctx.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
+        const opType = ctx.statementType === 'insert'
+            ? 'INSERT'
+            : ctx.statementType === 'replace'
+                ? 'REPLACE'
+            : ctx.statementType === 'update'
+                ? 'UPDATE'
+                : ctx.statementType === 'delete'
+                    ? 'DELETE'
+                    : ctx.statementType === 'merge'
+                        ? 'MERGE'
+                        : ctx.statementType === 'truncate'
+                            ? 'TRUNCATE'
+                            : undefined;
         const accessMode: 'write' = 'write';
 
         for (const t of tables) {
             ctx.stats.tables++;
             const tableId = genId('table');
-            const tableName = t.table || t.name || t;
+            const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
             nodes.push({
                 id: tableId,
                 type: 'table',

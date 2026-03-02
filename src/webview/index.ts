@@ -58,6 +58,7 @@ import {
     setColorblindMode as setRendererColorblindMode,
 } from './renderer';
 import type { ColorblindMode } from '../shared/theme';
+import { stripSqlComments } from '../shared/stringUtils';
 
 import {
     createToolbar,
@@ -84,6 +85,36 @@ import {
     HintActionEventDetail,
     parseHintActionCommand,
 } from './hintActions';
+import { applyLineOffsetToResult } from './state/lineOffsets';
+
+type HostPostMessagePayload = { command: string; [key: string]: unknown };
+
+interface SqlCrackWebviewBootstrapConfig {
+    initialSqlCode: string;
+    vscodeTheme: string;
+    isHighContrast: boolean;
+    defaultDialect: string;
+    fileName: string;
+    isPinnedView: boolean;
+    pinId: string | null;
+    viewLocation: string;
+    defaultLayout: string;
+    flowDirection: string;
+    persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
+    initialUiState: unknown;
+    showDeadColumnHints: boolean;
+    combineDdlStatements: boolean;
+    gridStyle: string;
+    nodeAccentPosition: string;
+    showMinimap: string;
+    colorblindMode: ColorblindMode;
+    maxFileSizeKB: number;
+    maxStatements: number;
+    deferredQueryThreshold: number;
+    parseTimeoutSeconds: number;
+    isFirstRun: boolean;
+    debugLogging: boolean;
+}
 
 // Global type declarations
 declare global {
@@ -106,13 +137,15 @@ declare global {
         colorblindMode?: ColorblindMode;
         maxFileSizeKB?: number;
         maxStatements?: number;
+        deferredQueryThreshold?: number;
         parseTimeoutSeconds?: number;
         isFirstRun?: boolean;
         persistedPinnedTabs?: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
         initialUiState?: unknown;
         debugLogging?: boolean;
+        sqlCrackConfig?: Partial<SqlCrackWebviewBootstrapConfig>;
         vscodeApi?: {
-            postMessage: (message: any) => void;
+            postMessage: (message: HostPostMessagePayload) => void;
         };
     }
 }
@@ -125,7 +158,10 @@ function debugLog(...args: unknown[]): void {
 }
 
 // Current state
-let currentDialect: SqlDialect = (window.defaultDialect as SqlDialect) || 'MySQL';
+let currentDialect: SqlDialect =
+    (window.sqlCrackConfig?.defaultDialect as SqlDialect) ||
+    (window.defaultDialect as SqlDialect) ||
+    'MySQL';
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
@@ -136,12 +172,13 @@ let compareModeActive = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
+let persistStateDirty = false;
 let applyInitialStatePending = true;
 let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
-const DEFERRED_QUERY_THRESHOLD = 12;
+const DEFERRED_QUERY_THRESHOLD = 50;
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -169,13 +206,6 @@ interface PersistedWebviewState {
     renderer: PersistedRendererUiState;
 }
 
-function stripSqlComments(sql: string): string {
-    return sql
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ')
-        .replace(/#[^\n\r]*/g, ' ');
-}
-
 function hasExecutableSql(sql: string): boolean {
     return stripSqlComments(sql).trim().length > 0;
 }
@@ -188,16 +218,18 @@ function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max
     return Math.min(max, Math.max(min, rounded));
 }
 
-function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; parseTimeoutSeconds: number } {
-    const maxFileSizeKB = normalizeAdvancedLimit(window.maxFileSizeKB, 100, 10, 10000);
-    const maxStatements = normalizeAdvancedLimit(window.maxStatements, 50, 1, 500);
-    const parseTimeoutSeconds = normalizeAdvancedLimit(window.parseTimeoutSeconds, 5, 1, 60);
+function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; deferredQueryThreshold: number; parseTimeoutSeconds: number } {
+    const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);
+    const maxStatements = normalizeAdvancedLimit(window.sqlCrackConfig?.maxStatements ?? window.maxStatements, 50, 1, 500);
+    const deferredQueryThreshold = normalizeAdvancedLimit(window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold, DEFERRED_QUERY_THRESHOLD, 1, 500);
+    const parseTimeoutSeconds = normalizeAdvancedLimit(window.sqlCrackConfig?.parseTimeoutSeconds ?? window.parseTimeoutSeconds, 5, 1, 60);
 
     window.maxFileSizeKB = maxFileSizeKB;
     window.maxStatements = maxStatements;
+    window.deferredQueryThreshold = deferredQueryThreshold;
     window.parseTimeoutSeconds = parseTimeoutSeconds;
 
-    return { maxFileSizeKB, maxStatements, parseTimeoutSeconds };
+    return { maxFileSizeKB, maxStatements, deferredQueryThreshold, parseTimeoutSeconds };
 }
 
 function syncRefreshButtonState(): void {
@@ -392,13 +424,19 @@ function schedulePersistUiState(delayMs = 150): void {
     if (!window.vscodeApi) {
         return;
     }
+    persistStateDirty = true;
     if (persistStateDebounceId !== null) {
         window.clearTimeout(persistStateDebounceId);
     }
     persistStateDebounceId = window.setTimeout(() => {
         persistStateDebounceId = null;
+        persistStateDirty = false;
         persistUiStateNow();
     }, delayMs);
+}
+
+export function markPersistDirty(): void {
+    persistStateDirty = true;
 }
 
 function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
@@ -469,9 +507,9 @@ function clearDeferredQueryState(): void {
     hydrationPromises.clear();
 }
 
-function compactBatchResultMemory(result: BatchParseResult, activeIndex: number): void {
+function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void {
     clearDeferredQueryState();
-    if (result.queries.length <= DEFERRED_QUERY_THRESHOLD) {
+    if (result.queries.length <= deferredQueryThreshold) {
         return;
     }
 
@@ -496,6 +534,14 @@ function compactBatchResultMemory(result: BatchParseResult, activeIndex: number)
 
 async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
     if (!batchResult || !deferredQueryIndexes.has(queryIndex)) {
+        return;
+    }
+
+    await reparseStoredQuery(queryIndex, 'Failed to hydrate deferred query');
+}
+
+async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): Promise<void> {
+    if (!batchResult) {
         return;
     }
 
@@ -527,17 +573,26 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
             }
         );
 
-        if (!batchResult || parseToken !== parseRequestId || !deferredQueryIndexes.has(queryIndex)) {
+        if (!batchResult || parseToken !== parseRequestId) {
             return;
         }
 
-        const hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, 'Failed to hydrate deferred query');
+        let hydratedQuery = hydrated.queries[0] || buildFallbackQueryErrorResult(querySql, fallbackMessage);
+        if (!hydratedQuery.error && hydratedQuery.nodes.length === 0 && hasExecutableSql(querySql)) {
+            hydratedQuery = buildFallbackQueryErrorResult(querySql, fallbackMessage);
+        }
         hydratedQuery.sql = querySql;
         if (query.partial) {
             hydratedQuery.partial = true;
         }
         if (query.error && !hydratedQuery.error) {
             hydratedQuery.error = query.error;
+        }
+
+        const lineRange = batchResult.queryLineRanges?.[queryIndex];
+        if (lineRange?.startLine && lineRange.startLine > 0) {
+            const lineOffset = lineRange.startLine - 1;
+            applyLineOffsetToResult(hydratedQuery, lineOffset);
         }
 
         batchResult.queries[queryIndex] = hydratedQuery;
@@ -550,6 +605,37 @@ async function hydrateQueryIfNeeded(queryIndex: number): Promise<void> {
     } finally {
         hydrationPromises.delete(queryIndex);
     }
+}
+
+function recoverQueryVisualization(queryIndex: number): void {
+    if (!batchResult) {
+        return;
+    }
+
+    const recoverToken = parseRequestId;
+    const querySql = batchResult.queries[queryIndex]?.sql || '';
+    const fallbackMessage = deferredQueryIndexes.has(queryIndex)
+        ? 'Failed to hydrate deferred query'
+        : 'Failed to recover query visualization';
+
+    showGlobalLoading('Loading query details...');
+    void reparseStoredQuery(queryIndex, fallbackMessage)
+        .catch((error) => {
+            if (!batchResult || parseRequestId !== recoverToken) {
+                return;
+            }
+            const message = error instanceof Error ? error.message : fallbackMessage;
+            batchResult.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
+            deferredQueryIndexes.delete(queryIndex);
+        })
+        .finally(() => {
+            if (parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
+                return;
+            }
+            hideGlobalLoading();
+            updateBatchTabsUI();
+            renderCurrentQuery();
+        });
 }
 
 function truncateSourceLine(line: string, maxLength = 120): string {
@@ -799,10 +885,16 @@ function init(): void {
         window.clearInterval(persistStateIntervalId);
     }
     persistStateIntervalId = window.setInterval(() => {
-        if (batchResult) {
+        if (batchResult && persistStateDirty) {
+            persistStateDirty = false;
             persistUiStateNow();
         }
     }, 1500);
+
+    // Mark persist dirty when renderer-side keyboard shortcuts mutate view state directly.
+    document.addEventListener('layout-state-changed', () => {
+        persistStateDirty = true;
+    });
 
     window.addEventListener('beforeunload', () => {
         if (persistStateIntervalId !== null) {
@@ -824,10 +916,7 @@ function init(): void {
         requestAnimationFrame(() => {
             showFirstRunOverlay(container, {
                 isDarkTheme,
-                onDismiss: () => {
-                    // Notify extension to persist dismissal
-                    window.vscodeApi?.postMessage({ type: 'firstRunDismissed' });
-                },
+                onDismiss: () => {},
             });
         });
     }
@@ -1130,7 +1219,7 @@ async function visualize(sql: string): Promise<void> {
         if (requestId !== parseRequestId) {
             return;
         }
-        compactBatchResultMemory(result, 0);
+        compactBatchResultMemory(result, 0, runtimeConfig.deferredQueryThreshold);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {
@@ -1229,6 +1318,11 @@ function renderCurrentQuery(): void {
 
     const query = batchResult.queries[currentQueryIndex];
 
+    if (!query.error && query.nodes.length === 0 && hasExecutableSql(query.sql)) {
+        recoverQueryVisualization(currentQueryIndex);
+        return;
+    }
+
     // If this query has a parse error, attach the source line for the renderer's error overlay
     if (query.error && batchResult.parseErrors) {
         const parseError = batchResult.parseErrors.find(e => e.queryIndex === currentQueryIndex);
@@ -1261,8 +1355,17 @@ async function switchToQueryIndex(newIndex: number): Promise<void> {
 
     if (deferredQueryIndexes.has(newIndex)) {
         showGlobalLoading('Loading query details...');
+        const hydrateToken = parseRequestId;
         try {
             await hydrateQueryIfNeeded(newIndex);
+        } catch (error) {
+            // Only mutate if this is still the same parse cycle
+            if (batchResult && parseRequestId === hydrateToken) {
+                const querySql = batchResult.queries[newIndex]?.sql || '';
+                const msg = error instanceof Error ? error.message : 'Failed to load query details';
+                batchResult.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+            }
+            deferredQueryIndexes.delete(newIndex);
         } finally {
             hideGlobalLoading();
         }

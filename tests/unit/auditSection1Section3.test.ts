@@ -55,10 +55,12 @@ describe('audit section 1 + section 3 fixes', () => {
         expect(extension).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500)");
         expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000)");
         expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500)");
+        expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500)");
         expect(panel).toContain("normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60)");
-        expect(webviewIndex).toContain('const maxFileSizeKB = normalizeAdvancedLimit(window.maxFileSizeKB, 100, 10, 10000);');
-        expect(webviewIndex).toContain('const maxStatements = normalizeAdvancedLimit(window.maxStatements, 50, 1, 500);');
-        expect(webviewIndex).toContain('const parseTimeoutSeconds = normalizeAdvancedLimit(window.parseTimeoutSeconds, 5, 1, 60);');
+        expect(webviewIndex).toContain('const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);');
+        expect(webviewIndex).toContain('const maxStatements = normalizeAdvancedLimit(window.sqlCrackConfig?.maxStatements ?? window.maxStatements, 50, 1, 500);');
+        expect(webviewIndex).toContain('const deferredQueryThreshold = normalizeAdvancedLimit(window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold, DEFERRED_QUERY_THRESHOLD, 1, 500);');
+        expect(webviewIndex).toContain('const parseTimeoutSeconds = normalizeAdvancedLimit(window.sqlCrackConfig?.parseTimeoutSeconds ?? window.parseTimeoutSeconds, 5, 1, 60);');
     });
 
     it('U9: restore pinned tabs command is contributed for command palette discoverability', () => {

@@ -156,10 +156,17 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
     if (node.operationType && node.operationType !== 'SELECT') {
         const opColors: Record<string, string> = {
             INSERT: BADGE_COLORS.insert,
+            REPLACE: BADGE_COLORS.replace,
             UPDATE: BADGE_COLORS.update,
             DELETE: BADGE_COLORS.delete,
             MERGE: BADGE_COLORS.merge,
             CREATE_TABLE_AS: BADGE_COLORS.createTableAs,
+            CREATE_TABLE: BADGE_COLORS.createTable,
+            CREATE_VIEW: BADGE_COLORS.createView,
+            CREATE_OBJECT: BADGE_COLORS.createObject,
+            ALTER: BADGE_COLORS.alter,
+            DROP: BADGE_COLORS.drop,
+            TRUNCATE: BADGE_COLORS.truncate,
         };
         badges.push({ text: node.operationType, color: opColors[node.operationType] || '#6B7280' });
     }

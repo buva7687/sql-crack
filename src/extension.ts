@@ -9,6 +9,7 @@ import {
     createDiagnosticsFromBatch,
     SqlCrackCodeActionProvider,
 } from './diagnostics';
+import { stripSqlComments } from './shared/stringUtils';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -90,13 +91,6 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
 
     // Set context for use in when clauses
     vscode.commands.executeCommand('setContext', 'sqlCrack.isAdditionalSqlFile', isSqlLike);
-}
-
-function stripSqlComments(sql: string): string {
-    return sql
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/--[^\n\r]*/g, ' ')
-        .replace(/#[^\n\r]*/g, ' ');
 }
 
 function hasExecutableSql(sql: string): boolean {

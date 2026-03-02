@@ -552,6 +552,7 @@ export class VisualizationPanel {
         const colorblindMode = config.get<string>('colorblindMode') || 'off';
         const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
         const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
+        const deferredQueryThreshold = normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500);
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
@@ -590,6 +591,34 @@ export class VisualizationPanel {
         // Ensure webpack chunk loading uses the CSP nonce
         window.__webpack_nonce__ = ${this._escapeForInlineScript(nonce)};
 
+        // Typed bootstrap contract (kept alongside legacy window.* fields for compatibility).
+        window.sqlCrackConfig = {
+            initialSqlCode: ${this._escapeForInlineScript(sqlCode)},
+            vscodeTheme: ${this._escapeForInlineScript(vscodeTheme)},
+            isHighContrast: ${this._escapeForInlineScript(isHighContrast)},
+            defaultDialect: ${this._escapeForInlineScript(options.dialect)},
+            fileName: ${this._escapeForInlineScript(options.fileName)},
+            isPinnedView: ${this._escapeForInlineScript(this._isPinned)},
+            pinId: ${this._escapeForInlineScript(this._pinId || null)},
+            viewLocation: ${this._escapeForInlineScript(viewLocation)},
+            defaultLayout: ${this._escapeForInlineScript(defaultLayout)},
+            flowDirection: ${this._escapeForInlineScript(flowDirection)},
+            persistedPinnedTabs: ${this._escapeForInlineScript(pinnedTabs)},
+            initialUiState: ${this._escapeForInlineScript(initialUiState)},
+            showDeadColumnHints: ${this._escapeForInlineScript(showDeadColumnHints)},
+            combineDdlStatements: ${this._escapeForInlineScript(combineDdlStatements)},
+            gridStyle: ${this._escapeForInlineScript(gridStyle)},
+            nodeAccentPosition: ${this._escapeForInlineScript(nodeAccentPosition)},
+            showMinimap: ${this._escapeForInlineScript(showMinimap)},
+            colorblindMode: ${this._escapeForInlineScript(colorblindMode)},
+            maxFileSizeKB: ${this._escapeForInlineScript(maxFileSizeKB)},
+            maxStatements: ${this._escapeForInlineScript(maxStatements)},
+            deferredQueryThreshold: ${this._escapeForInlineScript(deferredQueryThreshold)},
+            parseTimeoutSeconds: ${this._escapeForInlineScript(parseTimeoutSeconds)},
+            isFirstRun: ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())},
+            debugLogging: ${this._escapeForInlineScript(debugLogging)}
+        };
+
         window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
         window.vscodeTheme = ${this._escapeForInlineScript(vscodeTheme)};
         window.isHighContrast = ${this._escapeForInlineScript(isHighContrast)};
@@ -610,6 +639,7 @@ export class VisualizationPanel {
         window.colorblindMode = ${this._escapeForInlineScript(colorblindMode)};
         window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
         window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
+        window.deferredQueryThreshold = ${this._escapeForInlineScript(deferredQueryThreshold)};
         window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
         window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
         window.debugLogging = ${this._escapeForInlineScript(debugLogging)};

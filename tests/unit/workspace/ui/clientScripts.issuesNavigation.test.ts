@@ -45,4 +45,19 @@ describe('issues view script navigation', () => {
         expect(script).toContain("const nodeType = btn.getAttribute('data-show-graph-type') || undefined;");
         expect(script).toContain("vscode.postMessage({ command: 'showInGraph', query, nodeType });");
     });
+
+    it('filters rendered issues client-side and updates empty/search status state', () => {
+        const script = getIssuesScript('test');
+
+        expect(script).toContain("const searchInput = document.getElementById('issues-search-input');");
+        expect(script).toContain("const searchClearBtn = document.getElementById('issues-search-clear');");
+        expect(script).toContain("const searchableItems = Array.from(document.querySelectorAll('[data-issue-search]'));");
+        expect(script).toContain('function applyIssuesSearch()');
+        expect(script).toContain("item.getAttribute('data-issue-search') || item.textContent || ''");
+        expect(script).toContain("section.querySelectorAll('[data-issue-search]:not([hidden])')");
+        expect(script).toContain("searchStatus.textContent = visibleCount + ' of ' + searchableItems.length + ' issues shown';");
+        expect(script).toContain("searchEmptyState.hidden = !(query && visibleCount === 0);");
+        expect(script).toContain("searchInput.addEventListener('input', applyIssuesSearch);");
+        expect(script).toContain("searchInput.value = '';");
+    });
 });

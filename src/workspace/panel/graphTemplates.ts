@@ -210,7 +210,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
             <span class="issue-banner-text">
-                <strong>Graph may be partial (${totalIssues} issue${totalIssues !== 1 ? 's' : ''}):</strong>
+                <strong>Results may be incomplete (${totalIssues} issue${totalIssues !== 1 ? 's' : ''}):</strong>
                 ${[
                     graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : '',
                     graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : '',
