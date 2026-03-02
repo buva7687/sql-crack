@@ -86,6 +86,46 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
         });
     });
 
+    describe('Routine DDL Fallback', () => {
+        it('creates a fallback routine node for unsupported MySQL CREATE FUNCTION statements', () => {
+            const sql = `
+                CREATE FUNCTION calculate_discount(price DECIMAL(10,2), discount_pct INT)
+                RETURNS DECIMAL(10,2)
+                DETERMINISTIC
+                RETURN price * (1 - discount_pct / 100.0);
+            `;
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
+
+            expect(result.partial).toBe(true);
+            expect(result.nodes.length).toBeGreaterThan(0);
+            expect(result.error).toBeUndefined();
+
+            const routineNode = result.nodes.find((n: any) => n.label === 'FUNCTION calculate_discount');
+            expect(routineNode).toBeDefined();
+            expect(routineNode?.type).toBe('result');
+            expect(routineNode?.operationType).toBe('CREATE_OBJECT');
+            expect(routineNode?.details).toContain('Returns: DECIMAL(10,2)');
+            expect(routineNode?.details).toContain('RETURN price * (1 - discount_pct / 100.0)');
+
+            const routineHint = result.hints.find((h: any) => h.message.includes('FUNCTION DDL detected'));
+            expect(routineHint).toBeDefined();
+        });
+
+        it('handles CREATE DEFINER routine syntax in fallback parsing', () => {
+            const sql = `
+                CREATE DEFINER=\`root\`@\`localhost\` FUNCTION full_name(first_name VARCHAR(50), last_name VARCHAR(50))
+                RETURNS VARCHAR(101)
+                RETURN CONCAT(first_name, ' ', last_name);
+            `;
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
+
+            expect(result.partial).toBe(true);
+            const routineNode = result.nodes.find((n: any) => n.label === 'FUNCTION full_name');
+            expect(routineNode).toBeDefined();
+            expect(routineNode?.details).toContain('Returns: VARCHAR(101)');
+        });
+    });
+
     describe('CTE Detection', () => {
         it('should detect CTE names', () => {
             // Use truly invalid syntax - invalid token in CTE

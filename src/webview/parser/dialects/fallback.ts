@@ -8,6 +8,69 @@ import type {
 } from '../../types';
 import { findMatchingParen } from './preprocessing';
 
+interface RoutineDdlInfo {
+    action: 'CREATE' | 'ALTER' | 'DROP';
+    kind: 'FUNCTION' | 'PROCEDURE' | 'TRIGGER';
+    name: string;
+    returnsType?: string;
+    bodySummary?: string;
+}
+
+function stripIdentifierWrappers(raw: string): string {
+    return raw.replace(/[`"'[\]]/g, '');
+}
+
+function extractRoutineDdlInfo(sql: string): RoutineDdlInfo | null {
+    const identifierPart = '[\\p{L}\\p{N}_$]+';
+    const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
+    const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
+    const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;
+    const pattern = new RegExp(
+        '^\\s*(CREATE|ALTER|DROP)\\s+' +
+        '(?:OR\\s+REPLACE\\s+)?' +
+        '(?:DEFINER\\s*=\\s*(?:`[^`]+`|\"[^\"]+\"|\\S+)\\s+)?' +
+        '(FUNCTION|PROCEDURE|TRIGGER)\\s+' +
+        '(?:IF\\s+(?:NOT\\s+EXISTS|EXISTS)\\s+)?' +
+        `(${qualifiedIdentifier})`,
+        'iu'
+    );
+
+    const match = sql.match(pattern);
+    if (!match) {
+        return null;
+    }
+
+    const action = match[1].toUpperCase() as RoutineDdlInfo['action'];
+    const kind = match[2].toUpperCase() as RoutineDdlInfo['kind'];
+    const name = match[3]
+        .split('.')
+        .map(part => stripIdentifierWrappers(part).trim())
+        .filter(Boolean)
+        .join('.');
+
+    const returnsMatch = kind === 'FUNCTION'
+        ? sql.match(/\bRETURNS\s+([A-Z][A-Z0-9_]*(?:\s*\([^)]*\))?)/i)
+        : null;
+
+    let bodySummary: string | undefined;
+    if (/\bBEGIN\b[\s\S]*\bEND\b/i.test(sql)) {
+        bodySummary = 'Contains BEGIN...END routine body';
+    } else {
+        const returnMatch = sql.match(/\bRETURN\b\s+([^;]+)/i);
+        if (returnMatch) {
+            bodySummary = `RETURN ${returnMatch[1].trim().replace(/\s+/g, ' ')}`;
+        }
+    }
+
+    return {
+        action,
+        kind,
+        name,
+        returnsType: returnsMatch ? returnsMatch[1].trim().replace(/\s+/g, ' ') : undefined,
+        bodySummary,
+    };
+}
+
 /**
  * Regex-based fallback parser for when AST parsing fails.
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
@@ -25,6 +88,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/--[^\n]*/g, '')
         .replace(/#[^\n]*/g, '');
+    const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
     const cteBodies = new Map<string, string>();
@@ -155,6 +219,31 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
                 }
             }
         }
+    }
+
+    if (routineDdl) {
+        const rootLabel = `${routineDdl.kind} ${routineDdl.name}`;
+        const details = [
+            `${routineDdl.action} ${routineDdl.kind.toLowerCase()}`,
+            ...(routineDdl.returnsType ? [`Returns: ${routineDdl.returnsType}`] : []),
+            ...(routineDdl.bodySummary ? [routineDdl.bodySummary] : []),
+            'Fallback routine DDL visualization',
+        ];
+        nodes.push({
+            id: genId('routine'),
+            type: 'result',
+            label: rootLabel,
+            description: `${routineDdl.action} ${routineDdl.kind.toLowerCase()}: ${routineDdl.name}`,
+            details,
+            x: 100,
+            y: nodes.length * 100,
+            width: Math.min(420, Math.max(210, rootLabel.length * 10 + 50)),
+            height: 60,
+            accessMode: 'write',
+            operationType: routineDdl.action === 'CREATE'
+                ? 'CREATE_OBJECT'
+                : (routineDdl.action as 'ALTER' | 'DROP'),
+        });
     }
 
     const upperSql = commentStripped.toUpperCase().trim();
@@ -322,6 +411,16 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         category: 'best-practice',
         severity: 'medium',
     });
+
+    if (routineDdl) {
+        hints.push({
+            type: 'info',
+            message: `${routineDdl.kind} DDL detected (using fallback parser)`,
+            suggestion: 'Routine bodies are shown as a descriptive card. Procedural control flow and body-level lineage are not analyzed in fallback mode.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
 
     const validEdges = edges.filter(e => e.source && e.target);
     return {
