@@ -8,6 +8,29 @@ import type {
 } from '../types';
 import { getConnectedNodeIds, getCycledNode, getKeyboardNavigableNodes, getSiblingCycleTarget } from './keyboardNavigation';
 
+/**
+ * Measure actual right-side panel overlap to avoid hardcoding a fixed width offset.
+ * Returns the pixel width to reserve for visible right-side overlay panels.
+ */
+function measureRightPanelReserved(svg: SVGSVGElement): number {
+    const parent = svg.parentElement;
+    if (!parent) {
+        return 0;
+    }
+    let reserved = 0;
+    const detailsPanel = parent.querySelector('.details-panel') as HTMLElement | null;
+    const hintsPanel = parent.querySelector('.hints-panel') as HTMLElement | null;
+    if (detailsPanel && detailsPanel.offsetWidth > 0
+        && detailsPanel.style.transform && !detailsPanel.style.transform.includes('100%')) {
+        reserved = Math.max(reserved, detailsPanel.offsetWidth + 24);
+    }
+    if (hintsPanel && hintsPanel.offsetWidth > 0
+        && hintsPanel.style.visibility !== 'hidden') {
+        reserved = Math.max(reserved, hintsPanel.offsetWidth + 32);
+    }
+    return reserved;
+}
+
 interface NodeNavigationShared {
     nodes: FlowNode[];
     edges: FlowEdge[];
@@ -273,7 +296,7 @@ export function fitViewFeature(options: FitViewOptions): void {
         return;
     }
 
-    const availableWidth = Math.max(100, rect.width - 320);
+    const availableWidth = Math.max(100, rect.width - measureRightPanelReserved(svg));
     const availableHeight = Math.max(100, rect.height - 100);
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
@@ -444,7 +467,8 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
     }
 
     const rect = svg.getBoundingClientRect();
-    const availableWidth = rect.width - 320;
+    const rightReserved = measureRightPanelReserved(svg);
+    const availableWidth = rect.width - rightReserved;
     const availableHeight = rect.height - 100;
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
