@@ -34,4 +34,15 @@ describe('diagnostics problems setting config', () => {
         expect(setting.type).toBe('number');
         expect(setting.default).toBe(50);
     });
+
+    it('registers autoDetectDialect with default true', () => {
+        const packageJson = JSON.parse(
+            readFileSync(join(__dirname, '../../package.json'), 'utf8')
+        );
+
+        const setting = packageJson?.contributes?.configuration?.properties?.['sqlCrack.autoDetectDialect'];
+        expect(setting).toBeDefined();
+        expect(setting.type).toBe('boolean');
+        expect(setting.default).toBe(true);
+    });
 });

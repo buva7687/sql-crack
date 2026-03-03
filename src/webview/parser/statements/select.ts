@@ -59,6 +59,18 @@ function trackFunctionUsage(
     runtime.deps.trackFunctionUsage(runtime.context, functionName, category);
 }
 
+/** Extract column name string from AST column_ref (handles PostgreSQL wrapped object form). */
+function resolveColumnName(col: any): string {
+    if (col == null) { return '?'; }
+    if (typeof col === 'string') { return col; }
+    // PostgreSQL wraps column as { expr: { type: 'default', value: 'name' } }
+    if (typeof col === 'object') {
+        if (col.expr?.value) { return String(col.expr.value); }
+        if (col.value) { return String(col.value); }
+    }
+    return '?';
+}
+
 export function processSelectStatement(
     context: ParserContext,
     stmt: any,
@@ -322,7 +334,7 @@ function processSelect(
         ctx.stats.aggregations++;
         const groupId = genId(runtime, 'agg');
         const groupbyArr = Array.isArray(stmt.groupby) ? stmt.groupby : (stmt.groupby.columns || []);
-        const groupCols = groupbyArr.map((g: any) => g.column || g.expr?.column || '?').join(', ');
+        const groupCols = groupbyArr.map((g: any) => resolveColumnName(g.column) || resolveColumnName(g.expr?.column) || '?').join(', ');
         nodes.push({
             id: groupId,
             type: 'aggregate',
@@ -545,7 +557,7 @@ function processSelect(
         const sortId = genId(runtime, 'sort');
         const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
         const sortCols = orderbyArr.map((o: any) => {
-            const col = o.expr?.column || o.expr?.value || '?';
+            const col = resolveColumnName(o.expr?.column) || o.expr?.value || '?';
             const dir = o.type || 'ASC';
             return `${col} ${dir}`;
         }).join(', ');
@@ -977,7 +989,7 @@ function parseCteOrSubqueryInternals(
         ctx.stats.aggregations++;
         const groupId = genId(runtime, 'child_group');
         const groupbyArr = Array.isArray(stmt.groupby) ? stmt.groupby : (stmt.groupby.columns || []);
-        const groupCols = groupbyArr.map((g: any) => g.column || g.expr?.column || '?').join(', ');
+        const groupCols = groupbyArr.map((g: any) => resolveColumnName(g.column) || resolveColumnName(g.expr?.column) || '?').join(', ');
         nodes.push({
             id: groupId,
             type: 'aggregate',
@@ -1101,7 +1113,7 @@ function parseCteOrSubqueryInternals(
         const sortId = genId(runtime, 'child_sort');
         const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
         const sortCols = orderbyArr.map((o: any) => {
-            const col = o.expr?.column || o.expr?.value || '?';
+            const col = resolveColumnName(o.expr?.column) || o.expr?.value || '?';
             const dir = o.type || 'ASC';
             return `${col} ${dir}`;
         }).join(', ');

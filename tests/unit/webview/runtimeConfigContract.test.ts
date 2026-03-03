@@ -19,6 +19,8 @@ describe('webview runtime config contract', () => {
         expect(indexSource).toContain('window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB');
         expect(indexSource).toContain('window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold');
         expect(indexSource).toContain('window.sqlCrackConfig?.defaultDialect');
+        expect(indexSource).toContain('window.sqlCrackConfig?.autoDetectDialect ?? window.autoDetectDialect');
+        expect(indexSource).toContain('allowDialectFallback: autoDetectDialect');
     });
 
     it('removes renderer reliance on window as any for bootstrap fields', () => {

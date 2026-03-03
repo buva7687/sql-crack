@@ -737,6 +737,15 @@ SELECT * FROM t3;`;
       expect(retryHint).toBeDefined();
     });
 
+    it('does not retry parsing with a detected dialect when fallback is disabled', () => {
+      const sql = `SELECT * FROM users WHERE created > INTERVAL '30 days'`;
+      const result = parseSql(sql, 'MySQL', { allowDialectFallback: false });
+
+      expect(result.partial).toBe(true);
+      const retryHint = result.hints.find(h => h.message.includes('Auto-retried parse with PostgreSQL'));
+      expect(retryHint).toBeUndefined();
+    });
+
     it('retries parsing for PostgreSQL AT TIME ZONE + :: cast when Snowflake is selected', () => {
       const sql = `
 SELECT

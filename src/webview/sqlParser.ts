@@ -176,8 +176,12 @@ function genId(contextOrPrefix: ParserContext | string, prefix?: string): string
     return `${resolvedPrefix}_${contextOrPrefix.nodeCounter++}`;
 }
 
+export interface ParseOptions {
+    allowDialectFallback?: boolean;
+}
+
 // Options for batch parsing
-export interface BatchParseOptions {
+export interface BatchParseOptions extends ParseOptions {
     combineDdlStatements?: boolean;
 }
 
@@ -490,7 +494,7 @@ export function parseSqlBatch(
                 flushDdlCommands();
 
                 // Parse the regular statement
-                const result = parseSql(stmt, statementDialect);
+                const result = parseSql(stmt, statementDialect, options);
 
                 // Adjust line numbers by adding the offset
                 const lineOffset = stmtStartLine - 1;
@@ -963,7 +967,7 @@ function applyParserCompatibilityPreprocessing(
     return transformedSql;
 }
 
-export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResult {
+export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: ParseOptions = {}): ParseResult {
     // Reset all parser state atomically by creating a fresh context
     ctx = createFreshContext(dialect);
     const nodes: FlowNode[] = [];
@@ -1074,6 +1078,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL'): ParseResul
         try {
             ast = parseWithDialect(dialect);
         } catch (primaryParseError) {
+            if (options.allowDialectFallback === false) {
+                throw primaryParseError;
+            }
             const { retryDialect } = selectRetryDialectOnParseFailure(sql, dialect);
             if (!retryDialect) {
                 throw primaryParseError;

@@ -7,7 +7,7 @@
  */
 
 import { ParseResult, BatchParseResult, SqlDialect, ValidationError, ValidationLimits } from './types';
-import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS } from './sqlParser';
+import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
 
 function yieldToMainLoop(): Promise<void> {
     return new Promise(resolve => {
@@ -24,10 +24,11 @@ function yieldToMainLoop(): Promise<void> {
  */
 export async function parseAsync(
     sql: string,
-    dialect: SqlDialect = 'MySQL'
+    dialect: SqlDialect = 'MySQL',
+    options: ParseOptions = {}
 ): Promise<ParseResult> {
     await yieldToMainLoop();
-    return parseSql(sql, dialect);
+    return parseSql(sql, dialect, options);
 }
 
 /**
@@ -41,11 +42,11 @@ export async function parseBatchAsync(
     sql: string,
     dialect: SqlDialect = 'MySQL',
     limits?: ValidationLimits,
-    options?: { combineDdlStatements?: boolean }
+    options: BatchParseOptions = {}
 ): Promise<BatchParseResult> {
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
     await yieldToMainLoop();
-    return parseSqlBatch(sql, dialect, appliedLimits, options ?? {});
+    return parseSqlBatch(sql, dialect, appliedLimits, options);
 }
 
 /**
@@ -100,10 +101,11 @@ export function terminateWorker(): void {
 export async function parseWithFallback(
     sql: string,
     dialect: SqlDialect = 'MySQL',
-    useWorker: boolean = true
+    useWorker: boolean = true,
+    options: ParseOptions = {}
 ): Promise<ParseResult> {
     // Worker implementation deferred, always use async import
-    return parseAsync(sql, dialect);
+    return parseAsync(sql, dialect, options);
 }
 
 /**

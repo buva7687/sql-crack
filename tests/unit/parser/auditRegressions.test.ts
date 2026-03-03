@@ -119,6 +119,31 @@ describe('Audit regression: #7 — GROUP BY / ORDER BY object form', () => {
         expect(result.stats.aggregations).toBeGreaterThanOrEqual(1);
     });
 
+    it('GROUP BY details never contain [object Object] under PostgreSQL dialect', () => {
+        const sql = `
+            WITH cj AS (
+                SELECT c.customer_id, c.customer_name, c.email, c.region,
+                    COUNT(*) AS total_orders
+                FROM customers c
+                LEFT JOIN orders o ON c.customer_id = o.customer_id
+                GROUP BY c.customer_id, c.customer_name, c.email, c.region
+            )
+            SELECT * FROM cj
+        `;
+        const result = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        expect(result.error).toBeUndefined();
+
+        const all = allNodes(result.nodes);
+        const groupNode = all.find(
+            (n: any) => n.type === 'aggregate' && n.label === 'GROUP BY'
+        );
+        expect(groupNode).toBeDefined();
+        expect(groupNode!.details).toBeDefined();
+        const detailText = groupNode!.details!.join(' ');
+        expect(detailText).not.toContain('[object Object]');
+        expect(detailText).toContain('customer_id');
+    });
+
     it('ORDER BY is detected for queries that produce object-form orderby', () => {
         const sql = `SELECT name, age FROM users ORDER BY age DESC`;
         const result = parseSql(sql, DIALECT);

@@ -94,6 +94,7 @@ interface SqlCrackWebviewBootstrapConfig {
     vscodeTheme: string;
     isHighContrast: boolean;
     defaultDialect: string;
+    autoDetectDialect: boolean;
     fileName: string;
     isPinnedView: boolean;
     pinId: string | null;
@@ -123,6 +124,7 @@ declare global {
         vscodeTheme?: string;
         isHighContrast?: boolean;
         defaultDialect?: string;
+        autoDetectDialect?: boolean;
         fileName?: string;
         isPinnedView?: boolean;
         pinId?: string | null;
@@ -230,6 +232,10 @@ function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: numbe
     window.parseTimeoutSeconds = parseTimeoutSeconds;
 
     return { maxFileSizeKB, maxStatements, deferredQueryThreshold, parseTimeoutSeconds };
+}
+
+function isDialectAutoDetectionEnabled(): boolean {
+    return (window.sqlCrackConfig?.autoDetectDialect ?? window.autoDetectDialect) !== false;
 }
 
 function syncRefreshButtonState(): void {
@@ -569,7 +575,8 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
                 maxQueryCount: Number.POSITIVE_INFINITY,
             },
             {
-                combineDdlStatements: window.combineDdlStatements === true
+                combineDdlStatements: window.combineDdlStatements === true,
+                allowDialectFallback: isDialectAutoDetectionEnabled(),
             }
         );
 
@@ -986,7 +993,9 @@ async function toggleCompareMode(): Promise<void> {
         return;
     }
 
-    const baselineResult = await parseAsync(baseline.sql, baseline.dialect);
+    const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
+        allowDialectFallback: isDialectAutoDetectionEnabled(),
+    });
     const currentTitle = batchResult.queries.length > 1
         ? `Current • Q${currentQueryIndex + 1}`
         : (window.fileName || 'Current query');
@@ -1179,7 +1188,8 @@ async function visualize(sql: string): Promise<void> {
         return;
     }
 
-    if (!userExplicitlySetDialect) {
+    const autoDetectDialect = isDialectAutoDetectionEnabled();
+    if (autoDetectDialect && !userExplicitlySetDialect) {
         const detection = detectDialect(sql);
         const detectedDialect = detection.confidence === 'high' ? detection.dialect : null;
         updateAutoDetectIndicator(detectedDialect);
@@ -1190,6 +1200,8 @@ async function visualize(sql: string): Promise<void> {
                 dialectSelect.value = currentDialect;
             }
         }
+    } else {
+        updateAutoDetectIndicator(null);
     }
 
     showGlobalLoading('Parsing SQL...');
@@ -1211,7 +1223,8 @@ async function visualize(sql: string): Promise<void> {
             currentDialect,
             customLimits,
             {
-                combineDdlStatements: window.combineDdlStatements === true
+                combineDdlStatements: window.combineDdlStatements === true,
+                allowDialectFallback: autoDetectDialect,
             }
         );
         const t1 = performance.now();

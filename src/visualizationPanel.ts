@@ -544,6 +544,7 @@ export class VisualizationPanel {
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
         const flowDirection = config.get<string>('flowDirection') || 'top-down';
+        const autoDetectDialect = config.get<boolean>('autoDetectDialect') !== false;
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
         const gridStyle = config.get<string>('gridStyle') || 'lines';
@@ -597,6 +598,7 @@ export class VisualizationPanel {
             vscodeTheme: ${this._escapeForInlineScript(vscodeTheme)},
             isHighContrast: ${this._escapeForInlineScript(isHighContrast)},
             defaultDialect: ${this._escapeForInlineScript(options.dialect)},
+            autoDetectDialect: ${this._escapeForInlineScript(autoDetectDialect)},
             fileName: ${this._escapeForInlineScript(options.fileName)},
             isPinnedView: ${this._escapeForInlineScript(this._isPinned)},
             pinId: ${this._escapeForInlineScript(this._pinId || null)},
@@ -623,6 +625,7 @@ export class VisualizationPanel {
         window.vscodeTheme = ${this._escapeForInlineScript(vscodeTheme)};
         window.isHighContrast = ${this._escapeForInlineScript(isHighContrast)};
         window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
+        window.autoDetectDialect = ${this._escapeForInlineScript(autoDetectDialect)};
         window.fileName = ${this._escapeForInlineScript(options.fileName)};
         window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
