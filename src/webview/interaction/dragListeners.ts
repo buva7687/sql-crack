@@ -32,19 +32,24 @@ export function registerDragListeners(
 
     svg.addEventListener('mousemove', (e) => {
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
-            const rect = svg.getBoundingClientRect();
-            const mouseX = (e.clientX - rect.left - state.offsetX) / state.scale;
-            const mouseY = (e.clientY - rect.top - state.offsetY) / state.scale;
-
             const node = getCurrentNodes().find(n => n.id === state.draggingCloudNodeId);
             if (node) {
-                const deltaX = mouseX - state.dragMouseStartX;
-                const deltaY = mouseY - state.dragMouseStartY;
+                const lastClientX = state.dragPointerLastClientX ?? e.clientX;
+                const lastClientY = state.dragPointerLastClientY ?? e.clientY;
+                const deltaX = (e.clientX - lastClientX) / state.scale;
+                const deltaY = (e.clientY - lastClientY) / state.scale;
+                const currentOffset = cloudOffsets.get(node.id) || {
+                    offsetX: state.dragCloudStartOffsetX,
+                    offsetY: state.dragCloudStartOffsetY,
+                };
+                const nextOffset = {
+                    offsetX: currentOffset.offsetX + deltaX,
+                    offsetY: currentOffset.offsetY + deltaY,
+                };
 
-                const newOffsetX = state.dragCloudStartOffsetX + deltaX;
-                const newOffsetY = state.dragCloudStartOffsetY + deltaY;
-
-                cloudOffsets.set(node.id, { offsetX: newOffsetX, offsetY: newOffsetY });
+                cloudOffsets.set(node.id, nextOffset);
+                state.dragPointerLastClientX = e.clientX;
+                state.dragPointerLastClientY = e.clientY;
                 callbacks.updateCloudAndArrow(node);
             }
         } else if (state.isDraggingNode && state.draggingNodeId) {
@@ -104,6 +109,8 @@ export function registerDragListeners(
         state.isDraggingCloud = false;
         state.draggingNodeId = null;
         state.draggingCloudNodeId = null;
+        state.dragPointerLastClientX = null;
+        state.dragPointerLastClientY = null;
         svg.style.cursor = 'grab';
 
         if (shouldRecordHistory) {

@@ -8,6 +8,7 @@ import {
 } from './expandableNodeConstants';
 
 export interface CloudRenderElements {
+    group: SVGGElement;
     cloud: SVGRectElement;
     title: SVGTextElement;
     arrow: SVGPathElement;
@@ -70,11 +71,7 @@ export function updateCloudAndArrowFeature(options: UpdateCloudAndArrowFeatureOp
     const offset = ensureCloudOffset(node.id, cloudWidth, cloudHeight, nodeHeight, cloudGap);
     const cloudX = node.x + offset.offsetX;
     const cloudY = node.y + offset.offsetY;
-
-    cloudData.cloud.setAttribute('x', String(cloudX));
-    cloudData.cloud.setAttribute('y', String(cloudY));
-    cloudData.title.setAttribute('x', String(cloudX + cloudWidth / 2));
-    cloudData.title.setAttribute('y', String(cloudY + 20));
+    cloudData.group.setAttribute('transform', `translate(${cloudX}, ${cloudY})`);
 
     const cloudCenterX = cloudX + cloudWidth / 2;
     const cloudCenterY = cloudY + cloudHeight / 2;
@@ -88,54 +85,36 @@ export function updateCloudAndArrowFeature(options: UpdateCloudAndArrowFeatureOp
     let pathD: string;
 
     if (angle > -Math.PI / 4 && angle <= Math.PI / 4) {
-        const arrowStartX = cloudX + cloudWidth;
-        const arrowStartY = cloudCenterY;
-        const arrowEndX = node.x;
-        const arrowEndY = nodeCenterY;
+        const arrowStartX = cloudWidth;
+        const arrowStartY = cloudHeight / 2;
+        const arrowEndX = node.x - cloudX;
+        const arrowEndY = nodeCenterY - cloudY;
         const midX = (arrowStartX + arrowEndX) / 2;
         pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
     } else if (angle > Math.PI / 4 && angle <= (3 * Math.PI) / 4) {
-        const arrowStartX = cloudCenterX;
-        const arrowStartY = cloudY + cloudHeight;
-        const arrowEndX = nodeCenterX;
-        const arrowEndY = node.y;
+        const arrowStartX = cloudWidth / 2;
+        const arrowStartY = cloudHeight;
+        const arrowEndX = nodeCenterX - cloudX;
+        const arrowEndY = node.y - cloudY;
         const midY = (arrowStartY + arrowEndY) / 2;
         pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
     } else if (angle > (-3 * Math.PI) / 4 && angle <= -Math.PI / 4) {
-        const arrowStartX = cloudCenterX;
-        const arrowStartY = cloudY;
-        const arrowEndX = nodeCenterX;
-        const arrowEndY = node.y + nodeHeight;
+        const arrowStartX = cloudWidth / 2;
+        const arrowStartY = 0;
+        const arrowEndX = nodeCenterX - cloudX;
+        const arrowEndY = node.y + nodeHeight - cloudY;
         const midY = (arrowStartY + arrowEndY) / 2;
         pathD = `M ${arrowStartX} ${arrowStartY} C ${arrowStartX} ${midY}, ${arrowEndX} ${midY}, ${arrowEndX} ${arrowEndY}`;
     } else {
-        const arrowStartX = cloudX;
-        const arrowStartY = cloudCenterY;
-        const arrowEndX = node.x + nodeWidth;
-        const arrowEndY = nodeCenterY;
+        const arrowStartX = 0;
+        const arrowStartY = cloudHeight / 2;
+        const arrowEndX = node.x + nodeWidth - cloudX;
+        const arrowEndY = nodeCenterY - cloudY;
         const midX = (arrowStartX + arrowEndX) / 2;
         pathD = `M ${arrowStartX} ${arrowStartY} C ${midX} ${arrowStartY}, ${midX} ${arrowEndY}, ${arrowEndX} ${arrowEndY}`;
     }
 
     cloudData.arrow.setAttribute('d', pathD);
-
-    if (cloudData.nestedSvg) {
-        cloudData.nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
-        cloudData.nestedSvg.setAttribute('y', String(cloudY + EXPANDABLE_CLOUD_HEADER_HEIGHT));
-    } else {
-        cloudData.subflowGroup.setAttribute(
-            'transform',
-            `translate(${cloudX + cloudPadding}, ${cloudY + EXPANDABLE_CLOUD_HEADER_HEIGHT})`
-        );
-    }
-
-    if (cloudData.closeButton) {
-        const buttonSize = 20;
-        const buttonPadding = 8;
-        const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
-        const buttonY = cloudY + buttonPadding;
-        cloudData.closeButton.setAttribute('transform', `translate(${buttonX}, ${buttonY})`);
-    }
 }
 
 /**
@@ -158,9 +137,7 @@ export function calculateStackedCloudOffsetsFeature(
 
     const cloudInfos: CloudInfo[] = [];
     for (const node of expandableNodes) {
-        const childEdges = currentEdges.filter(edge =>
-            node.children?.some(child => child.id === edge.source || child.id === edge.target)
-        );
+        const childEdges = node.childEdges || [];
         const layoutSize = layoutSubflowNodesVertical(node.children || [], childEdges);
         const width = layoutSize.width + cloudPadding * 2;
         const height = layoutSize.height + cloudPadding * 2 + EXPANDABLE_CLOUD_HEADER_HEIGHT;

@@ -141,6 +141,10 @@ export function extractTablesFromStatement(stmt: any, dialect: SqlDialect = 'MyS
 
     const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
     for (const item of fromItems) {
+        // Skip subqueries — their alias is not a real table name
+        if (item.expr && item.expr.ast) {
+            continue;
+        }
         const tableValuedFunctionName = getTableValuedFunctionName(item, dialect);
         if (tableValuedFunctionName) {
             tables.push(tableValuedFunctionName);

@@ -39,9 +39,27 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
 
 export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     const keywordLines = extractKeywordLineNumbers(sql);
-    const usedJoinLines: number[] = [];
     const sqlLines = sql.split('\n');
     const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
+
+    // Track used lines per keyword type so each node gets the next unused occurrence
+    const usedLines = new Map<string, number[]>();
+
+    /** Get the next unused line for a keyword, marking it as used. */
+    function claimNextLine(...keywords: string[]): number | undefined {
+        for (const kw of keywords) {
+            const lines = keywordLines.get(kw) || [];
+            const used = usedLines.get(kw) || [];
+            for (const line of lines) {
+                if (!used.includes(line)) {
+                    if (!usedLines.has(kw)) { usedLines.set(kw, []); }
+                    usedLines.get(kw)!.push(line);
+                    return line;
+                }
+            }
+        }
+        return undefined;
+    }
 
     for (const node of nodes) {
         switch (node.type) {
@@ -96,14 +114,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     'CROSS JOIN', 'JOIN'];
                 for (const jt of joinTypes) {
                     if (node.label.toUpperCase().includes(jt.replace(' JOIN', ''))) {
-                        const lines = keywordLines.get(jt) || keywordLines.get('JOIN') || [];
-                        for (const line of lines) {
-                            if (!usedJoinLines.includes(line)) {
-                                node.startLine = line;
-                                usedJoinLines.push(line);
-                                break;
-                            }
-                        }
+                        node.startLine = claimNextLine(jt, 'JOIN');
                         if (node.startLine) {break;}
                     }
                 }
@@ -111,42 +122,41 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             }
             case 'filter': {
                 if (node.label === 'WHERE') {
-                    const whereLines = keywordLines.get('WHERE') || [];
-                    if (whereLines.length > 0) {node.startLine = whereLines[0];}
+                    node.startLine = claimNextLine('WHERE');
                 } else if (node.label === 'HAVING') {
-                    const havingLines = keywordLines.get('HAVING') || [];
-                    if (havingLines.length > 0) {node.startLine = havingLines[0];}
+                    node.startLine = claimNextLine('HAVING');
                 }
                 break;
             }
             case 'aggregate': {
-                const groupLines = keywordLines.get('GROUP BY') || [];
-                if (groupLines.length > 0) {node.startLine = groupLines[0];}
+                node.startLine = claimNextLine('GROUP BY');
                 break;
             }
             case 'sort': {
-                const orderLines = keywordLines.get('ORDER BY') || [];
-                if (orderLines.length > 0) {node.startLine = orderLines[0];}
+                node.startLine = claimNextLine('ORDER BY');
                 break;
             }
             case 'limit': {
-                const limitLines = keywordLines.get('LIMIT') || [];
-                if (limitLines.length > 0) {node.startLine = limitLines[0];}
+                node.startLine = claimNextLine('LIMIT');
                 break;
             }
             case 'select': {
-                const selectLines = keywordLines.get('SELECT') || [];
-                if (selectLines.length > 0) {node.startLine = selectLines[0];}
+                node.startLine = claimNextLine('SELECT');
                 break;
             }
             case 'cte': {
-                const withLines = keywordLines.get('WITH') || [];
-                if (withLines.length > 0) {node.startLine = withLines[0];}
+                node.startLine = claimNextLine('WITH');
                 break;
             }
             case 'union': {
-                const unionLines = keywordLines.get('UNION') || keywordLines.get('INTERSECT') || keywordLines.get('EXCEPT') || [];
-                if (unionLines.length > 0) {node.startLine = unionLines[0];}
+                node.startLine = claimNextLine('UNION', 'INTERSECT', 'EXCEPT');
+                break;
+            }
+            case 'subquery':
+            case 'window':
+            case 'case': {
+                // These node types use SELECT as their closest keyword anchor
+                node.startLine = claimNextLine('SELECT');
                 break;
             }
             case 'result': {

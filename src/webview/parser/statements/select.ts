@@ -313,10 +313,16 @@ function processSelect(
     }
 
     // Process GROUP BY
-    if (stmt.groupby && Array.isArray(stmt.groupby) && stmt.groupby.length > 0) {
+    // groupby can be an array or an object with columns property
+    const hasGroupBy = stmt.groupby && (
+        (Array.isArray(stmt.groupby) && stmt.groupby.length > 0) ||
+        (stmt.groupby.columns && Array.isArray(stmt.groupby.columns) && stmt.groupby.columns.length > 0)
+    );
+    if (hasGroupBy) {
         ctx.stats.aggregations++;
         const groupId = genId(runtime, 'agg');
-        const groupCols = stmt.groupby.map((g: any) => g.column || g.expr?.column || '?').join(', ');
+        const groupbyArr = Array.isArray(stmt.groupby) ? stmt.groupby : (stmt.groupby.columns || []);
+        const groupCols = groupbyArr.map((g: any) => g.column || g.expr?.column || '?').join(', ');
         nodes.push({
             id: groupId,
             type: 'aggregate',
@@ -338,6 +344,8 @@ function processSelect(
 
     // Process HAVING
     if (stmt.having) {
+        const havingConditions = extractConditions(stmt.having);
+        ctx.stats.conditions += havingConditions.length;
         const havingId = genId(runtime, 'filter');
         savedHavingId = havingId;
         nodes.push({
@@ -528,9 +536,15 @@ function processSelect(
     previousId = selectId;
 
     // Process ORDER BY
-    if (stmt.orderby && Array.isArray(stmt.orderby) && stmt.orderby.length > 0) {
+    // orderby can be an array or an object with columns property
+    const hasOrderBy = stmt.orderby && (
+        (Array.isArray(stmt.orderby) && stmt.orderby.length > 0) ||
+        (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
+    );
+    if (hasOrderBy) {
         const sortId = genId(runtime, 'sort');
-        const sortCols = stmt.orderby.map((o: any) => {
+        const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
+        const sortCols = orderbyArr.map((o: any) => {
             const col = o.expr?.column || o.expr?.value || '?';
             const dir = o.type || 'ASC';
             return `${col} ${dir}`;
@@ -844,7 +858,7 @@ function parseCteOrSubqueryInternals(
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
             // Check for nested subqueries in FROM clause
-            if (fromItem.expr && fromItem.expr.ast) {
+            if (fromItem.expr && fromItem.expr.ast && !fromItem.join) {
                 ctx.stats.subqueries++; // Count nested subqueries
                 // Recursively parse the nested subquery and capture last node for chaining
                 const subqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
@@ -920,13 +934,14 @@ function parseCteOrSubqueryInternals(
     }
 
     // Check for subqueries in SELECT clause (scalar subqueries)
+    // Note: Don't let scalar subqueries overwrite previousId — they are side branches,
+    // not part of the main FROM → WHERE → GROUP BY pipeline chain.
     if (stmt.columns && Array.isArray(stmt.columns)) {
         for (const col of stmt.columns) {
             if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
                 ctx.stats.subqueries++; // Count scalar subqueries
-                // Recursively parse the nested subquery and capture last node for chaining
-                const scalarSubqLastId = parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
-                if (scalarSubqLastId) { previousId = scalarSubqLastId; }
+                // Recursively parse the nested subquery as a side branch (don't chain into main pipeline)
+                parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
             }
         }
     }
@@ -981,6 +996,8 @@ function parseCteOrSubqueryInternals(
 
     // Add HAVING if present
     if (stmt.having) {
+        const havingConditions = extractConditions(stmt.having);
+        ctx.stats.conditions += havingConditions.length;
         const havingId = genId(runtime, 'child_having');
         nodes.push({
             id: havingId,
@@ -1155,7 +1172,7 @@ function parseCteOrSubqueryInternals(
             description: `${setOp} operation`,
             details: unionDetails.length > 0 ? unionDetails : undefined,
             parentId: parentId,
-            depth: depth,
+            depth: depth + 1,
             x: 0, y: 0, width: 140, height: 60
         });
 

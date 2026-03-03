@@ -823,9 +823,10 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
         node.y = position.y;
     });
 
-    cloudOffsets = new Map(
-        snapshot.cloudOffsets.map(entry => [entry.nodeId, { offsetX: entry.offsetX, offsetY: entry.offsetY }])
-    );
+    cloudOffsets.clear();
+    snapshot.cloudOffsets.forEach(entry => {
+        cloudOffsets.set(entry.nodeId, { offsetX: entry.offsetX, offsetY: entry.offsetY });
+    });
 
     applyNodePositionsToDom();
     applyEdgePositionsToDom();

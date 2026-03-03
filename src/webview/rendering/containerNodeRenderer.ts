@@ -283,6 +283,7 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
     const cloudGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     cloudGroup.setAttribute('class', 'cloud-container');
     cloudGroup.setAttribute('data-node-id', node.id);
+    cloudGroup.setAttribute('transform', `translate(${cloudX}, ${cloudY})`);
     cloudGroup.style.cursor = 'move';
 
     const isDark = deps.state.isDarkTheme;
@@ -290,8 +291,8 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
     const cloudAccent = getNodeAccentColor(accentType, isDark);
 
     const cloud = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    cloud.setAttribute('x', String(cloudX));
-    cloud.setAttribute('y', String(cloudY));
+    cloud.setAttribute('x', '0');
+    cloud.setAttribute('y', '0');
     cloud.setAttribute('width', String(cloudWidth));
     cloud.setAttribute('height', String(cloudHeight));
     cloud.setAttribute('rx', '16');
@@ -305,8 +306,8 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
     cloudGroup.appendChild(cloud);
 
     const cloudTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    cloudTitle.setAttribute('x', String(cloudX + cloudWidth / 2));
-    cloudTitle.setAttribute('y', String(cloudY + 20));
+    cloudTitle.setAttribute('x', String(cloudWidth / 2));
+    cloudTitle.setAttribute('y', '20');
     cloudTitle.setAttribute('text-anchor', 'middle');
     cloudTitle.setAttribute('fill', cloudSurface.textMuted);
     cloudTitle.setAttribute('font-size', '11');
@@ -314,11 +315,11 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
     cloudTitle.textContent = titleTruncatePrefix ? titleText.replace(titleTruncatePrefix, '') : titleText;
     cloudGroup.appendChild(cloudTitle);
 
-    const closeButton = addCloudCloseButton(node, cloudGroup, cloudX, cloudY, cloudWidth, deps.onRequestRerender);
+    const closeButton = addCloudCloseButton(node, cloudGroup, cloudWidth, deps.onRequestRerender);
 
     const nestedSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    nestedSvg.setAttribute('x', String(cloudX + cloudPadding));
-    nestedSvg.setAttribute('y', String(cloudY + EXPANDABLE_CLOUD_HEADER_HEIGHT));
+    nestedSvg.setAttribute('x', String(cloudPadding));
+    nestedSvg.setAttribute('y', String(EXPANDABLE_CLOUD_HEADER_HEIGHT));
     nestedSvg.setAttribute('width', String(cloudWidth - cloudPadding * 2));
     nestedSvg.setAttribute('height', String(cloudHeight - EXPANDABLE_CLOUD_HEADER_HEIGHT - cloudPadding));
     nestedSvg.setAttribute('overflow', 'hidden');
@@ -354,15 +355,15 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
     let arrowEndY: number;
 
     if (cloudIsOnRight) {
-        arrowStartX = cloudX;
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x + nodeWidth;
-        arrowEndY = node.y + nodeHeight / 2;
+        arrowStartX = 0;
+        arrowStartY = cloudHeight / 2;
+        arrowEndX = node.x + nodeWidth - cloudX;
+        arrowEndY = node.y + nodeHeight / 2 - cloudY;
     } else {
-        arrowStartX = cloudX + cloudWidth;
-        arrowStartY = cloudY + cloudHeight / 2;
-        arrowEndX = node.x;
-        arrowEndY = node.y + nodeHeight / 2;
+        arrowStartX = cloudWidth;
+        arrowStartY = cloudHeight / 2;
+        arrowEndX = node.x - cloudX;
+        arrowEndY = node.y + nodeHeight / 2 - cloudY;
     }
 
     const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -377,11 +378,16 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
 
     group.appendChild(cloudGroup);
 
-    deps.cloudElements.set(node.id, { cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
+    deps.cloudElements.set(node.id, { group: cloudGroup, cloud, title: cloudTitle, arrow: arrowPath, subflowGroup, nestedSvg, closeButton });
 
-    cloud.addEventListener('mousedown', (e) => {
+    cloudGroup.addEventListener('mousedown', (e) => {
+        const target = e.target as Element;
+        // Don't initiate cloud drag when clicking inside the nested subflow content or the close button
+        if (target.closest('.cloud-content') || target.closest('.cloud-close-btn')) {
+            return;
+        }
+        e.preventDefault();
         e.stopPropagation();
-        const rect = deps.svg.getBoundingClientRect();
         deps.state.isDraggingCloud = true;
         deps.state.draggingCloudNodeId = node.id;
 
@@ -391,8 +397,8 @@ function renderExpandedCloud(options: ExpandedCloudOptions): void {
         };
         deps.state.dragCloudStartOffsetX = currentOffset.offsetX;
         deps.state.dragCloudStartOffsetY = currentOffset.offsetY;
-        deps.state.dragMouseStartX = (e.clientX - rect.left - deps.state.offsetX) / deps.state.scale;
-        deps.state.dragMouseStartY = (e.clientY - rect.top - deps.state.offsetY) / deps.state.scale;
+        deps.state.dragPointerLastClientX = e.clientX;
+        deps.state.dragPointerLastClientY = e.clientY;
         cloudGroup.style.opacity = '0.8';
     });
 }
@@ -425,15 +431,13 @@ function attachCloudPanZoomListeners(
 function addCloudCloseButton(
     node: FlowNode,
     cloudGroup: SVGGElement,
-    cloudX: number,
-    cloudY: number,
     cloudWidth: number,
     onRequestRerender: () => void
 ): SVGGElement {
     const buttonSize = 20;
     const buttonPadding = 8;
-    const buttonX = cloudX + cloudWidth - buttonSize - buttonPadding;
-    const buttonY = cloudY + buttonPadding;
+    const buttonX = cloudWidth - buttonSize - buttonPadding;
+    const buttonY = buttonPadding;
 
     const closeButtonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     closeButtonGroup.setAttribute('class', 'cloud-close-btn');
