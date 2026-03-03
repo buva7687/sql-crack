@@ -61,7 +61,7 @@ function trackFunctionUsage(
 
 /** Extract column name string from AST column_ref (handles PostgreSQL wrapped object form). */
 function resolveColumnName(col: any): string {
-    if (col == null) { return '?'; }
+    if (col === null || col === undefined) { return '?'; }
     if (typeof col === 'string') { return col; }
     // PostgreSQL wraps column as { expr: { type: 'default', value: 'name' } }
     if (typeof col === 'object') {
