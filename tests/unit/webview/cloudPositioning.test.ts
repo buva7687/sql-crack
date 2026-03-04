@@ -53,38 +53,30 @@ describe('cloudPositioning helpers', () => {
         expect(secondOffset!.offsetX).toBeGreaterThan(firstOffset!.offsetX);
     });
 
-    it('updates cloud, arrow, nested svg, and close button positions for expanded nodes', () => {
+    it('updates group transform and arrow for expanded nodes', () => {
         const node = createExpandableNode('cte_1', 100, 300);
-        const cloud = createSettableElement();
-        const title = createSettableElement();
+        const group = createSettableElement();
         const arrow = createSettableElement();
-        const nestedSvg = createSettableElement();
-        const closeButton = createSettableElement();
 
         updateCloudAndArrowFeature({
             node,
             cloudElements: new Map([
                 ['cte_1', {
-                    cloud: cloud as any,
-                    title: title as any,
+                    group: group as any,
+                    cloud: createSettableElement() as any,
+                    title: createSettableElement() as any,
                     arrow: arrow as any,
                     subflowGroup: createSettableElement() as any,
-                    nestedSvg: nestedSvg as any,
-                    closeButton: closeButton as any,
+                    nestedSvg: createSettableElement() as any,
+                    closeButton: createSettableElement() as any,
                 }],
             ]),
             ensureCloudOffset: () => ({ offsetX: 220, offsetY: -180 }),
             layoutSubflowNodesVertical: () => ({ width: 140, height: 90 }),
         });
 
-        expect(cloud.setAttribute).toHaveBeenCalledWith('x', expect.any(String));
-        expect(cloud.setAttribute).toHaveBeenCalledWith('y', expect.any(String));
-        expect(title.setAttribute).toHaveBeenCalledWith('x', expect.any(String));
-        expect(title.setAttribute).toHaveBeenCalledWith('y', expect.any(String));
+        expect(group.setAttribute).toHaveBeenCalledWith('transform', expect.stringContaining('translate('));
         expect(arrow.setAttribute).toHaveBeenCalledWith('d', expect.stringContaining('M '));
-        expect(nestedSvg.setAttribute).toHaveBeenCalledWith('x', expect.any(String));
-        expect(nestedSvg.setAttribute).toHaveBeenCalledWith('y', expect.any(String));
-        expect(closeButton.setAttribute).toHaveBeenCalledWith('transform', expect.stringContaining('translate('));
     });
 
     it('does not update collapsed nodes or nodes without cloud render data', () => {
@@ -96,6 +88,7 @@ describe('cloudPositioning helpers', () => {
             node,
             cloudElements: new Map([
                 ['cte_1', {
+                    group: createSettableElement() as any,
                     cloud: cloud as any,
                     title: createSettableElement() as any,
                     arrow: createSettableElement() as any,

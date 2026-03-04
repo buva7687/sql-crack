@@ -24,6 +24,12 @@ describe('extension diagnostics wiring', () => {
         expect(source).toContain('diagnosticsCollection.clear();');
     });
 
+    it('rebuilds diagnostics when sqlCrack.autoDetectDialect changes', () => {
+        expect(source).toContain("config.get<boolean>('autoDetectDialect') !== false");
+        expect(source).toContain("e.affectsConfiguration('sqlCrack.autoDetectDialect')");
+        expect(source).toContain('allowDialectFallback: autoDetectDialect');
+    });
+
     it('registers quick-fix code actions for SQL diagnostics', () => {
         expect(source).toContain('vscode.languages.registerCodeActionsProvider');
         expect(source).toContain('new SqlCrackCodeActionProvider()');

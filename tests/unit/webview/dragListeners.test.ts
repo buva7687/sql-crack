@@ -262,8 +262,8 @@ describe('dragListeners', () => {
             draggingCloudNodeId: 'cloud_1',
             dragCloudStartOffsetX: 30,
             dragCloudStartOffsetY: 40,
-            dragMouseStartX: 5,
-            dragMouseStartY: 8,
+            dragPointerLastClientX: 15,
+            dragPointerLastClientY: 20,
         });
         const svg = createSvg();
         const cloudGroup = createElement('g');
@@ -283,13 +283,24 @@ describe('dragListeners', () => {
             clientY: 50,
         });
 
-        expect(cloudOffsets.get('cloud_1')).toEqual({ offsetX: 50, offsetY: 62 });
+        expect(cloudOffsets.get('cloud_1')).toEqual({ offsetX: 50, offsetY: 70 });
+        expect(state.dragPointerLastClientX).toBe(35);
+        expect(state.dragPointerLastClientY).toBe(50);
         expect(callbacks.updateCloudAndArrow).toHaveBeenCalledWith(node);
+
+        svg.emit('mousemove', {
+            clientX: 45,
+            clientY: 55,
+        });
+
+        expect(cloudOffsets.get('cloud_1')).toEqual({ offsetX: 60, offsetY: 75 });
 
         svg.emit('mouseleave', {});
         expect(cloudGroup.style.opacity).toBe('1');
         expect(state.isDraggingCloud).toBe(false);
         expect(state.draggingCloudNodeId).toBeNull();
+        expect(state.dragPointerLastClientX).toBeNull();
+        expect(state.dragPointerLastClientY).toBeNull();
     });
 
     it('supports non-mouse pointer dragging with pointer capture', () => {

@@ -80,6 +80,15 @@ describe('parserClient', () => {
             expect(result).toBeDefined();
         });
 
+        it('can disable dialect fallback retries', async () => {
+            const sql = `SELECT * FROM users WHERE created > INTERVAL '30 days'`;
+            const result = await parseAsync(sql, 'MySQL', { allowDialectFallback: false });
+
+            expect(result.partial).toBe(true);
+            const retryHint = result.hints.find((hint) => hint.message.includes('Auto-retried parse with PostgreSQL'));
+            expect(retryHint).toBeUndefined();
+        });
+
         it('should handle empty SQL', async () => {
             const result = await parseAsync('', 'MySQL');
 

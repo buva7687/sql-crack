@@ -467,10 +467,8 @@ export class ReferenceExtractor {
             this.extractFromStatement(stmt._next, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
-        // Set operations
-        if (stmt.set_op) {
-            this.extractFromStatement(stmt.set_op, filePath, sql, references, aliasMap, depth, statementIndex);
-        }
+        // Note: set_op is a string like 'union', not an AST node.
+        // The _next block above already handles the right-side statement.
     }
 
     /**

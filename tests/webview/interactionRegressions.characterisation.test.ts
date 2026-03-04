@@ -15,10 +15,17 @@ const srcDir = join(__dirname, '../../src/webview');
 
 const dragListenersSource = readFileSync(join(srcDir, 'interaction/dragListeners.ts'), 'utf8');
 const containerNodeRendererSource = readFileSync(join(srcDir, 'rendering/containerNodeRenderer.ts'), 'utf8');
+const cloudPositioningSource = readFileSync(join(srcDir, 'rendering/cloudPositioning.ts'), 'utf8');
 const searchSource = readFileSync(join(srcDir, 'features/search.ts'), 'utf8');
 const rendererSource = readFileSync(join(srcDir, 'renderer.ts'), 'utf8');
 
 describe('Cloud drag regressions', () => {
+    it('does not leave temporary cloud drag debug logs in source', () => {
+        expect(dragListenersSource).not.toContain('[CLOUD-DRAG]');
+        expect(containerNodeRendererSource).not.toContain('[CLOUD-DRAG]');
+        expect(cloudPositioningSource).not.toContain('[CLOUD-POSITION]');
+    });
+
     describe('no internal pan mousedown on cloud nestedSvg', () => {
         it('attachCloudPanZoomListeners should only have wheel listener, no mousedown', () => {
             // Extract the attachCloudPanZoomListeners function body
@@ -32,16 +39,36 @@ describe('Cloud drag regressions', () => {
             expect(fnBody).toContain("addEventListener('wheel'");
 
             // Must NOT have mousedown/mousemove/mouseup listeners
-            // (internal pan was removed so whole-cloud drag works via the cloud rect)
+            // (internal pan was removed so whole-cloud drag works via the cloud container)
             expect(fnBody).not.toContain("addEventListener('mousedown'");
             expect(fnBody).not.toContain("addEventListener('mousemove'");
             expect(fnBody).not.toContain("addEventListener('mouseup'");
         });
 
-        it('cloud rect should still have its own mousedown for whole-cloud drag', () => {
-            // The cloud rect's mousedown (outside attachCloudPanZoomListeners)
-            // sets isDraggingCloud — this is the whole-cloud drag handler
-            expect(containerNodeRendererSource).toContain('state.isDraggingCloud = true');
+        it('cloud drag mousedown must be on cloudGroup, not cloud rect', () => {
+            // The mousedown for whole-cloud drag must be on the cloudGroup <g> element,
+            // NOT on the cloud <rect>. The rect is covered by title text, close button,
+            // and nestedSvg — clicks on those never reach the rect. The cloudGroup
+            // receives bubbled events from all children.
+            expect(containerNodeRendererSource).toMatch(
+                /cloudGroup\.addEventListener\('mousedown'[\s\S]*?isDraggingCloud\s*=\s*true/
+            );
+            // Must NOT be cloud.addEventListener (the rect)
+            expect(containerNodeRendererSource).not.toMatch(
+                /\bcloud\.addEventListener\('mousedown'/
+            );
+        });
+
+        it('cloud drag handler excludes clicks on subflow content and close button', () => {
+            // Clicks inside the nested subflow or the close button should not
+            // trigger whole-cloud drag — they have their own interactions
+            const dragMatch = containerNodeRendererSource.match(
+                /cloudGroup\.addEventListener\('mousedown'[\s\S]*?isDraggingCloud\s*=\s*true/
+            );
+            expect(dragMatch).not.toBeNull();
+            const handlerBody = dragMatch![0];
+            expect(handlerBody).toContain("closest('.cloud-content')");
+            expect(handlerBody).toContain("closest('.cloud-close-btn')");
         });
     });
 
@@ -123,5 +150,17 @@ describe('Reset view triggers full refresh via custom event', () => {
 
     it('command bar labels R as Refresh Visualization', () => {
         expect(rendererSource).toContain("label: 'Refresh Visualization', shortcut: 'R'");
+    });
+
+    it('restoreLayoutHistorySnapshot mutates cloudOffsets instead of replacing the map', () => {
+        const restoreMatch = rendererSource.match(
+            /function restoreLayoutHistorySnapshot\(snapshot: LayoutHistorySnapshot\)[\s\S]*?^}/m
+        );
+        expect(restoreMatch).not.toBeNull();
+        const fnBody = restoreMatch![0];
+
+        expect(fnBody).toContain('cloudOffsets.clear()');
+        expect(fnBody).toContain('snapshot.cloudOffsets.forEach');
+        expect(fnBody).not.toContain('cloudOffsets = new Map(');
     });
 });

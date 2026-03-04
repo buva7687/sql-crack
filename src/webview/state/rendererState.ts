@@ -40,6 +40,8 @@ export function createInitialViewState(vscodeTheme: string | undefined, defaultL
         dragCloudStartOffsetY: 0,
         dragMouseStartX: 0,
         dragMouseStartY: 0,
+        dragPointerLastClientX: null,
+        dragPointerLastClientY: null,
         searchTerm: '',
         searchResults: [],
         currentSearchIndex: -1,

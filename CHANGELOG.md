@@ -5,7 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - Unreleased
+## [0.5.1] - 2026-03-03
+
+### Added
+
+- **Disable automatic dialect detection** ([#56](https://github.com/buva7687/sql-crack/issues/56)): New `sqlCrack.autoDetectDialect` setting (default `true`). When disabled, SQL Flow always uses the configured default dialect without auto-detecting or auto-retrying with a different dialect on parse failure. Useful for single-dialect repositories (e.g., Redshift-only DBT projects) where auto-detection produces false positives.
+
+### Fixed
+
+- **JOIN subqueries double-processed**: Fixed `parseCteOrSubqueryInternals` processing JOIN subqueries twice by adding a `!fromItem.join` guard, preventing duplicate child nodes for tables inside JOIN subqueries.
+- **Scalar subqueries breaking pipeline chain**: Scalar subqueries in SELECT expressions no longer overwrite the main pipeline's `previousId`, so outer FROM tables correctly connect to the outer WHERE clause instead of being hijacked by the scalar subquery's internal flow.
+- **Cloud subflow layout using wrong edges**: `updateCloudAndArrowFeature` and `calculateStackedCloudOffsetsFeature` now use `node.childEdges` instead of filtering the top-level `currentEdges` array, which contained no matching child edges.
+- **GROUP BY / ORDER BY object-form not detected**: Added handling for parser AST variants where `stmt.groupby` and `stmt.orderby` are objects with a `.columns` property instead of plain arrays.
+- **HAVING conditions not counted in stats**: `stats.conditions` now includes conditions extracted from `stmt.having` in both top-level queries and CTE internals.
+- **Subquery aliases appearing as real tables in UNION details**: `extractTablesFromStatement` now skips FROM items with `expr.ast` (subquery sources) so their aliases are not reported as table names.
+- **UNION node depth inconsistent with siblings**: UNION nodes inside CTEs/subqueries now use `depth + 1` (matching sibling table/filter nodes) instead of `depth`.
+- **Line number assignment collisions**: Refactored `assignLineNumbers()` with a `claimNextLine()` helper using a `usedLines` tracker, so multiple nodes of the same type each get a distinct source line. Added missing cases for `subquery`, `window`, and `case` node types.
+- **Dead code in referenceExtractor**: Removed unreachable `set_op` processing block that could never execute due to an earlier guard clause.
+- **Cloud drag not working (reference capture bug)**: `restoreLayoutHistorySnapshot()` now clears and repopulates the existing `cloudOffsets` Map instead of reassigning it to a new Map, so drag listeners that captured the original reference continue to read/write the same object.
+- **Cloud drag mousedown not reaching cloudGroup**: Moved the cloud drag mousedown listener from the cloud `<rect>` to the parent `cloudGroup` `<g>` element, since the rect is covered by title text, close button, and nestedSvg in SVG stacking order. Added guards to exclude clicks on `.cloud-content` and `.cloud-close-btn`.
+- **Cloud positioning uses group transform**: Cloud updates now set a single `transform` on the cloud group element instead of individual `x`/`y` attributes on each child, preventing coordinate mismatches during drag.
+- **Cloud drag delta tracking**: Replaced absolute-origin delta calculation (`mouseX - dragMouseStartX`) with incremental per-frame deltas (`clientX - lastClientX`) to avoid stale reference issues.
+- **GROUP BY / ORDER BY `[object Object]` in details**: PostgreSQL dialect wraps column names as `{ expr: { value: "name" } }` objects instead of strings. Added `resolveColumnName()` helper to unwrap these in both GROUP BY and ORDER BY detail generation, fixing `Columns: [object Object], ...` display.
+
+### Tests
+
+- Added parser audit regression tests for JOIN subquery deduplication, scalar subquery pipeline isolation, GROUP BY/ORDER BY object-form handling, HAVING condition counting, subquery alias exclusion from UNION details, and UNION node depth consistency.
+- Added line number tracking tests for unique line assignment across same-type nodes and coverage for subquery, window, and case node types.
+- Added cloud positioning child-edge regression tests verifying `node.childEdges` usage.
+- Added reference extractor dead-code regression test confirming `set_op` block removal.
+- Added interaction regression characterisation tests for cloud drag mousedown target, content/close-button exclusion guards, and node drag not calling `updateCloudAndArrow`.
+- Added PostgreSQL GROUP BY `[object Object]` regression test verifying CTE-internal GROUP BY details resolve column names correctly.
+- Removed debug probe test file (`_debug_structure.test.ts`).
+
+## [0.5.0] - 2026-03-02
 
 ### Added
 
@@ -1018,6 +1051,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.5.1]: https://github.com/buva7687/sql-crack/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/buva7687/sql-crack/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/buva7687/sql-crack/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/buva7687/sql-crack/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/buva7687/sql-crack/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/buva7687/sql-crack/compare/v0.3.7...v0.4.0
 

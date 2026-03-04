@@ -300,6 +300,7 @@ describe('visualizationPanel.ts', () => {
                 'vscodeTheme',
                 'isHighContrast',
                 'defaultDialect',
+                'autoDetectDialect',
                 'fileName',
                 'isPinnedView',
                 'pinId',

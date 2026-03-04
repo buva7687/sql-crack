@@ -153,6 +153,7 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             const config = getConfig();
             const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
+            const autoDetectDialect = config.get<boolean>('autoDetectDialect') !== false;
             const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
             const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
@@ -165,6 +166,7 @@ export function activate(context: vscode.ExtensionContext) {
                 },
                 {
                     combineDdlStatements,
+                    allowDialectFallback: autoDetectDialect,
                 }
             );
             diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
@@ -549,6 +551,11 @@ export function activate(context: vscode.ExtensionContext) {
                     updateDiagnosticsForDocument(document);
                 });
             }
+        }
+        if (e.affectsConfiguration('sqlCrack.autoDetectDialect')) {
+            vscode.workspace.textDocuments.forEach((document) => {
+                updateDiagnosticsForDocument(document);
+            });
         }
     });
 

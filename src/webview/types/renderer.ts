@@ -30,6 +30,8 @@ export interface ViewState {
     dragCloudStartOffsetY: number;
     dragMouseStartX: number;
     dragMouseStartY: number;
+    dragPointerLastClientX?: number | null;
+    dragPointerLastClientY?: number | null;
     searchTerm: string;
     searchResults: string[];
     currentSearchIndex: number;
@@ -64,6 +66,7 @@ export interface CloudOffset {
 }
 
 export interface CloudElements {
+    group: SVGGElement;
     cloud: SVGRectElement;
     title: SVGTextElement;
     arrow: SVGPathElement;
