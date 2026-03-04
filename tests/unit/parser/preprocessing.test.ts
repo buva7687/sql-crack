@@ -557,7 +557,7 @@ describe('parser preprocessing transforms', () => {
     describe('preprocessForParsing (unified)', () => {
         it('applies PostgreSQL preprocessing', () => {
             const sql = "SELECT created_at AT TIME ZONE 'UTC' FROM events";
-            const result = preprocessForParsing(sql, 'PostgreSQL');
+            const { sql: result } = preprocessForParsing(sql, 'PostgreSQL');
 
             expect(result).not.toMatch(/AT\s+TIME\s+ZONE/i);
             expect(result).toContain('SELECT created_at');
@@ -565,7 +565,7 @@ describe('parser preprocessing transforms', () => {
 
         it('applies GROUPING SETS rewrite for any dialect', () => {
             const sql = 'SELECT dept, SUM(sales) FROM t GROUP BY GROUPING SETS ((dept), (region))';
-            const result = preprocessForParsing(sql, 'MySQL');
+            const { sql: result } = preprocessForParsing(sql, 'MySQL');
 
             expect(result).not.toMatch(/GROUPING\s+SETS/i);
             expect(result).toContain('GROUP BY dept, region');
@@ -573,14 +573,14 @@ describe('parser preprocessing transforms', () => {
 
         it('applies Oracle preprocessing', () => {
             const sql = 'SELECT * FROM a, b WHERE a.id = b.id(+)';
-            const result = preprocessForParsing(sql, 'Oracle');
+            const { sql: result } = preprocessForParsing(sql, 'Oracle');
 
             expect(result).not.toContain('(+)');
         });
 
         it('applies Snowflake path collapse', () => {
             const sql = 'SELECT payload:a:b:c:d FROM events';
-            const result = preprocessForParsing(sql, 'Snowflake');
+            const { sql: result } = preprocessForParsing(sql, 'Snowflake');
 
             // Should collapse to 2 segments
             expect(result).toContain('payload:a:b');
@@ -589,7 +589,7 @@ describe('parser preprocessing transforms', () => {
 
         it('applies CTE hoisting for any dialect', () => {
             const sql = 'SELECT * FROM (WITH cte AS (SELECT 1 AS x) SELECT * FROM cte) t';
-            const result = preprocessForParsing(sql, 'Snowflake');
+            const { sql: result } = preprocessForParsing(sql, 'Snowflake');
 
             // CTE should be hoisted to top level
             expect(result).toMatch(/^\s*WITH\s+cte\s+AS/i);
@@ -597,9 +597,18 @@ describe('parser preprocessing transforms', () => {
 
         it('returns original SQL when no transforms apply', () => {
             const sql = 'SELECT id, name FROM employees WHERE active = 1';
-            const result = preprocessForParsing(sql, 'MySQL');
+            const { sql: result, hadJinja } = preprocessForParsing(sql, 'MySQL');
 
             expect(result).toBe(sql);
+            expect(hadJinja).toBe(false);
+        });
+
+        it('reports Jinja preprocessing metadata', () => {
+            const sql = "SELECT * FROM {{ ref('orders') }}";
+            const result = preprocessForParsing(sql, 'MySQL');
+
+            expect(result.hadJinja).toBe(true);
+            expect(result.sql).toContain('FROM orders');
         });
     });
 

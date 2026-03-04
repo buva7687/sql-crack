@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-03-04
+
+### Added
+
+- **DBT/Jinja template support** ([#57](https://github.com/buva7687/sql-crack/issues/57)): SQL files containing Jinja templates (`{{ ref() }}`, `{{ source() }}`, `{% if %}`, `{# comments #}`) are now preprocessed before parsing. Template expressions are rewritten to parser-friendly SQL identifiers so both SQL Flow and Workspace extraction produce correct visualizations for DBT projects.
+  - `{{ ref('model') }}` → `model`, `{{ source('schema', 'table') }}` → `schema.table`
+  - `{{ config(...) }}` stripped, `{{ var('name') }}` → placeholder, `{{ this }}` → `__dbt_this`
+  - `{% if/elif/else/endif %}` keeps first branch only (stack-based block parser handles nesting)
+  - `{% for %}` keeps loop body once, `{% macro %}` blocks stripped entirely
+  - `{# Jinja comments #}` stripped; Jinja inside SQL comments left untouched
+  - Newline and character offsets preserved for accurate error line mapping
+  - Info hint displayed when Jinja templates are detected and simplified
+
+### Fixed
+
+- **CTE name shadowing real tables in workspace extraction**: When a CTE has the same name as a real table (e.g., `WITH orders AS (SELECT * FROM orders)`), the real table reference inside the CTE body is now correctly extracted. Previously, all references matching a CTE name were filtered out globally, causing the real table to be missed.
+- **Workspace schema extraction missing CREATE VIEW names**: `SchemaExtractor` now handles `stmt.view` AST variants (array, object, string) in addition to `stmt.table`, fixing cases where CREATE VIEW definitions returned `name: 'unknown'`.
+
+### Tests
+
+- Added Jinja preprocessor unit tests (14 cases): expression rewrites, block tag handling, nested if/elif, macro removal, SQL comment skipping, newline preservation, detection heuristic.
+- Added Jinja integration tests (5 cases): full DBT model parsing, regex fallback path, workspace reference extraction, schema extraction with Jinja in CREATE VIEW, executable SQL detection for config-only files.
+- Added workspace reference extractor DBT tests (2 cases): AST and regex fallback paths for `ref()`/`source()` extraction.
+- Added CTE scoping regression tests (3 cases): CTE shadowing real table, CTE names not leaked as real tables, multiple shadowing CTEs.
+- Added source-reading wiring test for `hasExecutableSql` Jinja preprocessing in webview `index.ts`.
+
 ## [0.5.1] - 2026-03-03
 
 ### Added
@@ -1051,6 +1077,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.5.2]: https://github.com/buva7687/sql-crack/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/buva7687/sql-crack/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/buva7687/sql-crack/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/buva7687/sql-crack/compare/v0.4.2...v0.4.3
