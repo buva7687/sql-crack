@@ -1,4 +1,5 @@
 import type { SqlDialect } from '../../types';
+import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 /**
  * Preprocess PostgreSQL-specific syntax that node-sql-parser doesn't support.
@@ -2011,8 +2012,9 @@ function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
     return masked.length;
 }
 
-export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
-    let result = sql;
+export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
+    const { rewritten, hadJinja } = preprocessJinjaTemplates(sql);
+    let result = rewritten;
 
     const hoisted = hoistNestedCtes(result);
     if (hoisted !== null) { result = hoisted; }
@@ -2035,7 +2037,7 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): string {
     const teradata = preprocessTeradataSyntax(result, dialect);
     if (teradata !== null) { result = teradata; }
 
-    return result;
+    return { sql: result, hadJinja };
 }
 
 export { stripSqlComments } from '../../../shared/stringUtils';

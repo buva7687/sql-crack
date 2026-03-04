@@ -85,8 +85,10 @@ describe('extension isSqlLikeDocument logic', () => {
 describe('extension hasExecutableSql logic', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('strips comments before checking for executable SQL', () => {
-        expect(source).toContain('stripSqlComments(sql)');
+    it('preprocesses Jinja and strips comments before checking for executable SQL', () => {
+        expect(source).toContain("from './webview/parser/dialects/jinjaPreprocessor'");
+        expect(source).toContain('const { rewritten } = preprocessJinjaTemplates(sql);');
+        expect(source).toContain('stripSqlComments(rewritten)');
         expect(source).toContain('.trim().length > 0');
     });
 });

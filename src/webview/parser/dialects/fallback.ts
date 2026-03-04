@@ -80,10 +80,14 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
     const tableNames = new Set<string>();
+    const tableUsage = new Map<string, number>();
     const hints: OptimizationHint[] = [];
     let nodeId = 0;
 
     const genId = (prefix: string) => `${prefix}_${nodeId++}`;
+    const trackTableUsage = (tableName: string): void => {
+        tableUsage.set(tableName, (tableUsage.get(tableName) || 0) + 1);
+    };
     const commentStripped = sql
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/--[^\n]*/g, '')
@@ -129,6 +133,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     for (const cteName of cteNames) {
         tableNames.add(cteName);
+        trackTableUsage(cteName);
         nodes.push({
             id: genId('cte'),
             type: 'table',
@@ -156,7 +161,11 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
             const tableName = normalizeObjectName(match[1]);
-            if (tableName && !tableNames.has(tableName)) {
+            if (!tableName) {
+                continue;
+            }
+            trackTableUsage(tableName);
+            if (!tableNames.has(tableName)) {
                 tableNames.add(tableName);
                 nodes.push({
                     id: genId('table'),
@@ -430,7 +439,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         hints,
         sql,
         columnLineage: [],
-        tableUsage: new Map(),
+        tableUsage,
         partial: true,
     };
 }
