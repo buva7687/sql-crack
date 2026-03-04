@@ -101,6 +101,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
 | **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
+| **DBT/Jinja Preprocessing** | Automatically rewrites `{{ ref() }}`, `{{ source() }}`, `{% if/else %}`, and other Jinja templates to valid SQL so DBT projects visualize correctly |
 | **Actionable Parse Errors** | Parse diagnostics include source line context in the badge and canvas overlay, not just line/column numbers |
 
 **Performance Icons**: Filter Pushdown (⬆) • Non-Sargable (🚫) • Join Order (⇄) • Index Suggestion (📇) • Repeated Scan (🔄) • Complex (🧮)
@@ -264,6 +265,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
+| `sqlCrack.autoDetectDialect` | `true` | Auto-detect dialect from query content. Disable for single-dialect repos where auto-detection produces false positives. |
 | `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `tab` | Panel location: `beside`, `tab` |
 | `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
@@ -427,7 +429,7 @@ Refactoring milestone: large-file decomposition completed across core surfaces w
 **Planned**:
 - Export preview dialog with PDF support
 - Diff-aware visualization for PR reviews
-- dbt integration (`ref()`, `source()` macros)
+- dbt integration — deep: cross-file `ref()` resolution, manifest.json, macro following (basic Jinja preprocessing shipped in 0.5.2)
 - Performance regression detection
 
 ---
