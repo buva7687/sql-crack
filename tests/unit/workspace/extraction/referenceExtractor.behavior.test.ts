@@ -150,4 +150,117 @@ describe('ReferenceExtractor behavioral coverage', () => {
         expect(snowflakeRefs.map(ref => ref.tableName.toLowerCase())).toContain('events');
         expect(snowflakeRefs.map(ref => ref.tableName.toLowerCase())).not.toContain('items');
     });
+
+    it('extracts DBT ref/source tables on the AST path', () => {
+        const refs = extractor.extractReferences(
+            `
+            WITH src AS (
+                SELECT *
+                FROM {{ source('raw', 'customers') }}
+            )
+            SELECT *
+            FROM src
+            JOIN {{ ref('stg_orders') }} o ON src.id = o.customer_id
+            `,
+            'model.sql',
+            'MySQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'customers',
+                schema: 'raw',
+            }),
+            expect.objectContaining({
+                tableName: 'stg_orders',
+            }),
+        ]));
+    });
+
+    it('extracts real table inside CTE body when CTE name shadows it', () => {
+        const refs = extractor.extractReferences(
+            `
+            WITH orders AS (
+                SELECT * FROM orders WHERE active = 1
+            )
+            SELECT * FROM orders
+            `,
+            'query.sql',
+            'MySQL'
+        );
+
+        const names = refs.map(ref => ref.tableName.toLowerCase());
+        // The real "orders" table inside the CTE body should be extracted
+        expect(names).toContain('orders');
+        // Should have exactly one reference (the real table, not the CTE usage)
+        expect(refs.filter(r => r.tableName.toLowerCase() === 'orders')).toHaveLength(1);
+    });
+
+    it('does not extract CTE references as real tables in outer query', () => {
+        const refs = extractor.extractReferences(
+            `
+            WITH staging AS (
+                SELECT id, name FROM raw_customers
+            ),
+            enriched AS (
+                SELECT s.id, s.name, o.total
+                FROM staging s
+                JOIN raw_orders o ON s.id = o.customer_id
+            )
+            SELECT * FROM enriched
+            `,
+            'query.sql',
+            'MySQL'
+        );
+
+        const names = refs.map(ref => ref.tableName.toLowerCase());
+        expect(names).toContain('raw_customers');
+        expect(names).toContain('raw_orders');
+        expect(names).not.toContain('staging');
+        expect(names).not.toContain('enriched');
+    });
+
+    it('handles multiple CTEs that shadow real tables correctly', () => {
+        const refs = extractor.extractReferences(
+            `
+            WITH users AS (
+                SELECT * FROM users WHERE active = 1
+            ),
+            orders AS (
+                SELECT * FROM orders WHERE created_at > '2024-01-01'
+            )
+            SELECT u.id, o.total
+            FROM users u
+            JOIN orders o ON u.id = o.user_id
+            `,
+            'query.sql',
+            'MySQL'
+        );
+
+        const names = refs.map(ref => ref.tableName.toLowerCase());
+        // Real tables inside CTE bodies should be extracted
+        expect(names).toContain('users');
+        expect(names).toContain('orders');
+        // Each should appear exactly once (from CTE body, not outer CTE reference)
+        expect(refs.filter(r => r.tableName.toLowerCase() === 'users')).toHaveLength(1);
+        expect(refs.filter(r => r.tableName.toLowerCase() === 'orders')).toHaveLength(1);
+    });
+
+    it('extracts DBT ref tables on the regex fallback path', () => {
+        const refs = extractor.extractReferences(
+            `
+            SELECT *
+            FROM {{ ref('orders') }}
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1
+            `,
+            'model.sql',
+            'MySQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'orders',
+            }),
+        ]));
+    });
 });

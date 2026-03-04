@@ -34,11 +34,11 @@ export class SchemaExtractor {
         dialect: SqlDialect = this.options.dialect
     ): SchemaDefinition[] {
         const definitions: SchemaDefinition[] = [];
+        const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const sqlToParse = preprocessSqlForWorkspaceParsing(sql, dialect);
-            const ast = this.parser.astify(sqlToParse, { database: dbDialect });
+            const ast = this.parser.astify(normalizedSql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
             for (const stmt of statements) {
@@ -54,7 +54,7 @@ export class SchemaExtractor {
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
-            definitions.push(...this.extractWithRegex(sql, filePath));
+            definitions.push(...this.extractWithRegex(normalizedSql, filePath));
         }
 
         return definitions;
@@ -162,6 +162,22 @@ export class SchemaExtractor {
     private extractTableName(stmt: any): { name: string; schema?: string } {
         let name = 'unknown';
         let schema: string | undefined;
+
+        if (stmt.view) {
+            if (Array.isArray(stmt.view) && stmt.view.length > 0) {
+                name = stmt.view[0].view || stmt.view[0].table || stmt.view[0].name || 'unknown';
+                schema = stmt.view[0].db || stmt.view[0].schema;
+                return { name, schema };
+            }
+            if (typeof stmt.view === 'object') {
+                name = stmt.view.view || stmt.view.table || stmt.view.name || 'unknown';
+                schema = stmt.view.db || stmt.view.schema;
+                return { name, schema };
+            }
+            if (typeof stmt.view === 'string') {
+                return { name: stmt.view };
+            }
+        }
 
         if (stmt.table) {
             if (Array.isArray(stmt.table) && stmt.table.length > 0) {

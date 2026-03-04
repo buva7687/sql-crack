@@ -19,6 +19,7 @@ import {
     stripSqlComments,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
+import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
 import {
     DEFAULT_VALIDATION_LIMITS,
@@ -870,6 +871,30 @@ function applyParserCompatibilityPreprocessing(
 ): string {
     let transformedSql = sql;
 
+    const { rewritten: jinjaRewrittenSql, hadJinja } = preprocessJinjaTemplates(transformedSql);
+    if (hadJinja) {
+        transformedSql = jinjaRewrittenSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'DBT/Jinja templates detected and simplified for visualization',
+            suggestion: 'Template expressions like {{ ref() }} and {{ source() }} were simplified to parser-friendly identifiers. Conditional blocks keep only the first branch, and other expressions become placeholders.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const hoistedSql = hoistNestedCtes(transformedSql);
+    if (hoistedSql !== null) {
+        transformedSql = hoistedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Hoisted nested CTE(s) from subquery to top level for parser compatibility',
+            suggestion: 'Nested WITH inside FROM (...) is valid in some dialects but unsupported by the parser. The query was automatically rewritten.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const postgresPreprocessedSql = preprocessPostgresSyntax(transformedSql, dialect);
     if (postgresPreprocessedSql !== null) {
         transformedSql = postgresPreprocessedSql;
@@ -1034,19 +1059,6 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         layoutGraph(oracleInsertCompatibilityResult.nodes, oracleInsertCompatibilityResult.edges);
         assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql);
         return oracleInsertCompatibilityResult;
-    }
-
-    // Auto-hoist CTEs nested inside subqueries (e.g., Snowflake/Tableau patterns)
-    const hoistedSql = hoistNestedCtes(sql);
-    if (hoistedSql !== null) {
-        sql = hoistedSql;
-        ctx.hints.push({
-            type: 'info',
-            message: 'Hoisted nested CTE(s) from subquery to top level for parser compatibility',
-            suggestion: 'Nested WITH inside FROM (...) is valid in some dialects but unsupported by the parser. The query was automatically rewritten.',
-            category: 'best-practice',
-            severity: 'low',
-        });
     }
 
     sql = applyParserCompatibilityPreprocessing(sql, dialect, ctx);

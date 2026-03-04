@@ -10,6 +10,7 @@ import {
     SqlCrackCodeActionProvider,
 } from './diagnostics';
 import { stripSqlComments } from './shared/stringUtils';
+import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -94,7 +95,8 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
 }
 
 function hasExecutableSql(sql: string): boolean {
-    return stripSqlComments(sql).trim().length > 0;
+    const { rewritten } = preprocessJinjaTemplates(sql);
+    return stripSqlComments(rewritten).trim().length > 0;
 }
 
 function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
