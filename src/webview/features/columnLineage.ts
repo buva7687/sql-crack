@@ -434,7 +434,7 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     bg.setAttribute('r', '10');
     bg.setAttribute('fill', config.color);
-    bg.setAttribute('stroke', 'white');
+    bg.setAttribute('stroke', config.color);
     bg.setAttribute('stroke-width', '1.5');
     badgeGroup.appendChild(bg);
 
