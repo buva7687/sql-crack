@@ -65,12 +65,16 @@ export class ImpactAnalyzer {
     /**
      * Analyze impact of changing a table
      */
-    analyzeTableChange(tableName: string, changeType: ChangeType = 'modify'): ImpactReport {
-        const nodeId = this.getTableNodeId(tableName);
+    analyzeTableChange(
+        tableName: string,
+        changeType: ChangeType = 'modify',
+        targetType: 'table' | 'view' = 'table'
+    ): ImpactReport {
+        const nodeId = this.getRelationNodeId(tableName, targetType);
         const node = this.graph.nodes.get(nodeId);
 
         if (!node) {
-            return this.createNotFoundReport('table', tableName, changeType);
+            return this.createNotFoundReport(targetType, tableName, changeType);
         }
 
         // Get all downstream nodes (dependents)
@@ -80,7 +84,7 @@ export class ImpactAnalyzer {
 
         // Separate direct and transitive impacts
         // Filter out the table's own columns - they're structural, not downstream dependencies
-        const ownColumnPrefix = `column:${tableName.toLowerCase()}.`;
+        const ownColumnPrefix = `column:${nodeId.replace(/^(table|view):/, '')}.`;
         const directEdges = this.graph.edges.filter(e =>
             e.sourceId === nodeId && !e.targetId.startsWith(ownColumnPrefix)
         );
@@ -119,7 +123,7 @@ export class ImpactAnalyzer {
             if (!fk?.referencedTable) {continue;}
             if (!this.matchesForeignKeyTarget(fk.referencedTable, tableName, normalizedTarget)) {continue;}
 
-            const sourceTableId = this.getTableNodeId(fk.referencedTable);
+            const sourceTableId = this.getRelationNodeId(fk.referencedTable, 'table');
             const sourceTable = this.getTableDisplayName(sourceTableId);
             const targetTable = node.parentId ? this.getTableDisplayName(node.parentId) : this.getTableDisplayNameFromColumnId(node.id);
             const referencedColumn = fk.referencedColumn || 'unknown_column';
@@ -526,7 +530,7 @@ export class ImpactAnalyzer {
      * Create not-found report
      */
     private createNotFoundReport(
-        type: 'table' | 'column',
+        type: 'table' | 'view' | 'column',
         name: string,
         changeType: ChangeType
     ): ImpactReport {
@@ -555,10 +559,30 @@ export class ImpactAnalyzer {
     }
 
     /**
-     * Generate table node ID
+     * Resolve table/view node ID based on requested type, with compatibility fallback.
      */
-    private getTableNodeId(tableName: string): string {
-        return `table:${tableName.toLowerCase()}`;
+    private getRelationNodeId(tableName: string, targetType: 'table' | 'view' = 'table'): string {
+        const normalizedName = tableName.toLowerCase();
+        const tableId = `table:${normalizedName}`;
+        const viewId = `view:${normalizedName}`;
+
+        if (targetType === 'view') {
+            if (this.graph.nodes.has(viewId)) {
+                return viewId;
+            }
+            if (this.graph.nodes.has(tableId)) {
+                return tableId;
+            }
+            return viewId;
+        }
+
+        if (this.graph.nodes.has(tableId)) {
+            return tableId;
+        }
+        if (this.graph.nodes.has(viewId)) {
+            return viewId;
+        }
+        return tableId;
     }
 
     /**

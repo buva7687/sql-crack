@@ -1558,7 +1558,7 @@ export class ReferenceExtractor {
                 return false;
             }
 
-            const key = `${ref.tableName.toLowerCase()}|${ref.referenceType}|${ref.lineNumber}`;
+            const key = `${(ref.schema || '').toLowerCase()}|${ref.tableName.toLowerCase()}|${ref.referenceType}|${ref.lineNumber}`;
             if (seen.has(key)) {return false;}
             seen.add(key);
             return true;

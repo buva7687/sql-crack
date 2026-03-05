@@ -73,6 +73,28 @@ describe('ImpactAnalyzer', () => {
             expect(report.directImpacts[0].impactType).toBe('direct');
         });
 
+        it('resolves view targets when requested type is view', () => {
+            const nodes = [
+                makeNode('view:daily_orders', 'view', 'daily_orders'),
+                makeNode('table:consumer', 'table', 'consumer', { filePath: 'consumer.sql' }),
+            ];
+            const edges = [makeEdge('view:daily_orders', 'table:consumer')];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('daily_orders', 'modify', 'view');
+            expect(report.target.type).toBe('view');
+            expect(report.target.name).toBe('daily_orders');
+            expect(report.directImpacts).toHaveLength(1);
+            expect(report.directImpacts[0].node.id).toBe('table:consumer');
+        });
+
+        it('returns view-specific not-found report when requested type is view', () => {
+            const { analyzer } = makeAnalyzer([], []);
+            const report = analyzer.analyzeTableChange('missing_view', 'modify', 'view');
+            expect(report.target.type).toBe('view');
+            expect(report.suggestions.some(s => s.includes("view 'missing_view' not found"))).toBe(true);
+        });
+
         it('identifies transitive impacts', () => {
             const nodes = [
                 makeNode('table:orders', 'table', 'orders'),

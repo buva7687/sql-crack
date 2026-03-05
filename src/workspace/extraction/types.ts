@@ -75,6 +75,7 @@ export interface SchemaDefinition {
     type: 'table' | 'view';
     name: string;
     schema?: string;            // Database schema (e.g., dbo, public)
+    statementIndex?: number;    // Statement index within file for precise per-definition scoping
     columns: ColumnInfo[];
     filePath: string;
     lineNumber: number;

@@ -53,6 +53,8 @@ describe('ImpactView typeahead selection', () => {
         expect(script).toContain('impact-typeahead-item');
         expect(script).toContain('impact-table-id');
         expect(script).toContain('impact-selected-badge');
+        expect(script).toContain("const selectedType = tableIdInput.dataset.type === 'view' ? 'view' : 'table';");
+        expect(script).toContain("type: selectedType");
         expect(script).toContain('impactTypeaheadDebounceMs = 180');
         expect(script).toContain('function scheduleTypeaheadFilter(immediate = false)');
         expect(script).not.toContain('impact-table-select');

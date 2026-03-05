@@ -3,8 +3,53 @@
 import { FlowNode } from '../types';
 import { escapeRegex } from '../../shared';
 
+function stripCommentsPreserveLineNumbers(sql: string): string {
+    const chars = sql.split('');
+    let i = 0;
+
+    while (i < chars.length) {
+        if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
+            chars[i] = ' ';
+            chars[i + 1] = ' ';
+            i += 2;
+            while (i < chars.length) {
+                if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    i += 2;
+                    break;
+                }
+                if (chars[i] !== '\n' && chars[i] !== '\r') {
+                    chars[i] = ' ';
+                }
+                i++;
+            }
+            continue;
+        }
+
+        if (chars[i] === '-' && i + 1 < chars.length && chars[i + 1] === '-') {
+            while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+
+        if (chars[i] === '#') {
+            while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
+                chars[i] = ' ';
+                i++;
+            }
+            continue;
+        }
+        i++;
+    }
+
+    return chars.join('');
+}
+
 export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
-    const lines = sql.split('\n');
+    const lines = stripCommentsPreserveLineNumbers(sql).split('\n');
     const keywordLines = new Map<string, number[]>();
 
     const keywords = [
@@ -17,7 +62,7 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
 
     for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1; // 1-indexed
-        const lineWithoutComments = lines[i].replace(/--.*$/, '').replace(/\/\*.*?\*\//g, ' ');
+        const lineWithoutComments = lines[i];
         if (!lineWithoutComments.trim()) {
             continue;
         }
@@ -40,6 +85,7 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
 export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
+    const commentStrippedLines = stripCommentsPreserveLineNumbers(sql).split('\n');
     const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
 
     // Track used lines per keyword type so each node gets the next unused occurrence
@@ -92,10 +138,10 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                 const searchStartLine = anchorLines.length > 0 ? Math.min(...anchorLines) : 1;
 
                 for (let i = 0; i < sqlLines.length; i++) {
-                    const line = sqlLines[i].replace(/--.*$/, '').toLowerCase();
+                    const line = commentStrippedLines[i].toLowerCase();
                     const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
                     if (tableRegex.test(line)) {
-                        const previousLine = i > 0 ? sqlLines[i - 1].replace(/--.*$/, '').toLowerCase() : '';
+                        const previousLine = i > 0 ? commentStrippedLines[i - 1].toLowerCase() : '';
                         if (i >= searchStartLine - 1 ||
                             clauseRegex.test(line) ||
                             clauseRegex.test(previousLine)) {

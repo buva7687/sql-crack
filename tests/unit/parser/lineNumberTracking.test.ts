@@ -38,6 +38,21 @@ describe('extractKeywordLineNumbers', () => {
         const map = extractKeywordLineNumbers(sql);
         expect(map.get('WHERE')).toEqual([3]);
     });
+
+    it('ignores keywords inside multiline block comments', () => {
+        const sql = [
+            '/*',
+            'SELECT * FROM fake_table',
+            'JOIN fake_join',
+            '*/',
+            'SELECT id FROM users',
+        ].join('\n');
+
+        const map = extractKeywordLineNumbers(sql);
+        expect(map.get('SELECT')).toEqual([5]);
+        expect(map.get('FROM')).toEqual([5]);
+        expect(map.get('JOIN')).toBeUndefined();
+    });
 });
 
 describe('Audit regression: #3 — Union nodes get distinct line numbers', () => {

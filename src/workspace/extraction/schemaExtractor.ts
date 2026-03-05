@@ -41,14 +41,15 @@ export class SchemaExtractor {
             const ast = this.parser.astify(normalizedSql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
 
-            for (const stmt of statements) {
+            for (let statementIndex = 0; statementIndex < statements.length; statementIndex++) {
+                const stmt = statements[statementIndex];
                 if (!stmt) {continue;}
 
                 if (this.isCreateTable(stmt)) {
-                    const def = this.parseCreateTable(stmt, filePath, sql);
+                    const def = this.parseCreateTable(stmt, filePath, sql, statementIndex);
                     if (def) {definitions.push(def);}
                 } else if (this.isCreateView(stmt)) {
-                    const def = this.parseCreateView(stmt, filePath, sql);
+                    const def = this.parseCreateView(stmt, filePath, sql, statementIndex);
                     if (def) {definitions.push(def);}
                 }
             }
@@ -109,7 +110,8 @@ export class SchemaExtractor {
     private parseCreateTable(
         stmt: any,
         filePath: string,
-        originalSql: string
+        originalSql: string,
+        statementIndex: number
     ): SchemaDefinition | null {
         try {
             const { name: tableName, schema } = this.extractTableName(stmt);
@@ -119,6 +121,7 @@ export class SchemaExtractor {
                 type: 'table',
                 name: tableName,
                 schema,
+                statementIndex,
                 columns,
                 filePath,
                 lineNumber: this.findLineNumber(originalSql, tableName, 'table'),
@@ -135,7 +138,8 @@ export class SchemaExtractor {
     private parseCreateView(
         stmt: any,
         filePath: string,
-        originalSql: string
+        originalSql: string,
+        statementIndex: number
     ): SchemaDefinition | null {
         try {
             const { name: viewName, schema } = this.extractTableName(stmt);
@@ -145,6 +149,7 @@ export class SchemaExtractor {
                 type: 'view',
                 name: viewName,
                 schema,
+                statementIndex,
                 columns,
                 filePath,
                 lineNumber: this.findLineNumber(originalSql, viewName, 'view'),

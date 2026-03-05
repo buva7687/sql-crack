@@ -407,7 +407,7 @@ describe('MessageHandler depth and column lineage routing', () => {
             changeType: 'modify',
         } as any);
 
-        expect(impactAnalyzer.analyzeTableChange).toHaveBeenCalledWith('customer_view', 'modify');
+        expect(impactAnalyzer.analyzeTableChange).toHaveBeenCalledWith('customer_view', 'modify', 'view');
         expect(impactAnalyzer.analyzeColumnChange).not.toHaveBeenCalled();
         expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'impactResult',

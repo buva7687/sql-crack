@@ -739,7 +739,7 @@ export class MessageHandler {
         if (type === 'column') {
             report = impactAnalyzer.analyzeColumnChange(tableName!.trim(), trimmedName, changeType);
         } else {
-            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType);
+            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType, type === 'view' ? 'view' : 'table');
         }
 
         this._context.setCurrentImpactReport(report);
