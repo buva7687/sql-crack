@@ -263,4 +263,23 @@ describe('ReferenceExtractor behavioral coverage', () => {
             }),
         ]));
     });
+
+    it('does not treat EXTRACT(... FROM ...) as table reference on regex fallback when comments shift indices', () => {
+        const refs = extractor.extractReferences(
+            `
+            -- leading comment to force index drift between original and comment-stripped SQL
+            /* another comment block */
+            SELECT EXTRACT(YEAR FROM created_at) AS year_part
+            FROM orders
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1
+            `,
+            'fallback.sql',
+            'MySQL'
+        );
+
+        const names = refs.map(ref => ref.tableName.toLowerCase());
+        expect(names).toContain('orders');
+        expect(names).not.toContain('created_at');
+        expect(names).not.toContain('year');
+    });
 });

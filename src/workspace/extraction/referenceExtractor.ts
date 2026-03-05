@@ -1118,10 +1118,12 @@ export class ReferenceExtractor {
         };
 
         const isFunctionFrom = (matchIndex: number): boolean => {
-            const lineStart = sql.lastIndexOf('\n', matchIndex) + 1;
-            const lineEnd = sql.indexOf('\n', matchIndex);
-            const end = lineEnd === -1 ? sql.length : lineEnd;
-            const line = sql.slice(lineStart, end);
+            // matchIndex comes from regex matches against sqlNoComments, so line slicing
+            // must use sqlNoComments too. Mixing with original SQL causes index drift.
+            const lineStart = sqlNoComments.lastIndexOf('\n', matchIndex) + 1;
+            const lineEnd = sqlNoComments.indexOf('\n', matchIndex);
+            const end = lineEnd === -1 ? sqlNoComments.length : lineEnd;
+            const line = sqlNoComments.slice(lineStart, end);
             const fromPos = matchIndex - lineStart;
             const lowerLine = line.toLowerCase();
 

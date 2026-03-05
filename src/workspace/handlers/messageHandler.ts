@@ -202,6 +202,24 @@ export class MessageHandler {
         return tableId;
     }
 
+    private resolveColumnLineageTableId(lineageGraph: LineageGraph, tableNameOrId: string): string {
+        if (lineageGraph.nodes.has(tableNameOrId)) {
+            return tableNameOrId;
+        }
+
+        const normalizedTarget = tableNameOrId.trim().toLowerCase();
+        for (const [nodeId, node] of lineageGraph.nodes) {
+            if (node.type === 'column') {
+                continue;
+            }
+            if (node.name.toLowerCase() === normalizedTarget) {
+                return nodeId;
+            }
+        }
+
+        return tableNameOrId;
+    }
+
     private normalizePathForComparison(filePath: string): string {
         const normalized = path.resolve(filePath);
         return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -819,9 +837,12 @@ export class MessageHandler {
 
         if (!columnLineageTracker || !lineageGraph) {return;}
 
+        const resolvedTableId = this.resolveColumnLineageTableId(lineageGraph, tableName);
+        const resolvedTableNode = lineageGraph.nodes.get(resolvedTableId);
+
         const lineage = columnLineageTracker.getFullColumnLineage(
             lineageGraph,
-            tableName,
+            resolvedTableId,
             columnName
         );
 
@@ -830,16 +851,11 @@ export class MessageHandler {
         this.postMessage({
             command: 'columnLineageResult',
             data: {
-                tableName,
+                tableId: resolvedTableId,
+                tableName: resolvedTableNode?.name || tableName,
                 columnName,
-                upstream: lineage.upstream.map(p => ({
-                    depth: p.depth,
-                    nodeCount: p.nodes.length
-                })),
-                downstream: lineage.downstream.map(p => ({
-                    depth: p.depth,
-                    nodeCount: p.nodes.length
-                })),
+                upstream: lineage.upstream,
+                downstream: lineage.downstream,
                 html
             }
         });

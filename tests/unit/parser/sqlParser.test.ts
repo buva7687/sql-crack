@@ -499,6 +499,31 @@ SELECT * FROM t3;`;
       // Should have 2 CASE statements
       expect(caseNode?.caseDetails?.cases.length).toBe(2);
     });
+
+    it('includes a SELECT node in CTE internal pipeline', () => {
+      const sql = `
+        WITH recent_orders AS (
+          SELECT customer_id, order_total
+          FROM orders
+          WHERE created_at >= '2025-01-01'
+        )
+        SELECT * FROM recent_orders
+      `;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeUndefined();
+
+      const cteNode = result.nodes.find(n => n.type === 'cte');
+      expect(cteNode).toBeDefined();
+      expect(cteNode?.children).toBeDefined();
+
+      const childSelect = cteNode?.children?.find(n => n.type === 'select' && n.label === 'SELECT');
+      expect(childSelect).toBeDefined();
+      expect(childSelect?.columns?.length).toBeGreaterThanOrEqual(2);
+
+      const incomingToSelect = cteNode?.childEdges?.filter(e => e.target === childSelect?.id) || [];
+      expect(incomingToSelect.length).toBeGreaterThan(0);
+    });
   });
 
   describe('Aggregations', () => {

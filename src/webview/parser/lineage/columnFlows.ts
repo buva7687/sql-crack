@@ -3,6 +3,52 @@
 import { FlowNode, FlowEdge, ColumnFlow, ColumnInfo, LineageTransformation } from '../../types';
 import { safeString } from '../../../shared';
 
+function normalizeIdentifier(value: string | undefined): string {
+    if (!value) {
+        return '';
+    }
+    return value.trim().replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
+}
+
+function getUnqualifiedIdentifier(value: string | undefined): string {
+    const normalized = normalizeIdentifier(value);
+    if (!normalized) {
+        return '';
+    }
+    const parts = normalized.split('.');
+    return parts[parts.length - 1];
+}
+
+function getTableAlias(node: FlowNode): string {
+    if (typeof node.alias === 'string' && node.alias.trim().length > 0) {
+        return normalizeIdentifier(node.alias);
+    }
+    // Backward-compat fallback for historical nodes that only stored alias in details.
+    const aliasDetail = node.details?.find(detail => /^alias:\s*/i.test(detail));
+    if (!aliasDetail) {
+        return '';
+    }
+    return normalizeIdentifier(aliasDetail.replace(/^alias:\s*/i, ''));
+}
+
+function matchesTableNodeBySource(node: FlowNode, sourceTable: string): boolean {
+    const sourceFull = normalizeIdentifier(sourceTable);
+    if (!sourceFull) {
+        return false;
+    }
+
+    const sourceUnqualified = getUnqualifiedIdentifier(sourceTable);
+    const labelFull = normalizeIdentifier(node.label);
+    const labelUnqualified = getUnqualifiedIdentifier(node.label);
+    const alias = getTableAlias(node);
+    const aliasUnqualified = getUnqualifiedIdentifier(alias);
+
+    return labelFull === sourceFull
+        || (sourceUnqualified !== '' && labelUnqualified === sourceUnqualified)
+        || alias === sourceFull
+        || (sourceUnqualified !== '' && aliasUnqualified === sourceUnqualified);
+}
+
 export function generateColumnFlows(
     stmt: any,
     nodes: FlowNode[],
@@ -132,44 +178,16 @@ export function buildColumnLineagePath(
 
     // If we couldn't trace further and column has explicit source info
     if (column.sourceTable && column.sourceColumn) {
-        const sourceTableLower = column.sourceTable.toLowerCase();
         for (const node of nodeMap.values()) {
-            if (node.type === 'table') {
-                const nodeLabelLower = node.label.toLowerCase();
-                // Check for exact match first
-                if (nodeLabelLower === sourceTableLower) {
-                    path.unshift({
-                        nodeId: node.id,
-                        nodeName: node.label,
-                        nodeType: 'table',
-                        columnName: column.sourceColumn,
-                        transformation: 'source'
-                    });
-                    break;
-                }
-                // For aliases (short names), check if table name starts with alias
-                if (sourceTableLower.length <= 2 && nodeLabelLower.startsWith(sourceTableLower)) {
-                    path.unshift({
-                        nodeId: node.id,
-                        nodeName: node.label,
-                        nodeType: 'table',
-                        columnName: column.sourceColumn,
-                        transformation: 'source'
-                    });
-                    break;
-                }
-                // For longer names, check if either contains the other
-                if (sourceTableLower.length > 2 &&
-                    (nodeLabelLower.includes(sourceTableLower) || sourceTableLower.includes(nodeLabelLower))) {
-                    path.unshift({
-                        nodeId: node.id,
-                        nodeName: node.label,
-                        nodeType: 'table',
-                        columnName: column.sourceColumn,
-                        transformation: 'source'
-                    });
-                    break;
-                }
+            if (node.type === 'table' && matchesTableNodeBySource(node, column.sourceTable)) {
+                path.unshift({
+                    nodeId: node.id,
+                    nodeName: node.label,
+                    nodeType: 'table',
+                    columnName: column.sourceColumn,
+                    transformation: 'source'
+                });
+                break;
             }
         }
     }
@@ -184,7 +202,7 @@ export function findSourceColumn(
 ): ColumnInfo | null {
     // If target column has explicit source info, use it
     if (targetColumn.sourceColumn && targetColumn.sourceTable) {
-        if (sourceNode.label.toLowerCase().includes(targetColumn.sourceTable.toLowerCase())) {
+        if (matchesTableNodeBySource(sourceNode, targetColumn.sourceTable)) {
             return {
                 name: targetColumn.sourceColumn,
                 expression: targetColumn.sourceColumn,
@@ -243,6 +261,9 @@ export function findSourceColumn(
 
     // For JOIN nodes
     if (sourceNode.type === 'join') {
+        if (!targetColumn.sourceColumn && !targetColumn.sourceTable) {
+            return null;
+        }
         return {
             name: targetColumn.sourceColumn || targetColumn.name,
             expression: targetColumn.sourceColumn || targetColumn.name,
@@ -250,11 +271,8 @@ export function findSourceColumn(
         };
     }
 
-    // Default: assume passthrough
-    return {
-        name: targetColumn.sourceColumn || targetColumn.name,
-        expression: targetColumn.sourceColumn || targetColumn.name
-    };
+    // Unresolvable source for this branch.
+    return null;
 }
 
 export function getTransformationType(

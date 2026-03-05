@@ -777,15 +777,16 @@ function processFromItem(
         const tableId = genId(runtime, 'table');
         const label = getFromItemDisplayName(fromItem, ctx.dialect);
         const details: string[] = [`Function: ${tableValuedFunctionName}`];
-        const rawAlias = typeof fromItem.as === 'string' ? fromItem.as.trim() : '';
-        if (rawAlias && rawAlias !== label) {
-            details.push(`Alias: ${rawAlias}`);
+        const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
+        if (tableAlias && tableAlias !== label) {
+            details.push(`Alias: ${tableAlias}`);
         }
 
         nodes.push({
             id: tableId,
             type: 'table',
             label,
+            alias: tableAlias,
             description: asJoin
                 ? `Joined table function (${tableValuedFunctionName})`
                 : `Table function source (${tableValuedFunctionName})`,
@@ -831,16 +832,18 @@ function processFromItem(
     ctx.stats.tables++;
     trackTableUsage(runtime, tableName);
     const tableId = genId(runtime, 'table');
+    const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
     // Determine if this is a CTE reference
     const isCteRef = cteNames.has(tableName.toLowerCase());
     nodes.push({
         id: tableId,
         type: 'table',
         label: tableName,
+        alias: tableAlias,
         description: isCteRef
             ? (asJoin ? 'Joined CTE reference' : 'CTE reference')
             : (asJoin ? 'Joined table' : 'Source table'),
-        details: fromItem.as ? [`Alias: ${fromItem.as}`] : undefined,
+        details: tableAlias ? [`Alias: ${tableAlias}`] : undefined,
         tableCategory: isCteRef ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
     });
@@ -885,11 +888,14 @@ function parseCteOrSubqueryInternals(
                     // Track table usage for stats (including tables from CTEs and subqueries)
                     trackTableUsage(runtime, tableName);
                     const tableId = genId(runtime, 'child_table');
+                    const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
                     nodes.push({
                         id: tableId,
                         type: 'table',
                         label: tableName,
+                        alias: tableAlias,
                         description: 'Table',
+                        details: tableAlias ? [`Alias: ${tableAlias}`] : undefined,
                         parentId: parentId,
                         depth: depth + 1,
                         x: 0, y: 0, width: 100, height: 32
@@ -1105,6 +1111,36 @@ function parseCteOrSubqueryInternals(
             edges.push({ id: genId(runtime, 'ce'), source: previousId, target: windowId });
         }
         previousId = windowId;
+    }
+
+    // Add SELECT projection node for CTE/subquery internals so internal flow
+    // includes a clear projection step (mirrors top-level SELECT pipeline).
+    if (stmt.columns && Array.isArray(stmt.columns) && stmt.columns.length > 0) {
+        const selectId = genId(runtime, 'child_select');
+        const columns = extractColumns(stmt.columns, {
+            onSelectStar: () => {
+                ctx.hasSelectStar = true;
+            }
+        });
+        const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
+            expressionMode: 'formatted',
+            trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
+        });
+        nodes.push({
+            id: selectId,
+            type: 'select',
+            label: 'SELECT',
+            description: 'Project columns',
+            details: columns.length <= 5 ? columns : [`${columns.length} columns`],
+            columns: columnInfos,
+            parentId: parentId,
+            depth: depth + 1,
+            x: 0, y: 0, width: 140, height: 60
+        });
+        if (previousId) {
+            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: selectId });
+        }
+        previousId = selectId;
     }
 
     // Add ORDER BY if present

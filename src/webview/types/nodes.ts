@@ -82,6 +82,8 @@ export interface FlowNode {
     };
     // For SELECT nodes - column details with source tracking
     columns?: ColumnInfo[];
+    // Optional table alias when this node represents a table-like source.
+    alias?: string;
     // For visual column lineage
     visibleColumns?: string[];
     columnPositions?: Map<string, { x: number; y: number }>;
