@@ -175,7 +175,7 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
                 // Normalize: remove extra whitespace, lowercase, remove table aliases for comparison
                 let normalized = subquery.sql.replace(/\s+/g, ' ').toLowerCase();
                 // Remove table aliases (e.g., "orders o" -> "orders")
-                normalized = normalized.replace(/\b(\w+)\s+\w+\b/g, '$1');
+                normalized = normalized.replace(/\b(from|join|,)\s+(\w+)\s+(?:as\s+)?\w+\b/g, '$1 $2');
                 
                 // Determine location based on context
                 const beforeMatch = sql.substring(Math.max(0, parenPos - 100), parenPos).toLowerCase();

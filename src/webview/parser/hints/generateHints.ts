@@ -10,7 +10,9 @@ export function generateHints(context: ParserContext, stmt: any): void {
         context.hints.push({
             type: 'warning',
             message: 'SELECT * detected',
-            suggestion: 'Specify only needed columns to reduce data transfer and improve performance'
+            suggestion: 'Specify only needed columns to reduce data transfer and improve performance',
+            category: 'performance',
+            severity: 'medium'
         });
     }
 
@@ -19,7 +21,9 @@ export function generateHints(context: ParserContext, stmt: any): void {
         context.hints.push({
             type: 'info',
             message: 'No LIMIT clause',
-            suggestion: 'Consider adding LIMIT to prevent fetching large result sets'
+            suggestion: 'Consider adding LIMIT to prevent fetching large result sets',
+            category: 'performance',
+            severity: 'low'
         });
     }
 
@@ -28,7 +32,9 @@ export function generateHints(context: ParserContext, stmt: any): void {
         context.hints.push({
             type: 'error',
             message: `${type.toUpperCase()} without WHERE clause`,
-            suggestion: 'This will affect ALL rows in the table. Add a WHERE clause to limit scope'
+            suggestion: 'This will affect ALL rows in the table. Add a WHERE clause to limit scope',
+            category: 'performance',
+            severity: 'high'
         });
     }
 
@@ -37,7 +43,9 @@ export function generateHints(context: ParserContext, stmt: any): void {
         context.hints.push({
             type: 'warning',
             message: `High number of JOINs (${context.stats.joins})`,
-            suggestion: 'Consider breaking into smaller queries or using CTEs for clarity'
+            suggestion: 'Consider breaking into smaller queries or using CTEs for clarity',
+            category: 'performance',
+            severity: 'medium'
         });
     }
 
@@ -46,7 +54,9 @@ export function generateHints(context: ParserContext, stmt: any): void {
         context.hints.push({
             type: 'warning',
             message: `Multiple subqueries detected (${context.stats.subqueries})`,
-            suggestion: 'Consider using CTEs (WITH clause) for better readability'
+            suggestion: 'Consider using CTEs (WITH clause) for better readability',
+            category: 'performance',
+            severity: 'medium'
         });
     }
 

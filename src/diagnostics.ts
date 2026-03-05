@@ -50,7 +50,7 @@ function resolveHintLine(
 
     const parsedMessageLine = parseLineFromHintMessage(hint.message);
     if (parsedMessageLine !== null) {
-        return clampLine(parsedMessageLine - 1, document.lineCount);
+        return clampLine((queryStartLine - 1) + (parsedMessageLine - 1), document.lineCount);
     }
 
     return clampLine(queryStartLine - 1, document.lineCount);

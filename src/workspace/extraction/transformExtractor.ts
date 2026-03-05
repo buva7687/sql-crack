@@ -349,6 +349,7 @@ export class TransformExtractor {
      */
     private classifyBinaryExpression(expr: AstExpression): TransformationType {
         const operator = expr.operator;
+        if (!operator) { return 'complex'; }
 
         // Arithmetic operations
         if (['+', '-', '*', '/', '%'].includes(operator)) {
@@ -366,7 +367,7 @@ export class TransformExtractor {
         }
 
         // Logical operators
-        if (['AND', 'OR', 'NOT', 'XOR'].includes(operator.toUpperCase())) {
+        if (operator && ['AND', 'OR', 'NOT', 'XOR'].includes(operator.toUpperCase())) {
             return 'complex';
         }
 
