@@ -657,6 +657,10 @@ function processSelect(
                 source: nextResultId,
                 target: unionId
             });
+
+            // Return the union node as the final output so downstream
+            // nodes connect to the combined result, not just the first branch
+            return unionId;
         }
     }
 

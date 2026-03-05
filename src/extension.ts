@@ -424,36 +424,81 @@ export function activate(context: vscode.ExtensionContext) {
         return null;
     }
 
-    // Helper function to split SQL into statements (simplified version)
+    // Helper function to split SQL into statements.
+    // Handles string literals (with SQL-standard doubled-quote escaping),
+    // line comments (--), block comments (/* */), and parenthesis depth.
     function splitSqlStatements(sql: string): string[] {
         const statements: string[] = [];
         let current = '';
         let inString = false;
         let stringChar = '';
+        let inLineComment = false;
+        let inBlockComment = false;
         let depth = 0;
 
         for (let i = 0; i < sql.length; i++) {
             const char = sql[i];
-            const prevChar = i > 0 ? sql[i - 1] : '';
+            const next = i + 1 < sql.length ? sql[i + 1] : '';
 
-            // Handle string literals
-            if ((char === "'" || char === '"') && prevChar !== '\\') {
-                if (!inString) {
-                    inString = true;
-                    stringChar = char;
-                } else if (char === stringChar) {
-                    inString = false;
+            // Handle line comment state
+            if (inLineComment) {
+                current += char;
+                if (char === '\n') { inLineComment = false; }
+                continue;
+            }
+
+            // Handle block comment state
+            if (inBlockComment) {
+                current += char;
+                if (char === '*' && next === '/') {
+                    current += '/';
+                    i++;
+                    inBlockComment = false;
                 }
+                continue;
+            }
+
+            // Handle string literal state
+            if (inString) {
+                current += char;
+                if (char === stringChar) {
+                    // SQL-standard doubled quote escape: '' or ""
+                    if (next === stringChar) {
+                        current += next;
+                        i++;
+                    } else {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+
+            // Not inside any quoted/comment context — detect openings
+            if (char === '-' && next === '-') {
+                inLineComment = true;
+                current += char;
+                continue;
+            }
+
+            if (char === '/' && next === '*') {
+                inBlockComment = true;
+                current += char;
+                continue;
+            }
+
+            if (char === "'" || char === '"') {
+                inString = true;
+                stringChar = char;
+                current += char;
+                continue;
             }
 
             // Handle parentheses depth
-            if (!inString) {
-                if (char === '(') { depth++; }
-                if (char === ')') { depth--; }
-            }
+            if (char === '(') { depth++; }
+            if (char === ')') { depth--; }
 
             // Split on semicolon at depth 0
-            if (char === ';' && !inString && depth === 0) {
+            if (char === ';' && depth === 0) {
                 const trimmed = current.trim();
                 if (trimmed) {
                     statements.push(trimmed);

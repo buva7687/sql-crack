@@ -91,7 +91,7 @@ export function createDiagnosticsFromBatch(
         if (!query.hints || query.hints.length === 0) {
             return;
         }
-        const queryStartLine = queryRanges[index]?.startLine || 1;
+        const queryStartLine = queryRanges[index]?.startLine ?? 1;
         query.hints.forEach((hint) => {
             diagnostics.push(createDiagnosticFromHint(document, hint, query, queryStartLine));
         });

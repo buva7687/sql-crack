@@ -98,7 +98,6 @@ describe('extension splitSqlStatements edge cases', () => {
 
     it('handles string literals with quotes', () => {
         expect(source).toContain("char === \"'\" || char === '\"'");
-        expect(source).toContain("prevChar !== '\\\\'");
     });
 
     it('tracks parentheses depth for nested expressions', () => {
@@ -107,13 +106,24 @@ describe('extension splitSqlStatements edge cases', () => {
         expect(source).toContain('depth');
     });
 
-    it('splits on semicolon only at depth 0 and not in strings', () => {
+    it('splits on semicolon only at depth 0', () => {
         expect(source).toContain("char === ';'");
-        expect(source).toContain('!inString && depth === 0');
+        expect(source).toContain('depth === 0');
     });
 
-    it('handles escaped quotes in strings', () => {
-        expect(source).toContain("prevChar !== '\\\\'");
+    it('handles SQL-standard doubled-quote escaping', () => {
+        // The new implementation handles doubled quotes ('') not backslash
+        expect(source).toContain('next === stringChar');
+    });
+
+    it('handles line comments (--)', () => {
+        expect(source).toContain('inLineComment');
+        expect(source).toContain("char === '-' && next === '-'");
+    });
+
+    it('handles block comments (/* */)', () => {
+        expect(source).toContain('inBlockComment');
+        expect(source).toContain("char === '/' && next === '*'");
     });
 });
 

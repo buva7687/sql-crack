@@ -556,6 +556,7 @@ export class VisualizationPanel {
         const deferredQueryThreshold = normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500);
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
+        const isFirstRun = VisualizationPanel._isFirstRun();
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
         const initialUiState = VisualizationPanel._getPersistedUiState({
             documentUri: this._sourceDocumentUri,
@@ -617,7 +618,7 @@ export class VisualizationPanel {
             maxStatements: ${this._escapeForInlineScript(maxStatements)},
             deferredQueryThreshold: ${this._escapeForInlineScript(deferredQueryThreshold)},
             parseTimeoutSeconds: ${this._escapeForInlineScript(parseTimeoutSeconds)},
-            isFirstRun: ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())},
+            isFirstRun: ${this._escapeForInlineScript(isFirstRun)},
             debugLogging: ${this._escapeForInlineScript(debugLogging)}
         };
 
@@ -644,7 +645,7 @@ export class VisualizationPanel {
         window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
         window.deferredQueryThreshold = ${this._escapeForInlineScript(deferredQueryThreshold)};
         window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
-        window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
+        window.isFirstRun = ${this._escapeForInlineScript(isFirstRun)};
         window.debugLogging = ${this._escapeForInlineScript(debugLogging)};
 
         // VS Code API for messaging
@@ -657,6 +658,7 @@ export class VisualizationPanel {
     }
 
     public dispose() {
+        if (this._disposed) { return; }
         this._disposed = true;
 
         if (this._isPinned && this._pinId) {
