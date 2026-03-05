@@ -183,6 +183,13 @@ describe('extension cursor sync to webview', () => {
         expect(source).toContain('getQueryIndexForLine(sql, line)');
         expect(source).toContain('VisualizationPanel.sendQueryIndex(queryIndex)');
     });
+
+    it('uses character-offset search instead of substring heuristic for query index', () => {
+        // The old approach used stmtFirstLine.substring(0, 30) with .includes(),
+        // which could match the wrong statement when two queries share a prefix.
+        expect(source).toContain('sql.indexOf(stmt, searchFrom)');
+        expect(source).not.toContain('stmtFirstLine.substring(0, Math.min(30');
+    });
 });
 
 describe('extension visualize command validation', () => {

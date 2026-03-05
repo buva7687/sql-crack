@@ -420,34 +420,28 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // Helper function to determine which query index a line belongs to
+    // Helper function to determine which query index a line belongs to.
+    // Uses character-offset search instead of substring heuristic to avoid
+    // false matches when two statements share the same prefix.
     function getQueryIndexForLine(sql: string, lineNumber: number): number | null {
         const statements = splitSqlStatements(sql);
-        let currentLine = 1;
-        const lines = sql.split('\n');
+        let searchFrom = 0;
 
         for (let queryIndex = 0; queryIndex < statements.length; queryIndex++) {
             const stmt = statements[queryIndex];
-            // Find the starting line of this statement
-            let stmtStartLine = currentLine;
-            const stmtFirstLine = stmt.trim().split('\n')[0];
-            for (let i = currentLine - 1; i < lines.length; i++) {
-                if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
-                    stmtStartLine = i + 1;
-                    break;
-                }
-            }
-            
+            const charOffset = sql.indexOf(stmt, searchFrom);
+            if (charOffset === -1) {continue;}
+
+            const stmtStartLine = sql.substring(0, charOffset).split('\n').length;
             const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
-            
-            // Check if the line number falls within this query's range
+
             if (lineNumber >= stmtStartLine && lineNumber <= stmtEndLine) {
                 return queryIndex;
             }
-            
-            currentLine = stmtStartLine + stmt.split('\n').length;
+
+            searchFrom = charOffset + stmt.length;
         }
-        
+
         return null;
     }
 

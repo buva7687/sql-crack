@@ -47,6 +47,8 @@ export class LineageBuilder implements LineageGraph {
     nodes: Map<string, LineageNode> = new Map();
     edges: LineageEdge[] = [];
     columnEdges: import('./types').ColumnLineageEdge[] = [];
+    private edgeIds = new Set<string>();
+    private columnEdgeIds = new Set<string>();
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -422,9 +424,8 @@ export class LineageBuilder implements LineageGraph {
 
                     // Create edge from source to target
                     const edgeId = `${sourceNode.id}->${targetNode.id}`;
-                    const existingEdge = this.edges.find(e => e.id === edgeId);
-
-                    if (!existingEdge) {
+                    if (!this.edgeIds.has(edgeId)) {
+                        this.edgeIds.add(edgeId);
                         this.edges.push({
                             id: edgeId,
                             sourceId: sourceNode.id,
@@ -454,8 +455,6 @@ export class LineageBuilder implements LineageGraph {
         if (!analysis.queries) {
             return;
         }
-
-        let edgesAdded = 0;
 
         for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
             const query = analysis.queries[queryIndex];
@@ -495,20 +494,12 @@ export class LineageBuilder implements LineageGraph {
                         }
                     };
 
-                    // Avoid duplicates
-                    const exists = this.columnEdges.some(
-                        e => e.id === columnEdge.id
-                    );
-
-                    if (!exists) {
+                    if (!this.columnEdgeIds.has(columnEdge.id)) {
+                        this.columnEdgeIds.add(columnEdge.id);
                         this.columnEdges.push(columnEdge);
-                        edgesAdded++;
                     }
                 }
             }
-        }
-
-        if (edgesAdded > 0) {
         }
     }
 
