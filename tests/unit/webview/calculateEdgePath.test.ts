@@ -50,4 +50,10 @@ describe('calculateEdgePath layout support', () => {
         // The else branch covers vertical and compact — verify the comment
         expect(fnBody).toContain('Vertical/compact');
     });
+
+    it('guards dist against zero to prevent NaN in SVG path', () => {
+        // The force/radial branch computes perpX = -dy / dist, perpY = dx / dist.
+        // When dist === 0 (overlapping nodes), division by zero produces NaN without a guard.
+        expect(edgeRendererSource).toContain('Math.sqrt(dx * dx + dy * dy) || 1');
+    });
 });

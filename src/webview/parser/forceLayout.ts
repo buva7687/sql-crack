@@ -102,8 +102,8 @@ export function layoutGraphForce(
     // Create simulation nodes with initial positions
     const simNodes: d3Force.SimulationNodeDatum[] = nodes.map((node, i) => ({
         index: i,
-        x: node.x || Math.random() * 500,
-        y: node.y || Math.random() * 500,
+        x: node.x ?? Math.random() * 500,
+        y: node.y ?? Math.random() * 500,
     }));
 
     // Create node lookup for edges

@@ -79,7 +79,7 @@ export function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, la
 
         const dx = tx - sx;
         const dy = ty - sy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const curvature = Math.min(dist * 0.3, 50);
 
         const midX = (sx + tx) / 2;
