@@ -847,35 +847,35 @@ if (document.readyState === 'loading') {
 
 function setupVSCodeMessageListener(): void {
     window.addEventListener('message', (event) => {
-        const message = event.data;
-        switch (message.command) {
-            case 'refresh':
-                handleRefresh(message.sql, message.options);
-                break;
-            case 'cursorPosition':
-                highlightNodeAtLine(message.line);
-                break;
-            case 'switchToQuery':
-                handleSwitchToQuery(message.queryIndex);
-                break;
-            case 'runtimeConfig':
-                applyRuntimeConfigUpdate(message.config);
-                break;
-            case 'markStale':
-                markAsStale();
-                break;
-            case 'setEditorActivity':
-                isInactiveEditor = message.isSqlLikeActiveEditor !== true;
-                syncRefreshButtonState();
-                break;
-            case 'viewLocationOptions':
-                // Response from extension with current view location and pinned tabs
-                // Currently informational — the toolbar reads initial location from options
-                break;
-            case 'pinCreated':
-                // Confirmation that a pinned panel was created
-                // The extension already shows a toast via showInformationMessage
-                break;
+        try {
+            const message = event.data;
+            switch (message.command) {
+                case 'refresh':
+                    handleRefresh(message.sql, message.options);
+                    break;
+                case 'cursorPosition':
+                    highlightNodeAtLine(message.line);
+                    break;
+                case 'switchToQuery':
+                    handleSwitchToQuery(message.queryIndex);
+                    break;
+                case 'runtimeConfig':
+                    applyRuntimeConfigUpdate(message.config);
+                    break;
+                case 'markStale':
+                    markAsStale();
+                    break;
+                case 'setEditorActivity':
+                    isInactiveEditor = message.isSqlLikeActiveEditor !== true;
+                    syncRefreshButtonState();
+                    break;
+                case 'viewLocationOptions':
+                    break;
+                case 'pinCreated':
+                    break;
+            }
+        } catch (err) {
+            console.error('[SQL Flow] Message handler error:', err);
         }
     });
 }
