@@ -82,11 +82,10 @@ function prepareSvgForExport(
     style.textContent = `
         text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .node { opacity: 1 !important; }
-        .edge { opacity: 1 !important; fill: none !important; stroke: #64748b !important; stroke-width: 2 !important; }
-        path.edge { fill: none !important; stroke: #64748b !important; stroke-width: 2 !important; opacity: 1 !important; }
+        .edge { opacity: 1 !important; fill: none !important; stroke-width: 2 !important; }
+        path.edge { fill: none !important; stroke-width: 2 !important; opacity: 1 !important; }
         .node-rect { stroke-width: 1 !important; }
         .node-accent { opacity: 1 !important; }
-        marker path { fill: #64748b !important; }
     `;
     svgClone.insertBefore(style, svgClone.firstChild);
 
