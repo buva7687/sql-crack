@@ -2,7 +2,6 @@
 // Extracted from workspacePanel.ts for modularity
 
 import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } from '../types';
-import { getWebviewStyles } from './sharedStyles';
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
 import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 import { escapeHtml } from '../../shared/stringUtils';
@@ -56,8 +55,7 @@ export function generateGraphBody(params: GraphBodyParams): string {
     // Generate search filter query
     const searchFilterQuery = searchFilter.query || '';
 
-    // Get styles and scripts
-    const styles = getWebviewStyles();
+    // Get scripts
     const scriptParams: WebviewScriptParams = {
         nonce: getNonce(),
         graphData,
@@ -279,45 +277,4 @@ function getNonce(): string {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
     return text;
-}
-
-/**
- * Export the main graph view HTML generator
- */
-export function getGraphViewHtml(
-    graph: WorkspaceDependencyGraph,
-    searchFilter: SearchFilter,
-    detailedStats: {
-        orphanedDefinitions: any[];
-        missingDefinitions: any[];
-    }
-): string {
-    const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
-    
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    ${generateHeadContent()}
-</head>
-<body>
-    ${generateGraphBody({ graph, searchFilter, detailedStats, totalIssues })}
-</body>
-</html>`;
-}
-
-/**
- * Generate HTML head content
- */
-function generateHeadContent(): string {
-    const nonce = getNonce();
-    
-    return `
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SQL Workspace Dependencies</title>
-    <style>
-        ${getWebviewStyles()}
-    </style>
-`;
 }

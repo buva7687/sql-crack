@@ -85,7 +85,7 @@ describe('visualizationPanel.ts integration', () => {
 describe('ViewLocation type', () => {
     it('is defined as type in the module', () => {
         const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
-        expect(source).toContain("export type ViewLocation = 'beside' | 'tab'");
+        expect(source).toContain('export type { ViewLocation };');
     });
 });
 

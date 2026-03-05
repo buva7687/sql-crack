@@ -451,8 +451,10 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production",
-    "lint": "eslint src --ext ts",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests --ext ts",
+    "typecheck:src": "tsc --noEmit -p tsconfig.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
+    "typecheck": "npm run typecheck:src && npm run typecheck:tests",
     "test": "node scripts/runJest.js",
     "test:watch": "node scripts/runJest.js --watch",
     "test:coverage": "node scripts/runJest.js --coverage",
@@ -462,6 +464,8 @@
     "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/dagre": "^0.7.53",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.x",
     "@types/vscode": "^1.85.0",
@@ -478,8 +482,6 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "@types/d3-force": "^3.0.10",
-    "@types/dagre": "^0.7.53",
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
     "node-sql-parser": "5.4.0"

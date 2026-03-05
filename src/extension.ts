@@ -73,6 +73,29 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
 }
 
 /**
+ * Build document selectors for SQL diagnostics quick-fix registration.
+ * Includes SQL language documents and configured additional file extensions.
+ */
+function getSqlCodeActionDocumentSelector(): vscode.DocumentSelector {
+    const selectors: vscode.DocumentFilter[] = [
+        { language: 'sql', scheme: 'file' },
+        { language: 'sql', scheme: 'untitled' },
+    ];
+
+    const seenPatterns = new Set<string>();
+    for (const ext of additionalExtensions) {
+        const pattern = `**/*${ext}`;
+        if (seenPatterns.has(pattern)) {
+            continue;
+        }
+        seenPatterns.add(pattern);
+        selectors.push({ scheme: 'file', pattern });
+    }
+
+    return selectors;
+}
+
+/**
  * Update the context variable for SQL-like files (used in when clauses)
  * This enables the SQL Crack icon/menu for files with additional extensions
  */
@@ -358,21 +381,25 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    const diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
-        [
-            { language: 'sql', scheme: 'file' },
-            { language: 'sql', scheme: 'untitled' },
-        ],
-        new SqlCrackCodeActionProvider(),
-        {
-            providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds,
-        }
-    );
+    let diagnosticCodeActionProvider: vscode.Disposable | undefined;
+    const registerDiagnosticCodeActionProvider = (): void => {
+        diagnosticCodeActionProvider?.dispose();
+        diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
+            getSqlCodeActionDocumentSelector(),
+            new SqlCrackCodeActionProvider(),
+            {
+                providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds,
+            }
+        );
+    };
+    registerDiagnosticCodeActionProvider();
 
     context.subscriptions.push(activeEditorListener);
     context.subscriptions.push(workspaceCommand);
     context.subscriptions.push(workspaceUxMetricsCommand);
-    context.subscriptions.push(diagnosticCodeActionProvider);
+    context.subscriptions.push({
+        dispose: () => diagnosticCodeActionProvider?.dispose(),
+    });
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -587,6 +614,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
             loadAdditionalExtensions();
+            registerDiagnosticCodeActionProvider();
             // Re-evaluate context for current editor with new extensions
             updateSqlLikeFileContext(vscode.window.activeTextEditor);
         }

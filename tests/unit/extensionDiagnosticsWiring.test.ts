@@ -32,6 +32,7 @@ describe('extension diagnostics wiring', () => {
 
     it('registers quick-fix code actions for SQL diagnostics', () => {
         expect(source).toContain('vscode.languages.registerCodeActionsProvider');
+        expect(source).toContain('getSqlCodeActionDocumentSelector()');
         expect(source).toContain('new SqlCrackCodeActionProvider()');
         expect(source).toContain('providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds');
     });

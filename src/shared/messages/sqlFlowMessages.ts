@@ -1,7 +1,7 @@
 // Typed message protocol for SQL Flow webview panel
 // Discriminated unions on the `command` field for compile-time safety.
 
-import type { ViewLocation } from '../../visualizationPanel';
+import type { SqlFlowRuntimeConfig, ViewLocation } from './sqlFlowRuntimeConfig';
 
 // ─── Pinned visualization (mirrors the private interface in visualizationPanel.ts) ───
 
@@ -36,6 +36,11 @@ export type SqlFlowHostMessage =
     | { command: 'cursorPosition'; line: number }
     | { command: 'switchToQuery'; queryIndex: number }
     | { command: 'markStale' }
+    | {
+        command: 'runtimeConfig';
+        trigger: 'theme' | 'config';
+        config: SqlFlowRuntimeConfig;
+    }
     | { command: 'setEditorActivity'; isSqlLikeActiveEditor: boolean }
     | { command: 'viewLocationOptions'; currentLocation: ViewLocation; pinnedTabs: PinnedVisualizationInfo[] }
     | { command: 'pinCreated'; pinId: string };
