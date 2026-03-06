@@ -213,8 +213,8 @@ describe('LineageView curated start content', () => {
         const html = new LineageView().generateLineageGraphView(createGraph(), 'table:orders');
 
         expect(html).toContain('viewBox="0 0 20000 20000"');
-        expect(html).toContain('"width":20000');
-        expect(html).toContain('"height":20000');
+        expect(html).toContain('data-width="20000"');
+        expect(html).toContain('data-height="20000"');
 
         buildGraphSpy.mockRestore();
         generateSvgSpy.mockRestore();

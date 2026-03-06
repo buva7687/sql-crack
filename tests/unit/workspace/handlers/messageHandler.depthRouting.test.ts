@@ -52,6 +52,12 @@ function createContext(overrides: Record<string, unknown> = {}) {
         setCurrentFlowResult: jest.fn(),
         getLineageLegendVisible: jest.fn(() => true),
         setLineageLegendVisible: jest.fn(),
+        getLineageDetailNodeId: jest.fn(() => null),
+        setLineageDetailNodeId: jest.fn(),
+        getLineageDetailDirection: jest.fn(() => 'both'),
+        setLineageDetailDirection: jest.fn(),
+        getLineageDetailExpandedNodes: jest.fn(() => []),
+        setLineageDetailExpandedNodes: jest.fn(),
         getTableExplorer: jest.fn(),
         getLineageView: jest.fn(() => lineageView),
         getImpactView: jest.fn(),
@@ -213,6 +219,23 @@ describe('MessageHandler depth and column lineage routing', () => {
                 nodeId: 'table:customer_summary_2024',
             }),
         }));
+    });
+
+    it('persists lineage detail state for webview rebuild restoration', async () => {
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getLineageGraph',
+            nodeId: 'table:orders',
+            depth: 5,
+            direction: 'downstream',
+            expandedNodes: ['table:orders', 'view:daily_orders'],
+        } as any);
+
+        expect(context.setLineageDetailNodeId).toHaveBeenCalledWith('table:orders');
+        expect(context.setLineageDetailDirection).toHaveBeenCalledWith('downstream');
+        expect(context.setLineageDetailExpandedNodes).toHaveBeenCalledWith(['table:orders', 'view:daily_orders']);
     });
 
     it('resolves external workspace ids using unqualified labels against qualified lineage node names', async () => {

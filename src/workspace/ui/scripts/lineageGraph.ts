@@ -54,7 +54,7 @@ export function getLineageGraphScriptFragment(): string {
                 }
                 updateBackButtonText();
                 setupLineageGraphInteractions();
-                setupDirectionButtons();
+                // Note: direction buttons are already wired inside setupLineageGraphInteractions()
                 setupMinimap();
                 initializeLineageLegendBar();
                 // Defer queue release to the next paint cycle without a fixed timeout.
@@ -909,23 +909,18 @@ export function getLineageGraphScriptFragment(): string {
 
             let minimapDragging = false;
 
-            // Get graph data for calculations
+            // Get graph data for calculations (read from data-* attributes on a hidden div)
             const graphDataEl = document.getElementById('lineage-graph-data');
             let graphWidth = 800, graphHeight = 600;
             const MAX_MINIMAP_GRAPH_DIMENSION = 20000;
             if (graphDataEl) {
-                try {
-                    const data = JSON.parse(graphDataEl.textContent || '{}');
-                    const parsedWidth = Number(data.width);
-                    const parsedHeight = Number(data.height);
-                    if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
-                        graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);
-                    }
-                    if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
-                        graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);
-                    }
-                } catch (e) {
-                    console.debug('[sql-crack] Failed to parse graph data for minimap:', e);
+                const parsedWidth = Number(graphDataEl.getAttribute('data-width'));
+                const parsedHeight = Number(graphDataEl.getAttribute('data-height'));
+                if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
+                    graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);
+                }
+                if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
+                    graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);
                 }
             }
 

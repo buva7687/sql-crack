@@ -120,6 +120,7 @@ export function getMessageHandlingScriptFragment(): string {
                     clearColumnHighlighting();
                     break;
                 case 'impactFormResult':
+                    if (currentViewMode !== 'impact') break;
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
                         setupImpactForm();
@@ -129,6 +130,7 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'lineageOverviewResult':
+                    if (currentViewMode !== 'lineage') break;
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
                         setupVisualLineageSearch();

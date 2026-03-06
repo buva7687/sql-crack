@@ -400,12 +400,12 @@ export function getViewModeScriptFragment(): string {
             const value = target.getAttribute('data-breadcrumb-value');
 
             if (action === 'view' && value) {
-                switchToView(value, true);
+                switchToView(value);
                 return;
             }
 
             if (action === 'origin') {
-                switchToView('graph', true);
+                switchToView('graph');
                 return;
             }
 
@@ -514,7 +514,20 @@ export function getViewModeScriptFragment(): string {
                 switchToView(initialViewMode, true);
                 // Re-request the view content from server
                 if (initialViewMode === 'lineage') {
-                    vscode.postMessage({ command: 'switchToLineageView' });
+                    if (typeof initialLineageDetailNodeId !== 'undefined' && initialLineageDetailNodeId) {
+                        // Restore detail graph state instead of overview
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        vscode.postMessage({
+                            command: 'getLineageGraph',
+                            nodeId: initialLineageDetailNodeId,
+                            direction: typeof initialLineageDetailDirection !== 'undefined' ? initialLineageDetailDirection : 'both',
+                            depth: lineageDepth,
+                            expandedNodes: typeof initialLineageDetailExpandedNodes !== 'undefined' ? initialLineageDetailExpandedNodes : []
+                        });
+                    } else {
+                        vscode.postMessage({ command: 'switchToLineageView' });
+                    }
                 } else if (initialViewMode === 'impact') {
                     vscode.postMessage({ command: 'switchToImpactView' });
                 }

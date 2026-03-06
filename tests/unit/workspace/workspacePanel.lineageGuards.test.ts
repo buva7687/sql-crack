@@ -99,4 +99,42 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 73 });
         expect(resolveAutoIndexThresholdFromConfig()).toBe(73);
     });
+
+    it('embeds persisted lineage detail state into rebuilt webview scripts', () => {
+        const context: any = {
+            _isDarkTheme: true,
+            _isHighContrast: false,
+            _currentView: 'lineage',
+            _currentGraphMode: 'tables',
+            _lineageLegendVisible: true,
+            _lineageDetailNodeId: 'table:orders',
+            _lineageDetailDirection: 'downstream',
+            _lineageDetailExpandedNodes: ['table:orders', 'view:daily_orders'],
+            _indexManager: {
+                getIndex: jest.fn(() => null),
+                getChangesSinceIndex: jest.fn(() => []),
+            },
+            renderGraph: jest.fn(() => '<svg id="graph-svg"></svg>'),
+        };
+        const graph: any = {
+            nodes: [],
+            edges: [],
+            stats: {
+                orphanedDefinitions: [],
+                missingDefinitions: [],
+                parseErrors: 0,
+            },
+        };
+
+        const html = (WorkspacePanel.prototype as any).getWebviewHtml.call(context, graph, {
+            query: '',
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false,
+        });
+
+        expect(html).toContain('const initialLineageDetailNodeId = "table:orders";');
+        expect(html).toContain('const initialLineageDetailDirection = "downstream";');
+        expect(html).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
+    });
 });

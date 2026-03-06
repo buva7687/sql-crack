@@ -29,6 +29,10 @@ export interface WebviewScriptParams {
     currentGraphMode?: 'files' | 'tables';
     lineageDefaultDepth?: number;
     lineageLegendVisible?: boolean;
+    /** If set, the lineage tab should restore to this node's detail graph */
+    lineageDetailNodeId?: string | null;
+    lineageDetailDirection?: 'both' | 'upstream' | 'downstream';
+    lineageDetailExpandedNodes?: string[];
 }
 
 /**
@@ -42,7 +46,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         initialView = 'graph',
         currentGraphMode = 'tables',
         lineageDefaultDepth = 5,
-        lineageLegendVisible = true
+        lineageLegendVisible = true,
+        lineageDetailNodeId = null,
+        lineageDetailDirection = 'both',
+        lineageDetailExpandedNodes = []
     } = params;
     const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
         ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
@@ -57,6 +64,9 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let currentGraphMode = '${currentGraphMode}';
         let lineageDepth = ${normalizedLineageDepth};
         let lineageLegendVisibleFromHost = ${lineageLegendVisible ? 'true' : 'false'};
+        const initialLineageDetailNodeId = ${lineageDetailNodeId ? JSON.stringify(lineageDetailNodeId) : 'null'};
+        const initialLineageDetailDirection = ${JSON.stringify(lineageDetailDirection)};
+        const initialLineageDetailExpandedNodes = ${JSON.stringify(lineageDetailExpandedNodes)};
         function normalizeLineageDepth(value, fallbackDepth = 5) {
             const numeric = Number(value);
             if (!Number.isFinite(numeric)) {

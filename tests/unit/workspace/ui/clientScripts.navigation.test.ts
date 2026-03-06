@@ -55,6 +55,36 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("action === 'clear-column-trace'");
     });
 
+    it('guards lineage and impact view HTML against stale cross-view responses', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("case 'impactFormResult':");
+        expect(script).toContain("if (currentViewMode !== 'impact') break;");
+        expect(script).toContain("case 'lineageOverviewResult':");
+        expect(script).toContain("if (currentViewMode !== 'lineage') break;");
+    });
+
+    it('uses host-synced breadcrumb navigation instead of local-only skipMessage shortcuts', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("if (action === 'view' && value) {");
+        expect(script).toContain('switchToView(value);');
+        expect(script).toContain("if (action === 'origin') {");
+        expect(script).toContain("switchToView('graph');");
+    });
+
     it('supports bottom workspace legend visibility via L shortcut and dismiss button', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -335,6 +365,28 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toMatch(/setupMinimap\(\);\s*\n\s*initializeLineageLegendBar\(\);/);
     });
 
+    it('restores lineage detail requests across webview rebuilds', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'lineage',
+            currentGraphMode: 'tables',
+            lineageDetailNodeId: 'table:orders',
+            lineageDetailDirection: 'downstream',
+            lineageDetailExpandedNodes: ['table:orders', 'view:daily_orders'],
+        });
+
+        expect(script).toContain('const initialLineageDetailNodeId = "table:orders";');
+        expect(script).toContain('const initialLineageDetailDirection = "downstream";');
+        expect(script).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
+        expect(script).toContain("if (typeof initialLineageDetailNodeId !== 'undefined' && initialLineageDetailNodeId) {");
+        expect(script).toContain("command: 'getLineageGraph'");
+        expect(script).toContain('nodeId: initialLineageDetailNodeId,');
+        expect(script).toContain("direction: typeof initialLineageDetailDirection !== 'undefined' ? initialLineageDetailDirection : 'both'");
+        expect(script).toContain("expandedNodes: typeof initialLineageDetailExpandedNodes !== 'undefined' ? initialLineageDetailExpandedNodes : []");
+    });
+
     it('auto-fit uses responsive padding and allows moderate zoom-in for sparse lineage graphs', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -447,6 +499,19 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'impactFormResult':");
         expect(script).toContain("case 'impactResult':");
         expect(script).toContain('restoreViewState(currentViewMode);');
+    });
+
+    it('decodes tooltip and edge-reference payloads as UTF-8 instead of Latin-1', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64Value), c => c.charCodeAt(0))))');
+        expect(script).toContain('new TextDecoder().decode(Uint8Array.from(atob(base64), c => c.charCodeAt(0)))');
     });
 
     it('does not reference removed header focus button bindings', () => {

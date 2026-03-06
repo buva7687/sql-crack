@@ -125,6 +125,10 @@ export class WorkspacePanel {
     private _currentImpactReport: ImpactReport | null = null;
     private _currentFlowResult: FlowResult | null = null;
     private _lineageLegendVisible: boolean = true;
+    /** Active lineage detail state — survives webview rebuild */
+    private _lineageDetailNodeId: string | null = null;
+    private _lineageDetailDirection: 'both' | 'upstream' | 'downstream' = 'both';
+    private _lineageDetailExpandedNodes: string[] = [];
 
     // UI generators
     private _tableExplorer: TableExplorer = new TableExplorer();
@@ -473,6 +477,12 @@ export class WorkspacePanel {
                 this._lineageLegendVisible = visible;
                 void this._extensionContext.workspaceState.update(LINEAGE_LEGEND_VISIBILITY_STATE_KEY, visible);
             },
+            getLineageDetailNodeId: () => this._lineageDetailNodeId,
+            setLineageDetailNodeId: (nodeId) => { this._lineageDetailNodeId = nodeId; },
+            getLineageDetailDirection: () => this._lineageDetailDirection,
+            setLineageDetailDirection: (direction) => { this._lineageDetailDirection = direction; },
+            getLineageDetailExpandedNodes: () => this._lineageDetailExpandedNodes,
+            setLineageDetailExpandedNodes: (nodes) => { this._lineageDetailExpandedNodes = nodes; },
 
             // UI generators
             getTableExplorer: () => this._tableExplorer,
@@ -674,7 +684,10 @@ export class WorkspacePanel {
             initialView: this._currentView === 'issues' ? 'graph' : this._currentView,
             currentGraphMode: this._currentGraphMode,
             lineageDefaultDepth: resolveDefaultLineageDepthFromConfig(),
-            lineageLegendVisible: this._lineageLegendVisible
+            lineageLegendVisible: this._lineageLegendVisible,
+            lineageDetailNodeId: this._lineageDetailNodeId,
+            lineageDetailDirection: this._lineageDetailDirection,
+            lineageDetailExpandedNodes: this._lineageDetailExpandedNodes
         };
         const script = getWebviewScript(scriptParams);
 

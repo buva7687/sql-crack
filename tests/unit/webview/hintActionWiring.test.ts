@@ -3,6 +3,7 @@ import { SqlDialect } from '../../../src/webview/types';
 
 describe('hint action wiring', () => {
     beforeAll(() => {
+        const globalWithCustomEvent = globalThis as typeof globalThis & Partial<Record<'CustomEvent', typeof CustomEvent>>;
         if (typeof globalThis.CustomEvent === 'undefined') {
             class TestCustomEvent<T = unknown> extends Event {
                 detail: T;
@@ -12,7 +13,7 @@ describe('hint action wiring', () => {
                     this.detail = eventInitDict?.detail as T;
                 }
             }
-            (globalThis as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent = TestCustomEvent as unknown as typeof CustomEvent;
+            globalWithCustomEvent.CustomEvent = TestCustomEvent as unknown as typeof CustomEvent;
         }
     });
 

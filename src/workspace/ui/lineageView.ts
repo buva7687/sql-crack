@@ -405,18 +405,15 @@ export class LineageView {
                     </div>
                 </div>
 
-                <!-- Hidden data for JS -->
-                <script type="application/json" id="lineage-graph-data">
-                    ${JSON.stringify({
-                        centerNodeId,
-                        direction,
-                        depth,
-                        nodeCount: renderableGraph.nodes.length,
-                        edgeCount: renderableGraph.edges.length,
-                        width: minimapWidth,
-                        height: minimapHeight
-                    })}
-                </script>
+                <!-- Hidden data for JS (uses a div because the sanitizer strips script tags) -->
+                <div id="lineage-graph-data" style="display:none"
+                     data-center-node-id="${this.escapeHtml(centerNodeId)}"
+                     data-direction="${direction}"
+                     data-depth="${depth}"
+                     data-node-count="${renderableGraph.nodes.length}"
+                     data-edge-count="${renderableGraph.edges.length}"
+                     data-width="${minimapWidth}"
+                     data-height="${minimapHeight}"></div>
             </div>
         `;
     }

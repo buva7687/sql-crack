@@ -818,7 +818,7 @@ export function getGraphInteractionsScriptFragment(): string {
                 return [];
             }
             try {
-                const parsed = JSON.parse(atob(base64Value));
+                const parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64Value), c => c.charCodeAt(0))));
                 if (!Array.isArray(parsed)) {
                     return [];
                 }

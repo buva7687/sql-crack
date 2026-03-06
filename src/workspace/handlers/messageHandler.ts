@@ -66,6 +66,12 @@ export interface MessageHandlerContext {
     setCurrentFlowResult: (result: FlowResult | null) => void;
     getLineageLegendVisible: () => boolean;
     setLineageLegendVisible: (visible: boolean) => void;
+    getLineageDetailNodeId: () => string | null;
+    setLineageDetailNodeId: (nodeId: string | null) => void;
+    getLineageDetailDirection: () => 'both' | 'upstream' | 'downstream';
+    setLineageDetailDirection: (direction: 'both' | 'upstream' | 'downstream') => void;
+    getLineageDetailExpandedNodes: () => string[];
+    setLineageDetailExpandedNodes: (nodes: string[]) => void;
 
     // UI generators
     getTableExplorer: () => TableExplorer;
@@ -620,6 +626,8 @@ export class MessageHandler {
 
     private async handleSwitchToLineageView(): Promise<void> {
         this._context.setCurrentView('lineage');
+        // Switching to overview clears detail state
+        this._context.setLineageDetailNodeId(null);
         await this._context.buildLineageGraph();
 
         const lineageGraph = this._context.getLineageGraph();
@@ -636,6 +644,7 @@ export class MessageHandler {
 
     private async handleSwitchToImpactView(): Promise<void> {
         this._context.setCurrentView('impact');
+        this._context.setLineageDetailNodeId(null);
         await this._context.buildLineageGraph();
 
         const lineageGraph = this._context.getLineageGraph();
@@ -1086,6 +1095,11 @@ export class MessageHandler {
                 displayLabel: nodeLabel
             }
         );
+
+        // Persist detail state so it survives webview rebuilds (theme change, refresh)
+        this._context.setLineageDetailNodeId(resolvedNodeId);
+        this._context.setLineageDetailDirection(direction);
+        this._context.setLineageDetailExpandedNodes(expandedNodes || []);
 
         this.postMessage({
             command: 'lineageGraphResult',
