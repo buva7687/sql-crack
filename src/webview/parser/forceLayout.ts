@@ -203,10 +203,11 @@ export function layoutGraphRadial(
         }
     }
 
-    // Handle disconnected nodes
+    // Place disconnected nodes in an outer ring beyond the last BFS layer
+    const maxLayer = layers.size > 0 ? Math.max(...layers.values()) : 0;
     nodes.forEach(n => {
         if (!layers.has(n.id)) {
-            layers.set(n.id, 0);
+            layers.set(n.id, maxLayer + 1);
         }
     });
 

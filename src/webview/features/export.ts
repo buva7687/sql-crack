@@ -12,6 +12,16 @@ export interface ExportContext {
 const MAX_EXPORT_DIMENSION = 4096;
 const MAX_RASTER_DIMENSION = 4096;
 
+/** Convert a UTF-8 string to base64 without the deprecated unescape(). */
+function svgToBase64(str: string): string {
+    const bytes = new TextEncoder().encode(str);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
 function showExportToast(message: string, isDarkTheme: boolean, isError = false): void {
     const existing = document.getElementById('sql-flow-export-toast');
     if (existing) {
@@ -217,7 +227,7 @@ export function exportToPng(context: ExportContext): void {
             fallbackImg.onerror = () => {
                 showExportToast('PNG export failed', context.isDarkTheme(), true);
             };
-            fallbackImg.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+            fallbackImg.src = 'data:image/svg+xml;base64,' + svgToBase64(svgData);
         };
         img.src = svgUrl;
     } catch (e) {
@@ -384,7 +394,7 @@ export function copyToClipboard(context: ExportContext): void {
             };
             img2.src = url;
         };
-        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        img.src = 'data:image/svg+xml;base64,' + svgToBase64(svgData);
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] Clipboard copy failed:', e);
