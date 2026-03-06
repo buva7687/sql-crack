@@ -102,8 +102,8 @@ export function layoutGraphForce(
     // Create simulation nodes with initial positions
     const simNodes: d3Force.SimulationNodeDatum[] = nodes.map((node, i) => ({
         index: i,
-        x: node.x || Math.random() * 500,
-        y: node.y || Math.random() * 500,
+        x: node.x ?? Math.random() * 500,
+        y: node.y ?? Math.random() * 500,
     }));
 
     // Create node lookup for edges
@@ -203,10 +203,11 @@ export function layoutGraphRadial(
         }
     }
 
-    // Handle disconnected nodes
+    // Place disconnected nodes in an outer ring beyond the last BFS layer
+    const maxLayer = layers.size > 0 ? Math.max(...layers.values()) : 0;
     nodes.forEach(n => {
         if (!layers.has(n.id)) {
-            layers.set(n.id, 0);
+            layers.set(n.id, maxLayer + 1);
         }
     });
 

@@ -23,7 +23,7 @@ describe('colorblind mode wiring', () => {
     });
 
     it('injects colorblind mode config into webview bootstrap script', () => {
-        expect(panelSource).toContain("const colorblindMode = config.get<string>('colorblindMode') || 'off';");
+        expect(panelSource).toMatch(/const colorblindMode\w*\s*=\s*config\.get<string>\('colorblindMode'\)\s*\|\|\s*'off'/);
         expect(panelSource).toContain('window.colorblindMode =');
     });
 

@@ -502,4 +502,21 @@ describe('LineageBuilder', () => {
             expect(node.metadata.isExternal).toBe(true);
         });
     });
+
+    describe('edge dedup performance', () => {
+        it('uses Set-based dedup instead of O(n) array scan', () => {
+            const realFs = jest.requireActual('fs') as typeof import('fs');
+            const source = realFs.readFileSync(
+                path.join(__dirname, '../../../../src/workspace/lineage/lineageBuilder.ts'),
+                'utf8'
+            );
+            // Should use Set for O(1) lookup instead of edges.find() for O(n)
+            expect(source).toContain('private edgeIds = new Set<string>()');
+            expect(source).toContain('private columnEdgeIds = new Set<string>()');
+            expect(source).not.toMatch(/this\.edges\.find\(/);
+            expect(source).not.toMatch(/this\.columnEdges\.some\(/);
+            // Empty if block (#8) should be removed
+            expect(source).not.toMatch(/if\s*\(edgesAdded\s*>\s*0\)\s*\{\s*\}/);
+        });
+    });
 });

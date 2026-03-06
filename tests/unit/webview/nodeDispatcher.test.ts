@@ -169,7 +169,7 @@ describe('nodeDispatcher', () => {
         button!.emit('mouseenter');
         expect(button!.setAttribute).toHaveBeenCalledWith('fill', 'rgba(99, 102, 241, 0.5)');
         button!.emit('mouseleave');
-        expect(button!.setAttribute).toHaveBeenCalledWith('fill', 'rgba(0, 0, 0, 0.3)');
+        expect(button!.setAttribute).toHaveBeenCalledWith('fill', 'rgba(255, 255, 255, 0.15)');
 
         const stopPropagation = jest.fn();
         button!.emit('click', { stopPropagation });

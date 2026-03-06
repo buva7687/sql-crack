@@ -29,7 +29,7 @@ describe('SQL Flow theme initialization respects defaultTheme setting', () => {
 
         it('does not hardcode vscodeTheme directly from activeColorTheme without checking setting', () => {
             // vscodeTheme must be declared with let (computed conditionally), not const from theme kind
-            expect(panelSource).toContain('let vscodeTheme: string;');
+            expect(panelSource).toMatch(/let vscodeTheme:\s*'light'\s*\|\s*'dark'/);
             expect(panelSource).not.toMatch(
                 /const vscodeTheme\s*=\s*themeKind\s*===/
             );

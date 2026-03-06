@@ -187,6 +187,7 @@ export function getImpactFormScriptFragment(): string {
             if (analyzeBtn && tableIdInput) {
                 analyzeBtn.addEventListener('click', () => {
                     const tableName = tableIdInput.dataset.name;
+                    const selectedType = tableIdInput.dataset.type === 'view' ? 'view' : 'table';
                     const activeButton = document.querySelector('.change-type-btn.active');
                     const changeType = activeButton?.getAttribute('data-value') || 'modify';
 
@@ -200,7 +201,7 @@ export function getImpactFormScriptFragment(): string {
 
                     vscode.postMessage({
                         command: 'analyzeImpact',
-                        type: 'table',
+                        type: selectedType,
                         name: tableName,
                         changeType: changeType
                     });

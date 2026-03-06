@@ -97,7 +97,7 @@ function createCommentMask(sql: string): boolean[] {
             continue;
         }
 
-        if (char === '#' && sql[i - 1] !== '{' && next !== '}') {
+        if (char === '#' && sql[i - 1] !== '{' && next !== '}' && !/[a-zA-Z0-9_]/.test(next)) {
             mask[i] = true;
             i++;
             while (i < sql.length && sql[i] !== '\n') {

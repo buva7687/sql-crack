@@ -37,7 +37,7 @@ const extensionConfig = {
       }
     ]
   },
-  devtool: false
+  devtool: isProduction ? false : 'source-map'
 };
 
 /**@type {import('webpack').Configuration}*/
@@ -93,7 +93,7 @@ const webviewConfig = {
       process: 'process/browser',
     })
   ],
-  devtool: false
+  devtool: isProduction ? false : 'source-map'
 };
 
 module.exports = [extensionConfig, webviewConfig];

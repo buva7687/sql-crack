@@ -73,6 +73,29 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
 }
 
 /**
+ * Build document selectors for SQL diagnostics quick-fix registration.
+ * Includes SQL language documents and configured additional file extensions.
+ */
+function getSqlCodeActionDocumentSelector(): vscode.DocumentSelector {
+    const selectors: vscode.DocumentFilter[] = [
+        { language: 'sql', scheme: 'file' },
+        { language: 'sql', scheme: 'untitled' },
+    ];
+
+    const seenPatterns = new Set<string>();
+    for (const ext of additionalExtensions) {
+        const pattern = `**/*${ext}`;
+        if (seenPatterns.has(pattern)) {
+            continue;
+        }
+        seenPatterns.add(pattern);
+        selectors.push({ scheme: 'file', pattern });
+    }
+
+    return selectors;
+}
+
+/**
  * Update the context variable for SQL-like files (used in when clauses)
  * This enables the SQL Crack icon/menu for files with additional extensions
  */
@@ -358,21 +381,25 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    const diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
-        [
-            { language: 'sql', scheme: 'file' },
-            { language: 'sql', scheme: 'untitled' },
-        ],
-        new SqlCrackCodeActionProvider(),
-        {
-            providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds,
-        }
-    );
+    let diagnosticCodeActionProvider: vscode.Disposable | undefined;
+    const registerDiagnosticCodeActionProvider = (): void => {
+        diagnosticCodeActionProvider?.dispose();
+        diagnosticCodeActionProvider = vscode.languages.registerCodeActionsProvider(
+            getSqlCodeActionDocumentSelector(),
+            new SqlCrackCodeActionProvider(),
+            {
+                providedCodeActionKinds: SqlCrackCodeActionProvider.providedCodeActionKinds,
+            }
+        );
+    };
+    registerDiagnosticCodeActionProvider();
 
     context.subscriptions.push(activeEditorListener);
     context.subscriptions.push(workspaceCommand);
     context.subscriptions.push(workspaceUxMetricsCommand);
-    context.subscriptions.push(diagnosticCodeActionProvider);
+    context.subscriptions.push({
+        dispose: () => diagnosticCodeActionProvider?.dispose(),
+    });
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -393,67 +420,106 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // Helper function to determine which query index a line belongs to
+    // Helper function to determine which query index a line belongs to.
+    // Uses character-offset search instead of substring heuristic to avoid
+    // false matches when two statements share the same prefix.
     function getQueryIndexForLine(sql: string, lineNumber: number): number | null {
         const statements = splitSqlStatements(sql);
-        let currentLine = 1;
-        const lines = sql.split('\n');
+        let searchFrom = 0;
 
         for (let queryIndex = 0; queryIndex < statements.length; queryIndex++) {
             const stmt = statements[queryIndex];
-            // Find the starting line of this statement
-            let stmtStartLine = currentLine;
-            const stmtFirstLine = stmt.trim().split('\n')[0];
-            for (let i = currentLine - 1; i < lines.length; i++) {
-                if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
-                    stmtStartLine = i + 1;
-                    break;
-                }
-            }
-            
+            const charOffset = sql.indexOf(stmt, searchFrom);
+            if (charOffset === -1) {continue;}
+
+            const stmtStartLine = sql.substring(0, charOffset).split('\n').length;
             const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
-            
-            // Check if the line number falls within this query's range
+
             if (lineNumber >= stmtStartLine && lineNumber <= stmtEndLine) {
                 return queryIndex;
             }
-            
-            currentLine = stmtStartLine + stmt.split('\n').length;
+
+            searchFrom = charOffset + stmt.length;
         }
-        
+
         return null;
     }
 
-    // Helper function to split SQL into statements (simplified version)
+    // Helper function to split SQL into statements.
+    // Handles string literals (with SQL-standard doubled-quote escaping),
+    // line comments (--), block comments (/* */), and parenthesis depth.
     function splitSqlStatements(sql: string): string[] {
         const statements: string[] = [];
         let current = '';
         let inString = false;
         let stringChar = '';
+        let inLineComment = false;
+        let inBlockComment = false;
         let depth = 0;
 
         for (let i = 0; i < sql.length; i++) {
             const char = sql[i];
-            const prevChar = i > 0 ? sql[i - 1] : '';
+            const next = i + 1 < sql.length ? sql[i + 1] : '';
 
-            // Handle string literals
-            if ((char === "'" || char === '"') && prevChar !== '\\') {
-                if (!inString) {
-                    inString = true;
-                    stringChar = char;
-                } else if (char === stringChar) {
-                    inString = false;
+            // Handle line comment state
+            if (inLineComment) {
+                current += char;
+                if (char === '\n') { inLineComment = false; }
+                continue;
+            }
+
+            // Handle block comment state
+            if (inBlockComment) {
+                current += char;
+                if (char === '*' && next === '/') {
+                    current += '/';
+                    i++;
+                    inBlockComment = false;
                 }
+                continue;
+            }
+
+            // Handle string literal state
+            if (inString) {
+                current += char;
+                if (char === stringChar) {
+                    // SQL-standard doubled quote escape: '' or ""
+                    if (next === stringChar) {
+                        current += next;
+                        i++;
+                    } else {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+
+            // Not inside any quoted/comment context — detect openings
+            if (char === '-' && next === '-') {
+                inLineComment = true;
+                current += char;
+                continue;
+            }
+
+            if (char === '/' && next === '*') {
+                inBlockComment = true;
+                current += char;
+                continue;
+            }
+
+            if (char === "'" || char === '"') {
+                inString = true;
+                stringChar = char;
+                current += char;
+                continue;
             }
 
             // Handle parentheses depth
-            if (!inString) {
-                if (char === '(') { depth++; }
-                if (char === ')') { depth--; }
-            }
+            if (char === '(') { depth++; }
+            if (char === ')') { depth--; }
 
             // Split on semicolon at depth 0
-            if (char === ';' && !inString && depth === 0) {
+            if (char === ';' && depth === 0) {
                 const trimmed = current.trim();
                 if (trimmed) {
                     statements.push(trimmed);
@@ -542,6 +608,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
             loadAdditionalExtensions();
+            registerDiagnosticCodeActionProvider();
             // Re-evaluate context for current editor with new extensions
             updateSqlLikeFileContext(vscode.window.activeTextEditor);
         }

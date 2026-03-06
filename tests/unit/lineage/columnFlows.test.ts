@@ -10,6 +10,8 @@
  */
 
 import { parseSql } from '../../../src/webview/sqlParser';
+import { buildColumnLineagePath, findSourceColumn } from '../../../src/webview/parser/lineage/columnFlows';
+import type { ColumnInfo, FlowNode } from '../../../src/webview/types';
 
 describe('Column Lineage', () => {
   describe('Direct Passthrough', () => {
@@ -293,6 +295,129 @@ describe('Column Lineage', () => {
       expect(calculatedStep?.expression).toContain('round(');
       expect(calculatedStep?.expression).toContain('nullif(');
       expect(calculatedStep?.expression).not.toContain('[object Object]');
+    });
+  });
+
+  describe('Source Table Matching', () => {
+    it('matches source table by explicit alias instead of loose prefix/contains heuristics', () => {
+      const selectNode: FlowNode = {
+        id: 'select_1',
+        type: 'select',
+        label: 'SELECT',
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const outputTableNode: FlowNode = {
+        id: 'table_output',
+        type: 'table',
+        label: 'output',
+        details: ['Alias: out'],
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const ordersTableNode: FlowNode = {
+        id: 'table_orders',
+        type: 'table',
+        label: 'orders',
+        details: ['Alias: o'],
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const nodeMap = new Map<string, FlowNode>([
+        // Insert "output" first to ensure fallback logic doesn't pick by prefix.
+        [outputTableNode.id, outputTableNode],
+        [ordersTableNode.id, ordersTableNode],
+        [selectNode.id, selectNode],
+      ]);
+      const incomingEdges = new Map<string, string[]>();
+      const targetColumn: ColumnInfo = {
+        name: 'customer_id',
+        expression: 'o.customer_id',
+        sourceColumn: 'customer_id',
+        sourceTable: 'o',
+      };
+
+      const lineagePath = buildColumnLineagePath(targetColumn, selectNode, nodeMap, incomingEdges);
+      const sourceStep = lineagePath.find(step => step.transformation === 'source');
+
+      expect(sourceStep).toBeDefined();
+      expect(sourceStep?.nodeId).toBe('table_orders');
+      expect(sourceStep?.nodeName).toBe('orders');
+    });
+
+    it('prefers structured node.alias over parsing details text', () => {
+      const selectNode: FlowNode = {
+        id: 'select_2',
+        type: 'select',
+        label: 'SELECT',
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const outputTableNode: FlowNode = {
+        id: 'table_output_2',
+        type: 'table',
+        label: 'output',
+        alias: 'out',
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const ordersTableNode: FlowNode = {
+        id: 'table_orders_2',
+        type: 'table',
+        label: 'orders',
+        alias: 'o',
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const nodeMap = new Map<string, FlowNode>([
+        [outputTableNode.id, outputTableNode],
+        [ordersTableNode.id, ordersTableNode],
+        [selectNode.id, selectNode],
+      ]);
+      const incomingEdges = new Map<string, string[]>();
+      const targetColumn: ColumnInfo = {
+        name: 'customer_id',
+        expression: 'o.customer_id',
+        sourceColumn: 'customer_id',
+        sourceTable: 'o',
+      };
+
+      const lineagePath = buildColumnLineagePath(targetColumn, selectNode, nodeMap, incomingEdges);
+      const sourceStep = lineagePath.find(step => step.transformation === 'source');
+
+      expect(sourceStep).toBeDefined();
+      expect(sourceStep?.nodeId).toBe('table_orders_2');
+    });
+
+    it('returns null when source column is unresolvable for a branch', () => {
+      const sourceNode: FlowNode = {
+        id: 'table_orders',
+        type: 'table',
+        label: 'orders',
+        x: 0,
+        y: 0,
+        width: 140,
+        height: 60,
+      };
+      const targetColumn: ColumnInfo = {
+        name: 'mystery_col',
+        expression: 'mystery_expr',
+      };
+
+      const resolved = findSourceColumn(targetColumn, sourceNode, sourceNode);
+      expect(resolved).toBeNull();
     });
   });
 });

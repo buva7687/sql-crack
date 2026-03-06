@@ -7,6 +7,11 @@ export type {
 } from './sqlFlowMessages';
 
 export type {
+    ViewLocation,
+    SqlFlowRuntimeConfig,
+} from './sqlFlowRuntimeConfig';
+
+export type {
     WorkspaceWebviewMessage,
     WorkspaceHostMessage,
     LineageNodeResult,

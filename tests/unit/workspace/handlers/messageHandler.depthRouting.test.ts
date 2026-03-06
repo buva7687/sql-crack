@@ -105,6 +105,58 @@ describe('MessageHandler depth and column lineage routing', () => {
         }));
     });
 
+    it('normalizes getColumnLineage result shape to tableId + full lineage paths', async () => {
+        const lineagePath = {
+            depth: 1,
+            nodes: [{ id: 'column:orders.customer_id', name: 'customer_id', type: 'column' }],
+            edges: [],
+        };
+        const columnLineageTracker = {
+            getFullColumnLineage: jest.fn(() => ({ upstream: [lineagePath], downstream: [] })),
+        };
+        const lineageGraph = {
+            nodes: new Map([
+                ['table:orders', { id: 'table:orders', type: 'table', name: 'orders', metadata: {} }],
+            ]),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        };
+        const { context, postMessage } = createContext({
+            getLineageGraph: jest.fn(() => lineageGraph),
+            getColumnLineageTracker: jest.fn(() => columnLineageTracker),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getColumnLineage',
+            tableName: 'orders',
+            columnName: 'customer_id',
+        });
+
+        expect(columnLineageTracker.getFullColumnLineage).toHaveBeenCalledWith(
+            lineageGraph,
+            'table:orders',
+            'customer_id'
+        );
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'columnLineageResult',
+            data: expect.objectContaining({
+                tableId: 'table:orders',
+                tableName: 'orders',
+                columnName: 'customer_id',
+                upstream: expect.arrayContaining([
+                    expect.objectContaining({
+                        depth: 1,
+                        nodes: expect.any(Array),
+                    }),
+                ]),
+            }),
+        }));
+    });
+
     it('falls back to configured default depth when getLineageGraph depth is invalid', async () => {
         const { context, lineageView } = createContext({
             getDefaultLineageDepth: jest.fn(() => 9),
@@ -355,7 +407,7 @@ describe('MessageHandler depth and column lineage routing', () => {
             changeType: 'modify',
         } as any);
 
-        expect(impactAnalyzer.analyzeTableChange).toHaveBeenCalledWith('customer_view', 'modify');
+        expect(impactAnalyzer.analyzeTableChange).toHaveBeenCalledWith('customer_view', 'modify', 'view');
         expect(impactAnalyzer.analyzeColumnChange).not.toHaveBeenCalled();
         expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'impactResult',

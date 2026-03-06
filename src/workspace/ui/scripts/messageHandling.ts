@@ -143,6 +143,16 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'lineageGraphResult':
+                    if (message.data?.error) {
+                        if (lineageContent) {
+                            lineageSetupInProgress = false;
+                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
+                            if (typeof restoreViewState === 'function') {
+                                restoreViewState(currentViewMode);
+                            }
+                        }
+                        break;
+                    }
                     if (lineageSetupInProgress) {
                         // Queue the latest message so it's processed after current setup finishes
                         pendingLineageGraphMessage = message;

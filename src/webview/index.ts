@@ -58,6 +58,7 @@ import {
     setColorblindMode as setRendererColorblindMode,
 } from './renderer';
 import type { ColorblindMode } from '../shared/theme';
+import type { SqlFlowRuntimeConfig, ViewLocation } from '../shared/messages/sqlFlowRuntimeConfig';
 import { stripSqlComments } from '../shared/stringUtils';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 
@@ -117,6 +118,8 @@ interface SqlCrackWebviewBootstrapConfig {
     isFirstRun: boolean;
     debugLogging: boolean;
 }
+
+type SqlCrackRuntimeConfigUpdate = SqlFlowRuntimeConfig;
 
 // Global type declarations
 declare global {
@@ -234,6 +237,129 @@ function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: numbe
     window.parseTimeoutSeconds = parseTimeoutSeconds;
 
     return { maxFileSizeKB, maxStatements, deferredQueryThreshold, parseTimeoutSeconds };
+}
+
+function normalizeRuntimeConfigUpdate(raw: unknown): SqlCrackRuntimeConfigUpdate | null {
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+
+    const payload = raw as Record<string, unknown>;
+    const normalizeBool = (value: unknown, fallback: boolean): boolean =>
+        typeof value === 'boolean' ? value : fallback;
+    const normalizeEnum = (value: unknown, allowed: string[], fallback: string): string =>
+        typeof value === 'string' && allowed.includes(value) ? value : fallback;
+
+    return {
+        vscodeTheme: normalizeEnum(payload.vscodeTheme, ['light', 'dark'], (window.vscodeTheme || 'dark')) as 'light' | 'dark',
+        isHighContrast: normalizeBool(payload.isHighContrast, window.isHighContrast === true),
+        defaultDialect: typeof payload.defaultDialect === 'string'
+            ? payload.defaultDialect
+            : (window.defaultDialect || 'MySQL'),
+        autoDetectDialect: normalizeBool(payload.autoDetectDialect, (window.autoDetectDialect ?? true) !== false),
+        viewLocation: normalizeEnum(payload.viewLocation, ['beside', 'tab'], window.viewLocation || 'tab') as ViewLocation,
+        defaultLayout: normalizeEnum(payload.defaultLayout, ['vertical', 'horizontal', 'compact', 'force', 'radial'], window.defaultLayout || 'vertical'),
+        flowDirection: normalizeEnum(payload.flowDirection, ['top-down', 'bottom-up'], window.flowDirection || 'top-down'),
+        showDeadColumnHints: normalizeBool(payload.showDeadColumnHints, (window.showDeadColumnHints ?? true) !== false),
+        combineDdlStatements: normalizeBool(payload.combineDdlStatements, window.combineDdlStatements === true),
+        gridStyle: normalizeEnum(payload.gridStyle, ['dots', 'lines', 'none'], window.gridStyle || 'lines'),
+        nodeAccentPosition: normalizeEnum(payload.nodeAccentPosition, ['left', 'bottom'], window.nodeAccentPosition || 'left'),
+        showMinimap: normalizeEnum(payload.showMinimap, ['auto', 'always', 'never'], window.showMinimap || 'auto'),
+        colorblindMode: normalizeEnum(
+            payload.colorblindMode,
+            ['off', 'deuteranopia', 'protanopia', 'tritanopia'],
+            (window.colorblindMode || 'off')
+        ) as ColorblindMode,
+        maxFileSizeKB: normalizeAdvancedLimit(payload.maxFileSizeKB, window.maxFileSizeKB || 100, 10, 10000),
+        maxStatements: normalizeAdvancedLimit(payload.maxStatements, window.maxStatements || 50, 1, 500),
+        deferredQueryThreshold: normalizeAdvancedLimit(payload.deferredQueryThreshold, window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD, 1, 500),
+        parseTimeoutSeconds: normalizeAdvancedLimit(payload.parseTimeoutSeconds, window.parseTimeoutSeconds || 5, 1, 60),
+        debugLogging: normalizeBool(payload.debugLogging, window.debugLogging === true),
+    };
+}
+
+function applyRuntimeConfigUpdate(rawConfig: unknown): void {
+    const config = normalizeRuntimeConfigUpdate(rawConfig);
+    if (!config) {
+        return;
+    }
+
+    const previous = {
+        vscodeTheme: window.vscodeTheme || 'dark',
+        isHighContrast: window.isHighContrast === true,
+        autoDetectDialect: (window.autoDetectDialect ?? true) !== false,
+        defaultDialect: window.defaultDialect || currentDialect,
+        showDeadColumnHints: (window.showDeadColumnHints ?? true) !== false,
+        combineDdlStatements: window.combineDdlStatements === true,
+        gridStyle: window.gridStyle || 'lines',
+        nodeAccentPosition: window.nodeAccentPosition || 'left',
+        flowDirection: window.flowDirection || 'top-down',
+        maxFileSizeKB: window.maxFileSizeKB || 100,
+        maxStatements: window.maxStatements || 50,
+        deferredQueryThreshold: window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD,
+    };
+
+    window.sqlCrackConfig = {
+        ...(window.sqlCrackConfig || {}),
+        ...config,
+    };
+    window.vscodeTheme = config.vscodeTheme;
+    window.isHighContrast = config.isHighContrast;
+    window.defaultDialect = config.defaultDialect;
+    window.autoDetectDialect = config.autoDetectDialect;
+    window.viewLocation = config.viewLocation;
+    window.defaultLayout = config.defaultLayout;
+    window.flowDirection = config.flowDirection;
+    window.showDeadColumnHints = config.showDeadColumnHints;
+    window.combineDdlStatements = config.combineDdlStatements;
+    window.gridStyle = config.gridStyle;
+    window.nodeAccentPosition = config.nodeAccentPosition;
+    window.showMinimap = config.showMinimap;
+    window.colorblindMode = config.colorblindMode;
+    window.maxFileSizeKB = config.maxFileSizeKB;
+    window.maxStatements = config.maxStatements;
+    window.deferredQueryThreshold = config.deferredQueryThreshold;
+    window.parseTimeoutSeconds = config.parseTimeoutSeconds;
+    window.debugLogging = config.debugLogging;
+
+    setMinimapMode(config.showMinimap as MinimapMode);
+    setParseTimeout(config.parseTimeoutSeconds * 1000);
+    setRendererColorblindMode(config.colorblindMode);
+
+    const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
+    if (requestedDefaultDialect && !userExplicitlySetDialect && config.autoDetectDialect === false) {
+        currentDialect = requestedDefaultDialect;
+        const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+        if (dialectSelect) {
+            dialectSelect.value = currentDialect;
+        }
+    }
+    updateAutoDetectIndicator(null);
+
+    const isDark = config.vscodeTheme !== 'light';
+    if (previous.vscodeTheme !== config.vscodeTheme) {
+        toggleTheme(isDark);
+    } else if (previous.gridStyle !== config.gridStyle || previous.nodeAccentPosition !== config.nodeAccentPosition) {
+        // Re-apply existing theme to refresh style-dependent visuals without changing theme mode.
+        toggleTheme(isDarkTheme());
+    }
+
+    const requiresRevisualize =
+        previous.autoDetectDialect !== config.autoDetectDialect ||
+        previous.defaultDialect !== config.defaultDialect ||
+        previous.showDeadColumnHints !== config.showDeadColumnHints ||
+        previous.combineDdlStatements !== config.combineDdlStatements ||
+        previous.flowDirection !== config.flowDirection ||
+        previous.maxFileSizeKB !== config.maxFileSizeKB ||
+        previous.maxStatements !== config.maxStatements ||
+        previous.deferredQueryThreshold !== config.deferredQueryThreshold;
+
+    if (requiresRevisualize) {
+        const sql = window.initialSqlCode || '';
+        if (sql) {
+            void visualize(sql);
+        }
+    }
 }
 
 function isDialectAutoDetectionEnabled(): boolean {
@@ -721,32 +847,35 @@ if (document.readyState === 'loading') {
 
 function setupVSCodeMessageListener(): void {
     window.addEventListener('message', (event) => {
-        const message = event.data;
-        switch (message.command) {
-            case 'refresh':
-                handleRefresh(message.sql, message.options);
-                break;
-            case 'cursorPosition':
-                highlightNodeAtLine(message.line);
-                break;
-            case 'switchToQuery':
-                handleSwitchToQuery(message.queryIndex);
-                break;
-            case 'markStale':
-                markAsStale();
-                break;
-            case 'setEditorActivity':
-                isInactiveEditor = message.isSqlLikeActiveEditor !== true;
-                syncRefreshButtonState();
-                break;
-            case 'viewLocationOptions':
-                // Response from extension with current view location and pinned tabs
-                // Currently informational — the toolbar reads initial location from options
-                break;
-            case 'pinCreated':
-                // Confirmation that a pinned panel was created
-                // The extension already shows a toast via showInformationMessage
-                break;
+        try {
+            const message = event.data;
+            switch (message.command) {
+                case 'refresh':
+                    handleRefresh(message.sql, message.options);
+                    break;
+                case 'cursorPosition':
+                    highlightNodeAtLine(message.line);
+                    break;
+                case 'switchToQuery':
+                    handleSwitchToQuery(message.queryIndex);
+                    break;
+                case 'runtimeConfig':
+                    applyRuntimeConfigUpdate(message.config);
+                    break;
+                case 'markStale':
+                    markAsStale();
+                    break;
+                case 'setEditorActivity':
+                    isInactiveEditor = message.isSqlLikeActiveEditor !== true;
+                    syncRefreshButtonState();
+                    break;
+                case 'viewLocationOptions':
+                    break;
+                case 'pinCreated':
+                    break;
+            }
+        } catch (err) {
+            console.error('[SQL Flow] Message handler error:', err);
         }
     });
 }

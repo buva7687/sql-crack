@@ -79,7 +79,7 @@ export function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, la
 
         const dx = tx - sx;
         const dy = ty - sy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const curvature = Math.min(dist * 0.3, 50);
 
         const midX = (sx + tx) / 2;
@@ -223,6 +223,16 @@ export function highlightConnectedEdges(
                 edge.setAttribute('stroke', theme.default);
                 edge.setAttribute('stroke-width', String(theme.strokeWidth));
                 edge.setAttribute('marker-end', 'url(#arrowhead)');
+                // Restore original dash pattern (e.g., subquery_flow edges are dashed)
+                const clauseType = edge.getAttribute('data-clause-type') || undefined;
+                const dashPattern = clauseType === 'subquery_flow'
+                    ? EDGE_DASH_PATTERNS.subquery_flow
+                    : getEdgeDashPattern(clauseType);
+                if (dashPattern) {
+                    edge.setAttribute('stroke-dasharray', dashPattern);
+                } else {
+                    edge.removeAttribute('stroke-dasharray');
+                }
             }
         }
     });

@@ -12,6 +12,16 @@ export interface ExportContext {
 const MAX_EXPORT_DIMENSION = 4096;
 const MAX_RASTER_DIMENSION = 4096;
 
+/** Convert a UTF-8 string to base64 without the deprecated unescape(). */
+function svgToBase64(str: string): string {
+    const bytes = new TextEncoder().encode(str);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
 function showExportToast(message: string, isDarkTheme: boolean, isError = false): void {
     const existing = document.getElementById('sql-flow-export-toast');
     if (existing) {
@@ -82,11 +92,10 @@ function prepareSvgForExport(
     style.textContent = `
         text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .node { opacity: 1 !important; }
-        .edge { opacity: 1 !important; fill: none !important; stroke: #64748b !important; stroke-width: 2 !important; }
-        path.edge { fill: none !important; stroke: #64748b !important; stroke-width: 2 !important; opacity: 1 !important; }
+        .edge { opacity: 1 !important; fill: none !important; stroke-width: 2 !important; }
+        path.edge { fill: none !important; stroke-width: 2 !important; opacity: 1 !important; }
         .node-rect { stroke-width: 1 !important; }
         .node-accent { opacity: 1 !important; }
-        marker path { fill: #64748b !important; }
     `;
     svgClone.insertBefore(style, svgClone.firstChild);
 
@@ -218,7 +227,7 @@ export function exportToPng(context: ExportContext): void {
             fallbackImg.onerror = () => {
                 showExportToast('PNG export failed', context.isDarkTheme(), true);
             };
-            fallbackImg.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+            fallbackImg.src = 'data:image/svg+xml;base64,' + svgToBase64(svgData);
         };
         img.src = svgUrl;
     } catch (e) {
@@ -385,7 +394,7 @@ export function copyToClipboard(context: ExportContext): void {
             };
             img2.src = url;
         };
-        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        img.src = 'data:image/svg+xml;base64,' + svgToBase64(svgData);
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] Clipboard copy failed:', e);
@@ -394,7 +403,7 @@ export function copyToClipboard(context: ExportContext): void {
     }
 }
 
-function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[], isDarkTheme: boolean): string {
+function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[], _isDarkTheme: boolean): string {
     const direction = window.flowDirection === 'bottom-up' ? 'BT' : 'TD';
     const lines: string[] = [`flowchart ${direction}`];
 
@@ -424,18 +433,17 @@ function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[], isDarkTheme: 
         }
     });
 
-    const mermaidTextColor = isDarkTheme ? '#fff' : '#111827';
     lines.push('');
     lines.push('    %% Node styling');
-    lines.push(`    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:${mermaidTextColor}`);
-    lines.push(`    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:${mermaidTextColor}`);
-    lines.push(`    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:${mermaidTextColor}`);
-    lines.push(`    classDef aggregateStyle fill:#10b981,stroke:#047857,color:${mermaidTextColor}`);
-    lines.push(`    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:${mermaidTextColor}`);
-    lines.push(`    classDef resultStyle fill:#22c55e,stroke:#15803d,color:${mermaidTextColor}`);
-    lines.push(`    classDef cteStyle fill:#ec4899,stroke:#be185d,color:${mermaidTextColor}`);
-    lines.push(`    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:${mermaidTextColor}`);
-    lines.push(`    classDef defaultStyle fill:#64748b,stroke:#475569,color:${mermaidTextColor}`);
+    lines.push('    classDef tableStyle fill:#3b82f6,stroke:#1e40af,color:#fff');
+    lines.push('    classDef filterStyle fill:#f59e0b,stroke:#b45309,color:#fff');
+    lines.push('    classDef joinStyle fill:#8b5cf6,stroke:#5b21b6,color:#fff');
+    lines.push('    classDef aggregateStyle fill:#10b981,stroke:#047857,color:#fff');
+    lines.push('    classDef sortStyle fill:#6366f1,stroke:#4338ca,color:#fff');
+    lines.push('    classDef resultStyle fill:#22c55e,stroke:#15803d,color:#fff');
+    lines.push('    classDef cteStyle fill:#ec4899,stroke:#be185d,color:#fff');
+    lines.push('    classDef unionStyle fill:#14b8a6,stroke:#0f766e,color:#fff');
+    lines.push('    classDef defaultStyle fill:#64748b,stroke:#475569,color:#fff');
 
     generateStyleAssignments(nodes).forEach(assignment => lines.push(`    ${assignment}`));
     return lines.join('\n');

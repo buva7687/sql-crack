@@ -37,7 +37,8 @@ export interface RenderNodeDispatcherOptions {
 export function addCollapseButtonFeature(
     node: FlowNode,
     group: SVGGElement,
-    onToggleNodeCollapse: (nodeId: string) => void
+    onToggleNodeCollapse: (nodeId: string) => void,
+    isDarkTheme: boolean = true
 ): void {
     const isExpanded = node.expanded !== false;
     const buttonSize = 16;
@@ -50,7 +51,7 @@ export function addCollapseButtonFeature(
     buttonBg.setAttribute('width', String(buttonSize));
     buttonBg.setAttribute('height', String(buttonSize));
     buttonBg.setAttribute('rx', '3');
-    buttonBg.setAttribute('fill', 'rgba(0, 0, 0, 0.3)');
+    buttonBg.setAttribute('fill', isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)');
     buttonBg.setAttribute('class', 'collapse-btn');
     buttonBg.style.cursor = 'pointer';
     group.appendChild(buttonBg);
@@ -59,7 +60,7 @@ export function addCollapseButtonFeature(
     icon.setAttribute('x', String(buttonX + buttonSize / 2));
     icon.setAttribute('y', String(buttonY + buttonSize / 2 + 4));
     icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('fill', 'white');
+    icon.setAttribute('fill', isDarkTheme ? '#f1f5f9' : '#1e293b');
     icon.setAttribute('font-size', '12');
     icon.setAttribute('font-weight', '600');
     icon.setAttribute('class', 'collapse-icon');
@@ -72,11 +73,12 @@ export function addCollapseButtonFeature(
         onToggleNodeCollapse(node.id);
     });
 
+    const restFill = isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)';
     buttonBg.addEventListener('mouseenter', () => {
         buttonBg.setAttribute('fill', 'rgba(99, 102, 241, 0.5)');
     });
     buttonBg.addEventListener('mouseleave', () => {
-        buttonBg.setAttribute('fill', 'rgba(0, 0, 0, 0.3)');
+        buttonBg.setAttribute('fill', restFill);
     });
 }
 
@@ -360,7 +362,7 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
     });
 
     if ((node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
-        addCollapseButtonFeature(node, group, onToggleNodeCollapse);
+        addCollapseButtonFeature(node, group, onToggleNodeCollapse, state.isDarkTheme);
     }
 
     parent.appendChild(group);

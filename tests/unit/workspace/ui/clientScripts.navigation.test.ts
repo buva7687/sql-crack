@@ -132,6 +132,28 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('captureLineageSearchState();');
     });
 
+    it('surfaces lineage graph errors and reuses document-level lineage handlers across rerenders', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("if (message.data?.error) {");
+        expect(script).toContain("lineageContent.innerHTML = '<div style=\"color: var(--error); padding: 20px;\">' + escapeHtmlSafe(message.data.error) + '</div>';");
+        expect(script).toContain('let lineageDocumentMouseMoveHandler = null;');
+        expect(script).toContain('let lineageDocumentMouseUpHandler = null;');
+        expect(script).toContain('let lineageDocumentClickHandler = null;');
+        expect(script).toContain("document.removeEventListener('mousemove', lineageDocumentMouseMoveHandler);");
+        expect(script).toContain("document.removeEventListener('mouseup', lineageDocumentMouseUpHandler);");
+        expect(script).toContain("document.removeEventListener('click', lineageDocumentClickHandler);");
+        expect(script).toContain("document.addEventListener('mousemove', lineageDocumentMouseMoveHandler);");
+        expect(script).toContain("document.addEventListener('mouseup', lineageDocumentMouseUpHandler);");
+        expect(script).toContain("document.addEventListener('click', lineageDocumentClickHandler);");
+    });
+
     it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {
         const script = getWebviewScript({
             nonce: 'test',

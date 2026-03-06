@@ -241,31 +241,58 @@ function buildTableGraph(
             analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
         );
 
-        for (const def of analysis.definitions) {
-            if (def.type === 'view') {
-                // Views reference other tables - find what this view references
-                for (const ref of analysis.references) {
-                    const refKey = getQualifiedKey(ref.tableName, ref.schema);
-                    if (definedHere.has(refKey)) {
-                        continue;
+        const viewDefinitions = analysis.definitions
+            .filter(def => def.type === 'view')
+            .sort((a, b) => (a.lineNumber || Number.MAX_SAFE_INTEGER) - (b.lineNumber || Number.MAX_SAFE_INTEGER));
+
+        for (let viewIndex = 0; viewIndex < viewDefinitions.length; viewIndex++) {
+            const def = viewDefinitions[viewIndex];
+            const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
+            if (!sourceId) {
+                continue;
+            }
+
+            const refsByStatement = typeof def.statementIndex === 'number'
+                ? analysis.references.filter(ref => ref.statementIndex === def.statementIndex)
+                : [];
+
+            const nextDef = viewDefinitions[viewIndex + 1];
+            const refsByLineRange = analysis.references.filter(ref => {
+                if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {
+                    return true;
+                }
+                if (!Number.isFinite(ref.lineNumber) || ref.lineNumber <= 0) {
+                    return false;
+                }
+                if (ref.lineNumber < def.lineNumber) {
+                    return false;
+                }
+                if (nextDef && Number.isFinite(nextDef.lineNumber) && nextDef.lineNumber > def.lineNumber) {
+                    return ref.lineNumber < nextDef.lineNumber;
+                }
+                return true;
+            });
+
+            const scopedReferences = refsByStatement.length > 0 ? refsByStatement : refsByLineRange;
+
+            for (const ref of scopedReferences) {
+                const refKey = getQualifiedKey(ref.tableName, ref.schema);
+                if (definedHere.has(refKey)) {
+                    continue;
+                }
+
+                const targets = getDefinitionCandidates(index, ref);
+                if (targets.length > 0) {
+                    for (const targetDef of targets) {
+                        const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
+                        if (targetId) {
+                            pushEdge(sourceId, targetId, ref);
+                        }
                     }
-
-                    const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
-                    if (!sourceId) {continue;}
-
-                    const targets = getDefinitionCandidates(index, ref);
-                    if (targets.length > 0) {
-                        for (const targetDef of targets) {
-                            const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
-                            if (sourceId && targetId) {
-                                pushEdge(sourceId, targetId, ref);
-                            }
-                        }
-                    } else {
-                        const externalId = nodeIdMap.get(refKey);
-                        if (sourceId && externalId) {
-                            pushEdge(sourceId, externalId, ref);
-                        }
+                } else {
+                    const externalId = nodeIdMap.get(refKey);
+                    if (externalId) {
+                        pushEdge(sourceId, externalId, ref);
                     }
                 }
             }

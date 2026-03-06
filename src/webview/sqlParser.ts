@@ -284,7 +284,11 @@ export function parseSqlBatch(
 
         // For size limits, parse partial result instead of rejecting
         if (validationError.type === 'size_limit') {
-            const truncatedSql = sql.substring(0, limits.maxSqlSizeBytes);
+            // Use TextEncoder to truncate at a byte boundary, not character boundary
+            const encoder = new TextEncoder();
+            const decoder = new TextDecoder();
+            const encoded = encoder.encode(sql);
+            const truncatedSql = decoder.decode(encoded.slice(0, limits.maxSqlSizeBytes));
             // Recursively parse with infinite limit to avoid double-validation
             const partialResult = parseSqlBatch(truncatedSql, dialect, { ...limits, maxSqlSizeBytes: Infinity }, options);
             // Add truncation warning

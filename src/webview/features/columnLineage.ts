@@ -78,6 +78,7 @@ function createColumnItemFeature(
 ): HTMLElement {
     const { runtime, isDarkTheme, escapeHtml, onFlowSelected } = options;
     const item = document.createElement('div');
+    item.setAttribute('data-flow-id', flow.id);
     item.style.cssText = `
         padding: 8px 10px;
         background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)'};
@@ -434,7 +435,7 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     bg.setAttribute('r', '10');
     bg.setAttribute('fill', config.color);
-    bg.setAttribute('stroke', 'white');
+    bg.setAttribute('stroke', config.color);
     bg.setAttribute('stroke-width', '1.5');
     badgeGroup.appendChild(bg);
 

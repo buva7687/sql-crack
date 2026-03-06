@@ -171,9 +171,11 @@ export function renderStandardNodeVisual(node: FlowNode, group: SVGGElement, dep
         badges.push({ text: node.operationType, color: opColors[node.operationType] || '#6B7280' });
     }
 
-    badges.forEach((badge, index) => {
+    let badgeOffset = 0;
+    badges.forEach((badge) => {
         const badgeWidth = badge.text.length * 7 + 10;
-        const badgeX = node.x + node.width - badgeWidth - (index * (badgeWidth + 4));
+        const badgeX = node.x + node.width - badgeWidth - badgeOffset;
+        badgeOffset += badgeWidth + 4;
 
         const badgeRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         badgeRect.setAttribute('x', String(badgeX));

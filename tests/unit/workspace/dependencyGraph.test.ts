@@ -2,24 +2,39 @@ import * as path from 'path';
 import { buildDependencyGraph } from '../../../src/workspace/dependencyGraph';
 import { WorkspaceIndex, FileAnalysis, SchemaDefinition, TableReference } from '../../../src/workspace/types';
 
-function createDefinition(filePath: string, name: string): SchemaDefinition {
+function createDefinition(
+    filePath: string,
+    name: string,
+    options: Partial<SchemaDefinition> = {}
+): SchemaDefinition {
     return {
-        type: 'table',
+        type: options.type || 'table',
         name,
+        schema: options.schema,
+        statementIndex: options.statementIndex,
         columns: [],
         filePath,
-        lineNumber: 1,
-        sql: `create table ${name} (id int);`,
+        lineNumber: options.lineNumber || 1,
+        sql: options.sql || `create table ${name} (id int);`,
+        sourceQuery: options.sourceQuery,
     };
 }
 
-function createReference(filePath: string, tableName: string): TableReference {
+function createReference(
+    filePath: string,
+    tableName: string,
+    options: Partial<TableReference> = {}
+): TableReference {
     return {
         tableName,
-        referenceType: 'select',
+        schema: options.schema,
+        alias: options.alias,
+        referenceType: options.referenceType || 'select',
         filePath,
-        lineNumber: 1,
-        context: 'FROM',
+        lineNumber: options.lineNumber || 1,
+        context: options.context || 'FROM',
+        statementIndex: options.statementIndex,
+        columns: options.columns,
     };
 }
 
@@ -106,5 +121,56 @@ describe('workspace dependency graph layout and cycle detection', () => {
         expect(cycles[0]).toContain('c.sql');
         expect(cycles[0]).not.toContain('<->');
     });
-});
 
+    it('scopes table-mode view edges to the matching statement when a file defines multiple views', () => {
+        const viewsFile = '/repo/views.sql';
+        const sourceAFile = '/repo/source_a.sql';
+        const sourceBFile = '/repo/source_b.sql';
+
+        const viewsAnalysis: FileAnalysis = {
+            filePath: viewsFile,
+            fileName: path.basename(viewsFile),
+            lastModified: Date.now(),
+            contentHash: `${viewsFile}-hash`,
+            definitions: [
+                createDefinition(viewsFile, 'view_a', {
+                    type: 'view',
+                    lineNumber: 1,
+                    statementIndex: 0,
+                    sql: 'CREATE VIEW view_a AS SELECT * FROM source_a;'
+                }),
+                createDefinition(viewsFile, 'view_b', {
+                    type: 'view',
+                    lineNumber: 5,
+                    statementIndex: 1,
+                    sql: 'CREATE VIEW view_b AS SELECT * FROM source_b;'
+                }),
+            ],
+            references: [
+                createReference(viewsFile, 'source_a', { statementIndex: 0, lineNumber: 2 }),
+                createReference(viewsFile, 'source_b', { statementIndex: 1, lineNumber: 6 }),
+            ],
+        };
+
+        const index = createIndex([
+            viewsAnalysis,
+            createFileAnalysis(sourceAFile, createDefinition(sourceAFile, 'source_a'), []),
+            createFileAnalysis(sourceBFile, createDefinition(sourceBFile, 'source_b'), []),
+        ]);
+
+        const graph = buildDependencyGraph(index, 'tables');
+        const labelById = new Map(graph.nodes.map(node => [node.id, node.label]));
+        const edgesBySourceLabel = new Map<string, string[]>();
+        for (const edge of graph.edges) {
+            const sourceLabel = labelById.get(edge.source) || '';
+            const targetLabel = labelById.get(edge.target) || '';
+            if (!edgesBySourceLabel.has(sourceLabel)) {
+                edgesBySourceLabel.set(sourceLabel, []);
+            }
+            edgesBySourceLabel.get(sourceLabel)!.push(targetLabel);
+        }
+
+        expect(edgesBySourceLabel.get('view_a')).toEqual(['source_a']);
+        expect(edgesBySourceLabel.get('view_b')).toEqual(['source_b']);
+    });
+});

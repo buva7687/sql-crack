@@ -20,6 +20,9 @@ export function getLineageGraphScriptFragment(): string {
         let refreshLineageMinimapViewport = null;
         let lineageShortcutHandler = null;
         let lineageOverlayResizeHandler = null;
+        let lineageDocumentMouseMoveHandler = null;
+        let lineageDocumentMouseUpHandler = null;
+        let lineageDocumentClickHandler = null;
         let lineageContextMenuOpen = false;
         const lineageLegendStorageKey = 'sqlCrack.workspace.lineageLegendVisible';
         const warnedLineageIconTypes = new Set();
@@ -81,6 +84,16 @@ export function getLineageGraphScriptFragment(): string {
             lineageOffsetX = 0;
             lineageOffsetY = 0;
             refreshLineageMinimapViewport = null;
+
+            if (lineageDocumentMouseMoveHandler) {
+                document.removeEventListener('mousemove', lineageDocumentMouseMoveHandler);
+            }
+            if (lineageDocumentMouseUpHandler) {
+                document.removeEventListener('mouseup', lineageDocumentMouseUpHandler);
+            }
+            if (lineageDocumentClickHandler) {
+                document.removeEventListener('click', lineageDocumentClickHandler);
+            }
 
             function updateLineageTransform() {
                 const currentGraphContainer = document.querySelector('#lineage-graph-container .lineage-graph-svg .lineage-graph-container');
@@ -182,18 +195,20 @@ export function getLineageGraphScriptFragment(): string {
                 }
             });
 
-            document.addEventListener('mousemove', (e) => {
+            lineageDocumentMouseMoveHandler = (e) => {
                 if (lineageIsDragging) {
                     lineageOffsetX = e.clientX - lineageDragStartX;
                     lineageOffsetY = e.clientY - lineageDragStartY;
                     updateLineageTransform();
                 }
-            });
+            };
+            document.addEventListener('mousemove', lineageDocumentMouseMoveHandler);
 
-            document.addEventListener('mouseup', () => {
+            lineageDocumentMouseUpHandler = () => {
                 lineageIsDragging = false;
                 if (svg) svg.style.cursor = 'grab';
-            });
+            };
+            document.addEventListener('mouseup', lineageDocumentMouseUpHandler);
 
             function getColumnRows() {
                 return Array.from(svg.querySelectorAll('.column-row'));
@@ -358,9 +373,10 @@ export function getLineageGraphScriptFragment(): string {
                 });
             });
 
-            document.addEventListener('click', () => {
+            lineageDocumentClickHandler = () => {
                 hideLineageContextMenu();
-            });
+            };
+            document.addEventListener('click', lineageDocumentClickHandler);
 
             setTimeout(() => {
                 if (zoomFitBtn) zoomFitBtn.click();

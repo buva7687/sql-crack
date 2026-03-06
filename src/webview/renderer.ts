@@ -1367,28 +1367,119 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
     });
 }
 
-export function render(result: ParseResult): void {
+interface RenderOptions {
+    preserveInteractionState?: boolean;
+}
+
+interface PreservedRenderState {
+    viewState: TabViewState;
+    selectedNodeId: string | null;
+    focusModeEnabled: boolean;
+    focusMode: FocusMode;
+    searchTerm: string;
+    searchIndex: number;
+    showColumnFlows: boolean;
+    selectedColumnLineageId: string | null;
+}
+
+function capturePreservedRenderState(): PreservedRenderState {
+    return {
+        viewState: getViewState(),
+        selectedNodeId: state.selectedNodeId,
+        focusModeEnabled: state.focusModeEnabled,
+        focusMode: state.focusMode,
+        searchTerm: searchBox?.value || state.searchTerm || '',
+        searchIndex: state.currentSearchIndex,
+        showColumnFlows: state.showColumnFlows,
+        selectedColumnLineageId: columnLineageRuntime.selectedColumnLineage?.id || null,
+    };
+}
+
+function restoreFocusModeBreadcrumb(mode: FocusMode): void {
+    const modeLabel = mode === 'upstream' ? 'Upstream' : mode === 'downstream' ? 'Downstream' : 'All';
+    addBreadcrumbSegment({
+        id: 'focus-mode',
+        label: `Focus: ${modeLabel}`,
+        icon: mode === 'upstream' ? '\u2191' : mode === 'downstream' ? '\u2193' : '\u21c4',
+        onClear: () => { toggleFocusMode(false); },
+    });
+}
+
+function restorePreservedRenderState(snapshot: PreservedRenderState): void {
+    setViewState(snapshot.viewState);
+
+    if (snapshot.searchTerm) {
+        if (searchBox) {
+            searchBox.value = snapshot.searchTerm;
+        }
+        performSearch(snapshot.searchTerm);
+        if (snapshot.searchIndex > 0 && snapshot.searchIndex < state.searchResults.length) {
+            state.currentSearchIndex = snapshot.searchIndex - 1;
+            navigateSearch(1);
+        }
+    }
+
+    if (snapshot.selectedNodeId && currentNodes.some((node) => node.id === snapshot.selectedNodeId)) {
+        selectNode(snapshot.selectedNodeId, { skipNavigation: true });
+        if (snapshot.focusModeEnabled) {
+            state.focusMode = snapshot.focusMode;
+            state.focusModeEnabled = true;
+            applyFocusMode(snapshot.selectedNodeId);
+            restoreFocusModeBreadcrumb(snapshot.focusMode);
+        }
+    }
+
+    if (snapshot.showColumnFlows) {
+        state.showColumnFlows = true;
+        if (!columnLineageRuntime.columnLineagePanel && shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+            showColumnLineagePanel();
+        }
+        if (columnLineageRuntime.columnLineagePanel && snapshot.selectedColumnLineageId) {
+            const selectedFlow = currentColumnFlows.find((flow) => flow.id === snapshot.selectedColumnLineageId);
+            if (selectedFlow) {
+                columnLineageRuntime.selectedColumnLineage = selectedFlow;
+                showLineagePath(selectedFlow);
+                highlightLineageNodes(selectedFlow);
+                const selectedItem = columnLineageRuntime.columnLineagePanel.querySelector<HTMLElement>(
+                    `[data-flow-id="${CSS.escape(selectedFlow.id)}"]`
+                );
+                if (selectedItem) {
+                    selectedItem.style.borderColor = '#6366f1';
+                    selectedItem.style.background = state.isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)';
+                }
+            }
+        }
+    }
+
+    renderBreadcrumb();
+}
+
+export function render(result: ParseResult, options?: RenderOptions): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
     const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
+    const preserveInteractionState = options?.preserveInteractionState === true;
+    const preservedRenderState = preserveInteractionState ? capturePreservedRenderState() : null;
 
-    // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
-    selectNode(null);
-    clearFocusMode();
-    state.focusModeEnabled = false;
-    state.selectedColumn = null;
-    columnLineageRuntime.selectedColumnLineage = null;
-    clearLineageHighlights();
-    hideColumnLineagePanel();
-    state.showColumnFlows = false;
-    setColumnLineageBannerVisible(false);
-    updateLegendPanel();
+    if (!preserveInteractionState) {
+        // Clear any selected node when rendering new query (fixes details panel staying open on tab switch)
+        selectNode(null);
+        clearFocusMode();
+        state.focusModeEnabled = false;
+        state.selectedColumn = null;
+        columnLineageRuntime.selectedColumnLineage = null;
+        clearLineageHighlights();
+        hideColumnLineagePanel();
+        state.showColumnFlows = false;
+        setColumnLineageBannerVisible(false);
+        updateLegendPanel();
 
-    if (searchBox && searchBox.value) {
-        searchBox.value = '';
+        if (searchBox && searchBox.value) {
+            searchBox.value = '';
+        }
+        clearSearch();
+        clearBreadcrumbBar();
     }
-    clearSearch();
-    clearBreadcrumbBar();
 
     currentNodes = result.nodes;
     currentEdges = result.edges;
@@ -1543,6 +1634,10 @@ export function render(result: ParseResult): void {
     if (!layoutHistory.getCurrent()) {
         layoutHistory.initialize(captureLayoutHistorySnapshot());
         syncUndoRedoUiState();
+    }
+
+    if (preservedRenderState) {
+        restorePreservedRenderState(preservedRenderState);
     }
 }
 
@@ -3171,7 +3266,19 @@ function applyTheme(dark: boolean): void {
     
     // Re-render all nodes to update colors for theme
     if (currentNodes.length > 0) {
-        render({ nodes: currentNodes, edges: currentEdges, stats: currentStats || {} as QueryStats, hints: currentHints, sql: currentSql, columnLineage: currentColumnLineage, columnFlows: currentColumnFlows, tableUsage: currentTableUsage });
+        render(
+            {
+                nodes: currentNodes,
+                edges: currentEdges,
+                stats: currentStats || {} as QueryStats,
+                hints: currentHints,
+                sql: currentSql,
+                columnLineage: currentColumnLineage,
+                columnFlows: currentColumnFlows,
+                tableUsage: currentTableUsage
+            },
+            { preserveInteractionState: true }
+        );
     }
 }
 

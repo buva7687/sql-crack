@@ -50,7 +50,7 @@ function resolveHintLine(
 
     const parsedMessageLine = parseLineFromHintMessage(hint.message);
     if (parsedMessageLine !== null) {
-        return clampLine(parsedMessageLine - 1, document.lineCount);
+        return clampLine((queryStartLine - 1) + (parsedMessageLine - 1), document.lineCount);
     }
 
     return clampLine(queryStartLine - 1, document.lineCount);
@@ -91,7 +91,7 @@ export function createDiagnosticsFromBatch(
         if (!query.hints || query.hints.length === 0) {
             return;
         }
-        const queryStartLine = queryRanges[index]?.startLine || 1;
+        const queryStartLine = queryRanges[index]?.startLine ?? 1;
         query.hints.forEach((hint) => {
             diagnostics.push(createDiagnosticFromHint(document, hint, query, queryStartLine));
         });

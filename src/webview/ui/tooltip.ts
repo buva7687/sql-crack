@@ -64,12 +64,12 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
                 <div style="
                     margin-top: 8px;
                     padding: 8px;
-                    background: rgba(30, 41, 59, 0.6);
-                    border: 1px solid rgba(148, 163, 184, 0.2);
+                    background: ${isDarkTheme ? 'rgba(30, 41, 59, 0.6)' : 'rgba(241, 245, 249, 0.9)'};
+                    border: 1px solid ${isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(100, 116, 139, 0.2)'};
                     border-radius: 4px;
                     font-family: ${monoFontStack};
                     font-size: 10px;
-                    color: #f8fafc;
+                    color: ${isDarkTheme ? '#f8fafc' : '#1e293b'};
                     line-height: 1.4;
                     white-space: pre-wrap;
                     word-break: break-all;

@@ -263,4 +263,36 @@ describe('ReferenceExtractor behavioral coverage', () => {
             }),
         ]));
     });
+
+    it('keeps schema-distinct references on the same line', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM sales.orders o JOIN hr.orders h ON o.id = h.id',
+            'schema_distinct.sql',
+            'MySQL'
+        );
+
+        const ordersRefs = refs.filter(ref => ref.tableName.toLowerCase() === 'orders');
+        const schemas = ordersRefs.map(ref => (ref.schema || '').toLowerCase()).sort();
+        expect(ordersRefs).toHaveLength(2);
+        expect(schemas).toEqual(['hr', 'sales']);
+    });
+
+    it('does not treat EXTRACT(... FROM ...) as table reference on regex fallback when comments shift indices', () => {
+        const refs = extractor.extractReferences(
+            `
+            -- leading comment to force index drift between original and comment-stripped SQL
+            /* another comment block */
+            SELECT EXTRACT(YEAR FROM created_at) AS year_part
+            FROM orders
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1
+            `,
+            'fallback.sql',
+            'MySQL'
+        );
+
+        const names = refs.map(ref => ref.tableName.toLowerCase());
+        expect(names).toContain('orders');
+        expect(names).not.toContain('created_at');
+        expect(names).not.toContain('year');
+    });
 });

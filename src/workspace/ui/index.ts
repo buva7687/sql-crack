@@ -18,7 +18,6 @@ export { ImpactView } from './impactView';
 // Graph View
 export {
     generateGraphBody,
-    getGraphViewHtml,
     GraphBodyParams
 } from './graphView';
 

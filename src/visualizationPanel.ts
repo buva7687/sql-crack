@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
+import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
+import type { ColorblindMode } from './shared/theme';
 
 interface VisualizationOptions {
     dialect: string;
@@ -8,7 +10,7 @@ interface VisualizationOptions {
     documentUri?: vscode.Uri; // Store the document URI for navigation
 }
 
-export type ViewLocation = 'beside' | 'tab';
+export type { ViewLocation };
 
 interface PinnedVisualization {
     id: string;
@@ -320,7 +322,7 @@ export class VisualizationPanel {
 
         // Refresh the webview when VS Code theme changes so the panel reflects the active theme immediately.
         vscode.window.onDidChangeActiveColorTheme(() => {
-            this._update(this._currentSql, this._currentOptions);
+            this._postRuntimeConfigUpdate('theme');
         }, null, this._disposables);
 
         // Refresh when SQL Crack settings change so runtime config updates apply without reopening the panel.
@@ -328,7 +330,7 @@ export class VisualizationPanel {
             if (!event.affectsConfiguration('sqlCrack')) {
                 return;
             }
-            this._update(this._currentSql, this._currentOptions);
+            this._postRuntimeConfigUpdate('config');
         }, null, this._disposables);
 
         // Handle messages from the webview
@@ -498,6 +500,78 @@ export class VisualizationPanel {
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
     }
 
+    private _readRuntimeConfig(options: VisualizationOptions): SqlFlowRuntimeConfig {
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const themeKind = vscode.window.activeColorTheme.kind;
+        const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
+
+        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+        let vscodeTheme: 'light' | 'dark';
+        if (themePreference === 'light') {
+            vscodeTheme = 'light';
+        } else if (themePreference === 'dark') {
+            vscodeTheme = 'dark';
+        } else {
+            // 'auto' - match VS Code theme
+            vscodeTheme = themeKind === vscode.ColorThemeKind.Light || themeKind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
+        }
+
+        const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
+        const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
+        const flowDirection = config.get<string>('flowDirection') || 'top-down';
+        const autoDetectDialect = config.get<boolean>('autoDetectDialect') !== false;
+        const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
+        const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
+        const gridStyle = config.get<string>('gridStyle') || 'lines';
+        const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
+        const showMinimap = config.get<string>('showMinimap') || 'auto';
+        const colorblindModeRaw = config.get<string>('colorblindMode') || 'off';
+        const colorblindMode: ColorblindMode =
+            colorblindModeRaw === 'deuteranopia' ||
+            colorblindModeRaw === 'protanopia' ||
+            colorblindModeRaw === 'tritanopia'
+                ? colorblindModeRaw
+                : 'off';
+        const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
+        const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
+        const deferredQueryThreshold = normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500);
+        const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
+        const debugLogging = config.get<boolean>('advanced.debugLogging', false);
+
+        return {
+            vscodeTheme,
+            isHighContrast,
+            defaultDialect: options.dialect,
+            autoDetectDialect,
+            viewLocation,
+            defaultLayout,
+            flowDirection,
+            showDeadColumnHints,
+            combineDdlStatements,
+            gridStyle,
+            nodeAccentPosition,
+            showMinimap,
+            colorblindMode,
+            maxFileSizeKB,
+            maxStatements,
+            deferredQueryThreshold,
+            parseTimeoutSeconds,
+            debugLogging,
+        };
+    }
+
+    private _postRuntimeConfigUpdate(trigger: 'theme' | 'config'): void {
+        if (this._disposed) {
+            return;
+        }
+        const runtimeConfig = this._readRuntimeConfig(this._currentOptions);
+        this._postMessage({
+            command: 'runtimeConfig',
+            trigger,
+            config: runtimeConfig,
+        });
+    }
+
     /**
      * Safely escape a string for embedding in an inline script tag.
      * Uses JSON.stringify for base escaping, then handles HTML-specific sequences
@@ -525,37 +599,8 @@ export class VisualizationPanel {
         );
 
         const nonce = getNonce();
-
-        const config = vscode.workspace.getConfiguration('sqlCrack');
-
-        const themeKind = vscode.window.activeColorTheme.kind;
-        const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
-
-        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
-        let vscodeTheme: string;
-        if (themePreference === 'light') {
-            vscodeTheme = 'light';
-        } else if (themePreference === 'dark') {
-            vscodeTheme = 'dark';
-        } else {
-            // 'auto' - match VS Code theme
-            vscodeTheme = themeKind === vscode.ColorThemeKind.Light || themeKind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
-        }
-        const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
-        const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
-        const flowDirection = config.get<string>('flowDirection') || 'top-down';
-        const autoDetectDialect = config.get<boolean>('autoDetectDialect') !== false;
-        const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
-        const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
-        const gridStyle = config.get<string>('gridStyle') || 'lines';
-        const nodeAccentPosition = config.get<string>('nodeAccentPosition') || 'left';
-        const showMinimap = config.get<string>('showMinimap') || 'auto';
-        const colorblindMode = config.get<string>('colorblindMode') || 'off';
-        const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
-        const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
-        const deferredQueryThreshold = normalizeAdvancedLimit(config.get<number>('advanced.deferredQueryThreshold', 50), 50, 1, 500);
-        const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
-        const debugLogging = config.get<boolean>('advanced.debugLogging', false);
+        const runtimeConfig = this._readRuntimeConfig(options);
+        const isFirstRun = VisualizationPanel._isFirstRun();
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
         const initialUiState = VisualizationPanel._getPersistedUiState({
             documentUri: this._sourceDocumentUri,
@@ -595,57 +640,57 @@ export class VisualizationPanel {
         // Typed bootstrap contract (kept alongside legacy window.* fields for compatibility).
         window.sqlCrackConfig = {
             initialSqlCode: ${this._escapeForInlineScript(sqlCode)},
-            vscodeTheme: ${this._escapeForInlineScript(vscodeTheme)},
-            isHighContrast: ${this._escapeForInlineScript(isHighContrast)},
+            vscodeTheme: ${this._escapeForInlineScript(runtimeConfig.vscodeTheme)},
+            isHighContrast: ${this._escapeForInlineScript(runtimeConfig.isHighContrast)},
             defaultDialect: ${this._escapeForInlineScript(options.dialect)},
-            autoDetectDialect: ${this._escapeForInlineScript(autoDetectDialect)},
+            autoDetectDialect: ${this._escapeForInlineScript(runtimeConfig.autoDetectDialect)},
             fileName: ${this._escapeForInlineScript(options.fileName)},
             isPinnedView: ${this._escapeForInlineScript(this._isPinned)},
             pinId: ${this._escapeForInlineScript(this._pinId || null)},
-            viewLocation: ${this._escapeForInlineScript(viewLocation)},
-            defaultLayout: ${this._escapeForInlineScript(defaultLayout)},
-            flowDirection: ${this._escapeForInlineScript(flowDirection)},
+            viewLocation: ${this._escapeForInlineScript(runtimeConfig.viewLocation)},
+            defaultLayout: ${this._escapeForInlineScript(runtimeConfig.defaultLayout)},
+            flowDirection: ${this._escapeForInlineScript(runtimeConfig.flowDirection)},
             persistedPinnedTabs: ${this._escapeForInlineScript(pinnedTabs)},
             initialUiState: ${this._escapeForInlineScript(initialUiState)},
-            showDeadColumnHints: ${this._escapeForInlineScript(showDeadColumnHints)},
-            combineDdlStatements: ${this._escapeForInlineScript(combineDdlStatements)},
-            gridStyle: ${this._escapeForInlineScript(gridStyle)},
-            nodeAccentPosition: ${this._escapeForInlineScript(nodeAccentPosition)},
-            showMinimap: ${this._escapeForInlineScript(showMinimap)},
-            colorblindMode: ${this._escapeForInlineScript(colorblindMode)},
-            maxFileSizeKB: ${this._escapeForInlineScript(maxFileSizeKB)},
-            maxStatements: ${this._escapeForInlineScript(maxStatements)},
-            deferredQueryThreshold: ${this._escapeForInlineScript(deferredQueryThreshold)},
-            parseTimeoutSeconds: ${this._escapeForInlineScript(parseTimeoutSeconds)},
-            isFirstRun: ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())},
-            debugLogging: ${this._escapeForInlineScript(debugLogging)}
+            showDeadColumnHints: ${this._escapeForInlineScript(runtimeConfig.showDeadColumnHints)},
+            combineDdlStatements: ${this._escapeForInlineScript(runtimeConfig.combineDdlStatements)},
+            gridStyle: ${this._escapeForInlineScript(runtimeConfig.gridStyle)},
+            nodeAccentPosition: ${this._escapeForInlineScript(runtimeConfig.nodeAccentPosition)},
+            showMinimap: ${this._escapeForInlineScript(runtimeConfig.showMinimap)},
+            colorblindMode: ${this._escapeForInlineScript(runtimeConfig.colorblindMode)},
+            maxFileSizeKB: ${this._escapeForInlineScript(runtimeConfig.maxFileSizeKB)},
+            maxStatements: ${this._escapeForInlineScript(runtimeConfig.maxStatements)},
+            deferredQueryThreshold: ${this._escapeForInlineScript(runtimeConfig.deferredQueryThreshold)},
+            parseTimeoutSeconds: ${this._escapeForInlineScript(runtimeConfig.parseTimeoutSeconds)},
+            isFirstRun: ${this._escapeForInlineScript(isFirstRun)},
+            debugLogging: ${this._escapeForInlineScript(runtimeConfig.debugLogging)}
         };
 
         window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
-        window.vscodeTheme = ${this._escapeForInlineScript(vscodeTheme)};
-        window.isHighContrast = ${this._escapeForInlineScript(isHighContrast)};
+        window.vscodeTheme = ${this._escapeForInlineScript(runtimeConfig.vscodeTheme)};
+        window.isHighContrast = ${this._escapeForInlineScript(runtimeConfig.isHighContrast)};
         window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
-        window.autoDetectDialect = ${this._escapeForInlineScript(autoDetectDialect)};
+        window.autoDetectDialect = ${this._escapeForInlineScript(runtimeConfig.autoDetectDialect)};
         window.fileName = ${this._escapeForInlineScript(options.fileName)};
         window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
-        window.viewLocation = ${this._escapeForInlineScript(viewLocation)};
-        window.defaultLayout = ${this._escapeForInlineScript(defaultLayout)};
-        window.flowDirection = ${this._escapeForInlineScript(flowDirection)};
+        window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};
+        window.defaultLayout = ${this._escapeForInlineScript(runtimeConfig.defaultLayout)};
+        window.flowDirection = ${this._escapeForInlineScript(runtimeConfig.flowDirection)};
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
         window.initialUiState = ${this._escapeForInlineScript(initialUiState)};
-        window.showDeadColumnHints = ${this._escapeForInlineScript(showDeadColumnHints)};
-        window.combineDdlStatements = ${this._escapeForInlineScript(combineDdlStatements)};
-        window.gridStyle = ${this._escapeForInlineScript(gridStyle)};
-        window.nodeAccentPosition = ${this._escapeForInlineScript(nodeAccentPosition)};
-        window.showMinimap = ${this._escapeForInlineScript(showMinimap)};
-        window.colorblindMode = ${this._escapeForInlineScript(colorblindMode)};
-        window.maxFileSizeKB = ${this._escapeForInlineScript(maxFileSizeKB)};
-        window.maxStatements = ${this._escapeForInlineScript(maxStatements)};
-        window.deferredQueryThreshold = ${this._escapeForInlineScript(deferredQueryThreshold)};
-        window.parseTimeoutSeconds = ${this._escapeForInlineScript(parseTimeoutSeconds)};
-        window.isFirstRun = ${this._escapeForInlineScript(VisualizationPanel._isFirstRun())};
-        window.debugLogging = ${this._escapeForInlineScript(debugLogging)};
+        window.showDeadColumnHints = ${this._escapeForInlineScript(runtimeConfig.showDeadColumnHints)};
+        window.combineDdlStatements = ${this._escapeForInlineScript(runtimeConfig.combineDdlStatements)};
+        window.gridStyle = ${this._escapeForInlineScript(runtimeConfig.gridStyle)};
+        window.nodeAccentPosition = ${this._escapeForInlineScript(runtimeConfig.nodeAccentPosition)};
+        window.showMinimap = ${this._escapeForInlineScript(runtimeConfig.showMinimap)};
+        window.colorblindMode = ${this._escapeForInlineScript(runtimeConfig.colorblindMode)};
+        window.maxFileSizeKB = ${this._escapeForInlineScript(runtimeConfig.maxFileSizeKB)};
+        window.maxStatements = ${this._escapeForInlineScript(runtimeConfig.maxStatements)};
+        window.deferredQueryThreshold = ${this._escapeForInlineScript(runtimeConfig.deferredQueryThreshold)};
+        window.parseTimeoutSeconds = ${this._escapeForInlineScript(runtimeConfig.parseTimeoutSeconds)};
+        window.isFirstRun = ${this._escapeForInlineScript(isFirstRun)};
+        window.debugLogging = ${this._escapeForInlineScript(runtimeConfig.debugLogging)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();
@@ -657,6 +702,7 @@ export class VisualizationPanel {
     }
 
     public dispose() {
+        if (this._disposed) { return; }
         this._disposed = true;
 
         if (this._isPinned && this._pinId) {
