@@ -18,6 +18,25 @@ describe('workspace lineage discoverability script', () => {
         expect(script).toContain('if (warning && typeof showCopyFeedback === \'function\')');
     });
 
+    it('uses column-specific lineage edge metadata instead of marking every row in related nodes', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function collectLineageColumnRefs(paths)');
+        expect(script).toContain('addColumnRef(columnRefsByNode, edge.sourceId, metadata.sourceColumn);');
+        expect(script).toContain('addColumnRef(columnRefsByNode, edge.targetId, metadata.targetColumn);');
+        expect(script).toContain('function findColumnRow(nodeElement, columnName)');
+        expect(script).toContain("const sourceRow = findColumnRow(sourceNode, metadata.sourceColumn);");
+        expect(script).toContain("const targetRow = findColumnRow(targetNode, metadata.targetColumn);");
+        expect(script).toContain('applyColumnPathState(node, upstreamColumnRefs.get(nodeId), \'upstream\');');
+        expect(script).toContain('applyColumnPathState(node, downstreamColumnRefs.get(nodeId), \'downstream\');');
+    });
+
     it('supports keyboard navigation through expanded column rows', () => {
         const script = getWebviewScript({
             nonce: 'test',

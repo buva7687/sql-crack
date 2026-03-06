@@ -64,12 +64,12 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
             getUpstream: jest.fn((nodeId: string) => {
                 if (nodeId === 'table:orders') {
                     return createFlowResult([
-                        { id: 'table:customers', name: 'customers', type: 'table', filePath: '/repo/customers.sql' },
+                        { id: 'table:customers', name: 'customers', type: 'table', filePath: '/repo/customers.sql', lineNumber: 12 },
                     ], 1);
                 }
                 return createFlowResult([
-                    { id: 'table:customers', name: 'customers', type: 'table', filePath: '/repo/customers.sql' },
-                    { id: 'view:regions', name: 'regions', type: 'view', filePath: '/repo/regions.sql' },
+                    { id: 'table:customers', name: 'customers', type: 'table', filePath: '/repo/customers.sql', lineNumber: 12 },
+                    { id: 'view:regions', name: 'regions', type: 'view', filePath: '/repo/regions.sql', lineNumber: 27 },
                 ], 2);
             }),
             getDownstream: jest.fn(),
@@ -113,6 +113,10 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
         }));
         const sentNodes = postMessage.mock.calls[0][0].data.nodes;
         expect(sentNodes).toHaveLength(2);
+        expect(sentNodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'table:customers', lineNumber: 12 }),
+            expect.objectContaining({ id: 'view:regions', lineNumber: 27 }),
+        ]));
     });
 
     it('aggregates downstream for all table/view/cte nodes defined in a selected file', async () => {
@@ -121,12 +125,12 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
             getDownstream: jest.fn((nodeId: string) => {
                 if (nodeId === 'table:orders') {
                     return createFlowResult([
-                        { id: 'table:payments', name: 'payments', type: 'table', filePath: '/repo/payments.sql' },
+                        { id: 'table:payments', name: 'payments', type: 'table', filePath: '/repo/payments.sql', lineNumber: 33 },
                     ], 1);
                 }
                 return createFlowResult([
-                    { id: 'table:payments', name: 'payments', type: 'table', filePath: '/repo/payments.sql' },
-                    { id: 'cte:ledger', name: 'ledger', type: 'cte', filePath: '/repo/ledger.sql' },
+                    { id: 'table:payments', name: 'payments', type: 'table', filePath: '/repo/payments.sql', lineNumber: 33 },
+                    { id: 'cte:ledger', name: 'ledger', type: 'cte', filePath: '/repo/ledger.sql', lineNumber: 48 },
                 ], 3);
             }),
         };
@@ -168,5 +172,9 @@ describe('MessageHandler file-node upstream/downstream aggregation', () => {
         }));
         const sentNodes = postMessage.mock.calls[0][0].data.nodes;
         expect(sentNodes).toHaveLength(2);
+        expect(sentNodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'table:payments', lineNumber: 33 }),
+            expect.objectContaining({ id: 'cte:ledger', lineNumber: 48 }),
+        ]));
     });
 });

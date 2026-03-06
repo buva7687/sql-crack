@@ -8,6 +8,87 @@ export function getColumnLineageScriptFragment(): string {
         let selectedColumn = null;
         window.__workspaceColumnTraceActive = false;
 
+        function normalizeColumnName(columnName) {
+            return typeof columnName === 'string' ? columnName.trim().toLowerCase() : '';
+        }
+
+        function addColumnRef(columnRefsByNode, nodeId, columnName) {
+            if (!nodeId || !columnName) return;
+            const normalized = normalizeColumnName(columnName);
+            if (!normalized) return;
+            if (!columnRefsByNode.has(nodeId)) {
+                columnRefsByNode.set(nodeId, new Set());
+            }
+            columnRefsByNode.get(nodeId).add(normalized);
+        }
+
+        function collectLineageNodeIds(paths) {
+            const nodeIds = new Set();
+            if (!Array.isArray(paths)) return nodeIds;
+            paths.forEach(path => {
+                if (!path || !Array.isArray(path.nodes)) return;
+                path.nodes.forEach(node => {
+                    if (node && node.id) {
+                        nodeIds.add(node.id);
+                    }
+                });
+            });
+            return nodeIds;
+        }
+
+        function collectLineageColumnRefs(paths) {
+            const columnRefsByNode = new Map();
+            if (!Array.isArray(paths)) return columnRefsByNode;
+
+            paths.forEach(path => {
+                if (!path || !Array.isArray(path.edges)) return;
+                path.edges.forEach(edge => {
+                    const metadata = edge && edge.metadata ? edge.metadata : null;
+                    if (!metadata) return;
+                    addColumnRef(columnRefsByNode, edge.sourceId, metadata.sourceColumn);
+                    addColumnRef(columnRefsByNode, edge.targetId, metadata.targetColumn);
+                });
+            });
+
+            return columnRefsByNode;
+        }
+
+        function findColumnRow(nodeElement, columnName) {
+            if (!nodeElement || !columnName) return null;
+            const expected = normalizeColumnName(columnName);
+            const rows = nodeElement.querySelectorAll('.column-row');
+            for (const row of rows) {
+                if (normalizeColumnName(row.getAttribute('data-column-name')) === expected) {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        function applyColumnPathState(node, columnRefs, directionClass) {
+            if (!node) return;
+            node.classList.add('in-path', directionClass);
+
+            const rows = node.querySelectorAll('.column-row');
+            if (!rows.length) return;
+
+            if (!columnRefs || columnRefs.size === 0) {
+                return;
+            }
+
+            rows.forEach(row => {
+                const rowColumnName = normalizeColumnName(row.getAttribute('data-column-name'));
+                if (columnRefs.has(rowColumnName)) {
+                    row.classList.add('in-path');
+                    row.classList.remove('dimmed');
+                    const stateText = row.querySelector('.column-state');
+                    if (stateText) stateText.textContent = '●';
+                } else {
+                    row.classList.add('dimmed');
+                }
+            });
+        }
+
         function handleColumnLineageResult(data) {
             if (!data) return;
 
@@ -37,36 +118,10 @@ export function getColumnLineageScriptFragment(): string {
             const svg = document.querySelector('.lineage-graph-svg');
             if (!svg) return;
 
-            const upstreamColumns = new Set();
-            const downstreamColumns = new Set();
-
-            if (upstream && Array.isArray(upstream)) {
-                upstream.forEach(path => {
-                    if (path.nodes) {
-                        path.nodes.forEach(node => {
-                            if (node.type === 'column') {
-                                upstreamColumns.add(node.id);
-                            } else if (node.id && node.name) {
-                                upstreamColumns.add(node.id);
-                            }
-                        });
-                    }
-                });
-            }
-
-            if (downstream && Array.isArray(downstream)) {
-                downstream.forEach(path => {
-                    if (path.nodes) {
-                        path.nodes.forEach(node => {
-                            if (node.type === 'column') {
-                                downstreamColumns.add(node.id);
-                            } else if (node.id && node.name) {
-                                downstreamColumns.add(node.id);
-                            }
-                        });
-                    }
-                });
-            }
+            const upstreamNodeIds = collectLineageNodeIds(upstream);
+            const downstreamNodeIds = collectLineageNodeIds(downstream);
+            const upstreamColumnRefs = collectLineageColumnRefs(upstream);
+            const downstreamColumnRefs = collectLineageColumnRefs(downstream);
 
             const selectedNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(tableId) + '"]');
             if (selectedNode) {
@@ -83,36 +138,24 @@ export function getColumnLineageScriptFragment(): string {
                 });
             }
 
-            upstreamColumns.forEach(nodeId => {
+            upstreamNodeIds.forEach(nodeId => {
                 const node = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
                 if (node && node !== selectedNode) {
-                    node.classList.add('in-path', 'upstream');
-                    const columnRows = node.querySelectorAll('.column-row');
-                    columnRows.forEach(row => {
-                        row.classList.add('in-path');
-                        const stateText = row.querySelector('.column-state');
-                        if (stateText) stateText.textContent = '●';
-                    });
+                    applyColumnPathState(node, upstreamColumnRefs.get(nodeId), 'upstream');
                 }
             });
 
-            downstreamColumns.forEach(nodeId => {
+            downstreamNodeIds.forEach(nodeId => {
                 const node = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(nodeId) + '"]');
                 if (node && node !== selectedNode) {
-                    node.classList.add('in-path', 'downstream');
-                    const columnRows = node.querySelectorAll('.column-row');
-                    columnRows.forEach(row => {
-                        row.classList.add('in-path');
-                        const stateText = row.querySelector('.column-state');
-                        if (stateText) stateText.textContent = '●';
-                    });
+                    applyColumnPathState(node, downstreamColumnRefs.get(nodeId), 'downstream');
                 }
             });
 
             const allNodes = svg.querySelectorAll('.lineage-node');
             allNodes.forEach(node => {
                 const nodeId = node.getAttribute('data-node-id');
-                if (nodeId !== tableId && !upstreamColumns.has(nodeId) && !downstreamColumns.has(nodeId)) {
+                if (nodeId !== tableId && !upstreamNodeIds.has(nodeId) && !downstreamNodeIds.has(nodeId)) {
                     node.classList.add('dimmed');
                 }
             });
@@ -145,43 +188,41 @@ export function getColumnLineageScriptFragment(): string {
 
             if (upstream && Array.isArray(upstream)) {
                 upstream.forEach(path => {
-                    if (path.nodes) {
-                        path.nodes.forEach(node => {
-                            if (node.id && node.id !== selectedTableId) {
-                                const sourceNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(node.id) + '"]');
-                                if (sourceNode) {
-                                    const sourceColumnRows = sourceNode.querySelectorAll('.column-row');
-                                    sourceColumnRows.forEach(row => {
-                                        const sourcePos = getColumnPosition(sourceNode, row);
-                                        if (sourcePos) {
-                                            drawColumnEdge(edgeGroup, sourcePos, selectedPos, 'upstream');
-                                        }
-                                    });
-                                }
-                            }
-                        });
-                    }
+                    if (!path || !Array.isArray(path.edges)) return;
+                    path.edges.forEach(edge => {
+                        const metadata = edge && edge.metadata ? edge.metadata : null;
+                        if (!metadata || edge.targetId !== selectedTableId) return;
+                        if (normalizeColumnName(metadata.targetColumn) !== normalizeColumnName(selectedColumnName)) return;
+
+                        const sourceNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(edge.sourceId) + '"]');
+                        const sourceRow = findColumnRow(sourceNode, metadata.sourceColumn);
+                        if (!sourceNode || !sourceRow) return;
+
+                        const sourcePos = getColumnPosition(sourceNode, sourceRow);
+                        if (sourcePos) {
+                            drawColumnEdge(edgeGroup, sourcePos, selectedPos, 'upstream');
+                        }
+                    });
                 });
             }
 
             if (downstream && Array.isArray(downstream)) {
                 downstream.forEach(path => {
-                    if (path.nodes) {
-                        path.nodes.forEach(node => {
-                            if (node.id && node.id !== selectedTableId) {
-                                const targetNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(node.id) + '"]');
-                                if (targetNode) {
-                                    const targetColumnRows = targetNode.querySelectorAll('.column-row');
-                                    targetColumnRows.forEach(row => {
-                                        const targetPos = getColumnPosition(targetNode, row);
-                                        if (targetPos) {
-                                            drawColumnEdge(edgeGroup, selectedPos, targetPos, 'downstream');
-                                        }
-                                    });
-                                }
-                            }
-                        });
-                    }
+                    if (!path || !Array.isArray(path.edges)) return;
+                    path.edges.forEach(edge => {
+                        const metadata = edge && edge.metadata ? edge.metadata : null;
+                        if (!metadata || edge.sourceId !== selectedTableId) return;
+                        if (normalizeColumnName(metadata.sourceColumn) !== normalizeColumnName(selectedColumnName)) return;
+
+                        const targetNode = svg.querySelector('.lineage-node[data-node-id="' + CSS.escape(edge.targetId) + '"]');
+                        const targetRow = findColumnRow(targetNode, metadata.targetColumn);
+                        if (!targetNode || !targetRow) return;
+
+                        const targetPos = getColumnPosition(targetNode, targetRow);
+                        if (targetPos) {
+                            drawColumnEdge(edgeGroup, selectedPos, targetPos, 'downstream');
+                        }
+                    });
                 });
             }
         }

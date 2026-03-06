@@ -41,6 +41,16 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('hideColumnLineagePanel();');
         expect(rendererSource).toContain('setColumnLineageBannerVisible(false);');
         expect(rendererSource).toContain('state.focusModeEnabled = false;');
+        expect(rendererSource).toContain('if (!preserveInteractionState) {');
+    });
+
+    it('preserves interaction state when theme changes trigger a rerender', () => {
+        expect(rendererSource).toContain('capturePreservedRenderState()');
+        expect(rendererSource).toContain('restorePreservedRenderState(preservedRenderState);');
+        expect(rendererSource).toContain('setViewState(snapshot.viewState);');
+        expect(rendererSource).toContain('render(');
+        expect(rendererSource).toContain('{ preserveInteractionState: true }');
+        expect(rendererSource).toContain('selectedColumnLineageId: columnLineageRuntime.selectedColumnLineage?.id || null');
     });
 
     it('gates pulse animations behind reduced-motion preference checks', () => {

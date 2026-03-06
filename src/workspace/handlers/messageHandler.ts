@@ -906,14 +906,20 @@ export class MessageHandler {
         }
 
         // Aggregate results from all nodes
-        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
+        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string; lineNumber?: number }>();
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
             const result = flowAnalyzer.getUpstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
-                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
+                    allNodes.set(n.id, {
+                        id: n.id,
+                        name: n.name,
+                        type: n.type,
+                        filePath: n.filePath,
+                        lineNumber: n.lineNumber
+                    });
                 }
             }
             maxDepth = Math.max(maxDepth, result.depth);
@@ -964,14 +970,20 @@ export class MessageHandler {
         }
 
         // Aggregate results from all nodes
-        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string }>();
+        const allNodes = new Map<string, { id: string; name: string; type: string; filePath?: string; lineNumber?: number }>();
         let maxDepth = 0;
 
         for (const nid of nodeIds) {
             const result = flowAnalyzer.getDownstream(nid, { maxDepth: depth, excludeExternal: true });
             for (const n of result.nodes) {
                 if (!allNodes.has(n.id)) {
-                    allNodes.set(n.id, { id: n.id, name: n.name, type: n.type, filePath: n.filePath });
+                    allNodes.set(n.id, {
+                        id: n.id,
+                        name: n.name,
+                        type: n.type,
+                        filePath: n.filePath,
+                        lineNumber: n.lineNumber
+                    });
                 }
             }
             maxDepth = Math.max(maxDepth, result.depth);
