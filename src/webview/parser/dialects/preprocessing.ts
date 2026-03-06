@@ -866,11 +866,15 @@ export function maskStringsAndComments(sql: string): string {
             continue;
         }
         if (chars[i] === '#') {
-            while (i < chars.length && chars[i] !== '\n') {
-                chars[i] = ' ';
-                i++;
+            const next = i + 1 < chars.length ? chars[i + 1] : '';
+            const isIdentChar = /[a-zA-Z0-9_]/.test(next);
+            if (!isIdentChar) {
+                while (i < chars.length && chars[i] !== '\n') {
+                    chars[i] = ' ';
+                    i++;
+                }
+                continue;
             }
-            continue;
         }
         if (chars[i] === '\'') {
             chars[i] = ' ';

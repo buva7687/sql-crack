@@ -23,7 +23,7 @@ export function stripLeadingComments(sql: string): string {
             changed = true;
         }
 
-        while (result.startsWith('#')) {
+        while (result.startsWith('#') && !/^#[a-zA-Z0-9_]/.test(result)) {
             const newlineIdx = result.indexOf('\n');
             if (newlineIdx === -1) {
                 return '';
@@ -123,7 +123,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 i++;
                 continue;
             }
-            if (char === '#') {
+            if (char === '#' && !isIdentifierChar(nextChar)) {
                 inLineComment = true;
                 current += char;
                 continue;

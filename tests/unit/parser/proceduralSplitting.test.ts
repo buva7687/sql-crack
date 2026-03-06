@@ -330,4 +330,30 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
             expect(statements.length).toBe(2);
         });
     });
+
+    describe('Redshift/SQL Server temp table names with # prefix', () => {
+        it('does not treat #tablename as a line comment', () => {
+            const sql = `
+                DROP TABLE IF EXISTS #mytable;
+                CREATE TABLE #mytable AS
+                SELECT a.amount_1 FROM myschema.src AS a;
+                INSERT INTO myschema.target SELECT * FROM #mytable WHERE amount_1 > 0;
+            `;
+            const statements = splitSqlStatements(sql);
+            expect(statements.length).toBe(3);
+            expect(statements[0]).toContain('#mytable');
+            expect(statements[1]).toContain('CREATE TABLE #mytable');
+            expect(statements[2]).toContain('#mytable');
+        });
+
+        it('still treats standalone # as a line comment', () => {
+            const sql = `
+                # this is a comment
+                SELECT 1;
+            `;
+            const statements = splitSqlStatements(sql);
+            expect(statements.length).toBe(1);
+            expect(statements[0]).toContain('SELECT 1');
+        });
+    });
 });
