@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-03-06
+
+### Fixed
+
+- **Redshift/SQL Server `#temp` table names parsed as comments** ([#63](https://github.com/buva7687/sql-crack/issues/63)): The `#` character was unconditionally treated as a MySQL-style line comment, breaking parsing of temp tables like `#mytable`. Now `#` is only a comment when not followed by an identifier character. Applied across all comment-stripping code paths (splitting, preprocessing, line tracking, Jinja preprocessor).
+- **Impact analysis broken for views**: The impact form always sent `type: 'table'` regardless of the selected item. Views in the lineage graph have `view:` prefixed IDs and were never found. The form now reads the actual `data-type` attribute, and the impact analyzer resolves both `view:` and `table:` node IDs with fallback.
+- **Table-mode cross-contamination between views in same file**: When a file defines multiple views, all views were linked to all referenced tables from the entire file. References are now scoped per view using `statementIndex` matching (with line-range fallback).
+- **Reference dedup drops schema-distinct refs on same line**: Dedup key was `tableName|referenceType|lineNumber`, so `dbo.users` and `public.users` on the same line were treated as duplicates. Key now includes schema.
+- **Line-number assignment anchors to block-comment lines**: Multiline block comments containing SQL keywords caused nodes to anchor to comment lines. `extractKeywordLineNumbers()` now strips multiline comments while preserving line structure.
+- **Force layout treats `node.x === 0` as unset**: `||` treated `0` as falsy, replacing valid zero positions with random values. Changed to `??`.
+- **Division by zero in edge path calculation**: When source and target nodes overlap (`dist === 0`), perpendicular offset calculation produced `NaN`. Added `|| 1` guard matching the existing pattern in workspace `layoutEngine.ts`.
+- **Tooltip SQL snippet hardcoded dark-only colors**: Background, border, and text colors in the SQL code snippet tooltip now use theme-aware values via `isDarkTheme`.
+- **Query index heuristic false matches**: `getQueryIndexForLine()` used a 30-character substring `.includes()` search that could match the wrong statement when queries share a prefix. Replaced with character-offset `indexOf()` search.
+- **Lineage edge dedup O(n²)**: Replaced `edges.find()` / `columnEdges.some()` linear scans with `Set<string>` for O(1) edge ID dedup in `lineageBuilder.ts`.
+- **Collapse/expand button invisible on light theme**: Button background and icon color now use `isDarkTheme` for proper contrast on both themes.
+- **Column lineage edge badge stroke invisible on light theme**: Badge stroke changed from hardcoded `white` to `config.color` (the badge's own fill color).
+- **Mermaid export embeds theme-dependent text color**: Exported Mermaid classDef styles now always use `#fff` text on saturated node fills, instead of baking in the editor's current theme (which produced invisible white-on-white text when exported from dark mode).
+- **SVG export overrides all edge colors**: Removed hardcoded `#64748b` stroke override from SVG export stylesheet so edges retain their semantic/clause-based colors.
+- **Webview message listener has no error boundary**: Wrapped the SQL Flow message handler in try-catch so a single handler error doesn't kill all subsequent message processing.
+- **Radial layout disconnected nodes overlap root**: Disconnected nodes now go to `maxLayer + 1` (outer ring) instead of layer 0 where they overlap root nodes.
+- **Deprecated `unescape()` in SVG export**: Replaced `btoa(unescape(encodeURIComponent(...)))` with `TextEncoder`-based base64 conversion.
+- **Subquery alias-stripping regex too greedy**: Narrowed to only match aliases after FROM/JOIN/comma context, preventing arbitrary word-pair collapse.
+- **SQL truncation cuts at character boundary**: Now uses `TextEncoder`/`TextDecoder` to truncate at byte boundaries, fixing multi-byte content mismatch with `Blob.size` validation.
+- **Undefined operator crash in `classifyBinaryExpression`**: Added guard against undefined operator before calling `.toUpperCase()`.
+- **Hint category/severity fields missing**: All `generateHints()` hints now include category and severity fields so performance scoring can see them.
+- **Badge positioning overlap**: Uses cumulative `badgeOffset` instead of `index * currentBadgeWidth` which caused overlap when badges differ in length.
+- **Diagnostics line offset for multi-statement files**: `parsedMessageLine` now offsets by `queryStartLine` so diagnostics point to the correct line.
+- **Theme/config changes rebuild full webview HTML**: Theme and config changes now send a `runtimeConfig` message instead of rebuilding HTML, preserving scroll position, expanded nodes, and client-side state.
+- **Code action provider missing additional-extension selectors**: Now includes additional extensions and re-registers on config changes.
+- **UNION/INTERSECT/EXCEPT node disconnected**: `processStatement` now returns the union node ID instead of the first branch's result ID.
+- **dispose() re-entrancy crash**: Added early-return guard for double-dispose.
+- **`_isFirstRun()` side effect on second call**: Result cached in local variable so globalState flip only fires once.
+- **`startLine: 0` treated as falsy**: Changed `||` to `??` for diagnostic positioning.
+- **Edge dash pattern lost after selection**: Connected-edge highlighting now restores `stroke-dasharray` on unhighlight.
+- **Column lineage payload shape mismatch**: `handleGetColumnLineage` now sends full `LineagePath` objects (with nodes/edges/depth) instead of summaries.
+- **`isFunctionFrom` index misalignment**: Slicing now uses comment-stripped SQL so regex match indices align correctly, preventing `EXTRACT(YEAR FROM ...)` from being treated as a table reference.
+- **Column lineage alias matching too loose**: Replaced `includes()`/`startsWith()` heuristics with exact identifier matching. Alias `'o'` no longer falsely matches `'orders'` against `'output'`.
+- **`findSourceColumn` phantom lineage**: Removed default passthrough fallback that created phantom lineage paths through unrelated nodes.
+- **CTE column lineage not traceable**: `parseCteOrSubqueryInternals` now creates a SELECT projection node with extracted columns, enabling column flow tracing through CTEs.
+- **Dead code**: Removed unused `getGraphViewHtml()`, empty `if (edgesAdded > 0) {}` block, and unreachable `set_op` processing block.
+
+### Improved
+
+- **ESLint** ecmaVersion upgraded from 6 to 2020.
+- **Sourcemaps** enabled for dev builds in both webpack configs.
+- **Type dependencies** `@types/d3-force` and `@types/dagre` moved to devDependencies.
+- **Test infrastructure** added `tsconfig.tests.json` for test typechecking; tests included in lint and typecheck flow.
+
+### Tests
+
+- Added 100+ regression tests across all fix areas including: statement splitting with `#temp` tables, impact analysis view routing, per-view statement scoping, schema-aware dedup, multiline block comment handling, force layout zero positions, edge path division-by-zero guard, tooltip/collapse button/badge theme awareness, query index offset search, lineage edge dedup, Mermaid export, column lineage matching, CTE internal pipelines, and message handler routing.
+
 ## [0.5.2] - 2026-03-04
 
 ### Added
