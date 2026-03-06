@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - Unreleased
+
+### Added
+
+- **Workspace command/search entry point**: Added a shared `Quick Find` command bar for the workspace panel with view-switching and search-focus shortcuts.
+- **Workspace state bootstrap helpers**: Added shared request/recovery types plus host/client bootstrap helpers for rebuild-safe workspace view restore.
+
+### Changed
+
+- **Workspace panel resilience and restore behavior**: Workspace requests now use scoped last-request-wins handling, and the panel restores persisted Impact results, graph UI state, lineage search state, and per-view scroll/zoom state across rebuilds and theme refreshes.
+- **Workspace missing-data guidance**: Lineage and Impact recovery states now render reason-aware alert cards with actionable next steps instead of raw inline error blocks.
+
+### Fixed
+
+- **Cached Impact view replay dropped as stale**: `switchToImpactView` now tracks both form and result request scopes, so a cached impact report can reopen correctly after a rebuild.
+- **Impact tab empty target state**: When no indexed tables or views are available, the Impact tab now shows a proper guided empty state instead of an empty typeahead.
+- **Workspace response payload duplication in host handler**: Extracted impact payload serialization into a dedicated helper to keep the main workspace message handler smaller and easier to maintain.
+
 ## [0.5.3] - 2026-03-06
 
 ### Fixed
