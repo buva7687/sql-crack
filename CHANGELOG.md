@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`findSourceColumn` phantom lineage**: Removed default passthrough fallback that created phantom lineage paths through unrelated nodes.
 - **CTE column lineage not traceable**: `parseCteOrSubqueryInternals` now creates a SELECT projection node with extracted columns, enabling column flow tracing through CTEs.
 - **Dead code**: Removed unused `getGraphViewHtml()`, empty `if (edgesAdded > 0) {}` block, and unreachable `set_op` processing block.
+- **Workspace column lineage overstates dependencies**: Tracing a single column visually marked every column in related nodes as in-path and drew edges to all of them. Now uses edge metadata (`sourceColumn`/`targetColumn`) to highlight and connect only the specific columns involved in the lineage, dimming unrelated columns.
+- **Lineage graph errors silently discarded**: When no lineage graph is available, the host sends an error-only `lineageGraphResult` message. The client only checked for `data.html` and ignored error payloads. Now displays the error message to the user.
+- **Lineage graph re-render leaks document listeners**: `setupLineageGraphInteractions()` added anonymous `mousemove`, `mouseup`, and `click` listeners to `document` on each render without removing the old ones. Now stores handler references and removes them before re-adding, matching the existing `keydown` handler pattern.
+- **Upstream/downstream cards navigate to line 0**: File-level upstream/downstream aggregation dropped `lineNumber` from nodes, so clickable result cards fell back to `data-line="0"`. Now preserves `lineNumber` in both `handleGetUpstream` and `handleGetDownstream`.
+- **Theme toggle resets all user interaction state**: `toggleTheme()` called `render()` which unconditionally cleared selection, focus mode, column lineage, search, and breadcrumbs. Now uses `preserveInteractionState` option to snapshot and restore all interaction state across theme-triggered re-renders.
 
 ### Improved
 
