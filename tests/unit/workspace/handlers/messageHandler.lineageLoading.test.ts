@@ -52,6 +52,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
         getIsDarkTheme: jest.fn(() => true),
         setIsDarkTheme: jest.fn(),
         getIsRebuilding: jest.fn(() => false),
+        getHasPendingIndexChanges: jest.fn(() => false),
         renderCurrentView: jest.fn(),
         getWebviewHtml: jest.fn(),
         getThemeCss: jest.fn(),
@@ -107,6 +108,52 @@ describe('MessageHandler lineage null-state rendering', () => {
         expect(postMessage).toHaveBeenCalledWith({
             command: 'impactFormResult',
             data: { html: '<div>impact-form</div>' },
+        });
+    });
+
+    it('replays a cached impact report on impact view switch and preserves the request id', async () => {
+        const report = {
+            changeType: 'modify',
+            target: { type: 'table', name: 'orders' },
+            severity: 'medium',
+            summary: { totalAffected: 1, tablesAffected: 1, viewsAffected: 0, queriesAffected: 0, filesAffected: 1 },
+            directImpacts: [{
+                node: { name: 'orders', type: 'table' },
+                reason: 'Direct dependency',
+                severity: 'medium',
+                filePath: '/tmp/orders.sql',
+                lineNumber: 12,
+            }],
+            transitiveImpacts: [],
+            suggestions: ['Review downstream consumers'],
+        };
+        const { context, postMessage, impactView } = createContext({
+            getCurrentImpactReport: jest.fn(() => report),
+            getImpactView: jest.fn(() => ({
+                ...impactView,
+                generateImpactReport: jest.fn(() => '<div>impact-report</div>'),
+            })),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchToImpactView', requestId: 42 } as any);
+
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'impactResult',
+            data: expect.objectContaining({
+                html: '<div>impact-report</div>',
+                requestId: 42,
+                report: expect.objectContaining({
+                    changeType: 'modify',
+                    severity: 'medium',
+                    directImpacts: [
+                        expect.objectContaining({
+                            name: 'orders',
+                            reason: 'Direct dependency',
+                        }),
+                    ],
+                }),
+            }),
         });
     });
 });

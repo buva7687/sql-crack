@@ -5,11 +5,15 @@ export function getVisualLineageSearchScriptFragment(): string {
     return `
         // ========== Visual Lineage Search Setup ==========
         let lineageTypeFilter = 'all';
+        const savedLineageSearchState = typeof getPersistedLineageSearchState === 'function'
+            ? (getPersistedLineageSearchState() || {})
+            : {};
         let lineageSearchState = {
             query: '',
             typeFilter: 'all',
             sort: 'connected',
-            showAllTables: false
+            showAllTables: false,
+            ...savedLineageSearchState
         };
 
         function captureLineageSearchState() {
@@ -31,6 +35,9 @@ export function getVisualLineageSearchScriptFragment(): string {
                 sort: nextSort,
                 showAllTables
             };
+            if (typeof persistLineageSearchState === 'function') {
+                persistLineageSearchState(lineageSearchState);
+            }
 
             return lineageSearchState;
         }
@@ -52,13 +59,73 @@ export function getVisualLineageSearchScriptFragment(): string {
             let lineageFilterDebounceTimer = null;
             const lineageFilterDebounceMs = 180;
 
-            function persistLineageSearchState() {
+            function storeLineageSearchState() {
                 lineageSearchState = {
                     query: searchInput ? (searchInput.value || '') : lineageSearchState.query,
                     typeFilter: lineageTypeFilter || 'all',
                     sort: sortSelect ? (sortSelect.value || 'connected') : lineageSearchState.sort,
                     showAllTables
                 };
+                if (typeof persistLineageSearchState === 'function') {
+                    persistLineageSearchState(lineageSearchState);
+                }
+            }
+
+            function scoreLineageMatch(name, query) {
+                const target = (name || '').toLowerCase();
+                const needle = (query || '').trim().toLowerCase();
+                if (!needle) {
+                    return { score: 1, indices: [] };
+                }
+                if (target === needle) {
+                    return { score: 2000, indices: Array.from({ length: needle.length }, (_, index) => index) };
+                }
+                if (target.startsWith(needle)) {
+                    return { score: 1400 - target.length, indices: Array.from({ length: needle.length }, (_, index) => index) };
+                }
+                const containsIndex = target.indexOf(needle);
+                if (containsIndex >= 0) {
+                    return {
+                        score: 1100 - containsIndex,
+                        indices: Array.from({ length: needle.length }, (_, index) => containsIndex + index)
+                    };
+                }
+
+                const indices = [];
+                let score = 0;
+                let cursor = 0;
+                for (let i = 0; i < needle.length; i++) {
+                    const idx = target.indexOf(needle[i], cursor);
+                    if (idx < 0) {
+                        return null;
+                    }
+                    indices.push(idx);
+                    score += idx === cursor ? 40 : 12;
+                    if (idx === 0 || target[idx - 1] === '_' || target[idx - 1] === ' ' || target[idx - 1] === '-') {
+                        score += 28;
+                    }
+                    cursor = idx + 1;
+                }
+                return { score, indices };
+            }
+
+            function highlightLineageName(element, originalName, indices) {
+                if (!element) {
+                    return;
+                }
+                if (!indices || indices.length === 0) {
+                    element.textContent = originalName;
+                    return;
+                }
+                const matched = new Set(indices);
+                let html = '';
+                for (let index = 0; index < originalName.length; index++) {
+                    const char = originalName[index];
+                    html += matched.has(index)
+                        ? '<mark>' + escapeHtml(char) + '</mark>'
+                        : escapeHtml(char);
+                }
+                element.innerHTML = html;
             }
 
             const allowedFilters = new Set(['all', 'table', 'view']);
@@ -78,7 +145,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 const isActive = (chip.getAttribute('data-filter') || 'all') === lineageTypeFilter;
                 chip.classList.toggle('active', isActive);
             });
-            persistLineageSearchState();
+            storeLineageSearchState();
 
             function setLineageGridMode(expanded) {
                 if (tablesGrid) {
@@ -104,35 +171,23 @@ export function getVisualLineageSearchScriptFragment(): string {
                 items.forEach(item => {
                     const name = item.getAttribute('data-name') || '';
                     const type = item.getAttribute('data-type') || '';
+                    const match = scoreLineageMatch(name, searchQuery);
 
-                    const matchesSearch = !searchQuery || name.includes(searchQuery);
+                    const matchesSearch = !searchQuery || !!match;
                     const matchesType = lineageTypeFilter === 'all' || type === lineageTypeFilter;
 
                     if (matchesSearch && matchesType) {
                         item.style.display = '';
+                        item.setAttribute('data-search-score', match ? String(match.score) : '0');
                         visibleItems.push(item);
 
-                        // Highlight matching text
                         const nameEl = item.querySelector('.table-item-name');
-                        if (nameEl && searchQuery) {
-                            const originalName = nameEl.textContent || '';
-                            const lowerName = originalName.toLowerCase();
-                            const idx = lowerName.indexOf(searchQuery);
-                            if (idx >= 0) {
-                                const before = originalName.slice(0, idx);
-                                const match = originalName.slice(idx, idx + searchQuery.length);
-                                const after = originalName.slice(idx + searchQuery.length);
-                                nameEl.innerHTML = escapeHtml(before) + '<mark>' + escapeHtml(match) + '</mark>' + escapeHtml(after);
-                            } else {
-                                nameEl.textContent = originalName;
-                            }
-                        } else if (nameEl) {
-                            // Remove highlighting when no search
-                            const text = nameEl.textContent || '';
-                            nameEl.textContent = text;
+                        if (nameEl) {
+                            highlightLineageName(nameEl, name, searchQuery && match ? match.indices : []);
                         }
                     } else {
                         item.style.display = 'none';
+                        item.removeAttribute('data-search-score');
                     }
                 });
 
@@ -143,6 +198,8 @@ export function getVisualLineageSearchScriptFragment(): string {
                     const typeB = b.getAttribute('data-type') || '';
                     const totalA = Number(a.getAttribute('data-total') || '0');
                     const totalB = Number(b.getAttribute('data-total') || '0');
+                    const searchScoreA = Number(a.getAttribute('data-search-score') || '0');
+                    const searchScoreB = Number(b.getAttribute('data-search-score') || '0');
 
                     if (sortValue === 'name-asc') {
                         return nameA.localeCompare(nameB);
@@ -155,6 +212,10 @@ export function getVisualLineageSearchScriptFragment(): string {
                             return typeA.localeCompare(typeB);
                         }
                         return nameA.localeCompare(nameB);
+                    }
+
+                    if (searchQuery && searchScoreB !== searchScoreA) {
+                        return searchScoreB - searchScoreA;
                     }
 
                     if (totalB !== totalA) {
@@ -203,7 +264,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 if (!query) {
                     showAllTables = false;
                 }
-                persistLineageSearchState();
+                storeLineageSearchState();
                 scheduleLineageFilter();
             });
 
@@ -212,7 +273,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                     searchInput.value = '';
                     if (searchClear) searchClear.style.display = 'none';
                     showAllTables = false;
-                    persistLineageSearchState();
+                    storeLineageSearchState();
                     scheduleLineageFilter(true);
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
@@ -228,7 +289,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                 if (searchInput) searchInput.value = '';
                 if (searchClear) searchClear.style.display = 'none';
                 showAllTables = false;
-                persistLineageSearchState();
+                storeLineageSearchState();
                 scheduleLineageFilter(true);
                 searchInput?.focus();
             });
@@ -241,19 +302,19 @@ export function getVisualLineageSearchScriptFragment(): string {
                     if (lineageTypeFilter === 'all' && !(searchInput?.value || '').trim()) {
                         showAllTables = false;
                     }
-                    persistLineageSearchState();
+                    storeLineageSearchState();
                     scheduleLineageFilter(true);
                 });
             });
 
             sortSelect?.addEventListener('change', () => {
-                persistLineageSearchState();
+                storeLineageSearchState();
                 scheduleLineageFilter(true);
             });
 
             showAllBtn?.addEventListener('click', () => {
                 showAllTables = true;
-                persistLineageSearchState();
+                storeLineageSearchState();
                 scheduleLineageFilter(true);
             });
 
@@ -289,7 +350,7 @@ export function getVisualLineageSearchScriptFragment(): string {
             if (nodeType) {
                 request.nodeType = nodeType;
             }
-            vscode.postMessage(request);
+            postWorkspaceMessage(request);
         }
     `;
 }

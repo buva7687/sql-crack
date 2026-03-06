@@ -29,7 +29,7 @@ export function getNodeInteractionsScriptFragment(): string {
                         if (typeof switchToView === 'function') {
                             switchToView('lineage', false, nodeLabel, nodeType);
                         }
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             nodeLabel: nodeLabel,

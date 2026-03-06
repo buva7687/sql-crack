@@ -120,14 +120,14 @@ export function getContextMenuScriptFragment(): string {
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading upstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
-                            vscode.postMessage({
+                            postWorkspaceMessage({
                                 command: 'getUpstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
                                 depth: lineageDepth
                             });
                         } else {
-                            vscode.postMessage({
+                            postWorkspaceMessage({
                                 command: 'getUpstream',
                                 nodeId: contextMenuTarget.id,
                                 depth: lineageDepth
@@ -139,14 +139,14 @@ export function getContextMenuScriptFragment(): string {
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading downstream dependencies...</div></div>';
                         if (contextMenuTarget.type === 'file') {
-                            vscode.postMessage({
+                            postWorkspaceMessage({
                                 command: 'getDownstream',
                                 nodeType: 'file',
                                 filePath: contextMenuTarget.filePath,
                                 depth: lineageDepth
                             });
                         } else {
-                            vscode.postMessage({
+                            postWorkspaceMessage({
                                 command: 'getDownstream',
                                 nodeId: contextMenuTarget.id,
                                 depth: lineageDepth
@@ -158,7 +158,8 @@ export function getContextMenuScriptFragment(): string {
                         if (lineageTitle) lineageTitle.textContent = 'Impact Analysis: ' + nodeName;
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Analyzing impact...</div></div>';
                         var impactType = contextMenuTarget.type === 'view' ? 'view' : 'table';
-                        vscode.postMessage({
+                        clearPersistedImpactResult();
+                        postWorkspaceMessage({
                             command: 'analyzeImpact',
                             type: impactType,
                             name: nodeName,
@@ -171,7 +172,7 @@ export function getContextMenuScriptFragment(): string {
                         if (lineageContent) lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading table details...</div></div>';
                         lineageDetailView = true;
                         updateBackButtonText();
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'exploreTable',
                             tableName: nodeName,
                             nodeId: contextMenuTarget.id || ''

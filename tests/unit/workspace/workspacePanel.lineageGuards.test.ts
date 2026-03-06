@@ -110,9 +110,21 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
             _lineageDetailNodeId: 'table:orders',
             _lineageDetailDirection: 'downstream',
             _lineageDetailExpandedNodes: ['table:orders', 'view:daily_orders'],
+            _currentImpactReport: {
+                changeType: 'modify',
+                target: { type: 'table', name: 'orders' },
+                severity: 'medium',
+                summary: { totalAffected: 1, tablesAffected: 1, viewsAffected: 0, queriesAffected: 0, filesAffected: 1 },
+                directImpacts: [],
+                transitiveImpacts: [],
+                suggestions: [],
+            },
+            _impactView: {
+                generateImpactReport: jest.fn(() => '<div>impact-report</div>'),
+            },
             _indexManager: {
                 getIndex: jest.fn(() => null),
-                getChangesSinceIndex: jest.fn(() => []),
+                getChangesSinceIndex: jest.fn(() => 0),
             },
             renderGraph: jest.fn(() => '<svg id="graph-svg"></svg>'),
         };
@@ -136,5 +148,6 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(html).toContain('const initialLineageDetailNodeId = "table:orders";');
         expect(html).toContain('const initialLineageDetailDirection = "downstream";');
         expect(html).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
+        expect(html).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
     });
 });

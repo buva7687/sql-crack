@@ -75,6 +75,24 @@ describe('ImpactView typeahead selection', () => {
         expect(html).toContain('aria-describedby="impact-analyze-hint"');
     });
 
+    it('shows an actionable zero-target state when no indexed tables or views exist', () => {
+        const emptyGraph: LineageGraph = {
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: () => [],
+            getDownstream: () => [],
+            getColumnLineage: () => [],
+        };
+        const html = new ImpactView().generateImpactForm(emptyGraph);
+
+        expect(html).toContain('No indexed impact targets yet');
+        expect(html).toContain('Refresh Index');
+        expect(html).toContain('Go to Graph');
+        expect(html).toContain('focus-impact-target');
+        expect(html).not.toContain('impact-typeahead-results');
+    });
+
     it('toggles analyze hint visibility when table selection changes', () => {
         const script = getWebviewScript({
             nonce: 'test',

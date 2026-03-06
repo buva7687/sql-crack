@@ -50,7 +50,7 @@ export function getEventDelegationScriptFragment(): string {
                         lineageDetailView = true;
                         updateBackButtonText();
                         setTimeout(() => {
-                            vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: inferredNodeId || nodeId });
+                            postWorkspaceMessage({ command: 'exploreTable', tableName: tableName, nodeId: inferredNodeId || nodeId });
                         }, 120);
                         return;
                     }
@@ -77,17 +77,17 @@ export function getEventDelegationScriptFragment(): string {
                         if (lineageTitle) lineageTitle.textContent = 'Table: ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
                         // Send nodeId if available (for views/CTEs), fallback to tableName for backward compat
-                        vscode.postMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
+                        postWorkspaceMessage({ command: 'exploreTable', tableName: tableName, nodeId: nodeId });
                         break;
                     case 'show-upstream':
                         if (lineageTitle) lineageTitle.textContent = 'Upstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
+                        postWorkspaceMessage({ command: 'getUpstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                     case 'show-downstream':
                         if (lineageTitle) lineageTitle.textContent = 'Downstream of ' + tableName;
                         lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading...</div></div>';
-                        vscode.postMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
+                        postWorkspaceMessage({ command: 'getDownstream', nodeId: nodeId || ('table:' + tableName.toLowerCase()), depth: lineageDepth });
                         break;
                 }
             });

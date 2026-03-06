@@ -65,6 +65,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
         getIsDarkTheme: jest.fn(() => true),
         setIsDarkTheme: jest.fn(),
         getIsRebuilding: jest.fn(() => false),
+        getHasPendingIndexChanges: jest.fn(() => false),
         renderCurrentView: jest.fn(),
         getWebviewHtml: jest.fn(),
         getThemeCss: jest.fn(),

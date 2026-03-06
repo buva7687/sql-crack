@@ -28,12 +28,24 @@ export class ImpactView {
         }
         tables.sort((a, b) => a.name.localeCompare(b.name));
 
+        if (tables.length === 0) {
+            return this.generateNoIndexedTargetsState();
+        }
+
         return `
             <div class="view-container view-impact">
                 <div class="view-compact-header">
                     <span class="view-icon">${ICONS.warning}</span>
                     <h3>Impact</h3>
                     <span class="view-inline-stats">${tableCount} tables, ${viewCount} views</span>
+                </div>
+                <div class="workspace-alert-card">
+                    <h3>Plan schema changes with context</h3>
+                    <p class="workspace-alert-message">Pick a table or view, choose the change type, then run impact analysis. Quick Find with Cmd/Ctrl+K can jump directly to the target field.</p>
+                    <div class="workspace-alert-actions">
+                        <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
+                        <button type="button" class="action-chip" data-workspace-command-action="focus-impact-target">Focus Target</button>
+                    </div>
                 </div>
 
                 <!-- Form -->
@@ -148,6 +160,29 @@ export class ImpactView {
                 <h3>Impact Analysis</h3>
                 <p>Select a table or view above and choose a change type to analyze the impact of modifications.</p>
                 <p class="hint">This will show you which tables, views, and files would be affected by your changes.</p>
+                <div class="workspace-alert-actions">
+                    <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
+                    <button type="button" class="action-chip" data-workspace-command-action="focus-impact-target">Open Quick Find</button>
+                </div>
+            </div>
+        `;
+    }
+
+    private generateNoIndexedTargetsState(): string {
+        return `
+            <div class="impact-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 8v4l3 3"/>
+                </svg>
+                <h3>No indexed impact targets yet</h3>
+                <p>Impact analysis needs at least one indexed table or view in the current workspace scope.</p>
+                <p class="hint">Refresh the workspace index, switch to Graph to confirm objects were discovered, or use Quick Find once indexing completes.</p>
+                <div class="workspace-alert-actions">
+                    <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
+                    <button type="button" class="action-chip" data-workspace-alert-action="show-graph">Go to Graph</button>
+                    <button type="button" class="action-chip" data-workspace-command-action="focus-impact-target">Open Quick Find</button>
+                </div>
             </div>
         `;
     }

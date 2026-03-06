@@ -11,6 +11,10 @@ export function getViewModeScriptFragment(): string {
         const navStack = [];
         // Per-view zoom/pan state preservation
         const viewStates = {};
+        const restoredViewStates = typeof getPersistedViewStates === 'function' ? getPersistedViewStates() : null;
+        if (restoredViewStates && typeof restoredViewStates === 'object') {
+            Object.assign(viewStates, restoredViewStates);
+        }
         let navigationOriginLabel = '';
         let navigationOriginType = '';
 
@@ -57,6 +61,9 @@ export function getViewModeScriptFragment(): string {
                         scrollLeft: scrollContainer.scrollLeft
                     };
                 }
+            }
+            if (typeof persistViewStates === 'function') {
+                persistViewStates(viewStates);
             }
         }
 
@@ -372,9 +379,9 @@ export function getViewModeScriptFragment(): string {
                 // Only send message if not restoring view (skipMessage = false by default)
                 if (!skipMessage) {
                     if (view === 'lineage') {
-                        vscode.postMessage({ command: 'switchToLineageView' });
+                        postWorkspaceMessage({ command: 'switchToLineageView' });
                     } else if (view === 'impact') {
-                        vscode.postMessage({ command: 'switchToImpactView' });
+                        postWorkspaceMessage({ command: 'switchToImpactView' });
                     }
                 }
             }
@@ -418,10 +425,10 @@ export function getViewModeScriptFragment(): string {
                 updateBackButtonText();
                 if (currentViewMode === 'lineage') {
                     if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                    vscode.postMessage({ command: 'switchToLineageView' });
+                    postWorkspaceMessage({ command: 'switchToLineageView' });
                 } else if (currentViewMode === 'impact') {
                     if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                    postWorkspaceMessage({ command: 'switchToImpactView' });
                 }
                 updateWorkspaceBreadcrumb();
                 return;
@@ -518,7 +525,7 @@ export function getViewModeScriptFragment(): string {
                         // Restore detail graph state instead of overview
                         lineageDetailView = true;
                         updateBackButtonText();
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: initialLineageDetailNodeId,
                             direction: typeof initialLineageDetailDirection !== 'undefined' ? initialLineageDetailDirection : 'both',
@@ -526,10 +533,21 @@ export function getViewModeScriptFragment(): string {
                             expandedNodes: typeof initialLineageDetailExpandedNodes !== 'undefined' ? initialLineageDetailExpandedNodes : []
                         });
                     } else {
-                        vscode.postMessage({ command: 'switchToLineageView' });
+                        postWorkspaceMessage({ command: 'switchToLineageView' });
                     }
                 } else if (initialViewMode === 'impact') {
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                    const persistedImpact = typeof getPersistedImpactResult === 'function'
+                        ? getPersistedImpactResult()
+                        : { html: '', meta: null };
+                    if (persistedImpact.html && lineageContent) {
+                        setSafeHtml(lineageContent, persistedImpact.html);
+                        setupImpactSummaryDetails();
+                        if (typeof restoreViewState === 'function') {
+                            restoreViewState('impact');
+                        }
+                    } else {
+                        postWorkspaceMessage({ command: 'switchToImpactView' });
+                    }
                 }
             }, 0);
         }
@@ -554,7 +572,7 @@ export function getViewModeScriptFragment(): string {
                 lineageDetailView = false;
                 updateBackButtonText();
                 if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                vscode.postMessage({ command: 'switchToLineageView' });
+                postWorkspaceMessage({ command: 'switchToLineageView' });
             } else {
                 // Navigated from Graph (via "Trace in Lineage" / context menu) — go back to Graph directly
                 navStack.length = 0;

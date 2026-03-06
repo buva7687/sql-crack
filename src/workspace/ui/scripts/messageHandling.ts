@@ -51,6 +51,7 @@ export function getMessageHandlingScriptFragment(): string {
                 case 'lineageResult':
                 case 'upstreamResult':
                 case 'downstreamResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (lineageContent && message.data) {
                         const nodes = message.data.nodes || message.data.result?.nodes || [];
                         let html = '<h2>' + (message.command === 'upstreamResult' ? 'Upstream' : message.command === 'downstreamResult' ? 'Downstream' : 'Lineage') + ' Analysis</h2>';
@@ -77,15 +78,15 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'impactResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (lineageContent) {
                         const resultsDiv = document.getElementById('impact-results');
                         if (message.data?.error) {
-                            const errorHtml = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
                             if (resultsDiv) {
                                 resultsDiv.style.display = 'block';
-                                resultsDiv.innerHTML = errorHtml;
+                                showWorkspaceAlert(resultsDiv, message.data.error, message.data.reason, 'Impact analysis unavailable');
                             } else {
-                                lineageContent.innerHTML = errorHtml;
+                                showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Impact analysis unavailable');
                             }
                         } else if (message.data?.html) {
                             if (resultsDiv) {
@@ -95,6 +96,7 @@ export function getMessageHandlingScriptFragment(): string {
                                 setSafeHtml(lineageContent, message.data.html);
                             }
                             setupImpactSummaryDetails();
+                            persistImpactResult(message.data.html, message.data.report || null);
                             if (typeof restoreViewState === 'function') {
                                 restoreViewState(currentViewMode);
                             }
@@ -102,9 +104,10 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'tableDetailResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (lineageContent) {
                         if (message.data?.error) {
-                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
+                            showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Table details unavailable');
                         } else if (message.data?.html) {
                             setSafeHtml(lineageContent, message.data.html);
                             if (typeof restoreViewState === 'function') {
@@ -114,12 +117,14 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'columnLineageResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     handleColumnLineageResult(message.data);
                     break;
                 case 'columnSelectionCleared':
                     clearColumnHighlighting();
                     break;
                 case 'impactFormResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (currentViewMode !== 'impact') break;
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
@@ -130,6 +135,7 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'lineageOverviewResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (currentViewMode !== 'lineage') break;
                     if (lineageContent && message.data?.html) {
                         setSafeHtml(lineageContent, message.data.html);
@@ -140,15 +146,17 @@ export function getMessageHandlingScriptFragment(): string {
                     }
                     break;
                 case 'lineageSearchResults':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (message.data?.results) {
                         showLineageSearchResults(message.data.results);
                     }
                     break;
                 case 'lineageGraphResult':
+                    if (!isLatestWorkspaceResponse(message)) break;
                     if (message.data?.error) {
                         if (lineageContent) {
                             lineageSetupInProgress = false;
-                            lineageContent.innerHTML = '<div style="color: var(--error); padding: 20px;">' + escapeHtmlSafe(message.data.error) + '</div>';
+                            showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Lineage graph unavailable');
                             if (typeof restoreViewState === 'function') {
                                 restoreViewState(currentViewMode);
                             }
@@ -176,7 +184,7 @@ export function getMessageHandlingScriptFragment(): string {
                 case 'workspaceLineageDepthUpdated':
                     lineageDepth = normalizeLineageDepth(message.depth, lineageDepth);
                     if (currentViewMode === 'lineage' && lineageDetailView && lineageCurrentNodeId) {
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: lineageCurrentNodeId,
                             depth: lineageDepth,

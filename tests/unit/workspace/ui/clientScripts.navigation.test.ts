@@ -172,7 +172,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("if (message.data?.error) {");
-        expect(script).toContain("lineageContent.innerHTML = '<div style=\"color: var(--error); padding: 20px;\">' + escapeHtmlSafe(message.data.error) + '</div>';");
+        expect(script).toContain("showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Lineage graph unavailable');");
         expect(script).toContain('let lineageDocumentMouseMoveHandler = null;');
         expect(script).toContain('let lineageDocumentMouseUpHandler = null;');
         expect(script).toContain('let lineageDocumentClickHandler = null;');
@@ -182,6 +182,43 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("document.addEventListener('mousemove', lineageDocumentMouseMoveHandler);");
         expect(script).toContain("document.addEventListener('mouseup', lineageDocumentMouseUpHandler);");
         expect(script).toContain("document.addEventListener('click', lineageDocumentClickHandler);");
+    });
+
+    it('tracks workspace request ids across async scopes and restores cached impact html after rebuild', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'impact',
+            currentGraphMode: 'tables',
+            initialRestoreState: {
+                impact: {
+                    hasReport: true,
+                    html: '<div>impact-report</div>',
+                },
+            },
+        });
+
+        expect(script).toContain("switchToImpactView: ['impact-form', 'impact-result']");
+        expect(script).toContain("lineageResult: 'flow-result'");
+        expect(script).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
+        expect(script).toContain("persistImpactResult(message.data.html, message.data.report || null);");
+        expect(script).toContain("if (persistedImpact.html && lineageContent) {");
+    });
+
+    it('includes the shared workspace command/search overlay and recovery search actions', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const workspaceCommandBtn = document.getElementById('btn-workspace-command');");
+        expect(script).toContain("if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')");
+        expect(script).toContain("action === 'focus-current-search'");
+        expect(script).toContain("focusWorkspaceSearchTarget(currentViewMode);");
     });
 
     it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {

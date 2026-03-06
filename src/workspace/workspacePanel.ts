@@ -51,6 +51,7 @@ import {
     createEmptyWorkspaceHtml,
     createErrorHtml as createErrorStateHtml,
 } from './panel/statePages';
+import { buildWorkspaceInitialRestoreState } from './panel/viewStateBootstrap';
 import { renderWorkspaceGraphSvg } from './panel/graphSvg';
 import {
     createGraphAreaHtml,
@@ -496,6 +497,7 @@ export class WorkspacePanel {
 
             // Rebuild state
             getIsRebuilding: () => this._isRebuilding,
+            getHasPendingIndexChanges: () => this._indexManager.getChangesSinceIndex() > 0,
 
             // Callbacks
             renderCurrentView: () => this.renderCurrentView(),
@@ -687,7 +689,11 @@ export class WorkspacePanel {
             lineageLegendVisible: this._lineageLegendVisible,
             lineageDetailNodeId: this._lineageDetailNodeId,
             lineageDetailDirection: this._lineageDetailDirection,
-            lineageDetailExpandedNodes: this._lineageDetailExpandedNodes
+            lineageDetailExpandedNodes: this._lineageDetailExpandedNodes,
+            initialRestoreState: buildWorkspaceInitialRestoreState({
+                currentImpactReport: this._currentImpactReport,
+                impactView: this._impactView,
+            }),
         };
         const script = getWebviewScript(scriptParams);
 

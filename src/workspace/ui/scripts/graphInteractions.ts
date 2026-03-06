@@ -403,6 +403,19 @@ export function getGraphInteractionsScriptFragment(): string {
             button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
         }
 
+        function persistActiveGraphUiState() {
+            if (typeof persistGraphUiState !== 'function') {
+                return;
+            }
+            persistGraphUiState({
+                selectedNodeId: selectedNodeId || null,
+                focusModeEnabled: !!focusModeEnabled,
+                traceMode: traceMode || null,
+                pathStartNodeId: pathStartNodeId || null,
+                pathEndNodeId: pathEndNodeId || null
+            });
+        }
+
         function setPathEndpoint(kind, nodeId) {
             if (!nodeId) {
                 return;
@@ -417,6 +430,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_path_endpoint_set', { endpoint: kind });
             }
@@ -454,6 +468,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_path_shown', {
                     found: !!pathNodeIds && pathNodeIds.length > 0,
@@ -472,6 +487,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
         }
 
         function applyFocusMode() {
@@ -509,6 +525,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updateFocusButton();
             applyFocusMode();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_focus_mode_toggled', { enabled: !!enabled });
             }
@@ -608,6 +625,7 @@ export function getGraphInteractionsScriptFragment(): string {
             }
             applyTraceMode();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_trace_mode_changed', { mode: traceMode || 'none' });
             }
@@ -615,6 +633,7 @@ export function getGraphInteractionsScriptFragment(): string {
 
         function clearSelection() {
             selectedNodeId = null;
+            persistGraphSelectionId(null);
             document.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
             if (focusModeEnabled) {
                 setFocusMode(false);
@@ -638,6 +657,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
         }
 
         function updateGraphActionButtons() {
@@ -659,6 +679,8 @@ export function getGraphInteractionsScriptFragment(): string {
             if (!nodeId) return;
 
             selectedNodeId = nodeId;
+            persistGraphSelectionId(nodeId);
+            persistActiveGraphUiState();
             document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
             node.classList.add('node-selected');
 
@@ -842,6 +864,8 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             selectedNodeId = null;
+            persistGraphSelectionId(null);
+            persistActiveGraphUiState();
             document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
             if (selectionDetails) selectionDetails.style.display = 'none';
             if (selectionCrossLinks) selectionCrossLinks.style.display = 'none';
@@ -1569,6 +1593,42 @@ export function getGraphInteractionsScriptFragment(): string {
         applySearchHighlight();
         if (initialSearchQuery && !selectedNodeId) {
             jumpToSearchMatch(0);
+        } else if (!selectedNodeId) {
+            const persistedSelectionId = getPersistedGraphSelectionId();
+            if (persistedSelectionId) {
+                const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                    ? CSS.escape(persistedSelectionId)
+                    : persistedSelectionId.replace(/"/g, '\\"');
+                const persistedNode = document.querySelector('.node[data-id="' + escapedNodeId + '"]');
+                if (persistedNode) {
+                    updateSelectionPanel(persistedNode);
+                } else {
+                    persistGraphSelectionId(null);
+                }
+            }
+        }
+
+        const persistedGraphUiState = typeof getPersistedGraphUiState === 'function'
+            ? getPersistedGraphUiState()
+            : null;
+        if (persistedGraphUiState && typeof persistedGraphUiState === 'object') {
+            if (persistedGraphUiState.pathStartNodeId) {
+                pathStartNodeId = persistedGraphUiState.pathStartNodeId;
+            }
+            if (persistedGraphUiState.pathEndNodeId) {
+                pathEndNodeId = persistedGraphUiState.pathEndNodeId;
+            }
+            if (persistedGraphUiState.focusModeEnabled && selectedNodeId) {
+                setFocusMode(true);
+            } else if (persistedGraphUiState.traceMode === 'upstream' || persistedGraphUiState.traceMode === 'downstream') {
+                if (selectedNodeId) {
+                    setTraceMode(persistedGraphUiState.traceMode);
+                }
+            } else if (pathStartNodeId || pathEndNodeId) {
+                updatePathBuilderUi();
+                updateGraphActionButtons();
+                syncGraphContextUi();
+            }
         }
 
     `;
