@@ -7,6 +7,7 @@ export function getWorkspaceCommandBarScriptFragment(): string {
         const workspaceCommandOverlay = document.getElementById('workspace-command-overlay');
         const workspaceCommandInput = document.getElementById('workspace-command-input');
         const workspaceCommandResults = document.getElementById('workspace-command-results');
+        let pendingWorkspaceSearchFocus = '';
 
         function focusWorkspaceSearchTarget(preferredView) {
             const targetView = preferredView || currentViewMode;
@@ -34,16 +35,55 @@ export function getWorkspaceCommandBarScriptFragment(): string {
             return false;
         }
 
+        function flushPendingWorkspaceSearchFocus(targetView) {
+            if (!targetView || pendingWorkspaceSearchFocus !== targetView) {
+                return;
+            }
+
+            requestAnimationFrame(() => {
+                if (focusWorkspaceSearchTarget(targetView)) {
+                    pendingWorkspaceSearchFocus = '';
+                }
+            });
+        }
+
+        function requestWorkspaceSearchFocus(targetView) {
+            const normalizedTargetView = targetView || currentViewMode;
+            if (normalizedTargetView === 'graph') {
+                pendingWorkspaceSearchFocus = '';
+                return focusWorkspaceSearchTarget('graph');
+            }
+
+            pendingWorkspaceSearchFocus = normalizedTargetView;
+
+            if (currentViewMode === normalizedTargetView && lineageDetailView && typeof restoreWorkspaceViewRoot === 'function') {
+                restoreWorkspaceViewRoot(normalizedTargetView);
+                return true;
+            }
+
+            if (currentViewMode !== normalizedTargetView) {
+                switchToView(normalizedTargetView);
+                return true;
+            }
+
+            if (focusWorkspaceSearchTarget(normalizedTargetView)) {
+                pendingWorkspaceSearchFocus = '';
+                return true;
+            }
+
+            return false;
+        }
+
         function getWorkspaceCommandItems() {
             return [
-                { id: 'focus-search', label: 'Focus current view search', keywords: 'search find focus', action: () => focusWorkspaceSearchTarget(currentViewMode) },
+                { id: 'focus-search', label: 'Focus current view search', keywords: 'search find focus', action: () => requestWorkspaceSearchFocus(currentViewMode) },
                 { id: 'switch-graph', label: 'Switch to Graph view', keywords: 'graph dependencies files tables', action: () => switchToView('graph') },
                 { id: 'switch-lineage', label: 'Switch to Lineage view', keywords: 'lineage trace dependencies upstream downstream', action: () => switchToView('lineage') },
                 { id: 'switch-impact', label: 'Switch to Impact view', keywords: 'impact analysis schema change', action: () => switchToView('impact') },
                 { id: 'refresh-index', label: 'Refresh workspace index', keywords: 'refresh reindex rebuild', action: () => refresh() },
-                { id: 'focus-graph-search', label: 'Focus Graph search', keywords: 'graph search nodes', action: () => { switchToView('graph'); setTimeout(() => focusWorkspaceSearchTarget('graph'), 0); } },
-                { id: 'focus-lineage-search', label: 'Focus Lineage search', keywords: 'lineage search table view', action: () => { switchToView('lineage'); setTimeout(() => focusWorkspaceSearchTarget('lineage'), 0); } },
-                { id: 'focus-impact-target', label: 'Focus Impact target search', keywords: 'impact search table view', action: () => { switchToView('impact'); setTimeout(() => focusWorkspaceSearchTarget('impact'), 0); } },
+                { id: 'focus-graph-search', label: 'Focus Graph search', keywords: 'graph search nodes', action: () => requestWorkspaceSearchFocus('graph') },
+                { id: 'focus-lineage-search', label: 'Focus Lineage search', keywords: 'lineage search table view', action: () => requestWorkspaceSearchFocus('lineage') },
+                { id: 'focus-impact-target', label: 'Focus Impact target search', keywords: 'impact search table view', action: () => requestWorkspaceSearchFocus('impact') },
             ];
         }
 

@@ -90,23 +90,7 @@ export function getVisualLineageSearchScriptFragment(): string {
                         indices: Array.from({ length: needle.length }, (_, index) => containsIndex + index)
                     };
                 }
-
-                const indices = [];
-                let score = 0;
-                let cursor = 0;
-                for (let i = 0; i < needle.length; i++) {
-                    const idx = target.indexOf(needle[i], cursor);
-                    if (idx < 0) {
-                        return null;
-                    }
-                    indices.push(idx);
-                    score += idx === cursor ? 40 : 12;
-                    if (idx === 0 || target[idx - 1] === '_' || target[idx - 1] === ' ' || target[idx - 1] === '-') {
-                        score += 28;
-                    }
-                    cursor = idx + 1;
-                }
-                return { score, indices };
+                return null;
             }
 
             function highlightLineageName(element, originalName, indices) {

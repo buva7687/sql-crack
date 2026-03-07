@@ -73,6 +73,8 @@ describe('ImpactView typeahead selection', () => {
         expect(html).toContain('class="form-hint"');
         expect(html).toContain('Select a table or view above to analyze impact');
         expect(html).toContain('aria-describedby="impact-analyze-hint"');
+        expect(html).not.toContain('Focus Target');
+        expect(html).not.toContain('Refresh Index');
     });
 
     it('shows an actionable zero-target state when no indexed tables or views exist', () => {

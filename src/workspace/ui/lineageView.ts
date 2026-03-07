@@ -59,10 +59,6 @@ export class LineageView {
                 <div class="workspace-alert-card">
                     <h3>Find lineage faster</h3>
                     <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Cmd/Ctrl+K to jump between views and search targets.</p>
-                    <div class="workspace-alert-actions">
-                        <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
-                        <button type="button" class="action-chip" data-workspace-command-action="focus-lineage-search">Focus Search</button>
-                    </div>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

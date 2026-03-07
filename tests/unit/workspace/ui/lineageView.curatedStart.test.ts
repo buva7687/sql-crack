@@ -121,6 +121,8 @@ describe('LineageView curated start content', () => {
         expect(html).toContain('option value="connected">Most Connected');
         expect(html).toContain('class="lineage-table-item connection-');
         expect(html).toContain('data-total="');
+        expect(html).not.toContain('data-workspace-alert-action="refresh-index"');
+        expect(html).not.toContain('data-workspace-command-action="focus-lineage-search"');
     });
 
     it('includes script support for show-all expansion and curated-item click handling', () => {

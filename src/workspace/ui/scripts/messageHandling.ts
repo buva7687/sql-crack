@@ -82,6 +82,13 @@ export function getMessageHandlingScriptFragment(): string {
                     if (lineageContent) {
                         const resultsDiv = document.getElementById('impact-results');
                         if (message.data?.error) {
+                            lineageDetailView = false;
+                            if (typeof updateBackButtonText === 'function') {
+                                updateBackButtonText();
+                            }
+                            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                                updateWorkspaceBreadcrumb();
+                            }
                             if (resultsDiv) {
                                 resultsDiv.style.display = 'block';
                                 showWorkspaceAlert(resultsDiv, message.data.error, message.data.reason, 'Impact analysis unavailable');
@@ -89,6 +96,13 @@ export function getMessageHandlingScriptFragment(): string {
                                 showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Impact analysis unavailable');
                             }
                         } else if (message.data?.html) {
+                            lineageDetailView = true;
+                            if (typeof updateBackButtonText === 'function') {
+                                updateBackButtonText();
+                            }
+                            if (typeof updateWorkspaceBreadcrumb === 'function') {
+                                updateWorkspaceBreadcrumb();
+                            }
                             if (resultsDiv) {
                                 resultsDiv.style.display = 'block';
                                 setSafeHtml(resultsDiv, message.data.html);
@@ -127,10 +141,20 @@ export function getMessageHandlingScriptFragment(): string {
                     if (!isLatestWorkspaceResponse(message)) break;
                     if (currentViewMode !== 'impact') break;
                     if (lineageContent && message.data?.html) {
+                        lineageDetailView = false;
                         setSafeHtml(lineageContent, message.data.html);
                         setupImpactForm();
+                        if (typeof updateBackButtonText === 'function') {
+                            updateBackButtonText();
+                        }
+                        if (typeof updateWorkspaceBreadcrumb === 'function') {
+                            updateWorkspaceBreadcrumb();
+                        }
                         if (typeof restoreViewState === 'function') {
                             restoreViewState(currentViewMode);
+                        }
+                        if (typeof flushPendingWorkspaceSearchFocus === 'function') {
+                            flushPendingWorkspaceSearchFocus('impact');
                         }
                     }
                     break;
@@ -142,6 +166,9 @@ export function getMessageHandlingScriptFragment(): string {
                         setupVisualLineageSearch();
                         if (typeof restoreViewState === 'function') {
                             restoreViewState(currentViewMode);
+                        }
+                        if (typeof flushPendingWorkspaceSearchFocus === 'function') {
+                            flushPendingWorkspaceSearchFocus('lineage');
                         }
                     }
                     break;

@@ -80,6 +80,8 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("if (action === 'view' && value) {");
+        expect(script).toContain("if (value === currentViewMode && lineageDetailView && value !== 'graph') {");
+        expect(script).toContain('restoreWorkspaceViewRoot(value);');
         expect(script).toContain('switchToView(value);');
         expect(script).toContain("if (action === 'origin') {");
         expect(script).toContain("switchToView('graph');");
@@ -204,6 +206,7 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
         expect(script).toContain("persistImpactResult(message.data.html, message.data.report || null);");
         expect(script).toContain("if (persistedImpact.html && lineageContent) {");
+        expect(script).toContain("lineageDetailView = true;");
     });
 
     it('includes the shared workspace command/search overlay and recovery search actions', () => {
@@ -217,8 +220,59 @@ describe('workspace clientScripts navigation context', () => {
 
         expect(script).toContain("const workspaceCommandBtn = document.getElementById('btn-workspace-command');");
         expect(script).toContain("if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')");
-        expect(script).toContain("action === 'focus-current-search'");
-        expect(script).toContain("focusWorkspaceSearchTarget(currentViewMode);");
+        expect(script).toContain('let pendingWorkspaceSearchFocus = \'\';');
+        expect(script).toContain('function requestWorkspaceSearchFocus(targetView)');
+        expect(script).toContain("restoreWorkspaceViewRoot(normalizedTargetView);");
+        expect(script).toContain("requestWorkspaceSearchFocus(currentViewMode)");
+        expect(script).toContain("flushPendingWorkspaceSearchFocus('lineage');");
+        expect(script).toContain("flushPendingWorkspaceSearchFocus('impact');");
+    });
+
+    it('treats impact reports as in-tab detail state so back returns to the impact form', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("} else if (lineageDetailView && currentViewMode === 'impact') {");
+        expect(script).toContain("Back to Impact");
+        expect(script).toContain("function restoreWorkspaceViewRoot(view = currentViewMode)");
+        expect(script).toContain("command: targetView === 'lineage' ? 'switchToLineageView' : 'switchToImpactView'");
+    });
+
+    it('keeps main lineage filtering on direct matches instead of fuzzy subsequence matches', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function scoreLineageMatch(name, query) {');
+        expect(script).toContain('const containsIndex = target.indexOf(needle);');
+        expect(script).toContain('return null;');
+        expect(script).not.toContain('indices.push(idx);');
+    });
+
+    it('conditionally zooms graph search results when a single or compact match set is selected', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function getCombinedNodeBounds(nodes)');
+        expect(script).toContain('function zoomGraphToBounds(bounds, zoomCap)');
+        expect(script).toContain('function focusSearchMatchNode(targetNode, autoZoom = true)');
+        expect(script).toContain('if (searchMatchNodeIds.length > 0 && searchMatchNodeIds.length <= 3) {');
+        expect(script).toContain("jumpToSearchMatch(0, { autoZoom: true, track: false });");
+        expect(script).toContain('focusSearchMatchNode(targetNode, options.autoZoom !== false);');
     });
 
     it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {
@@ -333,12 +387,12 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';");
         expect(script).toContain("searchCount.style.display = 'inline';");
         expect(script).toContain("searchCount.style.display = 'none';");
-        expect(script).toContain('function jumpToSearchMatch(direction)');
+        expect(script).toContain('function jumpToSearchMatch(direction, options = {})');
         expect(script).toContain("searchPrevBtn?.addEventListener('click', () => jumpToSearchMatch(-1));");
         expect(script).toContain("searchNextBtn?.addEventListener('click', () => jumpToSearchMatch(1));");
         expect(script).toContain("if (event.key === 'Enter')");
         expect(script).toContain("jumpToSearchMatch(event.shiftKey ? -1 : 1);");
-        expect(script).toContain("if (typeof scrollNodeIntoView === 'function')");
+        expect(script).toContain('focusSearchMatchNode(targetNode, options.autoZoom !== false);');
     });
 
     it('marks current search match distinctly while keeping matched nodes highlighted', () => {

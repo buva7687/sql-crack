@@ -32,7 +32,7 @@ export function getWorkspaceCommandBarStyles(): string {
             padding: 12vh 20px 20px;
             background: rgba(15, 23, 42, 0.42);
             backdrop-filter: blur(10px);
-            z-index: 40;
+            z-index: 2000;
         }
         .workspace-command-overlay.is-visible {
             display: flex;

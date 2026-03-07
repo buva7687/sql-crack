@@ -42,10 +42,6 @@ export class ImpactView {
                 <div class="workspace-alert-card">
                     <h3>Plan schema changes with context</h3>
                     <p class="workspace-alert-message">Pick a table or view, choose the change type, then run impact analysis. Quick Find with Cmd/Ctrl+K can jump directly to the target field.</p>
-                    <div class="workspace-alert-actions">
-                        <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
-                        <button type="button" class="action-chip" data-workspace-command-action="focus-impact-target">Focus Target</button>
-                    </div>
                 </div>
 
                 <!-- Form -->
