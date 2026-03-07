@@ -173,6 +173,7 @@ let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
 let userExplicitlySetDialect = false;
+let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
@@ -590,8 +591,24 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         return;
     }
 
-    currentDialect = state.currentDialect;
     userExplicitlySetDialect = state.userExplicitlySetDialect;
+
+    // If the restored dialect differs from the dialect used for the current parse,
+    // re-visualize with the restored dialect instead of applying stale view state
+    if (state.currentDialect !== lastParsedDialect && lastParsedDialect !== null) {
+        currentDialect = state.currentDialect;
+        const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+        if (dialectSelect) {
+            dialectSelect.value = currentDialect;
+        }
+        const sql = window.initialSqlCode || '';
+        if (sql) {
+            void visualize(sql);
+        }
+        return;
+    }
+
+    currentDialect = state.currentDialect;
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
@@ -1330,6 +1347,9 @@ async function visualize(sql: string): Promise<void> {
         updateAutoDetectIndicator(null);
     }
 
+    // Capture dialect before yielding — handleRefresh may reset currentDialect during the await
+    const dialectForParse = currentDialect;
+
     showGlobalLoading('Parsing SQL...');
     await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
@@ -1346,7 +1366,7 @@ async function visualize(sql: string): Promise<void> {
         };
         const result = await parseBatchAsync(
             sql,
-            currentDialect,
+            dialectForParse,
             customLimits,
             {
                 combineDdlStatements: window.combineDdlStatements === true,
@@ -1354,7 +1374,7 @@ async function visualize(sql: string): Promise<void> {
             }
         );
         const t1 = performance.now();
-        debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${currentDialect})`);
+        debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${dialectForParse})`);
         if (requestId !== parseRequestId) {
             return;
         }
@@ -1385,6 +1405,7 @@ async function visualize(sql: string): Promise<void> {
         };
     } finally {
         if (requestId === parseRequestId) {
+            lastParsedDialect = dialectForParse;
             hideGlobalLoading();
         }
     }
