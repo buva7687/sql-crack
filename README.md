@@ -266,10 +266,8 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 |---------|---------|-------------|
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
 | `sqlCrack.autoDetectDialect` | `true` | Auto-detect dialect from query content. Disable for single-dialect repos where auto-detection produces false positives. |
-| `sqlCrack.syncEditorToFlow` | `true` | Highlight nodes when clicking in editor |
 | `sqlCrack.viewLocation` | `tab` | Panel location: `beside`, `tab` |
 | `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
-| `sqlCrack.flowDirection` | `top-down` | Flow direction: `top-down`, `bottom-up` |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
 | `sqlCrack.gridStyle` | `lines` | Canvas background style: `dots`, `lines`, `none` |
@@ -314,7 +312,6 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | `sqlCrack.advanced.parseTimeoutSeconds` | `5` | Parser timeout in seconds (1-60) |
 | `sqlCrack.advanced.debugLogging` | `false` | Enable verbose SQL Crack output-channel logs |
 | `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |
-| `sqlCrack.advanced.clearCacheOnStartup` | `false` | Clear cache when VS Code starts |
 
 ---
 
@@ -345,7 +342,7 @@ For lower-level diagnostics you can also open **Help → Toggle Developer Tools 
 If the extension behaves unexpectedly:
 1. Run **"Developer: Reload Window"** from Command Palette
 2. If issues persist, disable/re-enable the extension
-3. For workspace index issues, re-run **"SQL Crack: Analyze Workspace Dependencies"** to rebuild the index, or enable **Clear cache on startup** (Advanced) and reload the window
+3. For workspace index issues, re-run **"SQL Crack: Analyze Workspace Dependencies"** to rebuild the index, or set **Cache TTL** to `0` (Advanced) and reload the window
 
 ---
 

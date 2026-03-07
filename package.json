@@ -161,12 +161,7 @@
           "default": true,
           "description": "Automatically detect SQL dialect from query content. When disabled, SQL Flow always uses the configured default dialect unless you manually switch it in the toolbar."
         },
-        "sqlCrack.syncEditorToFlow": {
-          "type": "boolean",
-          "default": true,
-          "description": "Highlight flow nodes when clicking in SQL editor"
-        },
-        "sqlCrack.viewLocation": {
+"sqlCrack.viewLocation": {
           "type": "string",
           "default": "tab",
           "enum": [
@@ -198,20 +193,7 @@
           ],
           "description": "Default graph layout direction"
         },
-        "sqlCrack.flowDirection": {
-          "type": "string",
-          "default": "top-down",
-          "enum": [
-            "top-down",
-            "bottom-up"
-          ],
-          "enumDescriptions": [
-            "Data flows from top to bottom (default)",
-            "Data flows from bottom to top (Snowflake query profile style — tables at bottom, results at top)"
-          ],
-          "description": "Direction of data flow in the visualization. Bottom-up matches Snowflake query profile style where table scans start at the bottom and results flow upward."
-        },
-        "sqlCrack.autoRefresh": {
+"sqlCrack.autoRefresh": {
           "type": "boolean",
           "default": true,
           "description": "Automatically refresh visualization when SQL file changes (with debounce)"
@@ -257,12 +239,7 @@
           "maximum": 168,
           "description": "Cache time-to-live in hours. Set to 0 to disable caching. Index will be rebuilt after this time. (Advanced)"
         },
-        "sqlCrack.advanced.clearCacheOnStartup": {
-          "type": "boolean",
-          "default": false,
-          "description": "Always rebuild index when VS Code opens the workspace. Overrides cache TTL. (Advanced)"
-        },
-        "sqlCrack.gridStyle": {
+"sqlCrack.gridStyle": {
           "type": "string",
           "default": "lines",
           "enum": [

@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Quick Find search focus from detail states**: `Focus Lineage search` and `Focus Impact target` now correctly restore the tab root first, then focus the appropriate field.
 - **Workspace response payload duplication in host handler**: Extracted impact payload serialization into a dedicated helper to keep the main workspace message handler smaller and easier to maintain.
 
+### Removed
+
+- **`sqlCrack.flowDirection` setting**: Flow direction is now always top-down. The setting added complexity for a rarely changed preference; layout direction can still be switched via the toolbar at runtime.
+- **`sqlCrack.syncEditorToFlow` setting**: Editor-to-flow cursor sync is now always enabled. There was no practical reason to disable it.
+- **`sqlCrack.advanced.clearCacheOnStartup` setting**: Redundant with setting `cacheTTLHours` to `0`, which already disables caching and forces a rebuild.
+
 ### Tests
 
 - Added regression coverage for workspace request tracking, rebuild-safe view restore, breadcrumb/detail navigation, command-bar overlay layering, Impact draft/result persistence, and Graph/Lineage search behavior.

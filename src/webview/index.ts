@@ -102,7 +102,6 @@ interface SqlCrackWebviewBootstrapConfig {
     pinId: string | null;
     viewLocation: string;
     defaultLayout: string;
-    flowDirection: string;
     persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
     initialUiState: unknown;
     showDeadColumnHints: boolean;
@@ -259,7 +258,6 @@ function normalizeRuntimeConfigUpdate(raw: unknown): SqlCrackRuntimeConfigUpdate
         autoDetectDialect: normalizeBool(payload.autoDetectDialect, (window.autoDetectDialect ?? true) !== false),
         viewLocation: normalizeEnum(payload.viewLocation, ['beside', 'tab'], window.viewLocation || 'tab') as ViewLocation,
         defaultLayout: normalizeEnum(payload.defaultLayout, ['vertical', 'horizontal', 'compact', 'force', 'radial'], window.defaultLayout || 'vertical'),
-        flowDirection: normalizeEnum(payload.flowDirection, ['top-down', 'bottom-up'], window.flowDirection || 'top-down'),
         showDeadColumnHints: normalizeBool(payload.showDeadColumnHints, (window.showDeadColumnHints ?? true) !== false),
         combineDdlStatements: normalizeBool(payload.combineDdlStatements, window.combineDdlStatements === true),
         gridStyle: normalizeEnum(payload.gridStyle, ['dots', 'lines', 'none'], window.gridStyle || 'lines'),
@@ -293,7 +291,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
         combineDdlStatements: window.combineDdlStatements === true,
         gridStyle: window.gridStyle || 'lines',
         nodeAccentPosition: window.nodeAccentPosition || 'left',
-        flowDirection: window.flowDirection || 'top-down',
         maxFileSizeKB: window.maxFileSizeKB || 100,
         maxStatements: window.maxStatements || 50,
         deferredQueryThreshold: window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD,
@@ -309,7 +306,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     window.autoDetectDialect = config.autoDetectDialect;
     window.viewLocation = config.viewLocation;
     window.defaultLayout = config.defaultLayout;
-    window.flowDirection = config.flowDirection;
     window.showDeadColumnHints = config.showDeadColumnHints;
     window.combineDdlStatements = config.combineDdlStatements;
     window.gridStyle = config.gridStyle;
@@ -349,7 +345,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
         previous.defaultDialect !== config.defaultDialect ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
-        previous.flowDirection !== config.flowDirection ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||
         previous.maxStatements !== config.maxStatements ||
         previous.deferredQueryThreshold !== config.deferredQueryThreshold;
