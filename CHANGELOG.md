@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dialect state mismatch after webview restore**: When persisted UI state restored a dialect different from the one used for parsing, the dropdown showed the wrong dialect while results came from another parser. "Switch to X" hint buttons also silently no-oped. The webview now detects the mismatch and re-parses with the correct dialect.
+- **Parse dialect race condition**: `currentDialect` could be mutated by an incoming `handleRefresh` message during the `await` between dialect selection and parsing, causing the parse to use a stale dialect value.
+- **Auto-detect disabled hint**: When dialect auto-detection is disabled and a query looks like a different dialect than the current parser, an info hint now suggests enabling `sqlCrack.autoDetectDialect`.
 - **Cached Impact view replay dropped as stale**: `switchToImpactView` now tracks both form and result request scopes, so a cached impact report can reopen correctly after a rebuild.
 - **Impact tab empty target state**: When no indexed tables or views are available, the Impact tab now shows a proper guided empty state instead of an empty typeahead.
 - **Workspace command bar layering**: Quick Find now renders above Lineage and Impact overlays instead of opening underneath them.
