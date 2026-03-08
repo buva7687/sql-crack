@@ -1,4 +1,5 @@
 import { generateWorkspaceMermaid, WORKSPACE_EXPORT_OPTIONS } from '../../../src/workspace/exportUtils';
+import { createWorkspaceExportContext } from '../../../src/workspace/exportMetadata';
 import { WorkspaceDependencyGraph } from '../../../src/workspace/types';
 
 describe('workspace exportUtils', () => {
@@ -60,5 +61,23 @@ describe('workspace exportUtils', () => {
         expect(mermaid).toContain('file_orders["orders.sql"]');
         expect(mermaid).toContain('file_orders --> table_orders');
         expect(mermaid).toContain('```');
+    });
+
+    it('includes export metadata comments when context is provided', () => {
+        const context = createWorkspaceExportContext({
+            view: 'graph',
+            graphMode: 'tables',
+            scopeUri: '/repo/sql',
+            searchFilter: { query: 'orders', nodeTypes: undefined, useRegex: false, caseSensitive: false },
+            nodeCount: graph.nodes.length,
+            edgeCount: graph.edges.length,
+            exportedAt: '2026-03-07T12:34:56.000Z',
+        });
+
+        const mermaid = generateWorkspaceMermaid(graph, 'TD', context);
+
+        expect(mermaid).toContain('%% SQL Crack Workspace Export');
+        expect(mermaid).toContain('%% Graph Mode: tables');
+        expect(mermaid).toContain('%% Filters: query="orders"');
     });
 });

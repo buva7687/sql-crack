@@ -1,26 +1,25 @@
 import type { FlowEdge, FlowNode } from '../types';
+import type {
+    ExportContext,
+    ExportPreviewFormat,
+    PngExportOptions,
+    PdfExportOptions,
+    SvgExportOptions,
+} from './export/index';
+import {
+    DEFAULT_PNG_EXPORT_OPTIONS,
+    DEFAULT_PDF_EXPORT_OPTIONS,
+    DEFAULT_SVG_EXPORT_OPTIONS,
+    buildPdfExportArtifact,
+    buildPngExportArtifact,
+    buildSvgExportArtifact,
+    getRasterScale,
+    prepareSvgForExport,
+    svgToBase64,
+} from './export/index';
+import { showExportPreview } from '../ui/exportPreview';
 
-export interface ExportContext {
-    getSvg: () => SVGSVGElement | null;
-    getContainerElement: () => HTMLElement | null;
-    getCurrentNodes: () => FlowNode[];
-    getCurrentEdges: () => FlowEdge[];
-    isDarkTheme: () => boolean;
-    calculateBounds: () => { minX: number; minY: number; width: number; height: number };
-}
-
-const MAX_EXPORT_DIMENSION = 4096;
-const MAX_RASTER_DIMENSION = 4096;
-
-/** Convert a UTF-8 string to base64 without the deprecated unescape(). */
-function svgToBase64(str: string): string {
-    const bytes = new TextEncoder().encode(str);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
+export type { ExportContext } from './export/index';
 
 function showExportToast(message: string, isDarkTheme: boolean, isError = false): void {
     const existing = document.getElementById('sql-flow-export-toast');
@@ -64,98 +63,7 @@ function showExportToast(message: string, isDarkTheme: boolean, isError = false)
     }, 1500);
 }
 
-function prepareSvgForExport(
-    svgElement: SVGSVGElement,
-    calculateBounds: () => { minX: number; minY: number; width: number; height: number }
-): { svgClone: SVGSVGElement; width: number; height: number } {
-    const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
-    const bounds = calculateBounds();
-    const padding = 40;
-    const rawWidth = Math.max(1, Math.ceil(bounds.width + padding * 2));
-    const rawHeight = Math.max(1, Math.ceil(bounds.height + padding * 2));
-    const scaleDown = Math.min(1, MAX_EXPORT_DIMENSION / rawWidth, MAX_EXPORT_DIMENSION / rawHeight);
-    const width = Math.max(1, Math.floor(rawWidth * scaleDown));
-    const height = Math.max(1, Math.floor(rawHeight * scaleDown));
-
-    svgClone.setAttribute('width', String(width));
-    svgClone.setAttribute('height', String(height));
-    svgClone.setAttribute('viewBox', `${bounds.minX - padding} ${bounds.minY - padding} ${rawWidth} ${rawHeight}`);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Reset the pan/zoom transform on the main group so nodes align with the viewBox
-    const mainGroupClone = svgClone.querySelector('g');
-    if (mainGroupClone) {
-        mainGroupClone.removeAttribute('transform');
-    }
-
-    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-    style.textContent = `
-        text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .node { opacity: 1 !important; }
-        .edge { opacity: 1 !important; fill: none !important; stroke-width: 2 !important; }
-        path.edge { fill: none !important; stroke-width: 2 !important; opacity: 1 !important; }
-        .node-rect { stroke-width: 1 !important; }
-        .node-accent { opacity: 1 !important; }
-    `;
-    svgClone.insertBefore(style, svgClone.firstChild);
-
-    embedInlineStyles(svgClone, svgElement);
-
-    // Remove foreignObject elements — browsers block SVG-as-image rendering
-    // when foreignObject is present (security restriction). This affects join
-    // nodes that use foreignObject for Venn diagram icons.
-    const foreignObjects = svgClone.querySelectorAll('foreignObject');
-    foreignObjects.forEach(fo => fo.remove());
-
-    return { svgClone, width, height };
-}
-
-function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement): void {
-    let originalElement: Element | null = null;
-    const dataId = element.getAttribute('data-id');
-    if (dataId) {
-        originalElement = originalSvgElement.querySelector(`[data-id="${dataId}"]`);
-    }
-
-    if (!originalElement && element.classList && element.classList.length > 0) {
-        const firstClass = element.classList[0];
-        if (firstClass) {
-            try {
-                const escapedClass = firstClass.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
-                originalElement = originalSvgElement.querySelector(`.${escapedClass}`) ||
-                    document.querySelector(`.${escapedClass}`);
-            } catch (e) {
-                if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
-                    console.debug('[renderer] Invalid CSS selector, skipping:', e);
-                }
-            }
-        }
-    }
-
-    const styleProps = ['fill', 'stroke', 'stroke-width', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor'];
-
-    if (originalElement) {
-        const origStyle = window.getComputedStyle(originalElement);
-        styleProps.forEach(prop => {
-            const value = origStyle.getPropertyValue(prop);
-            if (value && value !== 'none' && value !== '') {
-                (element as HTMLElement).style.setProperty(prop, value);
-            }
-        });
-    }
-
-    Array.from(element.children).forEach(child => embedInlineStyles(child, originalSvgElement));
-}
-
-function getRasterScale(width: number, height: number, preferredScale = 2): number {
-    const safeWidth = Math.max(1, width);
-    const safeHeight = Math.max(1, height);
-    const widthLimitScale = MAX_RASTER_DIMENSION / safeWidth;
-    const heightLimitScale = MAX_RASTER_DIMENSION / safeHeight;
-    return Math.max(1, Math.min(preferredScale, widthLimitScale, heightLimitScale));
-}
-
-export function exportToPng(context: ExportContext): void {
+export function exportToPng(context: ExportContext, options: PngExportOptions = DEFAULT_PNG_EXPORT_OPTIONS): void {
     if (!context) {
         showExportToast('PNG export failed', false, true);
         return;
@@ -168,68 +76,12 @@ export function exportToPng(context: ExportContext): void {
     }
 
     try {
-        const { svgClone, width, height } = prepareSvgForExport(svgElement, context.calculateBounds);
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            showExportToast('PNG export failed', context.isDarkTheme(), true);
-            return;
-        }
-
-        const scale = getRasterScale(width, height);
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        ctx.scale(scale, scale);
-
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const svgUrl = URL.createObjectURL(svgBlob);
-
-        const finishExport = (img: HTMLImageElement, urlToRevoke?: string) => {
-            try {
-                ctx.drawImage(img, 0, 0);
-                if (urlToRevoke) {
-                    URL.revokeObjectURL(urlToRevoke);
-                }
-                const pngDataUrl = canvas.toDataURL('image/png');
-                const vscodeApi = (window as any).vscodeApi;
-                if (vscodeApi && vscodeApi.postMessage) {
-                    const base64Data = pngDataUrl.split(',')[1];
-                    vscodeApi.postMessage({
-                        command: 'savePng',
-                        data: base64Data,
-                        filename: `sql-flow-${Date.now()}.png`
-                    });
-                    showExportToast('Save dialog opened', context.isDarkTheme());
-                    return;
-                }
-                const a = document.createElement('a');
-                a.download = `sql-flow-${Date.now()}.png`;
-                a.href = pngDataUrl;
-                a.click();
-                showExportToast('PNG downloaded', context.isDarkTheme());
-            } catch (e) {
-                if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
-                    console.debug('[renderer] PNG export canvas draw failed:', e);
-                }
-                if (urlToRevoke) {
-                    URL.revokeObjectURL(urlToRevoke);
-                }
-                showExportToast('PNG export failed', context.isDarkTheme(), true);
+        void savePngArtifact(context, options).catch((error) => {
+            if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
+                console.debug('[renderer] PNG export failed:', error);
             }
-        };
-        const img = new Image();
-        img.onload = () => finishExport(img, svgUrl);
-        img.onerror = () => {
-            URL.revokeObjectURL(svgUrl);
-            const fallbackImg = new Image();
-            fallbackImg.onload = () => finishExport(fallbackImg);
-            fallbackImg.onerror = () => {
-                showExportToast('PNG export failed', context.isDarkTheme(), true);
-            };
-            fallbackImg.src = 'data:image/svg+xml;base64,' + svgToBase64(svgData);
-        };
-        img.src = svgUrl;
+            showExportToast('PNG export failed', context.isDarkTheme(), true);
+        });
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] PNG export failed:', e);
@@ -238,22 +90,18 @@ export function exportToPng(context: ExportContext): void {
     }
 }
 
-export function exportToSvg(context: ExportContext): void {
+export function exportToSvg(context: ExportContext, options: SvgExportOptions = DEFAULT_SVG_EXPORT_OPTIONS): void {
     const svgElement = context.getSvg() || (context.getContainerElement()?.querySelector('svg') as SVGSVGElement | null);
     if (!svgElement) {
         return;
     }
 
     try {
-        const { svgClone } = prepareSvgForExport(svgElement, context.calculateBounds);
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-        const blob = new Blob([svgData], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.download = `sql-flow-${Date.now()}.svg`;
-        a.href = url;
-        a.click();
-        URL.revokeObjectURL(url);
+        void saveSvgArtifact(context, options).catch((error) => {
+            if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
+                console.debug('[renderer] SVG export failed:', error);
+            }
+        });
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] SVG export failed:', e);
@@ -401,6 +249,99 @@ export function copyToClipboard(context: ExportContext): void {
         }
         showExportToast('PNG copy failed', context.isDarkTheme(), true);
     }
+}
+
+export function openExportPreview(
+    context: ExportContext,
+    initialFormat: ExportPreviewFormat = 'png'
+): void {
+    showExportPreview({
+        initialState: {
+            format: initialFormat,
+            png: { ...DEFAULT_PNG_EXPORT_OPTIONS },
+            svg: { ...DEFAULT_SVG_EXPORT_OPTIONS },
+            pdf: { ...DEFAULT_PDF_EXPORT_OPTIONS },
+        },
+        callbacks: {
+            buildPngPreview: (options) => buildPngExportArtifact(context, options),
+            buildSvgPreview: async (options) => buildSvgExportArtifact(context, options),
+            buildPdfPreview: (options) => buildPdfExportArtifact(context, options),
+            savePng: (options) => savePngArtifact(context, options),
+            saveSvg: async (options) => saveSvgArtifact(context, options),
+            savePdf: async (options) => savePdfArtifact(context, options),
+            isDarkTheme: context.isDarkTheme,
+        },
+    });
+}
+
+async function savePngArtifact(context: ExportContext, options: PngExportOptions): Promise<void> {
+    const artifact = await buildPngExportArtifact(context, options);
+    const vscodeApi = (window as any).vscodeApi;
+    if (vscodeApi?.postMessage) {
+        vscodeApi.postMessage({
+            command: 'savePng',
+            data: artifact.base64Data,
+            filename: `sql-flow-${Date.now()}.png`,
+        });
+        showExportToast('Save dialog opened', context.isDarkTheme());
+        return;
+    }
+
+    const link = document.createElement('a');
+    link.download = `sql-flow-${Date.now()}.png`;
+    link.href = artifact.dataUrl;
+    link.click();
+    showExportToast('PNG downloaded', context.isDarkTheme());
+}
+
+async function saveSvgArtifact(context: ExportContext, options: SvgExportOptions): Promise<void> {
+    const artifact = buildSvgExportArtifact(context, options);
+    const vscodeApi = (window as any).vscodeApi;
+    if (vscodeApi?.postMessage) {
+        vscodeApi.postMessage({
+            command: 'saveSvg',
+            data: artifact.svgData,
+            filename: `sql-flow-${Date.now()}.svg`,
+        });
+        showExportToast('Save dialog opened', context.isDarkTheme());
+        return;
+    }
+
+    const blob = new Blob([artifact.svgData], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = `sql-flow-${Date.now()}.svg`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+async function savePdfArtifact(context: ExportContext, options: PdfExportOptions): Promise<void> {
+    const artifact = await buildPdfExportArtifact(context, options);
+    const vscodeApi = (window as any).vscodeApi;
+    if (vscodeApi?.postMessage) {
+        vscodeApi.postMessage({
+            command: 'savePdf',
+            data: artifact.base64Data,
+            filename: `sql-flow-${Date.now()}.pdf`,
+        });
+        showExportToast('Save dialog opened', context.isDarkTheme());
+        return;
+    }
+
+    const binary = atob(artifact.base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = `sql-flow-${Date.now()}.pdf`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
 }
 
 function generateMermaidCode(nodes: FlowNode[], edges: FlowEdge[], _isDarkTheme: boolean): string {

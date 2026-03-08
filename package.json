@@ -161,7 +161,7 @@
           "default": true,
           "description": "Automatically detect SQL dialect from query content. When disabled, SQL Flow always uses the configured default dialect unless you manually switch it in the toolbar."
         },
-"sqlCrack.viewLocation": {
+        "sqlCrack.viewLocation": {
           "type": "string",
           "default": "tab",
           "enum": [
@@ -193,7 +193,7 @@
           ],
           "description": "Default graph layout direction"
         },
-"sqlCrack.autoRefresh": {
+        "sqlCrack.autoRefresh": {
           "type": "boolean",
           "default": true,
           "description": "Automatically refresh visualization when SQL file changes (with debounce)"
@@ -239,7 +239,7 @@
           "maximum": 168,
           "description": "Cache time-to-live in hours. Set to 0 to disable caching. Index will be rebuilt after this time. (Advanced)"
         },
-"sqlCrack.gridStyle": {
+        "sqlCrack.gridStyle": {
           "type": "string",
           "default": "lines",
           "enum": [
@@ -461,6 +461,7 @@
   "dependencies": {
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
+    "jspdf": "^4.2.0",
     "node-sql-parser": "5.4.0"
   }
 }

@@ -4,8 +4,10 @@
 import { getComponentUiColors } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
+import { disposeExportPreview } from './exportPreview';
 
 export interface ExportDropdownCallbacks {
+    onOpenExportPreview: (format: 'png' | 'svg' | 'pdf') => void;
     onExportPng: () => void;
     onExportSvg: () => void;
     onExportMermaid: () => void;
@@ -81,9 +83,10 @@ export function createExportDropdown(
     const modKey = navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+';
     const items = [
         { label: 'Copy to clipboard (PNG)', shortcut: `${modKey}C`, action: callbacks.onCopyToClipboard },
-        { label: 'Save as PNG', shortcut: `${modKey}S`, action: callbacks.onExportPng },
+        { label: 'PNG Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('png') },
+        { label: 'SVG Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('svg') },
+        { label: 'PDF Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('pdf') },
         { type: 'separator' as const },
-        { label: 'SVG', shortcut: '', action: callbacks.onExportSvg },
         { label: 'Mermaid', shortcut: '', action: callbacks.onExportMermaid },
         ...(callbacks.onCopyMermaidToClipboard ? [{ label: 'Copy Mermaid', shortcut: '', action: callbacks.onCopyMermaidToClipboard }] : []),
     ];
@@ -217,6 +220,7 @@ export function createExportDropdown(
 export function disposeExportDropdown(): void {
     exportAbortController?.abort();
     exportAbortController = null;
+    disposeExportPreview();
 }
 
 function openDropdown(): void {

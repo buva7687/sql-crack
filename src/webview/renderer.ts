@@ -149,9 +149,14 @@ import {
     copyMermaidToClipboard as copyMermaidToClipboardFeature,
     copyToClipboard as copyToClipboardFeature,
     exportToMermaid as exportToMermaidFeature,
+    openExportPreview as openExportPreviewFeature,
     exportToPng as exportToPngFeature,
     exportToSvg as exportToSvgFeature,
 } from './features/export';
+import {
+    canTraceInWorkspaceLineage as canTraceInWorkspaceLineageFeature,
+    traceInWorkspaceLineage as traceInWorkspaceLineageFeature,
+} from './features/workspaceTrace';
 import {
     clearSearchFeature,
     createSearchRuntimeState,
@@ -2560,6 +2565,10 @@ export function exportToSvg(): void {
     exportToSvgFeature(getExportFeatureContext());
 }
 
+export function openExportPreview(initialFormat: 'png' | 'svg' | 'pdf' = 'png'): void {
+    openExportPreviewFeature(getExportFeatureContext(), initialFormat);
+}
+
 export function exportToMermaid(): void {
     exportToMermaidFeature(getExportFeatureContext());
 }
@@ -3339,6 +3348,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
         isDarkTheme: state.isDarkTheme,
         node,
         onAction: handleContextMenuAction,
+        showWorkspaceTraceAction: canTraceInWorkspaceLineageFeature(node),
     });
 }
 
@@ -3390,6 +3400,11 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
             navigator.clipboard.writeText(node.label).then(() => {
                 showCopyFeedback('Node name copied!');
             });
+            break;
+        case 'trace-workspace-lineage':
+            if (!traceInWorkspaceLineageFeature(node, window.vscodeApi)) {
+                showCopyFeedback('Workspace lineage unavailable');
+            }
             break;
         case 'copy-details':
             if (node.details && node.details.length > 0) {

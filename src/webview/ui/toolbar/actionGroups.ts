@@ -261,6 +261,7 @@ function createExportGroup(
     `;
 
     const exportDropdown = createExportDropdown({
+        onOpenExportPreview: callbacks.onOpenExportPreview,
         onExportPng: callbacks.onExportPng,
         onExportSvg: callbacks.onExportSvg,
         onExportMermaid: callbacks.onExportMermaid,

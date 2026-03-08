@@ -3,6 +3,8 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
+import { WorkspacePanel } from './workspace';
+import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
     dialect: string;
@@ -349,6 +351,9 @@ export class VisualizationPanel {
                     case 'goToLine':
                         this._goToLine(message.line);
                         return;
+                    case 'traceInWorkspaceLineage':
+                        void this._traceInWorkspaceLineage(message.tableName, message.nodeType);
+                        return;
                     case 'requestFullscreen':
                         // VS Code doesn't support programmatic fullscreen, but we can maximize the panel
                         if (message.enable) {
@@ -411,6 +416,12 @@ export class VisualizationPanel {
                     case 'savePng':
                         this._savePngFile(message.data, message.filename);
                         return;
+                    case 'saveSvg':
+                        this._saveSvgFile(message.data, message.filename);
+                        return;
+                    case 'savePdf':
+                        this._savePdfFile(message.data, message.filename);
+                        return;
                 }
             },
             null,
@@ -462,6 +473,48 @@ export class VisualizationPanel {
         }
     }
 
+    private resolveWorkspaceScopeUri(): vscode.Uri | undefined {
+        const sourceUri = this._sourceDocumentUri;
+        if (sourceUri) {
+            return vscode.workspace.getWorkspaceFolder(sourceUri)?.uri;
+        }
+
+        const activeUri = vscode.window.activeTextEditor?.document.uri;
+        if (activeUri) {
+            return vscode.workspace.getWorkspaceFolder(activeUri)?.uri;
+        }
+
+        return undefined;
+    }
+
+    private normalizeWorkspaceDialect(dialect: string): WorkspaceSqlDialect {
+        if (dialect === 'SQL Server') { return 'TransactSQL'; }
+        if (dialect === 'PL/SQL') { return 'Oracle'; }
+        return dialect as WorkspaceSqlDialect;
+    }
+
+    private async _traceInWorkspaceLineage(tableName: string, nodeType: 'table' | 'view'): Promise<void> {
+        if (!VisualizationPanel._context) {
+            vscode.window.showErrorMessage('Cannot trace in workspace: extension context not available');
+            return;
+        }
+
+        await WorkspacePanel.createOrShow(
+            this._extensionUri,
+            VisualizationPanel._context,
+            this.normalizeWorkspaceDialect(this._currentOptions.dialect),
+            this.resolveWorkspaceScopeUri()
+        );
+
+        const workspacePanel = WorkspacePanel.currentPanel;
+        if (!workspacePanel) {
+            vscode.window.showErrorMessage('Could not open Workspace Dependencies panel');
+            return;
+        }
+
+        await workspacePanel.traceTableInLineage(tableName, nodeType);
+    }
+
     private _postMessage(message: SqlFlowHostMessage) {
         if (this._disposed) { return; }
         this._panel.webview.postMessage(message);
@@ -488,6 +541,47 @@ export class VisualizationPanel {
         } catch (error) {
             logger.error('Failed to save PNG', error);
             vscode.window.showErrorMessage('Failed to save PNG file');
+        }
+    }
+
+    private async _saveSvgFile(svgData: string, suggestedFilename: string) {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(suggestedFilename),
+                filters: {
+                    'SVG Images': ['svg']
+                },
+                saveLabel: 'Save SVG'
+            });
+
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, Buffer.from(svgData, 'utf8'));
+                vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
+            }
+        } catch (error) {
+            logger.error('Failed to save SVG', error);
+            vscode.window.showErrorMessage('Failed to save SVG file');
+        }
+    }
+
+    private async _savePdfFile(base64Data: string, suggestedFilename: string) {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(suggestedFilename),
+                filters: {
+                    'PDF Documents': ['pdf']
+                },
+                saveLabel: 'Save PDF'
+            });
+
+            if (uri) {
+                const buffer = Buffer.from(base64Data, 'base64');
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
+            }
+        } catch (error) {
+            logger.error('Failed to save PDF', error);
+            vscode.window.showErrorMessage('Failed to save PDF file');
         }
     }
 
