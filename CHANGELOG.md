@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- **SQL Flow export preview modal**: Added a preview-first export flow for PNG, SVG, and PDF with live option updates before saving.
+- **PDF export support**: Added PDF export in SQL Flow using `jsPDF`, including page size/orientation handling through the preview workflow.
+- **Cross-panel workspace trace**: Added `Show in Workspace Lineage` from SQL Flow table/view nodes to jump directly into the workspace lineage graph.
+- **Lineage markdown copy**: Added `Copy as Markdown` for the current workspace lineage detail graph.
+- **Workspace export metadata context**: Added shared workspace export metadata helpers so graph exports can carry consistent view/scope/filter/count information.
+
+### Changed
+
+- **SQL Flow export architecture**: Split export preparation, artifact generation, and PDF handling into modular helpers to keep the main export entry point smaller and reusable.
+- **Workspace lineage resolution**: Extracted lineage node resolution into a dedicated helper so cross-panel tracing and workspace lineage actions share one normalization path.
+- **Workspace graph export payloads**: Mermaid, JSON, DOT, SVG, and PNG save flows now use consistent export context and metadata-aware filenames/comments where appropriate.
+- **Impact export context**: Impact report exports now include workspace scope context in their payload/markdown output.
+
+### Fixed
+
+- **SQL Flow PNG preview/footer layout**: Export preview status chips and footer actions now remain visible when preview dimensions change.
+- **Export preview tab sync**: Switching between PNG, SVG, and PDF preview tabs now keeps the selected format state in sync.
+- **PDF orientation/render output**: Corrected PDF generation issues during the export-preview rollout and moved final output generation onto the `jsPDF` backend.
+- **Dark export contrast**: Dark-background SQL Flow exports now keep flow arrows/edges visible with stronger export-time contrast overrides.
+- **Workspace share/export completeness**: Workspace graph exports now include metadata blocks/comments instead of exporting context-free payloads.
+
+### Tests
+
+- Added regression coverage for export preview wiring, PDF artifact generation, cross-panel workspace trace resolution, workspace graph export metadata, lineage markdown export, and lineage header export actions.
+
 ## [0.5.6] - 2026-03-10
 
 ### Fixed
