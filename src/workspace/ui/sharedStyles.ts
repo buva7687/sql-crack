@@ -6,6 +6,7 @@
 import {
     getCssVariables,
     getBaseStyles,
+    getWorkspaceCommandBarStyles,
     getContextMenuStyles,
     getLineagePanelStyles,
     getSharedViewStyles,
@@ -23,6 +24,7 @@ import {
 export {
     getCssVariables,
     getBaseStyles,
+    getWorkspaceCommandBarStyles,
     getContextMenuStyles,
     getLineagePanelStyles,
     getSharedViewStyles,
@@ -44,6 +46,7 @@ export function getWebviewStyles(dark: boolean = true, isHighContrast: boolean =
     return [
         getCssVariables(dark, isHighContrast),
         getBaseStyles(),
+        getWorkspaceCommandBarStyles(),
         getContextMenuStyles(),
         getLineagePanelStyles(),
         getSharedViewStyles(),

@@ -106,6 +106,10 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             </div>
 
             <div class="header-right">
+                <button class="workspace-command-btn" id="btn-workspace-command" type="button" title="Open workspace commands (Ctrl/Cmd+K)" aria-label="Open workspace command search">
+                    <span>Quick Find</span>
+                    <kbd>${process.platform === 'darwin' ? 'Cmd+K' : 'Ctrl+K'}</kbd>
+                </button>
                 <div class="search-box">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
                         <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
@@ -254,6 +258,18 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
         </div>
 
         <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+        <div class="workspace-command-overlay" id="workspace-command-overlay" aria-hidden="true">
+            <div class="workspace-command-dialog" role="dialog" aria-modal="true" aria-label="Workspace command search">
+                <input
+                    type="text"
+                    id="workspace-command-input"
+                    class="workspace-command-input"
+                    placeholder="Search commands, views, and search targets..."
+                    autocomplete="off">
+                <div class="workspace-command-results" id="workspace-command-results"></div>
+            </div>
+        </div>
 
         <!-- Context Menu -->
         <div id="context-menu" class="context-menu">

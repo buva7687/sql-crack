@@ -17,8 +17,7 @@ function ensureGraphReadyForExport(graph: WorkspaceDependencyGraph): boolean {
 }
 
 function getFlowDirection(): 'TD' | 'BT' {
-    const config = vscode.workspace.getConfiguration('sqlCrack');
-    return config.get<string>('flowDirection') === 'bottom-up' ? 'BT' : 'TD';
+    return 'TD';
 }
 
 async function saveTextContent(

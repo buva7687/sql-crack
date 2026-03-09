@@ -21,6 +21,7 @@ import {
   validateSql,
   splitSqlStatements,
 } from '../../../src/webview/sqlParser';
+import type { SqlDialect } from '../../../src/webview/types/parser';
 
 describe('SQL Parser', () => {
   describe('validateSql', () => {
@@ -904,6 +905,35 @@ FROOM orders;`;
       const result = parseSqlBatch('', 'MySQL');
 
       expect(result.queries.length).toBe(0);
+    });
+
+    it('parses Redshift temp-table batches without zero-node recovery failures', () => {
+      const sql = `
+DROP TABLE IF EXISTS #mytable;
+CREATE TABLE #mytable
+AS
+SELECT
+  a.amount_1
+  ,a.amount_2
+  ,a.amount_5
+  ,a.amount_6
+  ,a.amount_7
+  ,a.amount_8
+  ,a.amount_9
+FROM myschema.anothertable AS a
+;
+
+insert into myschema.targettable
+select * FROM #mytable
+WHERE amount_1 > 0
+;
+`;
+      const result = parseSqlBatch(sql, 'Redshift' as SqlDialect);
+
+      expect(result.queries).toHaveLength(3);
+      expect(result.queries.every(query => query.nodes.length > 0)).toBe(true);
+      expect(result.queries.every(query => !query.error)).toBe(true);
+      expect(result.queries.every(query => !query.partial)).toBe(true);
     });
 
     it('returns validationError when SQL exceeds size limit but still parses partial', () => {

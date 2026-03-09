@@ -151,6 +151,23 @@ describe('DDL visualization', () => {
         expect(resultNode).toBeDefined();
     });
 
+    it('renders Redshift temp-table DDL with # identifiers without falling back', () => {
+        const dropResult = parseSql('DROP TABLE IF EXISTS #mytable', 'Redshift' as SqlDialect);
+        const createResult = parseSql(
+            'CREATE TABLE #mytable AS SELECT * FROM myschema.anothertable',
+            'Redshift' as SqlDialect
+        );
+
+        expect(dropResult.error).toBeUndefined();
+        expect(dropResult.partial).toBeUndefined();
+        expect(dropResult.nodes.find((node: any) => node.label === 'DROP TABLE #mytable')).toBeDefined();
+
+        expect(createResult.error).toBeUndefined();
+        expect(createResult.partial).toBeUndefined();
+        expect(createResult.nodes.find((node: any) => node.label === 'TABLE #mytable')).toBeDefined();
+        expect(createResult.nodes.find((node: any) => node.type === 'table' && /anothertable/i.test(node.label))).toBeDefined();
+    });
+
     it('includes TRUNCATE in merged DDL batches', () => {
         const sql = `
             CREATE TABLE orders (id INT);

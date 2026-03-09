@@ -77,6 +77,56 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
 }
 
 /**
+ * Quote SQL Server/Redshift-style temp table identifiers for parser compatibility.
+ *
+ * The bundled parser rejects bare identifiers like #temp / ##temp in DDL and DML,
+ * even though Redshift and T-SQL accept them for temporary tables. Rewriting them
+ * to quoted identifiers preserves the logical object name while allowing structural
+ * parsing to proceed.
+ */
+export function preprocessHashTempTableIdentifiers(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Redshift' && dialect !== 'TransactSQL') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const matches: Array<{ start: number; end: number; value: string }> = [];
+    const tempIdentifierRegex = /##?[A-Za-z0-9_]+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = tempIdentifierRegex.exec(masked)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const before = start > 0 ? masked[start - 1] : '';
+        const after = end < masked.length ? masked[end] : '';
+
+        // Skip comment markers and embedded tokens such as foo#bar.
+        if (before && /[A-Za-z0-9_$#]/.test(before)) {
+            continue;
+        }
+        if (after && /[A-Za-z0-9_$]/.test(after)) {
+            continue;
+        }
+
+        matches.push({ start, end, value: sql.substring(start, end) });
+    }
+
+    if (matches.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const current = matches[i];
+        result = result.substring(0, current.start)
+            + `"${current.value}"`
+            + result.substring(current.end);
+    }
+
+    return result;
+}
+
+/**
  * Strip `FILTER (WHERE ...)` clauses from aggregate/window functions.
  *
  * FILTER is valid SQL:2003 syntax supported by PostgreSQL, SQLite, and others,
@@ -2025,6 +2075,9 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: s
 
     const postgres = preprocessPostgresSyntax(result, dialect);
     if (postgres !== null) { result = postgres; }
+
+    const tempTables = preprocessHashTempTableIdentifiers(result, dialect);
+    if (tempTables !== null) { result = tempTables; }
 
     const groupingSets = rewriteGroupingSets(result);
     if (groupingSets !== null) { result = groupingSets; }

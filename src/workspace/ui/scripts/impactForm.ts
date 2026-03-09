@@ -14,13 +14,32 @@ export function getImpactFormScriptFragment(): string {
             const selectedClear = document.getElementById('impact-selected-clear');
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
+            const savedDraft = typeof getPersistedImpactDraft === 'function' ? getPersistedImpactDraft() : null;
             let impactTypeaheadDebounceTimer = null;
             const impactTypeaheadDebounceMs = 180;
+
+            function getActiveChangeType() {
+                const activeButton = document.querySelector('.change-type-btn.active');
+                return activeButton?.getAttribute('data-value') || 'modify';
+            }
+
+            function persistDraftState() {
+                if (typeof persistImpactDraft !== 'function' || !tableIdInput) {
+                    return;
+                }
+                persistImpactDraft({
+                    tableId: tableIdInput.value || '',
+                    tableName: tableIdInput.dataset.name || '',
+                    tableType: tableIdInput.dataset.type || '',
+                    changeType: getActiveChangeType()
+                });
+            }
 
             changeTypeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     changeTypeButtons.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                    persistDraftState();
                 });
             });
 
@@ -67,6 +86,7 @@ export function getImpactFormScriptFragment(): string {
                     selectedLabel.textContent = '';
                 }
                 updateAnalyzeButtonState();
+                persistDraftState();
             }
 
             function selectTypeaheadItem(item) {
@@ -95,6 +115,7 @@ export function getImpactFormScriptFragment(): string {
                 }
                 closeTypeaheadResults();
                 updateAnalyzeButtonState();
+                persistDraftState();
             }
 
             function filterTypeaheadResults() {
@@ -199,13 +220,40 @@ export function getImpactFormScriptFragment(): string {
                         resultsDiv.innerHTML = '<div class="skeleton-loader"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
                     }
 
-                    vscode.postMessage({
+                    persistDraftState();
+                    clearPersistedImpactResult();
+                    postWorkspaceMessage({
                         command: 'analyzeImpact',
                         type: selectedType,
                         name: tableName,
                         changeType: changeType
                     });
                 });
+            }
+
+            if (savedDraft && typeof savedDraft === 'object') {
+                const savedChangeType = savedDraft.changeType || 'modify';
+                changeTypeButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.getAttribute('data-value') === savedChangeType);
+                });
+
+                const savedTableId = savedDraft.tableId || '';
+                const savedTableName = savedDraft.tableName || '';
+                const savedTableType = savedDraft.tableType || '';
+                if (savedTableId && savedTableName && tableIdInput) {
+                    tableIdInput.value = savedTableId;
+                    tableIdInput.dataset.name = savedTableName;
+                    tableIdInput.dataset.type = savedTableType;
+                    if (tableInput) {
+                        tableInput.value = savedTableName;
+                    }
+                    if (selectedBadge) {
+                        selectedBadge.style.display = 'inline-flex';
+                    }
+                    if (selectedLabel) {
+                        selectedLabel.textContent = savedTableName + (savedTableType ? ' (' + savedTableType + ')' : '');
+                    }
+                }
             }
 
             updateAnalyzeButtonState();

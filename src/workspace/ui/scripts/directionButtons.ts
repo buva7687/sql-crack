@@ -17,7 +17,7 @@ export function getDirectionButtonsScriptFragment(): string {
                             lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
                         }
                         lineageCurrentDirection = direction;
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
@@ -30,4 +30,3 @@ export function getDirectionButtonsScriptFragment(): string {
         }
     `;
 }
-

@@ -235,10 +235,6 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain("get<string>('defaultLayout') || 'vertical'");
         });
 
-        it('reads flow direction setting', () => {
-            expect(source).toContain("get<string>('flowDirection') || 'top-down'");
-        });
-
         it('reads advanced limits with fallbacks', () => {
             expect(source).toContain('normalizeAdvancedLimit');
             expect(source).toContain('maxFileSizeKB');
@@ -306,7 +302,6 @@ describe('visualizationPanel.ts', () => {
                 'pinId',
                 'viewLocation',
                 'defaultLayout',
-                'flowDirection',
                 'persistedPinnedTabs',
                 'initialUiState',
                 'showDeadColumnHints',

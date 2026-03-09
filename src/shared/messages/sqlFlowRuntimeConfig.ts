@@ -9,7 +9,6 @@ export interface SqlFlowRuntimeConfig {
     autoDetectDialect: boolean;
     viewLocation: ViewLocation;
     defaultLayout: string;
-    flowDirection: string;
     showDeadColumnHints: boolean;
     combineDdlStatements: boolean;
     gridStyle: string;

@@ -309,6 +309,41 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
         });
     });
 
+    describe('T-SQL Temp Tables (issue #65)', () => {
+        it('should preserve #temptable names and not strip them as comments', () => {
+            const sql = `
+                DROP TABLE IF EXISTS #mytable;
+                CREATE TABLE #mytable AS
+                SELECT a.amount_1, a.amount_2
+                FROM myschema.anothertable AS a;
+
+                INSERT INTO myschema.targettable
+                SELECT * FROM #mytable WHERE amount_1 > 0;
+            `;
+            const result = parseSql(sql, 'TransactSQL' as SqlDialect);
+
+            // Should not be stuck / should return nodes
+            expect(result.nodes.length).toBeGreaterThan(0);
+
+            const labels = result.nodes.map((n: any) => n.label);
+            // #mytable should appear as a recognized table, not be stripped as a comment
+            const hasTemp = labels.some((l: string) => l.includes('mytable'));
+            expect(hasTemp).toBe(true);
+        });
+
+        it('should still strip actual # comments (MySQL style)', () => {
+            const sql = 'SELECT * FROM users # this is a comment\nWHERE id = 1';
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
+
+            expect(result.nodes.length).toBeGreaterThan(0);
+            const labels = result.nodes.map((n: any) => n.label);
+            expect(labels).toContain('users');
+            // The comment text should NOT appear as a table
+            expect(labels).not.toContain('this');
+            expect(labels).not.toContain('comment');
+        });
+    });
+
     describe('Valid SQL Should Not Use Fallback', () => {
         it('should parse valid SQL normally without fallback', () => {
             const sql = 'SELECT * FROM users WHERE id = 1';

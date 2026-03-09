@@ -7,16 +7,21 @@ import { getContextMenuScriptFragment } from './scripts/contextMenu';
 import { getImpactSummaryScriptFragment } from './scripts/impactSummary';
 import { getDirectionButtonsScriptFragment } from './scripts/directionButtons';
 import { getUtilityScriptFragment } from './scripts/utility';
+import { getPersistedWorkspaceStateScriptFragment } from './scripts/persistedState';
+import { getWorkspaceRequestStateScriptFragment } from './scripts/requestState';
 import { getImpactFormScriptFragment } from './scripts/impactForm';
 import { getVisualLineageSearchScriptFragment } from './scripts/lineageSearch';
 import { getLineageGraphScriptFragment } from './scripts/lineageGraph';
 import { getColumnLineageScriptFragment } from './scripts/columnLineage';
 import { getGraphInteractionsScriptFragment } from './scripts/graphInteractions';
 import { getMessageHandlingScriptFragment } from './scripts/messageHandling';
+import { getWorkspaceViewAlertsScriptFragment } from './scripts/viewAlerts';
 import { getEventDelegationScriptFragment } from './scripts/eventDelegation';
 import { getNodeInteractionsScriptFragment } from './scripts/nodeInteractions';
 import { getTooltipScriptFragment } from './scripts/tooltip';
 import { getWorkspaceShellScriptFragment } from './scripts/workspaceShell';
+import { getWorkspaceCommandBarScriptFragment } from './scripts/workspaceCommandBar';
+import type { WorkspaceInitialRestoreState } from '../panel/viewStateBootstrap';
 
 /**
  * Parameters for generating webview script
@@ -29,6 +34,11 @@ export interface WebviewScriptParams {
     currentGraphMode?: 'files' | 'tables';
     lineageDefaultDepth?: number;
     lineageLegendVisible?: boolean;
+    /** If set, the lineage tab should restore to this node's detail graph */
+    lineageDetailNodeId?: string | null;
+    lineageDetailDirection?: 'both' | 'upstream' | 'downstream';
+    lineageDetailExpandedNodes?: string[];
+    initialRestoreState?: WorkspaceInitialRestoreState;
 }
 
 /**
@@ -42,7 +52,11 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         initialView = 'graph',
         currentGraphMode = 'tables',
         lineageDefaultDepth = 5,
-        lineageLegendVisible = true
+        lineageLegendVisible = true,
+        lineageDetailNodeId = null,
+        lineageDetailDirection = 'both',
+        lineageDetailExpandedNodes = [],
+        initialRestoreState = { impact: { hasReport: false, html: null } }
     } = params;
     const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
         ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
@@ -57,6 +71,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let currentGraphMode = '${currentGraphMode}';
         let lineageDepth = ${normalizedLineageDepth};
         let lineageLegendVisibleFromHost = ${lineageLegendVisible ? 'true' : 'false'};
+        const initialLineageDetailNodeId = ${lineageDetailNodeId ? JSON.stringify(lineageDetailNodeId) : 'null'};
+        const initialLineageDetailDirection = ${JSON.stringify(lineageDetailDirection)};
+        const initialLineageDetailExpandedNodes = ${JSON.stringify(lineageDetailExpandedNodes)};
+        const initialWorkspaceRestoreState = ${JSON.stringify(initialRestoreState)};
         function normalizeLineageDepth(value, fallbackDepth = 5) {
             const numeric = Number(value);
             if (!Number.isFinite(numeric)) {
@@ -138,6 +156,10 @@ export function getWebviewScript(params: WebviewScriptParams): string {
         let traceMode = null; // null, 'upstream', 'downstream'
         let activeEmptyState = null;
         const graphLegendStorageKey = 'sqlCrack.workspace.graphLegendVisible';
+        ${getPersistedWorkspaceStateScriptFragment()}
+        ${getWorkspaceRequestStateScriptFragment()}
+        ${getWorkspaceViewAlertsScriptFragment()}
+        ${getWorkspaceCommandBarScriptFragment()}
 
         ${getGraphInteractionsScriptFragment()}
         ${getThemeToggleScript()}

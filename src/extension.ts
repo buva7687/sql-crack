@@ -403,10 +403,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for cursor position changes in SQL files
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
-        const config = getConfig();
-        const syncEnabled = config.get<boolean>('syncEditorToFlow');
-
-        if (syncEnabled && isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel && e.selections.length > 0) {
+        if (isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel && e.selections.length > 0) {
             const line = e.selections[0].active.line + 1; // 1-indexed
             const sql = e.textEditor.document.getText();
             

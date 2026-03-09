@@ -102,7 +102,6 @@ interface SqlCrackWebviewBootstrapConfig {
     pinId: string | null;
     viewLocation: string;
     defaultLayout: string;
-    flowDirection: string;
     persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
     initialUiState: unknown;
     showDeadColumnHints: boolean;
@@ -174,6 +173,7 @@ let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
 let userExplicitlySetDialect = false;
+let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
@@ -259,7 +259,6 @@ function normalizeRuntimeConfigUpdate(raw: unknown): SqlCrackRuntimeConfigUpdate
         autoDetectDialect: normalizeBool(payload.autoDetectDialect, (window.autoDetectDialect ?? true) !== false),
         viewLocation: normalizeEnum(payload.viewLocation, ['beside', 'tab'], window.viewLocation || 'tab') as ViewLocation,
         defaultLayout: normalizeEnum(payload.defaultLayout, ['vertical', 'horizontal', 'compact', 'force', 'radial'], window.defaultLayout || 'vertical'),
-        flowDirection: normalizeEnum(payload.flowDirection, ['top-down', 'bottom-up'], window.flowDirection || 'top-down'),
         showDeadColumnHints: normalizeBool(payload.showDeadColumnHints, (window.showDeadColumnHints ?? true) !== false),
         combineDdlStatements: normalizeBool(payload.combineDdlStatements, window.combineDdlStatements === true),
         gridStyle: normalizeEnum(payload.gridStyle, ['dots', 'lines', 'none'], window.gridStyle || 'lines'),
@@ -293,7 +292,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
         combineDdlStatements: window.combineDdlStatements === true,
         gridStyle: window.gridStyle || 'lines',
         nodeAccentPosition: window.nodeAccentPosition || 'left',
-        flowDirection: window.flowDirection || 'top-down',
         maxFileSizeKB: window.maxFileSizeKB || 100,
         maxStatements: window.maxStatements || 50,
         deferredQueryThreshold: window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD,
@@ -309,7 +307,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     window.autoDetectDialect = config.autoDetectDialect;
     window.viewLocation = config.viewLocation;
     window.defaultLayout = config.defaultLayout;
-    window.flowDirection = config.flowDirection;
     window.showDeadColumnHints = config.showDeadColumnHints;
     window.combineDdlStatements = config.combineDdlStatements;
     window.gridStyle = config.gridStyle;
@@ -349,7 +346,6 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
         previous.defaultDialect !== config.defaultDialect ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
-        previous.flowDirection !== config.flowDirection ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||
         previous.maxStatements !== config.maxStatements ||
         previous.deferredQueryThreshold !== config.deferredQueryThreshold;
@@ -595,8 +591,24 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         return;
     }
 
-    currentDialect = state.currentDialect;
     userExplicitlySetDialect = state.userExplicitlySetDialect;
+
+    // If the restored dialect differs from the dialect used for the current parse,
+    // re-visualize with the restored dialect instead of applying stale view state
+    if (state.currentDialect !== lastParsedDialect && lastParsedDialect !== null) {
+        currentDialect = state.currentDialect;
+        const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
+        if (dialectSelect) {
+            dialectSelect.value = currentDialect;
+        }
+        const sql = window.initialSqlCode || '';
+        if (sql) {
+            void visualize(sql);
+        }
+        return;
+    }
+
+    currentDialect = state.currentDialect;
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
@@ -1335,6 +1347,9 @@ async function visualize(sql: string): Promise<void> {
         updateAutoDetectIndicator(null);
     }
 
+    // Capture dialect before yielding — handleRefresh may reset currentDialect during the await
+    const dialectForParse = currentDialect;
+
     showGlobalLoading('Parsing SQL...');
     await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
@@ -1351,7 +1366,7 @@ async function visualize(sql: string): Promise<void> {
         };
         const result = await parseBatchAsync(
             sql,
-            currentDialect,
+            dialectForParse,
             customLimits,
             {
                 combineDdlStatements: window.combineDdlStatements === true,
@@ -1359,7 +1374,7 @@ async function visualize(sql: string): Promise<void> {
             }
         );
         const t1 = performance.now();
-        debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${currentDialect})`);
+        debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${dialectForParse})`);
         if (requestId !== parseRequestId) {
             return;
         }
@@ -1390,6 +1405,7 @@ async function visualize(sql: string): Promise<void> {
         };
     } finally {
         if (requestId === parseRequestId) {
+            lastParsedDialect = dialectForParse;
             hideGlobalLoading();
         }
     }

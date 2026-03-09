@@ -185,19 +185,21 @@ function findFirstWithAttribute(elements: FakeElement[], attr: string): FakeElem
 }
 
 describe('commandBar', () => {
+    const globalWithHTMLElement = global as Partial<Record<'HTMLElement', typeof HTMLElement>>;
+    const globalRecord = global as Record<string, unknown>;
     const originalDocument = global.document;
     const originalWindow = global.window;
     const originalRequestAnimationFrame = global.requestAnimationFrame;
-    const originalHTMLElement = (global as { HTMLElement?: typeof HTMLElement }).HTMLElement;
+    const originalHTMLElement = globalWithHTMLElement.HTMLElement;
 
     afterEach(() => {
         global.document = originalDocument;
         global.window = originalWindow;
         global.requestAnimationFrame = originalRequestAnimationFrame;
         if (originalHTMLElement) {
-            (global as { HTMLElement?: typeof HTMLElement }).HTMLElement = originalHTMLElement;
+            globalWithHTMLElement.HTMLElement = originalHTMLElement;
         } else {
-            delete (global as { HTMLElement?: typeof HTMLElement }).HTMLElement;
+            delete globalRecord['HTMLElement'];
         }
     });
 
@@ -223,7 +225,7 @@ describe('commandBar', () => {
             cb(0);
             return 1;
         });
-        (global as { HTMLElement?: typeof HTMLElement }).HTMLElement = Object as unknown as typeof HTMLElement;
+        globalWithHTMLElement.HTMLElement = Object as unknown as typeof HTMLElement;
 
         const openAction = jest.fn();
         const otherAction = jest.fn();

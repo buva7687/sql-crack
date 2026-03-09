@@ -10,6 +10,7 @@ import {
     collapseSnowflakePaths,
     hasOracleHints,
     hoistNestedCtes,
+    preprocessHashTempTableIdentifiers,
     preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
@@ -116,7 +117,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -911,6 +912,18 @@ function applyParserCompatibilityPreprocessing(
         });
     }
 
+    const tempTablePreprocessedSql = preprocessHashTempTableIdentifiers(transformedSql, dialect);
+    if (tempTablePreprocessedSql !== null) {
+        transformedSql = tempTablePreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Quoted #temp table identifiers for parser compatibility',
+            suggestion: 'Redshift and SQL Server temp-table names like #temp/##temp were rewritten as quoted identifiers so DDL and DML can be visualized correctly.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const groupingSetsRewrittenSql = rewriteGroupingSets(transformedSql);
     if (groupingSetsRewrittenSql !== null) {
         transformedSql = groupingSetsRewrittenSql;
@@ -1311,6 +1324,21 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         // Even when parsing fails, try to detect dialect-specific syntax
         // to provide helpful hints to users
         detectDialectSpecificSyntax(ctx, sql, dialect);
+
+        // If auto-detect is disabled and dialect-specific syntax was found,
+        // nudge the user to enable it
+        if (options.allowDialectFallback === false) {
+            const detectedResult = detectDialect(sql);
+            if (detectedResult.dialect && detectedResult.dialect !== dialect) {
+                ctx.hints.push({
+                    type: 'info',
+                    message: 'Dialect auto-detection is disabled',
+                    suggestion: `This query looks like ${detectedResult.dialect} but is being parsed as ${dialect}. Enable sqlCrack.autoDetectDialect in Settings for automatic dialect switching.`,
+                    category: 'best-practice',
+                    severity: 'medium',
+                });
+            }
+        }
 
         // Instead of returning empty result, use regex fallback parser
         // This gives users a best-effort visualization instead of nothing

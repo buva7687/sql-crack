@@ -55,6 +55,38 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("action === 'clear-column-trace'");
     });
 
+    it('guards lineage and impact view HTML against stale cross-view responses', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("case 'impactFormResult':");
+        expect(script).toContain("if (currentViewMode !== 'impact') break;");
+        expect(script).toContain("case 'lineageOverviewResult':");
+        expect(script).toContain("if (currentViewMode !== 'lineage') break;");
+    });
+
+    it('uses host-synced breadcrumb navigation instead of local-only skipMessage shortcuts', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("if (action === 'view' && value) {");
+        expect(script).toContain("if (value === currentViewMode && lineageDetailView && value !== 'graph') {");
+        expect(script).toContain('restoreWorkspaceViewRoot(value);');
+        expect(script).toContain('switchToView(value);');
+        expect(script).toContain("if (action === 'origin') {");
+        expect(script).toContain("switchToView('graph');");
+    });
+
     it('supports bottom workspace legend visibility via L shortcut and dismiss button', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -142,7 +174,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("if (message.data?.error) {");
-        expect(script).toContain("lineageContent.innerHTML = '<div style=\"color: var(--error); padding: 20px;\">' + escapeHtmlSafe(message.data.error) + '</div>';");
+        expect(script).toContain("showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Lineage graph unavailable');");
         expect(script).toContain('let lineageDocumentMouseMoveHandler = null;');
         expect(script).toContain('let lineageDocumentMouseUpHandler = null;');
         expect(script).toContain('let lineageDocumentClickHandler = null;');
@@ -152,6 +184,95 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("document.addEventListener('mousemove', lineageDocumentMouseMoveHandler);");
         expect(script).toContain("document.addEventListener('mouseup', lineageDocumentMouseUpHandler);");
         expect(script).toContain("document.addEventListener('click', lineageDocumentClickHandler);");
+    });
+
+    it('tracks workspace request ids across async scopes and restores cached impact html after rebuild', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'impact',
+            currentGraphMode: 'tables',
+            initialRestoreState: {
+                impact: {
+                    hasReport: true,
+                    html: '<div>impact-report</div>',
+                },
+            },
+        });
+
+        expect(script).toContain("switchToImpactView: ['impact-form', 'impact-result']");
+        expect(script).toContain("lineageResult: 'flow-result'");
+        expect(script).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
+        expect(script).toContain("persistImpactResult(message.data.html, message.data.report || null);");
+        expect(script).toContain("if (persistedImpact.html && lineageContent) {");
+        expect(script).toContain("lineageDetailView = true;");
+    });
+
+    it('includes the shared workspace command/search overlay and recovery search actions', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const workspaceCommandBtn = document.getElementById('btn-workspace-command');");
+        expect(script).toContain("if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')");
+        expect(script).toContain('let pendingWorkspaceSearchFocus = \'\';');
+        expect(script).toContain('function requestWorkspaceSearchFocus(targetView)');
+        expect(script).toContain("restoreWorkspaceViewRoot(normalizedTargetView);");
+        expect(script).toContain("requestWorkspaceSearchFocus(currentViewMode)");
+        expect(script).toContain("flushPendingWorkspaceSearchFocus('lineage');");
+        expect(script).toContain("flushPendingWorkspaceSearchFocus('impact');");
+    });
+
+    it('treats impact reports as in-tab detail state so back returns to the impact form', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("} else if (lineageDetailView && currentViewMode === 'impact') {");
+        expect(script).toContain("Back to Impact");
+        expect(script).toContain("function restoreWorkspaceViewRoot(view = currentViewMode)");
+        expect(script).toContain("command: targetView === 'lineage' ? 'switchToLineageView' : 'switchToImpactView'");
+    });
+
+    it('keeps main lineage filtering on direct matches instead of fuzzy subsequence matches', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function scoreLineageMatch(name, query) {');
+        expect(script).toContain('const containsIndex = target.indexOf(needle);');
+        expect(script).toContain('return null;');
+        expect(script).not.toContain('indices.push(idx);');
+    });
+
+    it('conditionally zooms graph search results when a single or compact match set is selected', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function getCombinedNodeBounds(nodes)');
+        expect(script).toContain('function zoomGraphToBounds(bounds, zoomCap)');
+        expect(script).toContain('function focusSearchMatchNode(targetNode, autoZoom = true)');
+        expect(script).toContain('if (searchMatchNodeIds.length > 0 && searchMatchNodeIds.length <= 3) {');
+        expect(script).toContain("jumpToSearchMatch(0, { autoZoom: true, track: false });");
+        expect(script).toContain('focusSearchMatchNode(targetNode, options.autoZoom !== false);');
     });
 
     it('wires graph sidebar cross-links for lineage, impact, and open-file actions', () => {
@@ -266,12 +387,12 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("searchCount.textContent = matched > 0 ? (pos + ' of ' + matched) : 'No matches';");
         expect(script).toContain("searchCount.style.display = 'inline';");
         expect(script).toContain("searchCount.style.display = 'none';");
-        expect(script).toContain('function jumpToSearchMatch(direction)');
+        expect(script).toContain('function jumpToSearchMatch(direction, options = {})');
         expect(script).toContain("searchPrevBtn?.addEventListener('click', () => jumpToSearchMatch(-1));");
         expect(script).toContain("searchNextBtn?.addEventListener('click', () => jumpToSearchMatch(1));");
         expect(script).toContain("if (event.key === 'Enter')");
         expect(script).toContain("jumpToSearchMatch(event.shiftKey ? -1 : 1);");
-        expect(script).toContain("if (typeof scrollNodeIntoView === 'function')");
+        expect(script).toContain('focusSearchMatchNode(targetNode, options.autoZoom !== false);');
     });
 
     it('marks current search match distinctly while keeping matched nodes highlighted', () => {
@@ -333,6 +454,28 @@ describe('workspace clientScripts navigation context', () => {
 
         // processLineageGraphResult must call initializeLineageLegendBar after DOM injection
         expect(script).toMatch(/setupMinimap\(\);\s*\n\s*initializeLineageLegendBar\(\);/);
+    });
+
+    it('restores lineage detail requests across webview rebuilds', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'lineage',
+            currentGraphMode: 'tables',
+            lineageDetailNodeId: 'table:orders',
+            lineageDetailDirection: 'downstream',
+            lineageDetailExpandedNodes: ['table:orders', 'view:daily_orders'],
+        });
+
+        expect(script).toContain('const initialLineageDetailNodeId = "table:orders";');
+        expect(script).toContain('const initialLineageDetailDirection = "downstream";');
+        expect(script).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
+        expect(script).toContain("if (typeof initialLineageDetailNodeId !== 'undefined' && initialLineageDetailNodeId) {");
+        expect(script).toContain("command: 'getLineageGraph'");
+        expect(script).toContain('nodeId: initialLineageDetailNodeId,');
+        expect(script).toContain("direction: typeof initialLineageDetailDirection !== 'undefined' ? initialLineageDetailDirection : 'both'");
+        expect(script).toContain("expandedNodes: typeof initialLineageDetailExpandedNodes !== 'undefined' ? initialLineageDetailExpandedNodes : []");
     });
 
     it('auto-fit uses responsive padding and allows moderate zoom-in for sparse lineage graphs', () => {
@@ -447,6 +590,19 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'impactFormResult':");
         expect(script).toContain("case 'impactResult':");
         expect(script).toContain('restoreViewState(currentViewMode);');
+    });
+
+    it('decodes tooltip and edge-reference payloads as UTF-8 instead of Latin-1', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64Value), c => c.charCodeAt(0))))');
+        expect(script).toContain('new TextDecoder().decode(Uint8Array.from(atob(base64), c => c.charCodeAt(0)))');
     });
 
     it('does not reference removed header focus button bindings', () => {

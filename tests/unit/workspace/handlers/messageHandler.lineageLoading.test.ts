@@ -5,6 +5,9 @@ function createContext(overrides: Record<string, unknown> = {}) {
     const lineageView = {
         generateLineageSearchView: jest.fn(() => '<div>lineage-empty</div>'),
     };
+    const impactView = {
+        generateImpactForm: jest.fn(() => '<div>impact-form</div>'),
+    };
 
     const base = {
         panel: { webview: { postMessage } },
@@ -34,13 +37,22 @@ function createContext(overrides: Record<string, unknown> = {}) {
         setCurrentImpactReport: jest.fn(),
         getCurrentFlowResult: jest.fn(() => null),
         setCurrentFlowResult: jest.fn(),
+        getLineageLegendVisible: jest.fn(() => true),
+        setLineageLegendVisible: jest.fn(),
+        getLineageDetailNodeId: jest.fn(() => null),
+        setLineageDetailNodeId: jest.fn(),
+        getLineageDetailDirection: jest.fn(() => 'both'),
+        setLineageDetailDirection: jest.fn(),
+        getLineageDetailExpandedNodes: jest.fn(() => []),
+        setLineageDetailExpandedNodes: jest.fn(),
         getTableExplorer: jest.fn(),
         getLineageView: jest.fn(() => lineageView),
-        getImpactView: jest.fn(),
+        getImpactView: jest.fn(() => impactView),
         getDefaultLineageDepth: jest.fn(() => 7),
         getIsDarkTheme: jest.fn(() => true),
         setIsDarkTheme: jest.fn(),
         getIsRebuilding: jest.fn(() => false),
+        getHasPendingIndexChanges: jest.fn(() => false),
         renderCurrentView: jest.fn(),
         getWebviewHtml: jest.fn(),
         getThemeCss: jest.fn(),
@@ -55,6 +67,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
         context: { ...base, ...overrides } as any,
         postMessage,
         lineageView,
+        impactView,
     };
 }
 
@@ -68,6 +81,7 @@ describe('MessageHandler lineage null-state rendering', () => {
         await handler.handleMessage({ command: 'switchToLineageView' } as any);
 
         expect(context.setCurrentView).toHaveBeenCalledWith('lineage');
+        expect(context.setLineageDetailNodeId).toHaveBeenCalledWith(null);
         expect(context.buildLineageGraph).toHaveBeenCalled();
         expect(lineageView.generateLineageSearchView).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -79,6 +93,67 @@ describe('MessageHandler lineage null-state rendering', () => {
         expect(postMessage).toHaveBeenCalledWith({
             command: 'lineageOverviewResult',
             data: { html: '<div>lineage-empty</div>' },
+        });
+    });
+
+    it('clears persisted lineage detail state when switching to impact overview', async () => {
+        const { context, postMessage, impactView } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchToImpactView' } as any);
+
+        expect(context.setCurrentView).toHaveBeenCalledWith('impact');
+        expect(context.setLineageDetailNodeId).toHaveBeenCalledWith(null);
+        expect(impactView.generateImpactForm).toHaveBeenCalledWith(null);
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'impactFormResult',
+            data: { html: '<div>impact-form</div>' },
+        });
+    });
+
+    it('replays a cached impact report on impact view switch and preserves the request id', async () => {
+        const report = {
+            changeType: 'modify',
+            target: { type: 'table', name: 'orders' },
+            severity: 'medium',
+            summary: { totalAffected: 1, tablesAffected: 1, viewsAffected: 0, queriesAffected: 0, filesAffected: 1 },
+            directImpacts: [{
+                node: { name: 'orders', type: 'table' },
+                reason: 'Direct dependency',
+                severity: 'medium',
+                filePath: '/tmp/orders.sql',
+                lineNumber: 12,
+            }],
+            transitiveImpacts: [],
+            suggestions: ['Review downstream consumers'],
+        };
+        const { context, postMessage, impactView } = createContext({
+            getCurrentImpactReport: jest.fn(() => report),
+            getImpactView: jest.fn(() => ({
+                ...impactView,
+                generateImpactReport: jest.fn(() => '<div>impact-report</div>'),
+            })),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchToImpactView', requestId: 42 } as any);
+
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'impactResult',
+            data: expect.objectContaining({
+                html: '<div>impact-report</div>',
+                requestId: 42,
+                report: expect.objectContaining({
+                    changeType: 'modify',
+                    severity: 'medium',
+                    directImpacts: [
+                        expect.objectContaining({
+                            name: 'orders',
+                            reason: 'Direct dependency',
+                        }),
+                    ],
+                }),
+            }),
         });
     });
 });
