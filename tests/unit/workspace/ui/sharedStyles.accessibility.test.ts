@@ -173,4 +173,13 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
         expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');
     });
+
+    it('keeps the workspace command overlay above the lineage panel', () => {
+        const css = getWebviewStyles(true);
+
+        expect(css).toContain('.workspace-command-overlay');
+        expect(css).toContain('z-index: 2000;');
+        expect(css).toContain('.lineage-panel {\n            position: absolute;');
+        expect(css).toContain('z-index: 50;');
+    });
 });

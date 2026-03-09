@@ -56,6 +56,10 @@ export class LineageView {
                     <h3>Lineage</h3>
                     <span class="view-inline-stats">${stats.tables} tables, ${stats.views} views</span>
                 </div>
+                <div class="workspace-alert-card">
+                    <h3>Find lineage faster</h3>
+                    <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Cmd/Ctrl+K to jump between views and search targets.</p>
+                </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
@@ -405,18 +409,15 @@ export class LineageView {
                     </div>
                 </div>
 
-                <!-- Hidden data for JS -->
-                <script type="application/json" id="lineage-graph-data">
-                    ${JSON.stringify({
-                        centerNodeId,
-                        direction,
-                        depth,
-                        nodeCount: renderableGraph.nodes.length,
-                        edgeCount: renderableGraph.edges.length,
-                        width: minimapWidth,
-                        height: minimapHeight
-                    })}
-                </script>
+                <!-- Hidden data for JS (uses a div because the sanitizer strips script tags) -->
+                <div id="lineage-graph-data" style="display:none"
+                     data-center-node-id="${this.escapeHtml(centerNodeId)}"
+                     data-direction="${direction}"
+                     data-depth="${depth}"
+                     data-node-count="${renderableGraph.nodes.length}"
+                     data-edge-count="${renderableGraph.edges.length}"
+                     data-width="${minimapWidth}"
+                     data-height="${minimapHeight}"></div>
             </div>
         `;
     }
@@ -559,6 +560,10 @@ export class LineageView {
                     </div>
                 </div>
                 <p class="hint">\uD83D\uDCA1 Tip: Refresh the index to pick up new files, or ensure your SQL files are within the workspace scope for richer lineage.</p>
+                <div class="workspace-alert-actions">
+                    <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
+                    <button type="button" class="action-chip" data-workspace-command-action="focus-lineage-search">Open Quick Find</button>
+                </div>
             </div>
         `;
     }
@@ -612,6 +617,10 @@ export class LineageView {
                 </div>
                 <p class="no-relations-msg">${message}</p>
                 <p class="hint">${hint}</p>
+                <div class="workspace-alert-actions">
+                    <button type="button" class="action-chip" data-workspace-alert-action="refresh-index">Refresh Index</button>
+                    <button type="button" class="action-chip" data-workspace-command-action="focus-lineage-search">Search another object</button>
+                </div>
                 ${showDirectionButtons && nodeId ? `
                 <div class="direction-suggestion">
                     <p>Try viewing:</p>

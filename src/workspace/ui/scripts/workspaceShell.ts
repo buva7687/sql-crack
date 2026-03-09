@@ -15,8 +15,7 @@ export function getWorkspaceShellScriptFragment(): string {
             // Cmd/Ctrl+F: Focus search (works even when typing)
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                 e.preventDefault();
-                searchInput?.focus();
-                searchInput?.select();
+                focusWorkspaceSearchTarget(currentViewMode);
                 return;
             }
 
@@ -481,7 +480,7 @@ export function getWorkspaceShellScriptFragment(): string {
                         if (lineageContent) {
                             lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Tracing file dependencies...</div></div>';
                         }
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getUpstream',
                             nodeType: 'file',
                             filePath,
@@ -491,7 +490,7 @@ export function getWorkspaceShellScriptFragment(): string {
                         if (lineageContent) {
                             lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading lineage...</div></div>';
                         }
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             nodeLabel: nodeLabel,
@@ -520,6 +519,7 @@ export function getWorkspaceShellScriptFragment(): string {
                     if (lineageTitle) {
                         lineageTitle.textContent = 'Impact Analysis';
                     }
+                    clearPersistedImpactResult();
                     scheduleImpactSelectionPrefill(nodeLabel, nodeId, nodeType);
                     break;
                 }

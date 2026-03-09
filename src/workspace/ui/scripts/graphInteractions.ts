@@ -403,6 +403,19 @@ export function getGraphInteractionsScriptFragment(): string {
             button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
         }
 
+        function persistActiveGraphUiState() {
+            if (typeof persistGraphUiState !== 'function') {
+                return;
+            }
+            persistGraphUiState({
+                selectedNodeId: selectedNodeId || null,
+                focusModeEnabled: !!focusModeEnabled,
+                traceMode: traceMode || null,
+                pathStartNodeId: pathStartNodeId || null,
+                pathEndNodeId: pathEndNodeId || null
+            });
+        }
+
         function setPathEndpoint(kind, nodeId) {
             if (!nodeId) {
                 return;
@@ -417,6 +430,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_path_endpoint_set', { endpoint: kind });
             }
@@ -454,6 +468,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_path_shown', {
                     found: !!pathNodeIds && pathNodeIds.length > 0,
@@ -472,6 +487,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
         }
 
         function applyFocusMode() {
@@ -509,6 +525,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updateFocusButton();
             applyFocusMode();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_focus_mode_toggled', { enabled: !!enabled });
             }
@@ -608,6 +625,7 @@ export function getGraphInteractionsScriptFragment(): string {
             }
             applyTraceMode();
             syncGraphContextUi();
+            persistActiveGraphUiState();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_trace_mode_changed', { mode: traceMode || 'none' });
             }
@@ -615,6 +633,7 @@ export function getGraphInteractionsScriptFragment(): string {
 
         function clearSelection() {
             selectedNodeId = null;
+            persistGraphSelectionId(null);
             document.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
             if (focusModeEnabled) {
                 setFocusMode(false);
@@ -638,6 +657,7 @@ export function getGraphInteractionsScriptFragment(): string {
             updatePathBuilderUi();
             updateGraphActionButtons();
             syncGraphContextUi();
+            persistActiveGraphUiState();
         }
 
         function updateGraphActionButtons() {
@@ -659,6 +679,8 @@ export function getGraphInteractionsScriptFragment(): string {
             if (!nodeId) return;
 
             selectedNodeId = nodeId;
+            persistGraphSelectionId(nodeId);
+            persistActiveGraphUiState();
             document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
             node.classList.add('node-selected');
 
@@ -818,7 +840,7 @@ export function getGraphInteractionsScriptFragment(): string {
                 return [];
             }
             try {
-                const parsed = JSON.parse(atob(base64Value));
+                const parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64Value), c => c.charCodeAt(0))));
                 if (!Array.isArray(parsed)) {
                     return [];
                 }
@@ -842,6 +864,8 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             selectedNodeId = null;
+            persistGraphSelectionId(null);
+            persistActiveGraphUiState();
             document.querySelectorAll('.node-selected').forEach(el => el.classList.remove('node-selected'));
             if (selectionDetails) selectionDetails.style.display = 'none';
             if (selectionCrossLinks) selectionCrossLinks.style.display = 'none';
@@ -1063,6 +1087,123 @@ export function getGraphInteractionsScriptFragment(): string {
             }
         }
 
+        function getNodeBounds(node) {
+            if (!node || typeof node.getBBox !== 'function') {
+                return null;
+            }
+            try {
+                const bbox = node.getBBox();
+                if (!bbox || !Number.isFinite(bbox.x) || !Number.isFinite(bbox.y) || bbox.width <= 0 || bbox.height <= 0) {
+                    return null;
+                }
+                return bbox;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function getCombinedNodeBounds(nodes) {
+            const bounds = (nodes || [])
+                .map((node) => getNodeBounds(node))
+                .filter((bbox) => !!bbox);
+
+            if (bounds.length === 0) {
+                return null;
+            }
+
+            return bounds.reduce((combined, bbox) => ({
+                x: Math.min(combined.x, bbox.x),
+                y: Math.min(combined.y, bbox.y),
+                width: Math.max(combined.x + combined.width, bbox.x + bbox.width) - Math.min(combined.x, bbox.x),
+                height: Math.max(combined.y + combined.height, bbox.y + bbox.height) - Math.min(combined.y, bbox.y)
+            }));
+        }
+
+        function getSearchMatchElements() {
+            return searchMatchNodeIds
+                .map((nodeId) => {
+                    const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                        ? CSS.escape(nodeId)
+                        : nodeId.replace(/"/g, '\\"');
+                    return document.querySelector('.node[data-id="' + escapedNodeId + '"]');
+                })
+                .filter((node) => !!node);
+        }
+
+        function zoomGraphToBounds(bounds, zoomCap) {
+            const container = document.querySelector('.graph-area');
+            if (!container || !bounds) {
+                return false;
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            if (containerRect.width <= 0 || containerRect.height <= 0) {
+                return false;
+            }
+
+            const padding = zoomCap > 1.3 ? 120 : 90;
+            const availableWidth = Math.max(120, containerRect.width - padding * 2);
+            const availableHeight = Math.max(120, containerRect.height - padding * 2);
+            const scaleX = availableWidth / bounds.width;
+            const scaleY = availableHeight / bounds.height;
+            const desiredScale = Math.min(scaleX, scaleY, zoomCap);
+
+            if (!Number.isFinite(desiredScale)) {
+                return false;
+            }
+
+            const nextScale = Math.max(scale, Math.max(0.35, desiredScale));
+            const centerX = bounds.x + bounds.width / 2;
+            const centerY = bounds.y + bounds.height / 2;
+            scale = nextScale;
+            offsetX = containerRect.width / 2 - centerX * scale;
+            offsetY = containerRect.height / 2 - centerY * scale;
+            updateTransform();
+            return true;
+        }
+
+        function focusSearchMatchNode(targetNode, autoZoom = true) {
+            if (!targetNode) {
+                return;
+            }
+
+            const matchNodes = getSearchMatchElements();
+            const matchCount = matchNodes.length;
+            if (!autoZoom || matchCount === 0) {
+                if (typeof scrollNodeIntoView === 'function') {
+                    scrollNodeIntoView(targetNode);
+                }
+                return;
+            }
+
+            if (matchCount === 1) {
+                const targetBounds = getCombinedNodeBounds([targetNode]);
+                if (!zoomGraphToBounds(targetBounds, 1.6) && typeof scrollNodeIntoView === 'function') {
+                    scrollNodeIntoView(targetNode);
+                }
+                return;
+            }
+
+            if (matchCount <= 3) {
+                const combinedBounds = getCombinedNodeBounds(matchNodes);
+                const container = document.querySelector('.graph-area');
+                const containerRect = container ? container.getBoundingClientRect() : null;
+                const compactCluster = !!combinedBounds && !!containerRect
+                    && containerRect.width > 0
+                    && containerRect.height > 0
+                    && combinedBounds.width <= containerRect.width * 0.42
+                    && combinedBounds.height <= containerRect.height * 0.34;
+
+                if (compactCluster && zoomGraphToBounds(combinedBounds, 1.18)) {
+                    return;
+                }
+            }
+
+            if (typeof scrollNodeIntoView === 'function') {
+                scrollNodeIntoView(targetNode);
+            }
+        }
+
         function levenshteinDistance(a, b) {
             if (a === b) return 0;
             if (!a) return b.length;
@@ -1112,7 +1253,7 @@ export function getGraphInteractionsScriptFragment(): string {
             return suggestions;
         }
 
-        function jumpToSearchMatch(direction) {
+        function jumpToSearchMatch(direction, options = {}) {
             const query = searchInput ? searchInput.value.trim() : '';
             if (!query) {
                 return;
@@ -1143,15 +1284,16 @@ export function getGraphInteractionsScriptFragment(): string {
             }
 
             updateSelectionPanel(targetNode);
-            if (typeof scrollNodeIntoView === 'function') {
-                scrollNodeIntoView(targetNode);
-            }
+            focusSearchMatchNode(targetNode, options.autoZoom !== false);
             refreshSearchNavigation(query);
             applySearchHighlight();
             syncGraphContextUi();
+            if (options.track === false) {
+                return;
+            }
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_search_jump', {
-                    direction: direction > 0 ? 'next' : 'prev',
+                    direction: direction > 0 ? 'next' : direction < 0 ? 'prev' : 'current',
                     index: activeSearchMatchIndex + 1,
                     total: searchMatchNodeIds.length
                 });
@@ -1512,6 +1654,9 @@ export function getGraphInteractionsScriptFragment(): string {
             updateGraphEmptyState();
             refreshSearchNavigation(query);
             applySearchHighlight();
+            if (searchMatchNodeIds.length > 0 && searchMatchNodeIds.length <= 3) {
+                jumpToSearchMatch(0, { autoZoom: true, track: false });
+            }
             syncGraphContextUi();
             if (typeof trackUxEvent === 'function') {
                 trackUxEvent('graph_search_submitted', {
@@ -1568,7 +1713,43 @@ export function getGraphInteractionsScriptFragment(): string {
         refreshSearchNavigation(searchInput ? searchInput.value.trim() : '');
         applySearchHighlight();
         if (initialSearchQuery && !selectedNodeId) {
-            jumpToSearchMatch(0);
+            jumpToSearchMatch(0, { track: false });
+        } else if (!selectedNodeId) {
+            const persistedSelectionId = getPersistedGraphSelectionId();
+            if (persistedSelectionId) {
+                const escapedNodeId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                    ? CSS.escape(persistedSelectionId)
+                    : persistedSelectionId.replace(/"/g, '\\"');
+                const persistedNode = document.querySelector('.node[data-id="' + escapedNodeId + '"]');
+                if (persistedNode) {
+                    updateSelectionPanel(persistedNode);
+                } else {
+                    persistGraphSelectionId(null);
+                }
+            }
+        }
+
+        const persistedGraphUiState = typeof getPersistedGraphUiState === 'function'
+            ? getPersistedGraphUiState()
+            : null;
+        if (persistedGraphUiState && typeof persistedGraphUiState === 'object') {
+            if (persistedGraphUiState.pathStartNodeId) {
+                pathStartNodeId = persistedGraphUiState.pathStartNodeId;
+            }
+            if (persistedGraphUiState.pathEndNodeId) {
+                pathEndNodeId = persistedGraphUiState.pathEndNodeId;
+            }
+            if (persistedGraphUiState.focusModeEnabled && selectedNodeId) {
+                setFocusMode(true);
+            } else if (persistedGraphUiState.traceMode === 'upstream' || persistedGraphUiState.traceMode === 'downstream') {
+                if (selectedNodeId) {
+                    setTraceMode(persistedGraphUiState.traceMode);
+                }
+            } else if (pathStartNodeId || pathEndNodeId) {
+                updatePathBuilderUi();
+                updateGraphActionButtons();
+                syncGraphContextUi();
+            }
         }
 
     `;

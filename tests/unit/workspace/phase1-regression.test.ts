@@ -122,8 +122,9 @@ describe('HTML escaping in clientScripts.ts', () => {
             searchFilterQuery: ''
         });
 
-        // Error messages should be escaped
-        expect(script).toContain('escapeHtmlSafe(message.data.error)');
+        // Error messages should be escaped before being inserted into alert cards
+        expect(script).toContain('const safeMessage = escapeHtml(message || \'\')');
+        expect(script).toContain('showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, \'Lineage graph unavailable\');');
     });
 
     it('should NOT have unescaped n.name or n.type in lineage result HTML', () => {

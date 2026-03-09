@@ -748,15 +748,7 @@ export class IndexManager {
     private async loadCachedIndex(): Promise<WorkspaceIndex | null> {
         // Check advanced settings
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
-        const clearOnStartup = config.get<boolean>('clearCacheOnStartup', false);
         const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
-
-        // If clear on startup is enabled, always return null (force rebuild)
-        if (clearOnStartup) {
-            logger.debug('[IndexManager] Clear cache on startup enabled - rebuilding index');
-            await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
-            return null;
-        }
 
         // If TTL is 0, caching is disabled
         if (cacheTTLHours === 0) {

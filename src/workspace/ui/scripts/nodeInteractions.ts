@@ -29,7 +29,7 @@ export function getNodeInteractionsScriptFragment(): string {
                         if (typeof switchToView === 'function') {
                             switchToView('lineage', false, nodeLabel, nodeType);
                         }
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             nodeLabel: nodeLabel,
@@ -42,7 +42,7 @@ export function getNodeInteractionsScriptFragment(): string {
             });
 
             function decodeTooltip(base64) {
-                try { return atob(base64); } catch (e) { return null; }
+                try { return new TextDecoder().decode(Uint8Array.from(atob(base64), c => c.charCodeAt(0))); } catch (e) { return null; }
             }
 
             svg.addEventListener('mouseover', (e) => {

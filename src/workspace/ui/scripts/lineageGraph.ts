@@ -54,7 +54,7 @@ export function getLineageGraphScriptFragment(): string {
                 }
                 updateBackButtonText();
                 setupLineageGraphInteractions();
-                setupDirectionButtons();
+                // Note: direction buttons are already wired inside setupLineageGraphInteractions()
                 setupMinimap();
                 initializeLineageLegendBar();
                 // Defer queue release to the next paint cycle without a fixed timeout.
@@ -219,7 +219,7 @@ export function getLineageGraphScriptFragment(): string {
                 const nodeId = nodeEl ? nodeEl.getAttribute('data-node-id') : null;
                 const columnName = row.getAttribute('data-column-name');
                 if (!nodeId || !columnName) return;
-                vscode.postMessage({
+                postWorkspaceMessage({
                     command: 'selectColumn',
                     tableId: nodeId,
                     columnName: columnName
@@ -294,7 +294,7 @@ export function getLineageGraphScriptFragment(): string {
                         if (action === 'selectColumn') {
                             const columnName = actionTarget.getAttribute('data-column-name');
                             if (nodeId && columnName) {
-                                vscode.postMessage({
+                                postWorkspaceMessage({
                                     command: 'selectColumn',
                                     tableId: nodeId,
                                     columnName: columnName
@@ -362,7 +362,7 @@ export function getLineageGraphScriptFragment(): string {
                     const nodeId = btn.getAttribute('data-node-id');
                     if (direction && nodeId) {
                         lineageCurrentDirection = direction;
-                        vscode.postMessage({
+                        postWorkspaceMessage({
                             command: 'getLineageGraph',
                             nodeId: nodeId,
                             direction: direction,
@@ -703,12 +703,12 @@ export function getLineageGraphScriptFragment(): string {
                 },
                 'focus-upstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: lineageDepth });
+                        postWorkspaceMessage({ command: 'getLineageGraph', nodeId, direction: 'upstream', depth: lineageDepth });
                     }
                 },
                 'focus-downstream': () => {
                     if (nodeId) {
-                        vscode.postMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: lineageDepth });
+                        postWorkspaceMessage({ command: 'getLineageGraph', nodeId, direction: 'downstream', depth: lineageDepth });
                     }
                 },
                 'expand-columns': () => {
@@ -764,7 +764,7 @@ export function getLineageGraphScriptFragment(): string {
             lineageExpandedNodes.add(nodeId);
 
             showColumnExpansionLoader(nodeId);
-            vscode.postMessage({
+            postWorkspaceMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
                 depth: lineageDepth,
@@ -782,7 +782,7 @@ export function getLineageGraphScriptFragment(): string {
                 lineageExpandedNodes.delete(nodeId);
             }
 
-            vscode.postMessage({
+            postWorkspaceMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
                 depth: lineageDepth,
@@ -827,7 +827,7 @@ export function getLineageGraphScriptFragment(): string {
             }
 
             // Re-render with all nodes expanded
-            vscode.postMessage({
+            postWorkspaceMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
                 depth: lineageDepth,
@@ -842,7 +842,7 @@ export function getLineageGraphScriptFragment(): string {
 
             lineageExpandedNodes.clear();
 
-            vscode.postMessage({
+            postWorkspaceMessage({
                 command: 'getLineageGraph',
                 nodeId: lineageCurrentNodeId,
                 depth: lineageDepth,
@@ -909,23 +909,18 @@ export function getLineageGraphScriptFragment(): string {
 
             let minimapDragging = false;
 
-            // Get graph data for calculations
+            // Get graph data for calculations (read from data-* attributes on a hidden div)
             const graphDataEl = document.getElementById('lineage-graph-data');
             let graphWidth = 800, graphHeight = 600;
             const MAX_MINIMAP_GRAPH_DIMENSION = 20000;
             if (graphDataEl) {
-                try {
-                    const data = JSON.parse(graphDataEl.textContent || '{}');
-                    const parsedWidth = Number(data.width);
-                    const parsedHeight = Number(data.height);
-                    if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
-                        graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);
-                    }
-                    if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
-                        graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);
-                    }
-                } catch (e) {
-                    console.debug('[sql-crack] Failed to parse graph data for minimap:', e);
+                const parsedWidth = Number(graphDataEl.getAttribute('data-width'));
+                const parsedHeight = Number(graphDataEl.getAttribute('data-height'));
+                if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
+                    graphWidth = Math.min(parsedWidth, MAX_MINIMAP_GRAPH_DIMENSION);
+                }
+                if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
+                    graphHeight = Math.min(parsedHeight, MAX_MINIMAP_GRAPH_DIMENSION);
                 }
             }
 

@@ -21,3 +21,9 @@ export type {
     WorkspaceUxMetricMetadata,
     WorkspaceUxMetricValue,
 } from './workspaceMessages';
+
+export type {
+    WorkspaceRequestId,
+    WorkspaceRecoveryReason,
+    WorkspaceErrorPayload,
+} from './workspaceViewState';

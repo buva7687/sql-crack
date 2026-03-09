@@ -26,6 +26,12 @@ import type {
     WorkspaceHostMessage,
     WorkspaceUxMetricMetadata
 } from '../../shared/messages';
+import {
+    attachWorkspaceRequestId,
+    getWorkspaceRequestId,
+    inferMissingDataReason,
+} from './messageMetadata';
+import { toImpactReportResult } from './impactPayload';
 
 /**
  * Context interface for message handler
@@ -66,6 +72,12 @@ export interface MessageHandlerContext {
     setCurrentFlowResult: (result: FlowResult | null) => void;
     getLineageLegendVisible: () => boolean;
     setLineageLegendVisible: (visible: boolean) => void;
+    getLineageDetailNodeId: () => string | null;
+    setLineageDetailNodeId: (nodeId: string | null) => void;
+    getLineageDetailDirection: () => 'both' | 'upstream' | 'downstream';
+    setLineageDetailDirection: (direction: 'both' | 'upstream' | 'downstream') => void;
+    getLineageDetailExpandedNodes: () => string[];
+    setLineageDetailExpandedNodes: (nodes: string[]) => void;
 
     // UI generators
     getTableExplorer: () => TableExplorer;
@@ -79,6 +91,7 @@ export interface MessageHandlerContext {
 
     // Rebuild state
     getIsRebuilding: () => boolean;
+    getHasPendingIndexChanges: () => boolean;
 
     // Callbacks
     renderCurrentView: () => void;
@@ -269,6 +282,10 @@ export class MessageHandler {
         this._context.panel.webview.postMessage(msg);
     }
 
+    private postRequestMessage(msg: WorkspaceHostMessage, requestId?: number): void {
+        this.postMessage(attachWorkspaceRequestId(msg, requestId));
+    }
+
     private setPanelHtml(html: string): void {
         if (this._disposed) {
             return;
@@ -336,11 +353,11 @@ export class MessageHandler {
 
                 // ========== Lineage Commands ==========
                 case 'switchToLineageView':
-                    await this.handleSwitchToLineageView();
+                    await this.handleSwitchToLineageView(getWorkspaceRequestId(message));
                     break;
 
                 case 'switchToImpactView':
-                    await this.handleSwitchToImpactView();
+                    await this.handleSwitchToImpactView(getWorkspaceRequestId(message));
                     break;
 
                 case 'getLineage':
@@ -356,19 +373,20 @@ export class MessageHandler {
                         message.type,
                         message.name,
                         message.tableName,
-                        message.changeType
+                        message.changeType,
+                        getWorkspaceRequestId(message)
                     );
                     break;
 
                 case 'exploreTable':
-                    await this.handleExploreTable(message.tableName, message.nodeId);
+                    await this.handleExploreTable(message.tableName, message.nodeId, getWorkspaceRequestId(message));
                     break;
 
                 case 'getColumnLineage':
                     {
                         const tableName = this.resolveColumnLineageTableName(message.tableName, message.tableId);
                         if (tableName && message.columnName) {
-                            await this.handleGetColumnLineage(tableName, message.columnName);
+                            await this.handleGetColumnLineage(tableName, message.columnName, getWorkspaceRequestId(message));
                         }
                     }
                     break;
@@ -382,7 +400,8 @@ export class MessageHandler {
                         message.nodeId,
                         this.resolveRequestedDepth(message.depth),
                         message.nodeType,
-                        message.filePath
+                        message.filePath,
+                        getWorkspaceRequestId(message)
                     );
                     break;
 
@@ -391,13 +410,14 @@ export class MessageHandler {
                         message.nodeId,
                         this.resolveRequestedDepth(message.depth),
                         message.nodeType,
-                        message.filePath
+                        message.filePath,
+                        getWorkspaceRequestId(message)
                     );
                     break;
 
                 // ========== Visual Lineage Graph Commands ==========
                 case 'searchLineageTables':
-                    await this.handleSearchLineageTables(message.query, message.typeFilter);
+                    await this.handleSearchLineageTables(message.query, message.typeFilter, getWorkspaceRequestId(message));
                     break;
 
                 case 'getLineageGraph':
@@ -407,7 +427,8 @@ export class MessageHandler {
                         message.direction || 'both',
                         message.expandedNodes,
                         message.nodeLabel,
-                        message.nodeType
+                        message.nodeType,
+                        getWorkspaceRequestId(message)
                     );
                     break;
 
@@ -428,7 +449,7 @@ export class MessageHandler {
                     break;
 
                 case 'selectColumn':
-                    await this.handleSelectColumn(message.tableId, message.columnName);
+                    await this.handleSelectColumn(message.tableId, message.columnName, getWorkspaceRequestId(message));
                     break;
 
                 case 'clearColumnSelection':
@@ -618,8 +639,10 @@ export class MessageHandler {
 
     // ========== Lineage View Switching ==========
 
-    private async handleSwitchToLineageView(): Promise<void> {
+    private async handleSwitchToLineageView(requestId?: number): Promise<void> {
         this._context.setCurrentView('lineage');
+        // Switching to overview clears detail state
+        this._context.setLineageDetailNodeId(null);
         await this._context.buildLineageGraph();
 
         const lineageGraph = this._context.getLineageGraph();
@@ -628,29 +651,42 @@ export class MessageHandler {
             depth: this._context.getDefaultLineageDepth()
         });
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'lineageOverviewResult',
             data: { html }
-        });
+        }, requestId);
     }
 
-    private async handleSwitchToImpactView(): Promise<void> {
+    private async handleSwitchToImpactView(requestId?: number): Promise<void> {
         this._context.setCurrentView('impact');
+        this._context.setLineageDetailNodeId(null);
         await this._context.buildLineageGraph();
+
+        const currentImpactReport = this._context.getCurrentImpactReport();
+        if (currentImpactReport) {
+            this.postRequestMessage({
+                command: 'impactResult',
+                data: {
+                    report: toImpactReportResult(currentImpactReport),
+                    html: this._context.getImpactView().generateImpactReport(currentImpactReport)
+                }
+            }, requestId);
+            return;
+        }
 
         const lineageGraph = this._context.getLineageGraph();
         if (lineageGraph) {
             const html = this._context.getImpactView().generateImpactForm(lineageGraph);
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'impactFormResult',
                 data: { html }
-            });
+            }, requestId);
         } else {
             const html = this._context.getImpactView().generateImpactForm(null);
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'impactFormResult',
                 data: { html }
-            });
+            }, requestId);
         }
     }
 
@@ -711,22 +747,23 @@ export class MessageHandler {
         type: 'table' | 'view' | 'column',
         name: string,
         tableName?: string,
-        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify'
+        changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify',
+        requestId?: number
     ): Promise<void> {
         const trimmedName = name?.trim() || '';
         if (!trimmedName) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'impactResult',
                 data: { error: 'Impact target name is required.' }
-            });
+            }, requestId);
             return;
         }
 
         if (type === 'column' && (!tableName || tableName.trim().length === 0)) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'impactResult',
                 data: { error: 'Table name is required for column impact analysis.' }
-            });
+            }, requestId);
             return;
         }
 
@@ -745,38 +782,16 @@ export class MessageHandler {
         this._context.setCurrentImpactReport(report);
 
         // Send result to webview
-        this.postMessage({
+        this.postRequestMessage({
             command: 'impactResult',
             data: {
-                report: {
-                    changeType: report.changeType,
-                    target: report.target,
-                    severity: report.severity,
-                    summary: report.summary,
-                    directImpacts: report.directImpacts.map(i => ({
-                        name: i.node.name,
-                        type: i.node.type,
-                        reason: i.reason,
-                        severity: i.severity,
-                        filePath: i.filePath,
-                        lineNumber: i.lineNumber
-                    })),
-                    transitiveImpacts: report.transitiveImpacts.map(i => ({
-                        name: i.node.name,
-                        type: i.node.type,
-                        reason: i.reason,
-                        severity: i.severity,
-                        filePath: i.filePath,
-                        lineNumber: i.lineNumber
-                    })),
-                    suggestions: report.suggestions
-                },
+                report: toImpactReportResult(report),
                 html: this._context.getImpactView().generateImpactReport(report)
             }
-        });
+        }, requestId);
     }
 
-    private async handleExploreTable(tableName: string, providedNodeId?: string): Promise<void> {
+    private async handleExploreTable(tableName: string, providedNodeId?: string, requestId?: number): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
@@ -801,10 +816,17 @@ export class MessageHandler {
             } else {
                 errorMsg += ' Make sure the table exists in your SQL files and the workspace index is up to date.';
             }
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'tableDetailResult',
-                data: { error: errorMsg }
-            });
+                data: {
+                    error: errorMsg,
+                    reason: inferMissingDataReason({
+                        changesSinceIndex: this._context.getHasPendingIndexChanges() ? 1 : 0,
+                        parseErrorCount: this._context.getCurrentGraph()?.stats.parseErrors || 0,
+                        requestedNodeType: providedNodeId ? undefined : 'table'
+                    })
+                }
+            }, requestId);
             return;
         }
 
@@ -815,7 +837,7 @@ export class MessageHandler {
             graph: lineageGraph
         });
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'tableDetailResult',
             data: {
                 table: {
@@ -827,10 +849,10 @@ export class MessageHandler {
                 },
                 html
             }
-        });
+        }, requestId);
     }
 
-    private async handleGetColumnLineage(tableName: string, columnName: string): Promise<void> {
+    private async handleGetColumnLineage(tableName: string, columnName: string, requestId?: number): Promise<void> {
         await this._context.buildLineageGraph();
         const columnLineageTracker = this._context.getColumnLineageTracker();
         const lineageGraph = this._context.getLineageGraph();
@@ -848,7 +870,7 @@ export class MessageHandler {
 
         const html = this._context.getLineageView().generateColumnLineageView(lineage);
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'columnLineageResult',
             data: {
                 tableId: resolvedTableId,
@@ -858,7 +880,7 @@ export class MessageHandler {
                 downstream: lineage.downstream,
                 html
             }
-        });
+        }, requestId);
     }
 
     private handleSelectLineageNode(nodeId: string): void {
@@ -875,7 +897,8 @@ export class MessageHandler {
         nodeId: string | undefined,
         depth: number = -1,
         nodeType?: string,
-        filePath?: string
+        filePath?: string,
+        requestId?: number
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
@@ -898,10 +921,10 @@ export class MessageHandler {
         }
 
         if (nodeIds.size === 0) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'upstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
-            });
+            }, requestId);
             return;
         }
 
@@ -925,21 +948,22 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'upstreamResult',
             data: {
                 nodeId: nodeId || filePath,
                 nodes: Array.from(allNodes.values()),
                 depth: maxDepth
             }
-        });
+        }, requestId);
     }
 
     private async handleGetDownstream(
         nodeId: string | undefined,
         depth: number = -1,
         nodeType?: string,
-        filePath?: string
+        filePath?: string,
+        requestId?: number
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
@@ -962,10 +986,10 @@ export class MessageHandler {
         }
 
         if (nodeIds.size === 0) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'downstreamResult',
                 data: { nodeId: nodeId || filePath, nodes: [], depth: 0 }
-            });
+            }, requestId);
             return;
         }
 
@@ -989,27 +1013,27 @@ export class MessageHandler {
             maxDepth = Math.max(maxDepth, result.depth);
         }
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'downstreamResult',
             data: {
                 nodeId: nodeId || filePath,
                 nodes: Array.from(allNodes.values()),
                 depth: maxDepth
             }
-        });
+        }, requestId);
     }
 
     // ========== Visual Lineage Graph Commands ==========
 
-    private async handleSearchLineageTables(query: string, typeFilter?: string): Promise<void> {
+    private async handleSearchLineageTables(query: string, typeFilter?: string, requestId?: number): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'lineageSearchResults',
                 data: { results: [] }
-            });
+            }, requestId);
             return;
         }
 
@@ -1043,10 +1067,10 @@ export class MessageHandler {
             return a.name.localeCompare(b.name);
         });
 
-        this.postMessage({
+        this.postRequestMessage({
             command: 'lineageSearchResults',
             data: { results: results.slice(0, 15) }
-        });
+        }, requestId);
     }
 
     private async handleGetLineageGraph(
@@ -1055,16 +1079,23 @@ export class MessageHandler {
         direction: 'both' | 'upstream' | 'downstream',
         expandedNodes?: string[],
         nodeLabel?: string,
-        nodeType?: string
+        nodeType?: string,
+        requestId?: number
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'lineageGraphResult',
-                data: { error: 'No lineage graph available. Open SQL files in your workspace and click Refresh to build the dependency index.' }
-            });
+                data: {
+                    error: 'No lineage graph available. Open SQL files in your workspace and click Refresh to build the dependency index.',
+                    reason: inferMissingDataReason({
+                        changesSinceIndex: this._context.getHasPendingIndexChanges() ? 1 : 0,
+                        parseErrorCount: this._context.getCurrentGraph()?.stats.parseErrors || 0
+                    })
+                }
+            }, requestId);
             return;
         }
 
@@ -1087,10 +1118,15 @@ export class MessageHandler {
             }
         );
 
-        this.postMessage({
+        // Persist detail state so it survives webview rebuilds (theme change, refresh)
+        this._context.setLineageDetailNodeId(resolvedNodeId);
+        this._context.setLineageDetailDirection(direction);
+        this._context.setLineageDetailExpandedNodes(expandedNodes || []);
+
+        this.postRequestMessage({
             command: 'lineageGraphResult',
             data: { html, nodeId: resolvedNodeId, direction, expandedNodes: expandedNodes || [] }
-        });
+        }, requestId);
     }
 
     private resolveRequestedLineageNodeId(
@@ -1147,7 +1183,7 @@ export class MessageHandler {
         });
     }
 
-    private async handleSelectColumn(tableId: string, columnName: string): Promise<void> {
+    private async handleSelectColumn(tableId: string, columnName: string, requestId?: number): Promise<void> {
         await this._context.buildLineageGraph();
         const lineageGraph = this._context.getLineageGraph();
         const columnLineageTracker = this._context.getColumnLineageTracker();
@@ -1158,16 +1194,20 @@ export class MessageHandler {
 
         const selectedTable = lineageGraph.nodes.get(tableId);
         if (!selectedTable) {
-            this.postMessage({
+            this.postRequestMessage({
                 command: 'columnLineageResult',
                 data: {
                     tableId,
                     columnName,
                     upstream: [],
                     downstream: [],
-                    warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.'
+                    warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.',
+                    warningReason: inferMissingDataReason({
+                        changesSinceIndex: this._context.getHasPendingIndexChanges() ? 1 : 0,
+                        parseErrorCount: this._context.getCurrentGraph()?.stats.parseErrors || 0
+                    })
                 }
-            });
+            }, requestId);
             return;
         }
 
@@ -1178,7 +1218,7 @@ export class MessageHandler {
         );
 
         // Send result back to webview
-        this.postMessage({
+        this.postRequestMessage({
             command: 'columnLineageResult',
             data: {
                 tableId,
@@ -1186,7 +1226,7 @@ export class MessageHandler {
                 upstream: lineage.upstream,
                 downstream: lineage.downstream
             }
-        });
+        }, requestId);
     }
 
     private async handleClearColumnSelection(): Promise<void> {

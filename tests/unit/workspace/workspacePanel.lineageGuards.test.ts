@@ -99,4 +99,55 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         (vscode as any).__setMockConfig('sqlCrack', { workspaceAutoIndexThreshold: 73 });
         expect(resolveAutoIndexThresholdFromConfig()).toBe(73);
     });
+
+    it('embeds persisted lineage detail state into rebuilt webview scripts', () => {
+        const context: any = {
+            _isDarkTheme: true,
+            _isHighContrast: false,
+            _currentView: 'lineage',
+            _currentGraphMode: 'tables',
+            _lineageLegendVisible: true,
+            _lineageDetailNodeId: 'table:orders',
+            _lineageDetailDirection: 'downstream',
+            _lineageDetailExpandedNodes: ['table:orders', 'view:daily_orders'],
+            _currentImpactReport: {
+                changeType: 'modify',
+                target: { type: 'table', name: 'orders' },
+                severity: 'medium',
+                summary: { totalAffected: 1, tablesAffected: 1, viewsAffected: 0, queriesAffected: 0, filesAffected: 1 },
+                directImpacts: [],
+                transitiveImpacts: [],
+                suggestions: [],
+            },
+            _impactView: {
+                generateImpactReport: jest.fn(() => '<div>impact-report</div>'),
+            },
+            _indexManager: {
+                getIndex: jest.fn(() => null),
+                getChangesSinceIndex: jest.fn(() => 0),
+            },
+            renderGraph: jest.fn(() => '<svg id="graph-svg"></svg>'),
+        };
+        const graph: any = {
+            nodes: [],
+            edges: [],
+            stats: {
+                orphanedDefinitions: [],
+                missingDefinitions: [],
+                parseErrors: 0,
+            },
+        };
+
+        const html = (WorkspacePanel.prototype as any).getWebviewHtml.call(context, graph, {
+            query: '',
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false,
+        });
+
+        expect(html).toContain('const initialLineageDetailNodeId = "table:orders";');
+        expect(html).toContain('const initialLineageDetailDirection = "downstream";');
+        expect(html).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
+        expect(html).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
+    });
 });

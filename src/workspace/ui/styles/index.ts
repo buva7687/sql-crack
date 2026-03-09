@@ -7,6 +7,7 @@
 
 export { getCssVariables } from './variables';
 export { getBaseStyles, getContextMenuStyles } from './base';
+export { getWorkspaceCommandBarStyles } from './commandBar';
 export { getLineagePanelStyles, getLineageVisualStyles } from './lineage';
 export { getSharedViewStyles, getIssuesPanelStyles, getStateStyles } from './panels';
 export { getTableListStyles } from './tables';

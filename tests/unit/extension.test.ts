@@ -174,8 +174,7 @@ describe('extension config change listeners', () => {
 describe('extension cursor sync to webview', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('syncs cursor position when setting is enabled', () => {
-        expect(source).toContain("get<boolean>('syncEditorToFlow')");
+    it('always syncs cursor position to webview', () => {
         expect(source).toContain('VisualizationPanel.sendCursorPosition(line)');
     });
 

@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-03-08
+
+### Added
+
+- **Workspace command/search entry point**: Added a shared `Quick Find` command bar for the workspace panel with view switching and search-focus shortcuts across Graph, Lineage, and Impact.
+- **Workspace state bootstrap helpers**: Added shared request/recovery types plus host/client bootstrap helpers for rebuild-safe workspace view restore.
+
+### Changed
+
+- **Workspace panel resilience and restore behavior**: Workspace requests now use scoped last-request-wins handling, and the panel restores persisted Impact results, Impact form draft state, graph UI state, lineage search state, and per-view scroll/zoom state across rebuilds and theme refreshes.
+- **Workspace missing-data guidance**: Lineage and Impact recovery states now render reason-aware alert cards with actionable next steps instead of raw inline error blocks.
+- **Lineage and Impact tab UX**: Normal tab landing views were simplified so recovery actions only appear in true empty/error states, while healthy states keep the focus on search and analysis workflows.
+- **Lineage search behavior**: Main Lineage filtering now uses direct exact/prefix/substring matching instead of broad fuzzy subsequence matching, keeping results more predictable and less noisy.
+- **Graph search navigation polish**: Graph search now conditionally centers and zooms to a single match or a compact small cluster, while avoiding aggressive auto-zoom for larger result sets.
+
+### Fixed
+
+- **Dialect state mismatch after webview restore**: When persisted UI state restored a dialect different from the one used for parsing, the dropdown showed the wrong dialect while results came from another parser. "Switch to X" hint buttons also silently no-oped. The webview now detects the mismatch and re-parses with the correct dialect.
+- **Parse dialect race condition**: `currentDialect` could be mutated by an incoming `handleRefresh` message during the `await` between dialect selection and parsing, causing the parse to use a stale dialect value.
+- **Auto-detect disabled hint**: When dialect auto-detection is disabled and a query looks like a different dialect than the current parser, an info hint now suggests enabling `sqlCrack.autoDetectDialect`.
+- **Cached Impact view replay dropped as stale**: `switchToImpactView` now tracks both form and result request scopes, so a cached impact report can reopen correctly after a rebuild.
+- **Impact tab empty target state**: When no indexed tables or views are available, the Impact tab now shows a proper guided empty state instead of an empty typeahead.
+- **Workspace command bar layering**: Quick Find now renders above Lineage and Impact overlays instead of opening underneath them.
+- **Impact report back navigation**: Returning from an Impact report now goes back to the Impact form instead of incorrectly jumping to Graph.
+- **Breadcrumb root navigation in detail views**: Clicking `Lineage` or `Impact` in the breadcrumb now returns to the tab root when viewing a detail graph/report.
+- **Quick Find search focus from detail states**: `Focus Lineage search` and `Focus Impact target` now correctly restore the tab root first, then focus the appropriate field.
+- **Workspace response payload duplication in host handler**: Extracted impact payload serialization into a dedicated helper to keep the main workspace message handler smaller and easier to maintain.
+- **Redshift/SQL Server `#temp` tables still failed after the initial hash-comment fix** ([#65](https://github.com/buva7687/sql-crack/issues/65)): Completed the temp-table hardening by fixing the remaining `#` comment stripping in the regex fallback parser and advanced-issue hint analyzer, updating fallback identifier matching to recognize `#`-prefixed table names, and rewriting `#temp` / `##temp` identifiers before AST parsing for Redshift and TransactSQL. This fixes the `examples/redshift.sql` repro where `DROP TABLE IF EXISTS #mytable` and `CREATE TABLE #mytable AS ...` could still degrade into partial parsing or "Failed to recover query visualization".
+
+### Removed
+
+- **`sqlCrack.flowDirection` setting**: Flow direction is now always top-down. The setting added complexity for a rarely changed preference; layout direction can still be switched via the toolbar at runtime.
+- **`sqlCrack.syncEditorToFlow` setting**: Editor-to-flow cursor sync is now always enabled. There was no practical reason to disable it.
+- **`sqlCrack.advanced.clearCacheOnStartup` setting**: Redundant with setting `cacheTTLHours` to `0`, which already disables caching and forces a rebuild.
+
+### Tests
+
+- Added regression coverage for workspace request tracking, rebuild-safe view restore, breadcrumb/detail navigation, command-bar overlay layering, Impact draft/result persistence, and Graph/Lineage search behavior.
+
 ## [0.5.3] - 2026-03-06
 
 ### Fixed

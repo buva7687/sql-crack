@@ -518,7 +518,6 @@ export class VisualizationPanel {
 
         const viewLocation = config.get<ViewLocation>('viewLocation') || 'tab';
         const defaultLayout = config.get<string>('defaultLayout') || 'vertical';
-        const flowDirection = config.get<string>('flowDirection') || 'top-down';
         const autoDetectDialect = config.get<boolean>('autoDetectDialect') !== false;
         const showDeadColumnHints = config.get<boolean>('advanced.showDeadColumnHints') !== false;
         const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements') === true;
@@ -545,7 +544,6 @@ export class VisualizationPanel {
             autoDetectDialect,
             viewLocation,
             defaultLayout,
-            flowDirection,
             showDeadColumnHints,
             combineDdlStatements,
             gridStyle,
@@ -649,7 +647,7 @@ export class VisualizationPanel {
             pinId: ${this._escapeForInlineScript(this._pinId || null)},
             viewLocation: ${this._escapeForInlineScript(runtimeConfig.viewLocation)},
             defaultLayout: ${this._escapeForInlineScript(runtimeConfig.defaultLayout)},
-            flowDirection: ${this._escapeForInlineScript(runtimeConfig.flowDirection)},
+            flowDirection: ${this._escapeForInlineScript('top-down')},
             persistedPinnedTabs: ${this._escapeForInlineScript(pinnedTabs)},
             initialUiState: ${this._escapeForInlineScript(initialUiState)},
             showDeadColumnHints: ${this._escapeForInlineScript(runtimeConfig.showDeadColumnHints)},
@@ -676,7 +674,7 @@ export class VisualizationPanel {
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
         window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};
         window.defaultLayout = ${this._escapeForInlineScript(runtimeConfig.defaultLayout)};
-        window.flowDirection = ${this._escapeForInlineScript(runtimeConfig.flowDirection)};
+        window.flowDirection = ${this._escapeForInlineScript('top-down')};
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
         window.initialUiState = ${this._escapeForInlineScript(initialUiState)};
         window.showDeadColumnHints = ${this._escapeForInlineScript(runtimeConfig.showDeadColumnHints)};

@@ -821,29 +821,6 @@ describe('IndexManager', () => {
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
         });
 
-        it('should respect clearCacheOnStartup setting', async () => {
-            __setMockConfig('sqlCrack.advanced', {
-                clearCacheOnStartup: true
-            });
-
-            const cache = {
-                version: 4,
-                lastUpdated: Date.now(),
-                fileCount: 1,
-                filesArray: [],
-                fileHashesArray: [],
-                definitionArray: [],
-                referenceArray: []
-            };
-
-            await mockContext.workspaceState.update('sqlWorkspaceIndex', cache);
-            mockScanner.getFileCount.mockResolvedValue(5);
-            mockScanner.analyzeWorkspace.mockResolvedValue([]);
-
-            await indexManager.initialize();
-
-            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
-        });
 
         it('should disable caching when TTL is 0', async () => {
             __setMockConfig('sqlCrack.advanced', {

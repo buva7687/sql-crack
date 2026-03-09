@@ -11,6 +11,10 @@ export function getViewModeScriptFragment(): string {
         const navStack = [];
         // Per-view zoom/pan state preservation
         const viewStates = {};
+        const restoredViewStates = typeof getPersistedViewStates === 'function' ? getPersistedViewStates() : null;
+        if (restoredViewStates && typeof restoredViewStates === 'object') {
+            Object.assign(viewStates, restoredViewStates);
+        }
         let navigationOriginLabel = '';
         let navigationOriginType = '';
 
@@ -57,6 +61,9 @@ export function getViewModeScriptFragment(): string {
                         scrollLeft: scrollContainer.scrollLeft
                     };
                 }
+            }
+            if (typeof persistViewStates === 'function') {
+                persistViewStates(viewStates);
             }
         }
 
@@ -217,8 +224,34 @@ export function getViewModeScriptFragment(): string {
             workspaceBreadcrumb.style.display = 'block';
         }
 
+        function restoreWorkspaceViewRoot(view = currentViewMode) {
+            const targetView = view || currentViewMode;
+            if (targetView !== 'lineage' && targetView !== 'impact') {
+                return false;
+            }
+
+            lineageDetailView = false;
+            if (typeof clearColumnHighlighting === 'function') {
+                clearColumnHighlighting();
+            }
+            if (lineageTitle) {
+                lineageTitle.textContent = viewTitles[targetView] || 'Data Lineage';
+            }
+            updateBackButtonText();
+            updateWorkspaceBreadcrumb();
+            postWorkspaceMessage({
+                command: targetView === 'lineage' ? 'switchToLineageView' : 'switchToImpactView'
+            });
+            return true;
+        }
+
         function switchToView(view, skipMessage = false, originLabel = '', originType = '') {
-            if (view === currentViewMode) return;
+            if (view === currentViewMode) {
+                if (lineageDetailView && view !== 'graph' && !skipMessage) {
+                    restoreWorkspaceViewRoot(view);
+                }
+                return;
+            }
             const previousView = currentViewMode;
 
             // Clear column trace when leaving a lineage-related view to prevent stale state
@@ -372,9 +405,9 @@ export function getViewModeScriptFragment(): string {
                 // Only send message if not restoring view (skipMessage = false by default)
                 if (!skipMessage) {
                     if (view === 'lineage') {
-                        vscode.postMessage({ command: 'switchToLineageView' });
+                        postWorkspaceMessage({ command: 'switchToLineageView' });
                     } else if (view === 'impact') {
-                        vscode.postMessage({ command: 'switchToImpactView' });
+                        postWorkspaceMessage({ command: 'switchToImpactView' });
                     }
                 }
             }
@@ -400,30 +433,21 @@ export function getViewModeScriptFragment(): string {
             const value = target.getAttribute('data-breadcrumb-value');
 
             if (action === 'view' && value) {
-                switchToView(value, true);
+                if (value === currentViewMode && lineageDetailView && value !== 'graph') {
+                    restoreWorkspaceViewRoot(value);
+                    return;
+                }
+                switchToView(value);
                 return;
             }
 
             if (action === 'origin') {
-                switchToView('graph', true);
+                switchToView('graph');
                 return;
             }
 
             if (action === 'detail-root') {
-                lineageDetailView = false;
-                // Clear column trace when resetting to detail root
-                if (typeof clearColumnHighlighting === 'function') {
-                    clearColumnHighlighting();
-                }
-                updateBackButtonText();
-                if (currentViewMode === 'lineage') {
-                    if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                    vscode.postMessage({ command: 'switchToLineageView' });
-                } else if (currentViewMode === 'impact') {
-                    if (lineageTitle) lineageTitle.textContent = 'Impact Analysis';
-                    vscode.postMessage({ command: 'switchToImpactView' });
-                }
-                updateWorkspaceBreadcrumb();
+                restoreWorkspaceViewRoot(currentViewMode);
                 return;
             }
 
@@ -514,9 +538,36 @@ export function getViewModeScriptFragment(): string {
                 switchToView(initialViewMode, true);
                 // Re-request the view content from server
                 if (initialViewMode === 'lineage') {
-                    vscode.postMessage({ command: 'switchToLineageView' });
+                    if (typeof initialLineageDetailNodeId !== 'undefined' && initialLineageDetailNodeId) {
+                        // Restore detail graph state instead of overview
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        postWorkspaceMessage({
+                            command: 'getLineageGraph',
+                            nodeId: initialLineageDetailNodeId,
+                            direction: typeof initialLineageDetailDirection !== 'undefined' ? initialLineageDetailDirection : 'both',
+                            depth: lineageDepth,
+                            expandedNodes: typeof initialLineageDetailExpandedNodes !== 'undefined' ? initialLineageDetailExpandedNodes : []
+                        });
+                    } else {
+                        postWorkspaceMessage({ command: 'switchToLineageView' });
+                    }
                 } else if (initialViewMode === 'impact') {
-                    vscode.postMessage({ command: 'switchToImpactView' });
+                    const persistedImpact = typeof getPersistedImpactResult === 'function'
+                        ? getPersistedImpactResult()
+                        : { html: '', meta: null };
+                    if (persistedImpact.html && lineageContent) {
+                        lineageDetailView = true;
+                        updateBackButtonText();
+                        setSafeHtml(lineageContent, persistedImpact.html);
+                        setupImpactSummaryDetails();
+                        updateWorkspaceBreadcrumb();
+                        if (typeof restoreViewState === 'function') {
+                            restoreViewState('impact');
+                        }
+                    } else {
+                        postWorkspaceMessage({ command: 'switchToImpactView' });
+                    }
                 }
             }, 0);
         }
@@ -526,6 +577,8 @@ export function getViewModeScriptFragment(): string {
             if (lineageDetailView && currentViewMode === 'lineage' && !navigationOriginLabel) {
                 // Within-lineage navigation (search -> detail) — back goes to lineage list
                 lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Lineage';
+            } else if (lineageDetailView && currentViewMode === 'impact') {
+                lineageBackBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back to Impact';
             } else {
                 // Came from Graph or at top level — back goes to Graph
                 const fromLabel = navigationOriginLabel ? ' (from: ' + navigationOriginLabel + ')' : '';
@@ -538,10 +591,9 @@ export function getViewModeScriptFragment(): string {
             e.stopPropagation();
             if (lineageDetailView && currentViewMode === 'lineage' && !navigationOriginLabel) {
                 // Navigated within Lineage tab (search -> detail) — go back to lineage list
-                lineageDetailView = false;
-                updateBackButtonText();
-                if (lineageTitle) lineageTitle.textContent = 'Data Lineage';
-                vscode.postMessage({ command: 'switchToLineageView' });
+                restoreWorkspaceViewRoot('lineage');
+            } else if (lineageDetailView && currentViewMode === 'impact') {
+                restoreWorkspaceViewRoot('impact');
             } else {
                 // Navigated from Graph (via "Trace in Lineage" / context menu) — go back to Graph directly
                 navStack.length = 0;

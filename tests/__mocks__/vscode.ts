@@ -23,6 +23,8 @@
  * ]);
  */
 
+/* eslint-disable @typescript-eslint/naming-convention */
+
 // ============================================================================
 // Uri - Represents file paths in VS Code
 // ============================================================================
@@ -81,7 +83,6 @@ const mockConfigValues: Record<string, Record<string, unknown>> = {
         'additionalFileExtensions': []
     },
     'sqlCrack.advanced': {
-        'clearCacheOnStartup': false,
         'cacheTTLHours': 24
     }
 };
@@ -94,7 +95,7 @@ export function __setMockConfig(section: string, values: Record<string, unknown>
 // Helper to reset config to defaults
 export function __resetMockConfig(): void {
     mockConfigValues['sqlCrack'] = { 'additionalFileExtensions': [] };
-    mockConfigValues['sqlCrack.advanced'] = { 'clearCacheOnStartup': false, 'cacheTTLHours': 24 };
+    mockConfigValues['sqlCrack.advanced'] = { 'cacheTTLHours': 24 };
 }
 
 const createMockConfiguration = (section: string) => ({
