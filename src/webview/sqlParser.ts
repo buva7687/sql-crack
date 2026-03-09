@@ -10,6 +10,7 @@ import {
     collapseSnowflakePaths,
     hasOracleHints,
     hoistNestedCtes,
+    preprocessHashTempTableIdentifiers,
     preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
@@ -116,7 +117,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -906,6 +907,18 @@ function applyParserCompatibilityPreprocessing(
             type: 'info',
             message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
             suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const tempTablePreprocessedSql = preprocessHashTempTableIdentifiers(transformedSql, dialect);
+    if (tempTablePreprocessedSql !== null) {
+        transformedSql = tempTablePreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Quoted #temp table identifiers for parser compatibility',
+            suggestion: 'Redshift and SQL Server temp-table names like #temp/##temp were rewritten as quoted identifiers so DDL and DML can be visualized correctly.',
             category: 'best-practice',
             severity: 'low',
         });

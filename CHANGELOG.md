@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.4] - Unreleased
+## [0.5.4] - 2026-03-08
 
 ### Added
 
@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breadcrumb root navigation in detail views**: Clicking `Lineage` or `Impact` in the breadcrumb now returns to the tab root when viewing a detail graph/report.
 - **Quick Find search focus from detail states**: `Focus Lineage search` and `Focus Impact target` now correctly restore the tab root first, then focus the appropriate field.
 - **Workspace response payload duplication in host handler**: Extracted impact payload serialization into a dedicated helper to keep the main workspace message handler smaller and easier to maintain.
+- **Redshift/SQL Server `#temp` tables still failed after the initial hash-comment fix** ([#65](https://github.com/buva7687/sql-crack/issues/65)): Completed the temp-table hardening by fixing the remaining `#` comment stripping in the regex fallback parser and advanced-issue hint analyzer, updating fallback identifier matching to recognize `#`-prefixed table names, and rewriting `#temp` / `##temp` identifiers before AST parsing for Redshift and TransactSQL. This fixes the `examples/redshift.sql` repro where `DROP TABLE IF EXISTS #mytable` and `CREATE TABLE #mytable AS ...` could still degrade into partial parsing or "Failed to recover query visualization".
 
 ### Removed
 

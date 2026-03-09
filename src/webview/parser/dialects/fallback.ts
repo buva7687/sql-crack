@@ -21,7 +21,7 @@ function stripIdentifierWrappers(raw: string): string {
 }
 
 function extractRoutineDdlInfo(sql: string): RoutineDdlInfo | null {
-    const identifierPart = '[\\p{L}\\p{N}_$]+';
+    const identifierPart = '#?[\\p{L}\\p{N}_$]+';
     const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
     const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
     const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;
@@ -91,12 +91,12 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const commentStripped = sql
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/--[^\n]*/g, '')
-        .replace(/#[^\n]*/g, '');
+        .replace(/#(?![A-Za-z0-9_])[^\n]*/g, '');
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
     const cteBodies = new Map<string, string>();
-    const identifierPart = '[\\p{L}\\p{N}_$]+';
+    const identifierPart = '#?[\\p{L}\\p{N}_$]+';
     const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
     const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
     const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;

@@ -367,7 +367,7 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
         }
 
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const normalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+        const normalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#(?![A-Za-z0-9_])[^\n]*/g, '').replace(/\s+/g, ' ').trim();
         const sqlLower = normalizedSql.toLowerCase();
 
         // Extract column names directly from SQL SELECT clause as fallback

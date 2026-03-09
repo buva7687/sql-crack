@@ -16,7 +16,18 @@ describe('parsing edge hardening guards', () => {
 
     it('keeps unicode-aware identifier matching in regex fallback parser', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/dialects/fallback.ts'), 'utf8');
-        expect(source).toContain("const identifierPart = '[\\\\p{L}\\\\p{N}_$]+';");
+        expect(source).toContain("const identifierPart = '#?[\\\\p{L}\\\\p{N}_$]+';");
         expect(source).toContain("new RegExp(`\\\\bFROM\\\\s+(${qualifiedIdentifier})`, 'giu')");
+    });
+
+    it('preserves temp-table identifiers when normalizing SQL for advanced issue detection', () => {
+        const source = readFileSync(join(__dirname, '../../../src/webview/parser/hints/advancedIssues.ts'), 'utf8');
+        expect(source).toContain(".replace(/#(?![A-Za-z0-9_])[^\\n]*/g, '')");
+    });
+
+    it('quotes hash temp-table identifiers before AST parsing for Redshift and TransactSQL', () => {
+        const source = readFileSync(join(__dirname, '../../../src/webview/parser/dialects/preprocessing.ts'), 'utf8');
+        expect(source).toContain("dialect !== 'Redshift' && dialect !== 'TransactSQL'");
+        expect(source).toContain('const tempIdentifierRegex = /##?[A-Za-z0-9_]+/g;');
     });
 });
