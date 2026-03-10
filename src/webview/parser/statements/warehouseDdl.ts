@@ -1,13 +1,21 @@
+import { Parser } from 'node-sql-parser';
 import type { FlowEdge, FlowNode, ParseResult, QueryStats } from '../../types';
 import type { ParserContext } from '../context';
 import { findMatchingParen, maskStringsAndComments, stripSqlComments } from '../dialects/preprocessing';
 
 type GenIdFn = (prefix: string) => string;
+type ProcessSelectFn = (
+    context: ParserContext,
+    stmt: any,
+    nodes: FlowNode[],
+    edges: FlowEdge[]
+) => string | null;
 
 interface TryParseWarehouseDdlArgs {
     context: ParserContext;
     sql: string;
     genId: GenIdFn;
+    processSelect: ProcessSelectFn;
 }
 
 const IDENTIFIER_WRAPPER_PATTERN = /[`"'\[\]]/g;
@@ -241,6 +249,80 @@ function extractQuotedValues(input: string): string[] {
     return Array.from(input.matchAll(/'([^']+)'|"([^"]+)"/g)).map(match => match[1] || match[2]).filter(Boolean);
 }
 
+function createQueryResultNode(nodes: FlowNode[], genId: GenIdFn, label: string, description: string, details: string[] = []): string {
+    const id = genId('stmt');
+    nodes.push({
+        id,
+        type: 'result',
+        label,
+        description,
+        details: details.length > 0 ? details : undefined,
+        accessMode: 'write',
+        operationType: 'CREATE_TABLE_AS',
+        x: 0,
+        y: 0,
+        width: Math.min(440, Math.max(180, label.length * 10 + 40)),
+        height: 60,
+    });
+    return id;
+}
+
+function parseSelectAst(selectSql: string, dialect: ParserContext['dialect']): any | null {
+    const parser = new Parser();
+    const parserDialect = dialect === 'Oracle'
+        ? 'PostgreSQL'
+        : dialect === 'Teradata'
+            ? 'MySQL'
+            : dialect;
+
+    try {
+        return parser.astify(selectSql, { database: parserDialect });
+    } catch {
+        if (dialect === 'Redshift') {
+            try {
+                return parser.astify(selectSql, { database: 'PostgreSQL' });
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }
+}
+
+function attachQuerySource(
+    args: TryParseWarehouseDdlArgs,
+    querySql: string,
+    nodes: FlowNode[],
+    edges: FlowEdge[]
+): string {
+    const ast = parseSelectAst(querySql, args.context.dialect);
+    if (ast) {
+        const selectStmt = Array.isArray(ast) ? ast[0] : ast;
+        const previousType = args.context.statementType;
+        args.context.statementType = 'select';
+        const rootId = args.processSelect(args.context, selectStmt, nodes, edges);
+        args.context.statementType = previousType;
+        if (rootId) {
+            return rootId;
+        }
+    }
+
+    const approxNodeId = args.genId('source');
+    nodes.push({
+        id: approxNodeId,
+        type: 'operation' as any,
+        label: 'SELECT',
+        description: 'Approximated source query',
+        details: [querySql.replace(/\s+/g, ' ').slice(0, 140)],
+        accessMode: 'read',
+        x: 0,
+        y: 0,
+        width: 220,
+        height: 60,
+    });
+    return approxNodeId;
+}
+
 function buildExternalTableResult(
     args: TryParseWarehouseDdlArgs,
     objectType: 'EXTERNAL TABLE' | 'TABLE',
@@ -329,6 +411,44 @@ function tryParseHiveExternalTable(args: TryParseWarehouseDdlArgs): ParseResult 
         details,
         locationMatch ? [locationMatch[2]] : [],
         `Parsed ${context.dialect} CREATE EXTERNAL TABLE via compatibility parser`
+    );
+}
+
+function tryParseRedshiftExternalTable(args: TryParseWarehouseDdlArgs): ParseResult | null {
+    const { context, sql } = args;
+    if (context.dialect !== 'Redshift') {
+        return null;
+    }
+
+    const stripped = stripSqlComments(sql).trim();
+    const match = stripped.match(/^CREATE\s+EXTERNAL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
+    if (!match) {
+        return null;
+    }
+
+    const tableName = normalizeIdentifier(match[1]);
+    const matchStart = match.index ?? stripped.indexOf(match[0]);
+    const columnSection = extractFirstParenContentAfterIndex(stripped, matchStart + match[0].length);
+    const storedAsMatch = stripped.match(/\bSTORED\s+AS\s+([A-Z_]+)/i);
+    const locationMatch = stripped.match(/\bLOCATION\s+(['"])(.+?)\1/i);
+    const partitionMatch = stripped.match(/\bPARTITIONED\s+BY\s*\(([\s\S]*?)\)/i);
+    const columnCount = columnSection ? splitTopLevelComma(columnSection).length : 0;
+    const partitionCount = partitionMatch ? splitTopLevelComma(partitionMatch[1]).length : 0;
+    const details = [
+        columnCount > 0 ? `Columns: ${columnCount}` : '',
+        partitionCount > 0 ? `Partitions: ${partitionCount}` : '',
+        storedAsMatch ? `Format: ${storedAsMatch[1].toUpperCase()}` : '',
+        locationMatch ? `Location: ${locationMatch[2]}` : '',
+    ].filter(Boolean);
+
+    return buildExternalTableResult(
+        args,
+        'EXTERNAL TABLE',
+        tableName,
+        `Create external table: ${tableName}`,
+        details,
+        locationMatch ? [locationMatch[2]] : [],
+        'Parsed Redshift CREATE EXTERNAL TABLE via compatibility parser'
     );
 }
 
@@ -607,12 +727,87 @@ function tryParseRedshiftCreateTable(args: TryParseWarehouseDdlArgs): ParseResul
     );
 }
 
+function tryParseRedshiftCreateTableAs(args: TryParseWarehouseDdlArgs): ParseResult | null {
+    const { context, sql, genId } = args;
+    if (context.dialect !== 'Redshift') {
+        return null;
+    }
+
+    const stripped = stripSqlComments(sql).trim();
+    const match = stripped.match(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
+    if (!match) {
+        return null;
+    }
+
+    const headerEnd = (match.index ?? stripped.indexOf(match[0])) + match[0].length;
+    const masked = maskStringsAndComments(stripped);
+    const asIndex = findTopLevelKeywordIndex(masked, 'AS', headerEnd);
+    if (asIndex === -1) {
+        return null;
+    }
+
+    const querySql = stripped.slice(asIndex + 'AS'.length).trim();
+    if (!/^(SELECT|WITH|\(SELECT|\(WITH)\b/i.test(querySql)) {
+        return null;
+    }
+
+    const optionsSegment = stripped.slice(headerEnd, asIndex);
+    if (!/\bDISTSTYLE\b|\bDISTKEY\s*\(|\b(?:COMPOUND\s+|INTERLEAVED\s+)?SORTKEY\s*\(/i.test(optionsSegment)) {
+        return null;
+    }
+
+    const tableName = normalizeIdentifier(match[1]);
+    const distkeyMatch = optionsSegment.match(/\bDISTKEY\s*\(([^)]+)\)/i);
+    const sortkeyMatch = optionsSegment.match(/\b(?:COMPOUND\s+|INTERLEAVED\s+)?SORTKEY\s*\(([^)]+)\)/i);
+    const diststyleMatch = optionsSegment.match(/\bDISTSTYLE\s+([A-Z]+)/i);
+    const details = [
+        diststyleMatch ? `DISTSTYLE: ${diststyleMatch[1].toUpperCase()}` : '',
+        distkeyMatch ? `DISTKEY: ${distkeyMatch[1].trim()}` : '',
+        sortkeyMatch ? `SORTKEY: ${sortkeyMatch[1].trim()}` : '',
+    ].filter(Boolean);
+
+    const nodes: FlowNode[] = [];
+    const edges: FlowEdge[] = [];
+    const sourceRootId = attachQuerySource(args, querySql, nodes, edges);
+    const targetId = createTargetNode(context, nodes, genId, tableName, 'CTAS target table', 'CREATE_TABLE_AS');
+    const resultId = createQueryResultNode(
+        nodes,
+        genId,
+        `TABLE ${tableName}`,
+        `Create table as select: ${tableName}`,
+        details
+    );
+
+    edges.push(createFlowEdge(genId, sourceRootId, targetId, 'AS SELECT'));
+    edges.push(createFlowEdge(genId, targetId, resultId, 'CREATE'));
+
+    context.hints.push({
+        type: 'info',
+        message: 'Parsed Redshift CREATE TABLE AS with physical options via compatibility parser',
+        suggestion: 'Redshift CTAS distribution/sort options are preserved while the SELECT source flow is modeled separately.',
+        category: 'best-practice',
+        severity: 'low',
+    });
+
+    return {
+        nodes,
+        edges,
+        stats: buildStats(context, edges),
+        hints: [...context.hints],
+        sql,
+        columnLineage: [],
+        tableUsage: new Map(context.tableUsageMap),
+    };
+}
+
 export function tryParseWarehouseDdlStatement(args: TryParseWarehouseDdlArgs): ParseResult | null {
     return tryParseHiveExternalTable(args)
+        || tryParseRedshiftExternalTable(args)
         || tryParseBigQueryExternalTable(args)
         || tryParseTrinoCreateTableWith(args)
         || tryParseSnowflakeStage(args)
         || tryParseSnowflakeStream(args)
         || tryParseSnowflakeTask(args)
+        || tryParseRedshiftCreateTableAs(args)
         || tryParseRedshiftCreateTable(args);
 }
