@@ -554,6 +554,45 @@ describe('Dialect Support', () => {
       // Document behavior
     });
 
+    it('classifies VACUUM as a session command for Redshift', () => {
+      const info = getSessionCommandInfo('VACUUM FULL myschema.mytable', dialect);
+      expect(info).not.toBeNull();
+      expect(info!.type).toBe('VACUUM');
+    });
+
+    it('classifies VACUUM SORT ONLY as a session command for Redshift', () => {
+      const info = getSessionCommandInfo('VACUUM SORT ONLY orders', dialect);
+      expect(info).not.toBeNull();
+      expect(info!.type).toBe('VACUUM');
+    });
+
+    it('classifies ANALYZE as a session command for Redshift', () => {
+      const info = getSessionCommandInfo('ANALYZE myschema.events', dialect);
+      expect(info).not.toBeNull();
+      expect(info!.type).toBe('ANALYZE');
+    });
+
+    it('classifies ALTER TABLE APPEND as a session command for Redshift', () => {
+      const info = getSessionCommandInfo('ALTER TABLE target_table APPEND FROM staging_table', dialect);
+      expect(info).not.toBeNull();
+      expect(info!.type).toBe('ALTER TABLE APPEND');
+      expect(info!.description).toContain('staging_table');
+      expect(info!.description).toContain('target_table');
+    });
+
+    it('parses CREATE TABLE with SUPER column type without error', () => {
+      const result = parseSql(`
+        CREATE TABLE events (
+          event_id INT,
+          payload SUPER,
+          sketch HLLSKETCH
+        )
+      `, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).toBeUndefined();
+    });
+
     it('parses CREATE TABLE AS SELECT via PostgreSQL proxy fallback', () => {
       const result = parseSql(`
         CREATE TABLE archived_orders AS

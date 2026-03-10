@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-03-10
+
+### Added
+
+- **Redshift SELECT INTO support** ([#68](https://github.com/buva7687/sql-crack/issues/68)): `SELECT ... INTO schema.table FROM ...` is now rewritten to CTAS before parsing, enabling full SQL Flow visualization and workspace lineage for Redshift SELECT INTO statements. CTE-based SELECT INTO (`WITH ... SELECT INTO`) correctly hoists the CTE after `AS`.
+- **Redshift CTAS with physical options**: `CREATE TABLE ... DISTSTYLE KEY DISTKEY(col) SORTKEY(col) AS SELECT ...` now parses and visualizes correctly, with distribution and sort key details shown in the result node.
+- **Redshift Spectrum external tables**: `CREATE EXTERNAL TABLE ... STORED AS PARQUET LOCATION 's3://...'` is now parsed via a dedicated Redshift compatibility handler, showing column count, format, partitions, and S3 location.
+- **Redshift late-binding views**: `CREATE VIEW ... WITH NO SCHEMA BINDING` is stripped before parsing so the underlying view definition visualizes normally.
+- **Redshift VACUUM/ANALYZE**: `VACUUM [FULL|SORT ONLY|DELETE ONLY|REINDEX]` and `ANALYZE` are now recognized as session commands for Redshift (previously PostgreSQL-only).
+- **Redshift ALTER TABLE APPEND**: `ALTER TABLE target APPEND FROM source` is now recognized as a Redshift session command.
+- **Redshift DDL type compatibility**: `SUPER`, `HLLSKETCH`, and `TIMETZ` column types in CREATE/ALTER TABLE statements are rewritten to parser-compatible equivalents so DDL visualizes without errors.
+
+### Fixed
+
+- **Workspace SELECT INTO lineage**: Schema-qualified SELECT INTO targets and INSERT INTO targets are now correctly resolved in workspace dependency extraction, including `#temp` table names.
+
 ## [0.5.4] - 2026-03-08
 
 ### Added

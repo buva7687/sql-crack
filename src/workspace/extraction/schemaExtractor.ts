@@ -587,6 +587,14 @@ export class SchemaExtractor {
                 return { lineNumber: lineNum, charIndex: m.index };
             }
         }
+
+        if (type === 'table') {
+            const selectIntoLocation = this.findSelectIntoStatementLocation(sql, identifier);
+            if (selectIntoLocation) {
+                return selectIntoLocation;
+            }
+        }
+
         // Fallback: return line 1 if not found (should rarely happen)
         return { lineNumber: 1, charIndex: 0 };
     }
@@ -621,7 +629,43 @@ export class SchemaExtractor {
             'gi'
         );
         const match = regex.exec(sql);
-        return match ? match[0].trim() : '';
+        if (match) {
+            return match[0].trim();
+        }
+
+        if (type === 'table') {
+            const selectIntoLocation = this.findSelectIntoStatementLocation(sql, name);
+            if (selectIntoLocation) {
+                return this.extractStatementFromIndex(sql, selectIntoLocation.charIndex);
+            }
+        }
+
+        return '';
+    }
+
+    private findSelectIntoStatementLocation(
+        sql: string,
+        identifier: string
+    ): { lineNumber: number; charIndex: number } | null {
+        const escaped = escapeRegex(identifier);
+        const intoRegex = new RegExp(
+            `\\bINTO\\s+(?:TEMP(?:ORARY)?(?:\\s+TABLE)?\\s+)?(?:\\w+\\.)?["'\`]?${escaped}["'\`]?`,
+            'gi'
+        );
+
+        let match: RegExpExecArray | null;
+        while ((match = intoRegex.exec(sql)) !== null) {
+            const statementStart = sql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
+            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index)).toUpperCase();
+            if (!/\bSELECT\b/.test(statementPrefix)) {
+                continue;
+            }
+
+            const lineNumber = this.getLineNumberAtIndex(sql, statementStart);
+            return { lineNumber, charIndex: statementStart };
+        }
+
+        return null;
     }
 
     /**

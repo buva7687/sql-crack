@@ -193,7 +193,7 @@ describe('Warehouse DDL negative matrix', () => {
             LOCATION 's3://bucket/path'
         `;
 
-        const EXTERNAL_TABLE_POSITIVE: SqlDialect[] = ['Hive', 'Athena'];
+        const EXTERNAL_TABLE_POSITIVE: SqlDialect[] = ['Hive', 'Athena', 'Redshift'];
         const EXTERNAL_TABLE_NEGATIVE = ALL_DIALECTS.filter(d => !EXTERNAL_TABLE_POSITIVE.includes(d) && d !== 'BigQuery');
 
         it.each(EXTERNAL_TABLE_POSITIVE)(
