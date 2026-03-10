@@ -14,6 +14,8 @@ import {
     preprocessForParsing,
     preprocessOracleSyntax,
     preprocessPostgresSyntax,
+    preprocessRedshiftSyntax,
+    preprocessRedshiftTypes,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
@@ -117,7 +119,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessRedshiftSyntax, preprocessRedshiftTypes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 /**
@@ -912,6 +914,18 @@ function applyParserCompatibilityPreprocessing(
         });
     }
 
+    const redshiftPreprocessedSql = preprocessRedshiftSyntax(transformedSql, dialect);
+    if (redshiftPreprocessedSql !== null) {
+        transformedSql = redshiftPreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote Redshift-specific syntax (SELECT INTO, late-binding views, CTAS physical options) for parser compatibility',
+            suggestion: 'Redshift-specific constructs were automatically simplified for visualization. SELECT INTO is modeled as CTAS, WITH NO SCHEMA BINDING is stripped from views, and CTAS physical options are normalized before parsing.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const tempTablePreprocessedSql = preprocessHashTempTableIdentifiers(transformedSql, dialect);
     if (tempTablePreprocessedSql !== null) {
         transformedSql = tempTablePreprocessedSql;
@@ -919,6 +933,18 @@ function applyParserCompatibilityPreprocessing(
             type: 'info',
             message: 'Quoted #temp table identifiers for parser compatibility',
             suggestion: 'Redshift and SQL Server temp-table names like #temp/##temp were rewritten as quoted identifiers so DDL and DML can be visualized correctly.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
+    const redshiftTypesPreprocessedSql = preprocessRedshiftTypes(transformedSql, dialect);
+    if (redshiftTypesPreprocessedSql !== null) {
+        transformedSql = redshiftTypesPreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote Redshift-specific data types for parser compatibility',
+            suggestion: 'Redshift-native DDL types like SUPER and HLLSKETCH were simplified so table definitions remain visualizable.',
             category: 'best-practice',
             severity: 'low',
         });
@@ -1035,6 +1061,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         context: ctx,
         sql,
         genId: (prefix) => genId(ctx, prefix),
+        processSelect,
     });
     if (warehouseDdlResult) {
         layoutGraph(warehouseDdlResult.nodes, warehouseDdlResult.edges);

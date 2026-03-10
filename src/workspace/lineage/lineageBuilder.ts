@@ -342,7 +342,9 @@ export class LineageBuilder implements LineageGraph {
         for (const def of analysis.definitions) {
             const tableKey = getQualifiedKey(def.name, def.schema);
             const isView = def.type === 'view';
-            const isCtas = def.type === 'table' && def.sql && /\bAS\s+(?:SELECT|\()/i.test(def.sql);
+            const isCtas = def.type === 'table'
+                && def.sql
+                && (/\bAS\s+(?:SELECT|\()/i.test(def.sql) || /^\s*(?:WITH[\s\S]+?)?SELECT[\s\S]+?\bINTO\b/i.test(def.sql));
 
             if (!isView && !isCtas) {continue;}
 
@@ -621,15 +623,17 @@ export class LineageBuilder implements LineageGraph {
             const sql = query.sql.toUpperCase();
 
             // SELECT INTO pattern
-            const intoMatch = sql.match(/INTO\s+(\w+)/);
+            const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
             if (intoMatch) {
-                return this.resolveTableId(intoMatch[1], filePath);
+                const tableKey = getQualifiedKey(intoMatch[2], intoMatch[1]);
+                return this.resolveTableId(tableKey, filePath);
             }
 
             // INSERT INTO pattern
-            const insertMatch = sql.match(/INSERT\s+INTO\s+(\w+)/);
+            const insertMatch = sql.match(/INSERT\s+INTO\s+(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
             if (insertMatch) {
-                return this.resolveTableId(insertMatch[1], filePath);
+                const tableKey = getQualifiedKey(insertMatch[2], insertMatch[1]);
+                return this.resolveTableId(tableKey, filePath);
             }
         }
 

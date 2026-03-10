@@ -16,3 +16,11 @@ insert into myschema.targettable
 select * FROM #mytable
 WHERE amount_1 > 0
 ;
+
+
+SELECT DISTINCT 
+  mydate
+INTO myschema.mytable
+FROM (
+SELECT current_date as mydate
+  ) AS src;

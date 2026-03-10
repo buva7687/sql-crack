@@ -76,6 +76,162 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
     return changed ? result : null;
 }
 
+function rewriteRedshiftSelectIntoStatement(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const withIndex = findKeywordAtDepth0(masked, 'WITH', 0);
+    const selectIndex = findKeywordAtDepth0(masked, 'SELECT', 0);
+    if (selectIndex === -1) {
+        return null;
+    }
+    const queryStart = withIndex !== -1 && withIndex < selectIndex ? withIndex : selectIndex;
+
+    const intoIndex = findKeywordAtDepth0(masked, 'INTO', selectIndex + 'SELECT'.length);
+    if (intoIndex === -1) {
+        return null;
+    }
+
+    const fromIndex = findKeywordAtDepth0(masked, 'FROM', intoIndex + 'INTO'.length);
+    if (fromIndex === -1 || fromIndex <= intoIndex) {
+        return null;
+    }
+
+    const targetClause = sql.slice(intoIndex + 'INTO'.length, fromIndex).trim();
+    if (!targetClause) {
+        return null;
+    }
+
+    let createPrefix = 'CREATE TABLE';
+    let targetName = targetClause;
+    const tempMatch = targetClause.match(/^(TEMPORARY|TEMP)(?:\s+TABLE)?\s+(.+)$/i);
+    if (tempMatch) {
+        createPrefix = `CREATE ${tempMatch[1].toUpperCase()} TABLE`;
+        targetName = tempMatch[2].trim();
+    }
+
+    if (!targetName) {
+        return null;
+    }
+
+    const leadingPrefix = sql.slice(0, queryStart);
+    const queryClause = sql.slice(queryStart, intoIndex).trimEnd();
+    const fromClause = sql.slice(fromIndex).trimStart();
+    return `${leadingPrefix}${createPrefix} ${targetName} AS ${queryClause} ${fromClause}`;
+}
+
+function stripRedshiftLateBindingViewClause(sql: string): string | null {
+    if (!/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(sql)) {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const clauseRegex = /\bWITH\s+NO\s+SCHEMA\s+BINDING\b/gi;
+    const matches: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = clauseRegex.exec(masked)) !== null) {
+        matches.push({ start: match.index, end: match.index + match[0].length });
+    }
+
+    if (matches.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const current = matches[i];
+        result = result.substring(0, current.start)
+            + ' '.repeat(current.end - current.start)
+            + result.substring(current.end);
+    }
+
+    return result;
+}
+
+function stripRedshiftCtasPhysicalOptions(sql: string): string | null {
+    if (!/^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\b/i.test(sql)) {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const headerMatch = masked.match(/^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[^\s(]+/i);
+    if (!headerMatch) {
+        return null;
+    }
+
+    const headerEnd = headerMatch.index! + headerMatch[0].length;
+    const asIndex = findKeywordAtDepth0(masked, 'AS', headerEnd);
+    if (asIndex === -1) {
+        return null;
+    }
+
+    const afterAs = masked.slice(asIndex + 'AS'.length).trimStart().toUpperCase();
+    const isCtas = afterAs.startsWith('SELECT')
+        || afterAs.startsWith('WITH')
+        || afterAs.startsWith('(SELECT')
+        || afterAs.startsWith('(WITH');
+    if (!isCtas) {
+        return null;
+    }
+
+    const optionSegment = sql.slice(headerEnd, asIndex);
+    if (!/\bDISTSTYLE\b|\bDISTKEY\s*\(|\b(?:COMPOUND\s+|INTERLEAVED\s+)?SORTKEY\s*\(/i.test(optionSegment)) {
+        return null;
+    }
+
+    return sql.substring(0, headerEnd)
+        + ' '.repeat(asIndex - headerEnd)
+        + sql.substring(asIndex);
+}
+
+/**
+ * Preprocess Redshift-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. `SELECT ... INTO target FROM ...` -> `CREATE TABLE target AS SELECT ... FROM ...`
+ * 2. `WITH NO SCHEMA BINDING` on CREATE VIEW - stripped
+ * 3. Physical CTAS options between table name and `AS`
+ *    (`DISTSTYLE`, `DISTKEY`, `SORTKEY`) - stripped for AST compatibility
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessRedshiftSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Redshift') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    let cursor = 0;
+    let changed = false;
+    let result = '';
+
+    while (cursor < sql.length) {
+        const statementEnd = findStatementTerminatorAtDepth0(masked, cursor);
+        const statement = sql.slice(cursor, statementEnd);
+
+        let rewritten = rewriteRedshiftSelectIntoStatement(statement) ?? statement;
+        const lateBindingStripped = stripRedshiftLateBindingViewClause(rewritten);
+        if (lateBindingStripped !== null) {
+            rewritten = lateBindingStripped;
+        }
+        const ctasOptionsStripped = stripRedshiftCtasPhysicalOptions(rewritten);
+        if (ctasOptionsStripped !== null) {
+            rewritten = ctasOptionsStripped;
+        }
+
+        if (rewritten !== statement) {
+            changed = true;
+        }
+
+        result += rewritten;
+        if (statementEnd < sql.length && sql[statementEnd] === ';') {
+            result += ';';
+        }
+        cursor = statementEnd + 1;
+    }
+
+    return changed ? result : null;
+}
+
 /**
  * Quote SQL Server/Redshift-style temp table identifiers for parser compatibility.
  *
@@ -124,6 +280,55 @@ export function preprocessHashTempTableIdentifiers(sql: string, dialect: SqlDial
     }
 
     return result;
+}
+
+/**
+ * Rewrite Redshift-specific DDL data types that node-sql-parser does not recognise.
+ *
+ * `SUPER` → `TEXT`, `HLLSKETCH` → `TEXT`, `TIMETZ` → `TIME`, `GEOMETRY` is already
+ * accepted by the PostgreSQL proxy grammar so it is not rewritten.
+ *
+ * Only applied inside CREATE/ALTER TABLE statements to avoid false positives in DML.
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessRedshiftTypes(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'Redshift') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const isDdl = /^\s*(CREATE\s+(?:(?:TEMP(?:ORARY)?\s+)?TABLE|(?:EXTERNAL\s+)?TABLE)|ALTER\s+TABLE)\b/i.test(masked);
+    if (!isDdl) {
+        return null;
+    }
+
+    const typeReplacements: Array<{ pattern: RegExp; replacement: string }> = [
+        { pattern: /\bSUPER\b/gi, replacement: 'TEXT' },
+        { pattern: /\bHLLSKETCH\b/gi, replacement: 'TEXT' },
+        { pattern: /\bTIMETZ\b/gi, replacement: 'TIME' },
+    ];
+
+    let result = sql;
+    let changed = false;
+    let currentMasked = masked;
+
+    for (const replacement of typeReplacements) {
+        const rewrites: Array<{ start: number; end: number }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = replacement.pattern.exec(currentMasked)) !== null) {
+            rewrites.push({ start: match.index, end: match.index + match[0].length });
+        }
+        for (let i = rewrites.length - 1; i >= 0; i--) {
+            const m = rewrites[i];
+            result = result.substring(0, m.start) + replacement.replacement + result.substring(m.end);
+            changed = true;
+        }
+        if (rewrites.length > 0) {
+            currentMasked = maskStringsAndComments(result);
+        }
+    }
+
+    return changed ? result : null;
 }
 
 /**
@@ -1455,9 +1660,10 @@ function stripDoubleColonCasts(sql: string): string | null {
  * Order mirrors `applyParserCompatibilityPreprocessing()` in sqlParser.ts:
  * 1. CTE hoisting (all dialects)
  * 2. PostgreSQL syntax (AT TIME ZONE, type-prefixed literals)
- * 3. GROUPING SETS rewrite (all dialects)
- * 4. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
- * 5. Snowflake deep path collapse
+ * 3. Redshift syntax (SELECT INTO, late-binding views, CTAS physical options)
+ * 4. GROUPING SETS rewrite (all dialects)
+ * 5. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
+ * 6. Snowflake deep path collapse
  */
 /**
  * Preprocess Teradata-specific syntax that node-sql-parser doesn't support.
@@ -2076,8 +2282,14 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: s
     const postgres = preprocessPostgresSyntax(result, dialect);
     if (postgres !== null) { result = postgres; }
 
+    const redshift = preprocessRedshiftSyntax(result, dialect);
+    if (redshift !== null) { result = redshift; }
+
     const tempTables = preprocessHashTempTableIdentifiers(result, dialect);
     if (tempTables !== null) { result = tempTables; }
+
+    const redshiftTypes = preprocessRedshiftTypes(result, dialect);
+    if (redshiftTypes !== null) { result = redshiftTypes; }
 
     const groupingSets = rewriteGroupingSets(result);
     if (groupingSets !== null) { result = groupingSets; }
