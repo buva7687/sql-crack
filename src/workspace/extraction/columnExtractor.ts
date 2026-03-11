@@ -18,6 +18,13 @@ export class ColumnExtractor {
         this.parser = new Parser();
     }
 
+    private asArray<T>(value: T | T[] | null | undefined): T[] {
+        if (value == null) {
+            return [];
+        }
+        return Array.isArray(value) ? value : [value];
+    }
+
     /**
      * Extract columns from SELECT clause with source tracking
      */
@@ -141,13 +148,13 @@ export class ColumnExtractor {
             return aliasMap;
         }
 
-        for (const fromClause of ast.from) {
+        for (const fromClause of this.asArray(ast.from)) {
             this.extractAliasFromTable(fromClause, aliasMap);
         }
 
         // Also extract from JOINs
         if (ast.join) {
-            for (const join of ast.join) {
+            for (const join of this.asArray(ast.join)) {
                 this.extractAliasFromTable(join.table, aliasMap);
             }
         }
@@ -393,7 +400,7 @@ export class ColumnExtractor {
     ): void {
         if (!from) {return;}
 
-        for (const fromClause of from) {
+        for (const fromClause of this.asArray(from)) {
             if (fromClause.on) {
                 this.extractColumnsFromExpression(fromClause.on, columns, context);
             }

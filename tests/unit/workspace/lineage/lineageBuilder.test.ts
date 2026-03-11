@@ -380,6 +380,60 @@ describe('LineageBuilder', () => {
         });
     });
 
+    describe('resolveTargetTableId', () => {
+        it('matches create_view transformations to the nearest definition in multi-view files', () => {
+            const sourceDef = makeDef('orders', 'table', [makeColumn('customer_id')], {
+                filePath: 'views.sql',
+                lineNumber: 1
+            });
+            const firstView = makeDef('daily_orders', 'view', [makeColumn('customer_id')], {
+                filePath: 'views.sql',
+                lineNumber: 5,
+                sql: 'CREATE VIEW daily_orders AS SELECT customer_id FROM orders'
+            });
+            const secondView = makeDef('monthly_orders', 'view', [makeColumn('customer_id')], {
+                filePath: 'views.sql',
+                lineNumber: 25,
+                sql: 'CREATE VIEW monthly_orders AS SELECT customer_id FROM orders'
+            });
+
+            const queries = [{
+                statementType: 'create_view',
+                outputColumns: [makeColumn('customer_id')],
+                inputTables: [],
+                inputColumns: [],
+                transformations: [{
+                    outputColumn: 'customer_id',
+                    inputColumns: [{ tableName: 'orders', columnName: 'customer_id' }],
+                    operation: 'direct',
+                    expression: 'orders.customer_id',
+                    lineNumber: 26
+                }],
+                ctes: [],
+                subqueries: [],
+                lineNumber: 25
+            }];
+
+            const refs = [
+                makeRef('orders', 'select', { filePath: 'views.sql', statementIndex: 1, lineNumber: 26 })
+            ];
+            const fileAnalysis = makeFileAnalysis('views.sql', [sourceDef, firstView, secondView], refs, queries as any);
+            const files = new Map([['views.sql', fileAnalysis]]);
+            const index = makeIndex([sourceDef, firstView, secondView], files);
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(builder.columnEdges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceTableId: 'table:orders',
+                    targetTableId: 'view:monthly_orders',
+                    targetColumnName: 'customer_id'
+                })
+            ]));
+        });
+    });
+
     describe('extractCTEsWithRegex', () => {
         it('extracts simple CTEs from SQL on disk', () => {
             const sql = 'WITH my_cte AS (\n  SELECT * FROM orders\n)\nSELECT * FROM my_cte';

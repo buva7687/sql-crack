@@ -94,9 +94,9 @@ function splitTopLevelComma(input: string): string[] {
     return parts;
 }
 
-function parseSelectAst(selectSql: string): any | null {
+function parseSelectAst(selectSql: string, dialect: SqlDialect = 'PostgreSQL'): any | null {
     try {
-        return SELECT_PARSER.astify(selectSql, { database: 'PostgreSQL' });
+        return SELECT_PARSER.astify(selectSql, { database: dialect });
     } catch {
         return null;
     }
@@ -461,7 +461,7 @@ export function tryParseCompatibleDeleteStatement(args: TryParseCompatibleDelete
 
     let sourceRootId: string | null = null;
     const syntheticSelect = `SELECT * FROM ${usingClause}`;
-    const syntheticAst = parseSelectAst(syntheticSelect);
+    const syntheticAst = parseSelectAst(syntheticSelect, context.dialect);
     if (syntheticAst) {
         const previousType = context.statementType;
         context.statementType = 'select';

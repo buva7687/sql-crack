@@ -646,14 +646,14 @@ export class WorkspacePanel {
             }
 
             const buildVersion = this._lineageBuildVersion;
-            const buildPromise = Promise.resolve().then(() => {
+            const buildPromise = Promise.resolve().then(async () => {
                 if (this._lineageGraph) {return;}
 
                 const currentIndex = this._indexManager.getIndex();
                 if (!currentIndex) {return;}
 
                 const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
-                const graph = builder.buildFromIndex(currentIndex);
+                const graph = await builder.buildFromIndexAsync(currentIndex);
 
                 // If graph state was invalidated while building, discard stale results.
                 if (buildVersion !== this._lineageBuildVersion) {

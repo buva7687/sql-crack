@@ -295,4 +295,30 @@ describe('ReferenceExtractor behavioral coverage', () => {
         expect(names).not.toContain('created_at');
         expect(names).not.toContain('year');
     });
+
+    it('handles singular WITH clause objects without throwing', () => {
+        const sql = 'WITH recent_orders AS (SELECT * FROM orders) SELECT * FROM recent_orders';
+        (extractor as any).parser.astify = jest.fn(() => ({
+            type: 'select',
+            with: {
+                name: 'recent_orders',
+                stmt: {
+                    type: 'select',
+                    from: [{ table: 'orders' }],
+                    columns: ['*']
+                }
+            },
+            from: [{ table: 'recent_orders' }],
+            columns: ['*']
+        }));
+
+        const refs = extractor.extractReferences(sql, 'query.sql', 'MySQL');
+
+        expect(refs).toEqual([
+            expect.objectContaining({
+                tableName: 'orders',
+                referenceType: 'select'
+            })
+        ]);
+    });
 });

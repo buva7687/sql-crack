@@ -79,6 +79,9 @@ export function getWorkspaceViewAlertsScriptFragment(): string {
         }
 
         document.addEventListener('click', (event) => {
+            if (!(event.target instanceof Element)) {
+                return;
+            }
             const actionEl = event.target.closest('[data-workspace-alert-action]');
             if (!actionEl) {
                 return;

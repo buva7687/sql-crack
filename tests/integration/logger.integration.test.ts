@@ -4,11 +4,13 @@ const { logger } = require('../../src/logger');
 
 describe('Logger', () => {
     let mockOutputChannel: any;
+    let context: any;
 
     beforeEach(() => {
         jest.clearAllMocks();
         vscodeMock.__resetStorage();
-        
+        logger._reset();
+
         mockOutputChannel = {
             appendLine: jest.fn(),
             show: jest.fn(),
@@ -20,7 +22,7 @@ describe('Logger', () => {
         
         (vscodeMock.window.createOutputChannel as jest.Mock).mockReturnValue(mockOutputChannel);
         
-        const context = vscodeMock.createMockExtensionContext();
+        context = vscodeMock.createMockExtensionContext();
         logger.initialize(context);
     });
 
@@ -28,6 +30,13 @@ describe('Logger', () => {
         it('returns the same instance', () => {
             const { logger: logger2 } = require('../../src/logger');
             expect(logger).toBe(logger2);
+        });
+
+        it('ignores duplicate initialize calls after the logger is ready', () => {
+            logger.initialize(context);
+
+            expect(vscodeMock.window.createOutputChannel).toHaveBeenCalledTimes(1);
+            expect(context.subscriptions).toHaveLength(2);
         });
     });
 
@@ -130,6 +139,7 @@ describe('Logger', () => {
 
         it('logs when debug enabled', () => {
             vscodeMock.__setMockConfig('sqlCrack.advanced', { debugLogging: true });
+            logger._reset();
             const context = vscodeMock.createMockExtensionContext();
             logger.initialize(context);
             logger.debug('debug message');

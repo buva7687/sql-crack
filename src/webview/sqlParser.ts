@@ -436,9 +436,21 @@ export function parseSqlBatch(
         const stmtLineCount = countLines(stmt);
 
         // Find the starting line of this statement in the original SQL
+        // Use the full first line for matching; for short lines also verify
+        // the next line to reduce false matches on duplicated prefixes
         let stmtStartLine = currentLine;
+        const matchPrefix = stmtFirstLine.trimEnd();
+        const stmtSecondLine = firstNewlineIdx !== -1
+            ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
+            : '';
         for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
+            if (lines[i].includes(matchPrefix)) {
+                // For short prefixes, verify the next line matches too
+                if (matchPrefix.length < 30 && stmtSecondLine && i + 1 < lines.length) {
+                    if (!lines[i + 1].includes(stmtSecondLine)) {
+                        continue;
+                    }
+                }
                 stmtStartLine = i + 1;
                 break;
             }
@@ -1256,6 +1268,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
             ctx.stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
             ctx.stats.performanceIssues = perfHints.length;
+        } else {
+            ctx.stats.performanceScore = 100;
+            ctx.stats.performanceIssues = 0;
         }
 
         // Use dagre for layout

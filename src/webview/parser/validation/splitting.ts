@@ -174,11 +174,17 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inDollarQuotes) {
-            if ((char === '\'' || char === '"') && prevChar !== '\\') {
+            if (char === '\'' || char === '"') {
                 if (!inString) {
                     inString = true;
                     stringChar = char;
                 } else if (char === stringChar) {
+                    // SQL-standard doubled quote escape: '' or ""
+                    const nextChar = i + 1 < sql.length ? sql[i + 1] : '';
+                    if (nextChar === stringChar) {
+                        i++; // skip the escaped quote
+                        continue;
+                    }
                     inString = false;
                 }
             }

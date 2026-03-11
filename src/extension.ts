@@ -504,7 +504,7 @@ export function activate(context: vscode.ExtensionContext) {
                 continue;
             }
 
-            if (char === "'" || char === '"') {
+            if (char === "'" || char === '"' || char === '`') {
                 inString = true;
                 stringChar = char;
                 current += char;
@@ -546,6 +546,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
         diagnosticsCollection.delete(document.uri);
+        if (lastActiveSqlDocument && lastActiveSqlDocument.uri.toString() === document.uri.toString()) {
+            lastActiveSqlDocument = null;
+        }
     });
 
     // Listen for document changes with debounced auto-refresh
@@ -583,6 +586,10 @@ export function activate(context: vscode.ExtensionContext) {
                     const document = e.document;
                     if (document && VisualizationPanel.currentPanel) {
                         const sqlCode = document.getText();
+                        if (!hasExecutableSql(sqlCode)) {
+                            autoRefreshTimer = null;
+                            return;
+                        }
                         const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
                         VisualizationPanel.refresh(sqlCode, {

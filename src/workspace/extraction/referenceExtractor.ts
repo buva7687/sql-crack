@@ -47,6 +47,13 @@ export class ReferenceExtractor {
         return undefined;
     }
 
+    private getWithClauses(stmt: AstStatement): AstCTE[] {
+        if (!stmt?.with) {
+            return [];
+        }
+        return Array.isArray(stmt.with) ? stmt.with : [stmt.with];
+    }
+
     /**
      * Check if a name is a SQL reserved word (dialect-scoped for Teradata-only keywords)
      */
@@ -342,7 +349,7 @@ export class ReferenceExtractor {
         // Check for WITH clause at the top level (before statement type)
         // Some parsers structure WITH clauses separately from the main statement
         if (stmt.with) {
-            for (const cte of stmt.with) {
+            for (const cte of this.getWithClauses(stmt)) {
                 const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
@@ -457,7 +464,7 @@ export class ReferenceExtractor {
     ): void {
         // Process CTEs first - add to alias map to exclude from references
         if (stmt.with) {
-            for (const cte of stmt.with) {
+            for (const cte of this.getWithClauses(stmt)) {
                 const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
@@ -582,7 +589,7 @@ export class ReferenceExtractor {
     ): void {
         // Process WITH clause first if present (for UPDATE ... WITH ... UPDATE)
         if (stmt.with) {
-            for (const cte of stmt.with) {
+            for (const cte of this.getWithClauses(stmt)) {
                 const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());
@@ -691,7 +698,7 @@ export class ReferenceExtractor {
     ): void {
         // Process WITH clause first if present (for DELETE ... WITH ... DELETE FROM)
         if (stmt.with) {
-            for (const cte of stmt.with) {
+            for (const cte of this.getWithClauses(stmt)) {
                 const cteName = this.getCTENameString(cte.name);
                 if (cteName) {
                     aliasMap.cteNames.add(cteName.toLowerCase());

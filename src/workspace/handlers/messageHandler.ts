@@ -823,14 +823,14 @@ export class MessageHandler {
 
         this.postRequestMessage({
             command: 'columnLineageResult',
-            data: {
-                tableId: resolvedTableId,
-                tableName: resolvedTableNode?.name || tableName,
+            data: this.buildColumnLineageResultPayload(
+                resolvedTableId,
+                resolvedTableNode?.name || tableName,
                 columnName,
-                upstream: lineage.upstream,
-                downstream: lineage.downstream,
+                lineage.upstream,
+                lineage.downstream,
                 html
-            }
+            )
         }, requestId);
     }
 
@@ -1126,10 +1126,14 @@ export class MessageHandler {
             this.postRequestMessage({
                 command: 'columnLineageResult',
                 data: {
-                    tableId,
-                    columnName,
-                    upstream: [],
-                    downstream: [],
+                    ...this.buildColumnLineageResultPayload(
+                        tableId,
+                        this.getColumnLineageTableLabel(tableId),
+                        columnName,
+                        [],
+                        [],
+                        ''
+                    ),
                     warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.',
                     warningReason: inferMissingDataReason({
                         changesSinceIndex: this._context.getHasPendingIndexChanges() ? 1 : 0,
@@ -1146,16 +1150,50 @@ export class MessageHandler {
             columnName
         );
 
+        const html = this._context.getLineageView().generateColumnLineageView(lineage);
+
         // Send result back to webview
         this.postRequestMessage({
             command: 'columnLineageResult',
-            data: {
+            data: this.buildColumnLineageResultPayload(
                 tableId,
+                selectedTable.name,
                 columnName,
-                upstream: lineage.upstream,
-                downstream: lineage.downstream
-            }
+                lineage.upstream,
+                lineage.downstream,
+                html
+            )
         }, requestId);
+    }
+
+    private buildColumnLineageResultPayload(
+        tableId: string,
+        tableName: string,
+        columnName: string,
+        upstream: unknown[],
+        downstream: unknown[],
+        html: string
+    ): {
+        tableId: string;
+        tableName: string;
+        columnName: string;
+        upstream: unknown[];
+        downstream: unknown[];
+        html: string;
+    } {
+        return {
+            tableId,
+            tableName,
+            columnName,
+            upstream,
+            downstream,
+            html
+        };
+    }
+
+    private getColumnLineageTableLabel(tableId: string): string {
+        const separatorIndex = tableId.indexOf(':');
+        return separatorIndex >= 0 ? tableId.slice(separatorIndex + 1) : tableId;
     }
 
     private async handleClearColumnSelection(): Promise<void> {

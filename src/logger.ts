@@ -23,6 +23,9 @@ class Logger {
      * Call this in the extension's activate function.
      */
     initialize(context: vscode.ExtensionContext): void {
+        if (this.outputChannel) {
+            return;
+        }
         this.outputChannel = vscode.window.createOutputChannel('SQL Crack');
         context.subscriptions.push(this.outputChannel);
         this.updateDebugSetting();
@@ -104,6 +107,12 @@ class Logger {
      */
     show(): void {
         this.outputChannel?.show();
+    }
+
+    /** Reset internal state. Intended for test isolation only. */
+    _reset(): void {
+        this.outputChannel = null;
+        this.debugEnabled = false;
     }
 }
 

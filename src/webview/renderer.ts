@@ -1892,6 +1892,7 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
         isDark: state.isDarkTheme,
         nodeMap: renderNodeMap,
         allNodes: currentNodes,
+        layoutType: state.layoutType || 'vertical',
         onEdgeClick: handleEdgeClick,
     });
 }
