@@ -167,4 +167,31 @@ describe('Logger', () => {
             freshLogger.show();
         });
     });
+
+    describe('pre-init buffering', () => {
+        it('buffers messages logged before initialize and flushes them on init', () => {
+            logger._reset();
+            // Log before initialize — should be buffered, not lost
+            logger.info('pre-init message 1');
+            logger.warn('pre-init message 2');
+            expect(mockOutputChannel.appendLine).not.toHaveBeenCalled();
+
+            // Now initialize — buffered messages should flush
+            const freshMock = {
+                appendLine: jest.fn(),
+                show: jest.fn(),
+                clear: jest.fn(),
+                append: jest.fn(),
+                hide: jest.fn(),
+                dispose: jest.fn()
+            };
+            (vscodeMock.window.createOutputChannel as jest.Mock).mockReturnValue(freshMock);
+            const ctx = vscodeMock.createMockExtensionContext();
+            logger.initialize(ctx);
+
+            expect(freshMock.appendLine).toHaveBeenCalledTimes(2);
+            expect(freshMock.appendLine.mock.calls[0][0]).toContain('pre-init message 1');
+            expect(freshMock.appendLine.mock.calls[1][0]).toContain('pre-init message 2');
+        });
+    });
 });

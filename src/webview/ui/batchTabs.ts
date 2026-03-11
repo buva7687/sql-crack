@@ -5,7 +5,7 @@ import { ICONS } from '../../shared/icons';
 import { Z_INDEX } from '../../shared/zIndex';
 
 function escapeHtml(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 export interface BatchTabsCallbacks {

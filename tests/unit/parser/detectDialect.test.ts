@@ -162,6 +162,13 @@ describe('detectDialect', () => {
         expect(result.scores.Oracle || 0).toBe(0);
     });
 
+    it('treats MINUS alone as low-confidence Oracle signal', () => {
+        const result = detectDialect('SELECT 1 MINUS SELECT 2');
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('low');
+        expect(result.scores.Oracle).toBe(1);
+    });
+
     // Hive detection
     it('detects Hive LATERAL VIEW with high confidence', () => {
         const result = detectDialect('SELECT * FROM src LATERAL VIEW EXPLODE(items) t AS item');
@@ -327,6 +334,8 @@ describe('detectDialect', () => {
     it('detects Teradata SAMPLE clause as medium-confidence', () => {
         const result = detectDialect('SELECT * FROM customers SAMPLE 1000');
         expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('low');
     });
 
     it('does not false-positive SEL inside identifiers', () => {

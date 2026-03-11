@@ -29,6 +29,10 @@ export function formatCondition(expr: any): string {
         return `${left} ${expr.operator} ${right}`;
     }
 
+    if (expr.type === 'function' || expr.type === 'aggr_func' || expr.type === 'unary_expr') {
+        return formatConditionOperand(expr);
+    }
+
     return 'condition';
 }
 
@@ -73,10 +77,16 @@ function formatConditionOperand(operand: any): string {
         const funcName = getAstString(operand.name) || (operand.type === 'aggr_func' ? 'AGG' : 'FUNC');
         const rawArgs = operand.args?.value ?? operand.args?.expr ?? operand.args;
         const args = Array.isArray(rawArgs) ? rawArgs : (rawArgs ? [rawArgs] : []);
+        if (funcName.toUpperCase() === 'EXISTS') {
+            return `EXISTS (${args.length > 0 ? args.map(formatConditionOperand).join(', ') : 'subquery'})`;
+        }
         return `${funcName}(${args.map(formatConditionOperand).join(', ')})`;
     }
     if (operand.type === 'star' || operand.column === '*') {
         return '*';
+    }
+    if (operand.type === 'select' || operand.ast?.type === 'select' || operand.ast?.type === 'union') {
+        return 'subquery';
     }
     if (operand.expr) {
         return formatConditionOperand(operand.expr);

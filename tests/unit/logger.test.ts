@@ -40,7 +40,7 @@ describe('logger.ts', () => {
 
         it('has debug method gated by debugEnabled flag', () => {
             expect(source).toContain('debug(message: string): void');
-            expect(source).toContain('if (this.debugEnabled && this.outputChannel)');
+            expect(source).toContain('if (this.debugEnabled)');
         });
     });
 
