@@ -605,6 +605,54 @@ describe('Dialect Support', () => {
       expect(result.nodes.some(n => n.type === 'result' && n.label === 'TABLE archived_orders')).toBe(true);
       expect(result.nodes.some(n => n.type === 'table' && n.label === 'orders')).toBe(true);
     });
+
+    it('parses AT TIME ZONE expressions without recovery failure', () => {
+      const result = parseSql(
+        "select CURRENT_TIMESTAMP AT TIME ZONE 'Antarctica/South_Pole' AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses PostgreSQL-style :: casts without recovery failure', () => {
+      const result = parseSql(
+        "SELECT CURRENT_TIMESTAMP::timestamp AS report_ts, '2026-03-10'::date AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses PostgreSQL-style type-prefixed literals without recovery failure', () => {
+      const result = parseSql(
+        "select TIMESTAMP '2026-03-10 12:34:56' AS report_ts, DATE '2026-03-10' AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses combined PostgreSQL-derived time syntax without recovery failure', () => {
+      const result = parseSql(`
+        SELECT
+          date_bin('15 minutes'::interval, created_at, TIMESTAMPTZ '1970-01-01 00:00:00+00') AS bucket,
+          created_at AT TIME ZONE 'UTC' AS utc_time,
+          created_at::date AS created_date
+        FROM events
+        WHERE created_at > now() - INTERVAL '24 hours'
+      `, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.some(n => n.label === 'events')).toBe(true);
+    });
   });
 
   describe('Athena', () => {

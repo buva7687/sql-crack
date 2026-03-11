@@ -908,7 +908,7 @@ function applyParserCompatibilityPreprocessing(
         pushHintOnce(context, {
             type: 'info',
             message: 'Rewrote PostgreSQL-specific syntax (AT TIME ZONE, type-prefixed literals) for parser compatibility',
-            suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid PostgreSQL but unsupported by the parser. They were automatically simplified.',
+            suggestion: 'Constructs like AT TIME ZONE and timestamptz literals are valid in PostgreSQL-derived dialects but unsupported by the parser. They were automatically simplified.',
             category: 'best-practice',
             severity: 'low',
         });
