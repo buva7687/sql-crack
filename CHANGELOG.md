@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-03-10
+
+### Fixed
+
+- **Redshift PostgreSQL-derived time/literal syntax compatibility** ([#71](https://github.com/buva7687/sql-crack/issues/71)): Redshift queries now reuse the PostgreSQL-compatible preprocessing path for `AT TIME ZONE` and type-prefixed literals before parsing, preventing `Failed to recover query visualization` for statements like `CURRENT_TIMESTAMP AT TIME ZONE 'Antarctica/South_Pole'` and improving compatibility for `TIMESTAMP '...'` / `DATE '...'` literals. Added release guards for adjacent PostgreSQL-derived Redshift syntax including `::` casts and mixed time-expression queries so this patch covers the immediate follow-on compatibility family.
+
+### Tests
+
+- Added Redshift regression cases covering `AT TIME ZONE` and type-prefixed literal parsing, and updated the Redshift example fixture with the reported repro query.
+
 ## [0.5.5] - 2026-03-10
 
 ### Added

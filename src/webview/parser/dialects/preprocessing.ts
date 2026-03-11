@@ -2,7 +2,7 @@ import type { SqlDialect } from '../../types';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 /**
- * Preprocess PostgreSQL-specific syntax that node-sql-parser doesn't support.
+ * Preprocess PostgreSQL-style syntax that node-sql-parser doesn't support.
  *
  * Rewrites:
  * 1. `AT TIME ZONE 'tz'` / `AT TIME ZONE identifier` - removed (timezone cast doesn't affect structure)
@@ -11,7 +11,7 @@ import { preprocessJinjaTemplates } from './jinjaPreprocessor';
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
 export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): string | null {
-    if (dialect !== 'PostgreSQL') {
+    if (dialect !== 'PostgreSQL' && dialect !== 'Redshift') {
         return null;
     }
 
