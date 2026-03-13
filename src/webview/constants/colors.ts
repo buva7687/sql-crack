@@ -3,6 +3,7 @@
 
 import { NodeType, Severity } from '../types';
 import type { ColorblindMode } from '../../shared/theme';
+import { COMPLEXITY_COLORS as SHARED_COMPLEXITY_COLORS } from '../../shared/theme';
 import { ICONS } from '../../shared/icons';
 
 // ============================================================
@@ -377,12 +378,7 @@ export const HINT_COLORS = {
     info: { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: ICONS.info },
 } as const;
 
-export const COMPLEXITY_COLORS: Record<string, string> = {
-    'Simple': '#22c55e',
-    'Moderate': '#eab308',
-    'Complex': '#f97316',
-    'Very Complex': '#ef4444',
-};
+export const COMPLEXITY_COLORS: Record<string, string> = SHARED_COMPLEXITY_COLORS;
 
 // ============================================================
 // Transformation Colors - For column lineage transformations

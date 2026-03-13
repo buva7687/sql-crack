@@ -8,7 +8,6 @@ export {
     WORKSPACE_NODE_COLORS_DARK,
     COLORBLIND_WORKSPACE_NODE_COLORS,
     UI_THEME,
-    STATUS_COLORS,
     COMPLEXITY_COLORS,
     getReferenceTypeColor,
     getWorkspaceNodeColor,

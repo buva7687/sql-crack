@@ -102,21 +102,6 @@ export const UI_THEME = {
 } as const;
 
 // ============================================================
-// Status Colors - For error/warning/success states
-// ============================================================
-
-export const STATUS_COLORS = {
-    error: '#f87171',
-    errorDark: '#ef4444',
-    warning: '#fbbf24',
-    warningDark: '#f59e0b',
-    success: '#34d399',
-    successDark: '#10b981',
-    info: '#60a5fa',
-    infoDark: '#3b82f6',
-} as const;
-
-// ============================================================
 // Complexity Colors - For query complexity indicators
 // ============================================================
 
