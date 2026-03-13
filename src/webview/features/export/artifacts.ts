@@ -156,7 +156,7 @@ function applyExportContrastAdjustments(
     }
 
     const edgeStroke = '#CBD5E1';
-    const gridStroke = 'rgba(255, 255, 255, 0.12)';
+    const gridStroke = 'rgba(200, 213, 225, 0.12)';
 
     svgClone.querySelectorAll('.edge, .edge-path, path[marker-end="url(#arrowhead)"]').forEach((element) => {
         element.setAttribute('stroke', edgeStroke);

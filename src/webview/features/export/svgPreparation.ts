@@ -68,7 +68,7 @@ function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement):
     let originalElement: Element | null = null;
     const dataId = element.getAttribute('data-id');
     if (dataId) {
-        originalElement = originalSvgElement.querySelector(`[data-id="${dataId}"]`);
+        originalElement = originalSvgElement.querySelector(`[data-id="${CSS.escape(dataId)}"]`);
     }
 
     if (!originalElement && element.classList && element.classList.length > 0) {

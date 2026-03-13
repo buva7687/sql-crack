@@ -300,6 +300,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
 
     const setLoading = (loading: boolean): void => {
         saveButton.disabled = loading;
+        saveButton.style.pointerEvents = loading ? 'none' : '';
         saveButton.textContent = loading ? 'Rendering…' : getSaveButtonLabel(state.format);
         if (loading) {
             previewMeta.textContent = 'Updating preview…';
