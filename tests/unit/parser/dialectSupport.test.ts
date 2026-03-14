@@ -13,6 +13,7 @@ import { readFileSync } from 'fs';
 import { Parser } from 'node-sql-parser';
 import { join } from 'path';
 import { parseSql, parseSqlBatch, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
+import { rewriteUnsupportedPostgresWindowFunctionsForCompatibility } from '../../../src/webview/parser/dialects/preprocessing';
 import { getSessionCommandInfo } from '../../../src/webview/parser/statements/ddl';
 
 describe('Dialect Support', () => {
@@ -197,6 +198,41 @@ describe('Dialect Support', () => {
       expect(functionNames).toEqual(expect.arrayContaining(['RANK', 'PERCENT_RANK', 'AVG', 'STDDEV']));
     });
 
+    it('preserves alias-based disambiguation when a genuine function and rewritten function share the same replacement name', () => {
+      const sql = `SELECT
+        RANK() OVER (ORDER BY score DESC) AS rnk,
+        PERCENT_RANK() OVER (ORDER BY score) AS pct_rnk
+      FROM scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+
+      const windowNode = result.nodes.find(node => node.type === 'window');
+      expect(windowNode?.windowDetails?.functions.map(func => func.name)).toEqual(['RANK', 'PERCENT_RANK']);
+    });
+
+    it('preserves unsupported PostgreSQL window function names inside nested CTEs', () => {
+      const sql = `WITH ranked_scores AS (
+        SELECT
+          score,
+          PERCENT_RANK() OVER (ORDER BY score) AS pct_rank,
+          STDDEV(score) OVER () AS score_stddev
+        FROM scores
+      )
+      SELECT pct_rank, score_stddev
+      FROM ranked_scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(expect.arrayContaining(['PERCENT_RANK', 'STDDEV']));
+    });
+
     it('parses Query 1 from complex analytics examples without partial fallback and preserves PostgreSQL window names', () => {
       const examplesPath = join(__dirname, '../../../examples/complex-analytics-queries.sql');
       const exampleSql = readFileSync(examplesPath, 'utf8');
@@ -292,6 +328,46 @@ describe('Dialect Support', () => {
           "SELECT 'AT TIME ZONE test' FROM t",
           'PostgreSQL'
         );
+        expect(result).toBeNull();
+      });
+
+      it('does not contain window-function compatibility rewrites on the main PostgreSQL preprocess path', () => {
+        const preprocessingSource = readFileSync(
+          join(__dirname, '../../../src/webview/parser/dialects/preprocessing.ts'),
+          'utf8'
+        );
+        const start = preprocessingSource.indexOf('export function preprocessPostgresSyntax');
+        const end = preprocessingSource.indexOf('interface PostgresWindowCompatibilityRewrite', start);
+        const preprocessPostgresBody = preprocessingSource.slice(start, end);
+
+        expect(preprocessPostgresBody).not.toMatch(/PERCENT_RANK|CUME_DIST|STDDEV_POP|STDDEV_SAMP|STDDEV|VARIANCE/);
+      });
+    });
+
+    describe('rewriteUnsupportedPostgresWindowFunctionsForCompatibility', () => {
+      it('rewrites only unsupported PostgreSQL functions used with OVER()', () => {
+        const sql = `SELECT
+          STDDEV(score) AS plain_stddev,
+          STDDEV(score) OVER () AS window_stddev,
+          PERCENT_RANK() OVER (ORDER BY score) AS pct_rank
+        FROM scores`;
+        const result = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, 'PostgreSQL');
+
+        expect(result).not.toBeNull();
+        expect(result!.sql).toContain('STDDEV(score) AS plain_stddev');
+        expect(result!.sql).toContain('AVG(score) OVER () AS window_stddev');
+        expect(result!.sql).toContain('RANK() OVER (ORDER BY score) AS pct_rank');
+      });
+
+      it('does not rewrite function names inside comments or string literals', () => {
+        const sql = `SELECT
+          'PERCENT_RANK() OVER (ORDER BY score)' AS note,
+          score
+        FROM scores
+        -- STDDEV(score) OVER ()
+        WHERE score > 0`;
+        const result = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, 'PostgreSQL');
+
         expect(result).toBeNull();
       });
     });
