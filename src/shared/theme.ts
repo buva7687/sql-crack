@@ -112,6 +112,14 @@ export const COMPLEXITY_COLORS: Record<string, string> = {
     'Very Complex': '#ef4444', // Red
 } as const;
 
+/** Text color to use on each complexity badge background for WCAG AA contrast. */
+export const COMPLEXITY_TEXT_COLORS: Record<string, string> = {
+    'Simple': 'white',
+    'Moderate': '#713f12',   // Dark amber — white on #eab308 is only ~1.85:1; this is >7:1
+    'Complex': 'white',
+    'Very Complex': 'white',
+} as const;
+
 // ============================================================
 // Helper Functions
 // ============================================================

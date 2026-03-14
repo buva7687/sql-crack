@@ -9,6 +9,7 @@ export {
     COLORBLIND_WORKSPACE_NODE_COLORS,
     UI_THEME,
     COMPLEXITY_COLORS,
+    COMPLEXITY_TEXT_COLORS,
     getReferenceTypeColor,
     getWorkspaceNodeColor,
 } from './theme';
