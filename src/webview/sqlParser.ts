@@ -16,6 +16,7 @@ import {
     preprocessPostgresSyntax,
     preprocessRedshiftSyntax,
     preprocessRedshiftTypes,
+    rewriteUnsupportedPostgresWindowFunctionsForCompatibility,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
@@ -790,6 +791,124 @@ function isDebugLoggingEnabled(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).debugLogging);
 }
 
+function normalizeAstFunctionName(name: any): string | null {
+    if (typeof name === 'string') {
+        return name.toUpperCase();
+    }
+    if (typeof name?.name === 'string') {
+        return String(name.name).toUpperCase();
+    }
+    if (Array.isArray(name?.name) && name.name.length > 0) {
+        const firstName = name.name[0]?.value;
+        return typeof firstName === 'string' ? firstName.toUpperCase() : null;
+    }
+    if (typeof name?.value === 'string') {
+        return name.value.toUpperCase();
+    }
+    return null;
+}
+
+function visitSelectStatements(node: any, visit: (stmt: any) => void, seen = new Set<any>()): void {
+    if (!node || typeof node !== 'object' || seen.has(node)) {
+        return;
+    }
+
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            visitSelectStatements(item, visit, seen);
+        }
+        return;
+    }
+
+    if (node.type === 'select' && Array.isArray(node.columns)) {
+        visit(node);
+    }
+
+    for (const value of Object.values(node)) {
+        if (value && typeof value === 'object') {
+            visitSelectStatements(value, visit, seen);
+        }
+    }
+}
+
+function restorePostgresCompatibilityWindowFunctionNames(
+    ast: any,
+    rewrites: Array<{ alias: string | null; originalName: string; replacementName: string }>
+): void {
+    if (!rewrites.length) {
+        return;
+    }
+
+    const remaining = rewrites.map(rewrite => ({ ...rewrite, used: false }));
+    visitSelectStatements(ast, stmt => {
+        for (const column of stmt.columns || []) {
+            const expr = column?.expr;
+            if (!expr?.over) {
+                continue;
+            }
+
+            const currentName = normalizeAstFunctionName(expr.name);
+            if (!currentName) {
+                continue;
+            }
+
+            const alias = typeof column.as === 'string' ? column.as : null;
+            const rewrite = remaining.find(entry =>
+                !entry.used
+                && entry.replacementName === currentName
+                && (entry.alias === null || entry.alias === alias)
+            );
+            if (!rewrite) {
+                continue;
+            }
+
+            expr.name = rewrite.originalName;
+            rewrite.used = true;
+        }
+    });
+}
+
+function tryParsePostgresWindowCompatibilityAstFallback(
+    parser: Parser,
+    sql: string,
+    dialect: SqlDialect,
+    context: ParserContext
+): any | null {
+    if (dialect !== 'PostgreSQL') {
+        return null;
+    }
+
+    const keyword = getLeadingKeyword(sql);
+    if (keyword !== 'SELECT' && keyword !== 'WITH') {
+        return null;
+    }
+
+    const compatibilityRewrite = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, dialect);
+    if (!compatibilityRewrite) {
+        return null;
+    }
+
+    try {
+        const ast = parser.astify(compatibilityRewrite.sql, { database: 'PostgreSQL' });
+        restorePostgresCompatibilityWindowFunctionNames(ast, compatibilityRewrite.rewrites);
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Retried PostgreSQL parse with compatibility rewrites for unsupported window functions',
+            suggestion: 'Window functions like PERCENT_RANK, CUME_DIST, and STDDEV variants were parsed through a compatibility rewrite, but their original names are preserved in the visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+        return ast;
+    } catch (e) {
+        if (isDebugLoggingEnabled()) {
+            console.debug('[sqlParser] PostgreSQL window compatibility parse failed:', e);
+        }
+        return null;
+    }
+}
+
 function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
     const keyword = getLeadingKeyword(sql);
     if (!keyword) {
@@ -1128,6 +1247,15 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             try {
                 return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {
+                const postgresWindowCompatibilityAst = tryParsePostgresWindowCompatibilityAstFallback(
+                    parser,
+                    sqlText,
+                    targetDialect,
+                    context
+                );
+                if (postgresWindowCompatibilityAst) {
+                    return postgresWindowCompatibilityAst;
+                }
                 const fallbackAst = tryParseDialectProxyAstFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;

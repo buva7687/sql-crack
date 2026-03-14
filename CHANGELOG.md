@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PostgreSQL window-function compatibility retry**: Queries using PostgreSQL window functions unsupported by `node-sql-parser` (`PERCENT_RANK`, `CUME_DIST`, `STDDEV`, `STDDEV_POP`, `STDDEV_SAMP`, `VARIANCE`) now retry through a narrow PostgreSQL compatibility rewrite only after the native parse fails. The retry restores original function names onto the AST before extraction, so SQL Flow window details and function usage stats preserve the real PostgreSQL function names instead of compatibility stand-ins.
 - **SQL Flow PNG preview/footer layout**: Export preview status chips and footer actions now remain visible when preview dimensions change.
 - **Export preview tab sync**: Switching between PNG, SVG, and PDF preview tabs now keeps the selected format state in sync.
 - **PDF orientation/render output**: Corrected PDF generation issues during the export-preview rollout and moved final output generation onto the `jsPDF` backend.
@@ -68,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
+- Added PostgreSQL regression coverage for unsupported native window-function parsing, compatibility retry with preserved function names, and Query 1 from `examples/complex-analytics-queries.sql`.
 - Added regression coverage for export preview wiring, PDF artifact generation, cross-panel workspace trace resolution, workspace graph export metadata, lineage markdown export, and lineage header export actions.
 - Added 33 source-reading regression anchors in `archiveConfirmedBugs.regressions.test.ts` covering all audit fixes.
 - Added behavioral tests for logger pre-init buffering, logger idempotency, edge layout routing, impact analyzer null safety, multi-definition lineage proximity, and async parser cancellation.

@@ -9,6 +9,9 @@
  * - SQL Server (TransactSQL) specific features
  */
 
+import { readFileSync } from 'fs';
+import { Parser } from 'node-sql-parser';
+import { join } from 'path';
 import { parseSql, parseSqlBatch, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
 import { getSessionCommandInfo } from '../../../src/webview/parser/statements/ddl';
 
@@ -67,6 +70,21 @@ describe('Dialect Support', () => {
 
   describe('PostgreSQL', () => {
     const dialect = 'PostgreSQL';
+    const parser = new Parser();
+    const unsupportedWindowFunctions: Array<[string, string]> = [
+      ['PERCENT_RANK', 'SELECT PERCENT_RANK() OVER (ORDER BY score) AS pct_rank FROM scores'],
+      ['CUME_DIST', 'SELECT CUME_DIST() OVER (ORDER BY score) AS cume_rank FROM scores'],
+      ['STDDEV', 'SELECT STDDEV(score) OVER () AS score_stddev FROM scores'],
+      ['STDDEV_POP', 'SELECT STDDEV_POP(score) OVER () AS score_stddev_pop FROM scores'],
+      ['STDDEV_SAMP', 'SELECT STDDEV_SAMP(score) OVER () AS score_stddev_samp FROM scores'],
+      ['VARIANCE', 'SELECT VARIANCE(score) OVER () AS score_variance FROM scores'],
+    ];
+    const supportedWindowFunctions: Array<[string, string]> = [
+      ['LAG', 'SELECT LAG(score, 1) OVER (ORDER BY score) AS prev_score FROM scores'],
+      ['LEAD', 'SELECT LEAD(score, 1) OVER (ORDER BY score) AS next_score FROM scores'],
+      ['FIRST_VALUE', 'SELECT FIRST_VALUE(score) OVER (ORDER BY score) AS first_score FROM scores'],
+      ['LAST_VALUE', 'SELECT LAST_VALUE(score) OVER (ORDER BY score) AS last_score FROM scores'],
+    ];
 
     it('parses double-quoted identifiers', () => {
       const result = parseSql('SELECT "user-name" FROM "my-table"', dialect);
@@ -139,6 +157,64 @@ describe('Dialect Support', () => {
       const result = parseSql(sql, dialect);
       expect(result.error).toBeUndefined();
       expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it.each(unsupportedWindowFunctions)(
+      'native PostgreSQL grammar rejects unsupported window function %s',
+      (_name, sql) => {
+        expect(() => parser.astify(sql, { database: 'PostgreSQL' })).toThrow();
+      }
+    );
+
+    it.each(supportedWindowFunctions)(
+      'native PostgreSQL grammar accepts supported window function %s',
+      (_name, sql) => {
+        expect(() => parser.astify(sql, { database: 'PostgreSQL' })).not.toThrow();
+      }
+    );
+
+    it('retries unsupported PostgreSQL window functions while preserving original names', () => {
+      const sql = `SELECT
+        RANK() OVER (ORDER BY score DESC) AS real_rank,
+        PERCENT_RANK() OVER (ORDER BY score) AS pct_rank,
+        AVG(score) OVER () AS real_avg,
+        STDDEV(score) OVER () AS score_stddev
+      FROM scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.hints.some(h => h.message.includes('unsupported window functions'))).toBe(true);
+
+      const windowNode = result.nodes.find(node => node.type === 'window');
+      expect(windowNode?.windowDetails?.functions.map(func => func.name)).toEqual(
+        expect.arrayContaining(['RANK', 'PERCENT_RANK', 'AVG', 'STDDEV'])
+      );
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(expect.arrayContaining(['RANK', 'PERCENT_RANK', 'AVG', 'STDDEV']));
+    });
+
+    it('parses Query 1 from complex analytics examples without partial fallback and preserves PostgreSQL window names', () => {
+      const examplesPath = join(__dirname, '../../../examples/complex-analytics-queries.sql');
+      const exampleSql = readFileSync(examplesPath, 'utf8');
+      const query1Start = exampleSql.indexOf('WITH employee_base_metrics AS (');
+      const query2Start = exampleSql.indexOf('-- ============================================================\n-- QUERY 2:', query1Start);
+      const query1Sql = exampleSql.slice(query1Start, query2Start).trim();
+
+      const result = parseSql(query1Sql, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.stats.windowFunctions).toBeGreaterThan(0);
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(
+        expect.arrayContaining(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'STDDEV', 'LAG', 'LEAD'])
+      );
     });
 
     describe('preprocessPostgresSyntax', () => {

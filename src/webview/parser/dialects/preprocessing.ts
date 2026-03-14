@@ -76,6 +76,130 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
     return changed ? result : null;
 }
 
+interface PostgresWindowCompatibilityRewrite {
+    alias: string | null;
+    originalName: string;
+    replacementName: string;
+}
+
+export interface PostgresWindowCompatibilityRewriteResult {
+    rewrites: PostgresWindowCompatibilityRewrite[];
+    sql: string;
+}
+
+const POSTGRES_WINDOW_COMPATIBILITY_REPLACEMENTS: Record<string, string> = {
+    PERCENT_RANK: 'RANK',
+    CUME_DIST: 'RANK',
+    STDDEV: 'AVG',
+    STDDEV_POP: 'AVG',
+    STDDEV_SAMP: 'AVG',
+    VARIANCE: 'AVG',
+};
+
+export function rewriteUnsupportedPostgresWindowFunctionsForCompatibility(
+    sql: string,
+    dialect: SqlDialect
+): PostgresWindowCompatibilityRewriteResult | null {
+    if (dialect !== 'PostgreSQL') {
+        return null;
+    }
+
+    const masked = maskStringsAndComments(sql);
+    const functionRegex = /\b(PERCENT_RANK|CUME_DIST|STDDEV_POP|STDDEV_SAMP|STDDEV|VARIANCE)\s*\(/gi;
+    const rewrites: PostgresWindowCompatibilityRewrite[] = [];
+    const textRewrites: Array<{ start: number; end: number; replacement: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = functionRegex.exec(masked)) !== null) {
+        const originalName = match[1].toUpperCase();
+        const replacementName = POSTGRES_WINDOW_COMPATIBILITY_REPLACEMENTS[originalName];
+        if (!replacementName) {
+            continue;
+        }
+
+        const openParenPos = match.index + match[0].length - 1;
+        const closeParenPos = findMatchingParen(sql, openParenPos);
+        if (closeParenPos === -1) {
+            continue;
+        }
+
+        let pos = closeParenPos + 1;
+        while (pos < masked.length && /\s/.test(masked[pos])) {
+            pos++;
+        }
+        if (!/^OVER\b/i.test(masked.substring(pos))) {
+            continue;
+        }
+
+        pos += 'OVER'.length;
+        while (pos < masked.length && /\s/.test(masked[pos])) {
+            pos++;
+        }
+        if (sql[pos] !== '(') {
+            continue;
+        }
+
+        const overCloseParenPos = findMatchingParen(sql, pos);
+        if (overCloseParenPos === -1) {
+            continue;
+        }
+
+        const alias = extractPostgresWindowCompatibilityAlias(sql, overCloseParenPos + 1);
+        rewrites.push({
+            alias,
+            originalName,
+            replacementName,
+        });
+        textRewrites.push({
+            start: match.index,
+            end: match.index + match[1].length,
+            replacement: replacementName,
+        });
+    }
+
+    if (textRewrites.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = textRewrites.length - 1; i >= 0; i--) {
+        const rewrite = textRewrites[i];
+        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
+    }
+
+    return { sql: result, rewrites };
+}
+
+function extractPostgresWindowCompatibilityAlias(sql: string, startPos: number): string | null {
+    let pos = startPos;
+    while (pos < sql.length && /\s/.test(sql[pos])) {
+        pos++;
+    }
+
+    if (pos >= sql.length || !/^AS\b/i.test(sql.substring(pos))) {
+        return null;
+    }
+
+    pos += 'AS'.length;
+    while (pos < sql.length && /\s/.test(sql[pos])) {
+        pos++;
+    }
+
+    if (pos >= sql.length) {
+        return null;
+    }
+
+    const quote = sql[pos];
+    if (quote === '"' || quote === '`' || quote === '[') {
+        const closingQuote = quote === '[' ? ']' : quote;
+        const end = sql.indexOf(closingQuote, pos + 1);
+        return end === -1 ? null : sql.substring(pos + 1, end);
+    }
+
+    const aliasMatch = sql.substring(pos).match(/^[A-Za-z_][A-Za-z0-9_$]*/);
+    return aliasMatch ? aliasMatch[0] : null;
+}
+
 function rewriteRedshiftSelectIntoStatement(sql: string): string | null {
     const masked = maskStringsAndComments(sql);
     const withIndex = findKeywordAtDepth0(masked, 'WITH', 0);
