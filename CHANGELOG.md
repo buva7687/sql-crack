@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-22
+
+### Added
+
+- **Pure rendering computations module**: Extracted `calculateEdgePath`, `contrastTextForBadge`, `computeCloudArrowPath`, `calculateQueryDepth`, and `getQueryComplexityInfo` from DOM-dependent rendering modules into a standalone `computations.ts` — zero DOM imports, directly testable in Jest.
+- **Shared fake DOM test helper**: Added `tests/helpers/fakeDom.ts` providing lightweight `FakeElement` / `FakeDocument` objects that track `setAttribute`, children, style mutations, and event listeners without requiring jsdom. Enables direct-import testing of `nodeRenderer.ts` and `edgeRenderer.ts`.
+- **Workspace pipeline integration test**: Test exercising SQL strings → SchemaExtractor + ReferenceExtractor → WorkspaceIndex → LineageBuilder with assertions on nodes, edges, upstream/downstream relationships.
+- **Extension activation source-reading guards**: Validates `normalizeDialect()`, command declarations, keybindings, configuration schema, activation events, and message protocol type coverage via source-reading assertions.
+- **Message protocol source-reading guards**: Source-reading tests validating SQL Flow and Workspace message type unions cover all expected commands, handler coverage, and cross-panel consistency.
+- **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface.
+
+### Changed
+
+- **Edge renderer delegation**: `edgeRenderer.ts` now delegates `calculateEdgePath` and `contrastTextForBadge` to the pure `computations.ts` module instead of containing inline implementations.
+- **Query complexity delegation**: `queryComplexity.ts` now delegates `calculateQueryDepth` and `getQueryComplexityInfo` to `computations.ts`.
+- **Rendering barrel exports**: `rendering/index.ts` now re-exports pure computation functions for downstream consumers.
+
+### Fixed
+
+- **Query depth reconverging DAG bug**: `calculateQueryDepth()` used a single global `visited` set that prevented revisiting a shared ancestor through a longer path, undercounting depth for diamond-shaped DAGs. Replaced with per-node best-depth tracking and an `onStack` cycle guard so reconverging graphs report the true longest path.
+
+### Tests
+
+- Added 176 new tests across 8 files: `computations.test.ts` (36), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `workspacePipeline.test.ts` (14), `extensionActivation.test.ts` (15), `messageProtocol.test.ts` (18), `settingsPropagation.test.ts` (39). Includes reconverging DAG and multi-reconvergence depth test cases. Total suite: 3,254 passing, zero regressions.
+
 ## [0.6.0] - 2026-03-15
 
 ### Added

@@ -181,6 +181,11 @@ export function computeCloudArrowPath(
 
 /**
  * Calculate maximum depth of the query graph via reverse DFS from the result node.
+ *
+ * Uses per-node best-depth tracking instead of a simple visited set so that
+ * reconverging DAGs (diamond shapes) report the true longest path.  A node
+ * is only re-explored when reached at a greater depth than previously seen.
+ * An `onStack` guard breaks cycles without suppressing longer paths.
  */
 export function calculateQueryDepth(nodes: FlowNode[], edges: FlowEdge[]): number {
     const resultNode = nodes.find(node => node.type === 'result');
@@ -188,14 +193,19 @@ export function calculateQueryDepth(nodes: FlowNode[], edges: FlowEdge[]): numbe
         return 0;
     }
 
-    const visited = new Set<string>();
+    const bestDepth = new Map<string, number>();
+    const onStack = new Set<string>();
     let maxDepth = 0;
 
     const dfs = (nodeId: string, depth: number): void => {
-        if (visited.has(nodeId)) {
-            return;
+        if (onStack.has(nodeId)) {
+            return; // cycle guard
         }
-        visited.add(nodeId);
+        if ((bestDepth.get(nodeId) ?? -1) >= depth) {
+            return; // already reached at equal or greater depth
+        }
+        bestDepth.set(nodeId, depth);
+        onStack.add(nodeId);
         maxDepth = Math.max(maxDepth, depth);
 
         for (const edge of edges) {
@@ -203,6 +213,8 @@ export function calculateQueryDepth(nodes: FlowNode[], edges: FlowEdge[]): numbe
                 dfs(edge.source, depth + 1);
             }
         }
+
+        onStack.delete(nodeId);
     };
 
     dfs(resultNode.id, 0);

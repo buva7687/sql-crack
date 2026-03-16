@@ -420,11 +420,10 @@ src/
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
-
-Refactoring milestone: large-file decomposition completed across core surfaces with full regression validation (`tsc`, lint, and test suite all green).
+- ✅ **Phase 7** — Export preview with PDF support, architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage)
 
 **Planned**:
-- Export preview dialog with PDF support
+- Web Worker parsing (off-main-thread SQL parsing for large files)
 - Diff-aware visualization for PR reviews
 - dbt integration — deep: cross-file `ref()` resolution, manifest.json, macro following (basic Jinja preprocessing shipped in 0.5.2)
 - Performance regression detection

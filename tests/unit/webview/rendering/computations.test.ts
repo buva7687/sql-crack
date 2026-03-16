@@ -266,6 +266,45 @@ describe('calculateQueryDepth', () => {
         // Should terminate; exact depth depends on traversal order
         expect(typeof calculateQueryDepth(nodes, edges)).toBe('number');
     });
+
+    it('reports true longest path in reconverging DAGs (diamond shape)', () => {
+        // Diamond:  t1 -> join -> result   (short: depth 2)
+        //           t1 -> filter -> join   (long:  depth 3 via t1->filter->join->result)
+        // The shared "join" node must be explored at depth 1 AND depth 2.
+        const nodes = [
+            makeNode({ id: 't1', type: 'table' }),
+            makeNode({ id: 'f', type: 'filter' }),
+            makeNode({ id: 'j', type: 'join' }),
+            makeNode({ id: 'r', type: 'result' }),
+        ];
+        const edges = [
+            makeEdge('t1', 'j'),  // short path: t1 -> j -> r (depth 2)
+            makeEdge('t1', 'f'),  // long path:  t1 -> f -> j -> r (depth 3)
+            makeEdge('f', 'j'),
+            makeEdge('j', 'r'),
+        ];
+        expect(calculateQueryDepth(nodes, edges)).toBe(3);
+    });
+
+    it('reports true longest path with multiple reconvergence points', () => {
+        // t -> a -> b -> result   (depth 3)
+        // t -> c -> a             (reconverge at a; t->c->a->b->result = depth 4)
+        const nodes = [
+            makeNode({ id: 't', type: 'table' }),
+            makeNode({ id: 'a', type: 'filter' }),
+            makeNode({ id: 'b', type: 'join' }),
+            makeNode({ id: 'c', type: 'filter' }),
+            makeNode({ id: 'r', type: 'result' }),
+        ];
+        const edges = [
+            makeEdge('t', 'a'),
+            makeEdge('a', 'b'),
+            makeEdge('b', 'r'),
+            makeEdge('t', 'c'),
+            makeEdge('c', 'a'), // reconverge: longer path to a
+        ];
+        expect(calculateQueryDepth(nodes, edges)).toBe(4);
+    });
 });
 
 // ============================================================
