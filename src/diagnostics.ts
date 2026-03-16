@@ -98,7 +98,7 @@ export function createDiagnosticsFromBatch(
     });
 
     (result.parseErrors || []).forEach((parseError) => {
-        const fallbackLine = parseError.line != null ? parseError.line - 1 : 0;
+        const fallbackLine = parseError.line !== null && parseError.line !== undefined ? parseError.line - 1 : 0;
         const range = createLineRange(document, fallbackLine);
         const diagnostic = new vscode.Diagnostic(range, parseError.message, vscode.DiagnosticSeverity.Error);
         diagnostic.source = SQL_CRACK_DIAGNOSTIC_SOURCE;

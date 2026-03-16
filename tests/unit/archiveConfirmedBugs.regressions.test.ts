@@ -121,7 +121,7 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
 
     it('#N7 uses a nullish-style line guard for diagnostics parse errors', () => {
         const source = readSource('src/diagnostics.ts');
-        expect(source).toContain('const fallbackLine = parseError.line != null ? parseError.line - 1 : 0;');
+        expect(source).toContain('const fallbackLine = parseError.line !== null && parseError.line !== undefined ? parseError.line - 1 : 0;');
     });
 
     it('#N9 guards viewAlerts click handling against non-Element event targets', () => {

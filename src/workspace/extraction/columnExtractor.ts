@@ -19,7 +19,7 @@ export class ColumnExtractor {
     }
 
     private asArray<T>(value: T | T[] | null | undefined): T[] {
-        if (value == null) {
+        if (value === null || value === undefined) {
             return [];
         }
         return Array.isArray(value) ? value : [value];
