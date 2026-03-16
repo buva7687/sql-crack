@@ -103,6 +103,7 @@ interface SqlCrackWebviewBootstrapConfig {
     pinId: string | null;
     viewLocation: string;
     defaultLayout: string;
+    parserWorkerUri: string;
     persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
     initialUiState: unknown;
     showDeadColumnHints: boolean;
@@ -134,6 +135,7 @@ declare global {
         pinId?: string | null;
         viewLocation?: string;
         defaultLayout?: string;
+        parserWorkerUri?: string;
         flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
@@ -1137,9 +1139,14 @@ async function toggleCompareMode(): Promise<void> {
         return;
     }
 
+    const compareToken = parseRequestId;
+    const compareQueryIndex = currentQueryIndex;
     const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
         allowDialectFallback: isDialectAutoDetectionEnabled(),
     });
+    if (!batchResult || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
+        return;
+    }
     const currentTitle = batchResult.queries.length > 1
         ? `Current • Q${currentQueryIndex + 1}`
         : (window.fileName || 'Current query');

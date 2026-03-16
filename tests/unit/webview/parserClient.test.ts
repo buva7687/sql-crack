@@ -28,6 +28,14 @@ describe('parserClient', () => {
         DROP TABLE users;
     `;
 
+    afterEach(() => {
+        terminateWorker();
+        delete (global as Record<string, unknown>).window;
+        delete (global as Record<string, unknown>).Worker;
+        delete (globalThis as Record<string, unknown>).window;
+        delete (globalThis as Record<string, unknown>).Worker;
+    });
+
     describe('parseAsync', () => {
         it('defers parsing to a macrotask so UI can paint loading states', async () => {
             jest.useFakeTimers();
@@ -290,7 +298,7 @@ describe('parserClient', () => {
     });
 
     describe('isWorkerSupported', () => {
-        it('should return false (worker implementation deferred)', () => {
+        it('should return false when no worker bootstrap is available', () => {
             const supported = isWorkerSupported();
 
             expect(supported).toBe(false);
@@ -298,7 +306,7 @@ describe('parserClient', () => {
     });
 
     describe('terminateWorker', () => {
-        it('should be a no-op (worker implementation deferred)', () => {
+        it('should be safe to call when no worker exists', () => {
             expect(() => terminateWorker()).not.toThrow();
         });
 
@@ -308,6 +316,163 @@ describe('parserClient', () => {
             terminateWorker();
 
             expect(true).toBe(true); // Should not throw
+        });
+    });
+
+    describe('worker mode', () => {
+        class MockWorker {
+            public readonly postMessage = jest.fn();
+            public readonly terminate = jest.fn();
+            private readonly listeners = new Map<string, Set<(event: any) => void>>();
+
+            addEventListener(type: string, handler: (event: any) => void): void {
+                if (!this.listeners.has(type)) {
+                    this.listeners.set(type, new Set());
+                }
+                this.listeners.get(type)!.add(handler);
+            }
+
+            removeEventListener(type: string, handler: (event: any) => void): void {
+                this.listeners.get(type)?.delete(handler);
+            }
+
+            emitMessage(data: unknown): void {
+                this.listeners.get('message')?.forEach(handler => handler({ data }));
+            }
+
+            emitError(message: string): void {
+                this.listeners.get('error')?.forEach(handler => handler({ message }));
+            }
+        }
+
+        function installWorkerEnvironment() {
+            const workerInstances: MockWorker[] = [];
+            const WorkerMock = jest.fn(() => {
+                const worker = new MockWorker();
+                workerInstances.push(worker);
+                return worker as unknown as Worker;
+            });
+
+            const workerWindow = {
+                parserWorkerUri: 'vscode-webview://unit-test/parser.worker.js',
+                sqlCrackConfig: {
+                    parserWorkerUri: 'vscode-webview://unit-test/parser.worker.js',
+                },
+            };
+            (global as Record<string, unknown>).window = workerWindow;
+            (globalThis as Record<string, unknown>).window = workerWindow;
+            (global as Record<string, unknown>).Worker = WorkerMock;
+            (globalThis as Record<string, unknown>).Worker = WorkerMock;
+
+            return { WorkerMock, workerInstances };
+        }
+
+        it('returns true when worker bootstrap URI and Worker are available', () => {
+            installWorkerEnvironment();
+
+            expect(isWorkerSupported()).toBe(true);
+        });
+
+        it('uses the parser worker for single-query parse requests', async () => {
+            jest.useFakeTimers();
+            try {
+                const { WorkerMock, workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+                const pending = parseAsync('SELECT 1', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+
+                expect(WorkerMock).toHaveBeenCalledWith('vscode-webview://unit-test/parser.worker.js');
+                const worker = workerInstances[0];
+                expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+                    type: 'parse',
+                    payload: expect.objectContaining({ sql: 'SELECT 1', dialect: 'MySQL' }),
+                }));
+
+                const request = worker.postMessage.mock.calls[0][0];
+                worker.emitMessage({
+                    type: 'parse',
+                    requestId: request.requestId,
+                    result: {
+                        nodes: [{ id: 'n1' }],
+                        edges: [],
+                        stats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        hints: [],
+                        sql: 'SELECT 1',
+                        columnLineage: [],
+                        tableUsage: new Map(),
+                    },
+                });
+
+                const result = await pending;
+                expect(result.sql).toBe('SELECT 1');
+                expect(result.nodes).toEqual([{ id: 'n1' }]);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('uses the parser worker for batch parse requests', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+                const pending = parseBatchAsync('SELECT 1; SELECT 2;', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+
+                const worker = workerInstances[0];
+                const request = worker.postMessage.mock.calls[0][0];
+                expect(request).toEqual(expect.objectContaining({
+                    type: 'parseBatch',
+                    payload: expect.objectContaining({ sql: 'SELECT 1; SELECT 2;', dialect: 'MySQL' }),
+                }));
+
+                worker.emitMessage({
+                    type: 'parseBatch',
+                    requestId: request.requestId,
+                    result: {
+                        queries: [{
+                            nodes: [],
+                            edges: [],
+                            stats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                            hints: [],
+                            sql: 'SELECT 1',
+                            columnLineage: [],
+                            tableUsage: new Map(),
+                        }],
+                        totalStats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        successCount: 1,
+                        errorCount: 0,
+                    },
+                });
+
+                const result = await pending;
+                expect(result.queries).toHaveLength(1);
+                expect(result.errorCount).toBe(0);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('falls back to main-thread parsing when the worker errors', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+                const pending = parseAsync('SELECT 1', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                workerInstances[0].emitError('worker failed');
+
+                const result = await pending;
+                expect(result.nodes.length).toBeGreaterThanOrEqual(0);
+            } finally {
+                jest.useRealTimers();
+            }
         });
     });
 
@@ -366,7 +531,7 @@ describe('parserClient', () => {
     });
 
     describe('getWorkerStatus', () => {
-        it('should return worker status with deferred implementation', () => {
+        it('should return worker status with deferred implementation when unsupported', () => {
             const status = getWorkerStatus();
 
             expect(status).toHaveProperty('supported');
@@ -379,7 +544,7 @@ describe('parserClient', () => {
             expect(status.implementation).toBe('deferred');
         });
 
-        it('should reflect deferred implementation', () => {
+        it('should reflect deferred implementation when worker support is unavailable', () => {
             terminateWorker();
 
             const status = getWorkerStatus();
