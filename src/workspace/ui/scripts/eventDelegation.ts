@@ -21,6 +21,14 @@ export function getEventDelegationScriptFragment(): string {
                     return;
                 }
 
+                if (action === 'copy-lineage-markdown') {
+                    vscode.postMessage({
+                        command: 'export',
+                        format: 'copy-lineage-markdown'
+                    });
+                    return;
+                }
+
                 if (action && action.indexOf('cross-view-') === 0) {
                     const inferredNodeId = nodeId || (tableName ? ('table:' + tableName.toLowerCase()) : '');
 

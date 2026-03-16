@@ -11,7 +11,13 @@ function createCommentMask(sql: string): boolean[] {
         const next = sql[i + 1];
 
         if (inSingleQuote) {
+            // SQL-standard doubled quote escape: ''
             if (char === '\'' && next === '\'') {
+                i += 2;
+                continue;
+            }
+            // MySQL backslash escape: \'
+            if (char === '\\' && next === '\'') {
                 i += 2;
                 continue;
             }

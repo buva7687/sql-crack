@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { WorkspaceDependencyGraph } from '../types';
+import { WorkspaceExportContext, buildWorkspaceExportFilename } from '../exportMetadata';
 import { buildWorkspaceGraphDot, buildWorkspaceGraphJsonExportData, buildWorkspaceGraphSvg } from './graphExportBuilders';
 import { generateWorkspaceMermaid } from '../exportUtils';
 
@@ -38,19 +39,29 @@ async function saveTextContent(
     vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
 }
 
-export async function exportWorkspaceMermaidFile(graph: WorkspaceDependencyGraph): Promise<void> {
+export async function exportWorkspaceMermaidFile(
+    graph: WorkspaceDependencyGraph,
+    context?: WorkspaceExportContext
+): Promise<void> {
     if (!ensureGraphReadyForExport(graph)) {
         return;
     }
-    const mermaid = generateWorkspaceMermaid(graph, getFlowDirection());
-    await saveTextContent(mermaid, 'workspace-dependencies.md', { Markdown: ['md'] });
+    const mermaid = generateWorkspaceMermaid(graph, getFlowDirection(), context);
+    await saveTextContent(
+        mermaid,
+        buildWorkspaceExportFilename('workspace-dependencies', 'md', context),
+        { Markdown: ['md'] }
+    );
 }
 
-export async function copyWorkspaceMermaid(graph: WorkspaceDependencyGraph): Promise<void> {
+export async function copyWorkspaceMermaid(
+    graph: WorkspaceDependencyGraph,
+    context?: WorkspaceExportContext
+): Promise<void> {
     if (!ensureGraphReadyForExport(graph)) {
         return;
     }
-    const mermaid = generateWorkspaceMermaid(graph, getFlowDirection());
+    const mermaid = generateWorkspaceMermaid(graph, getFlowDirection(), context);
     await vscode.env.clipboard.writeText(mermaid);
     vscode.window.showInformationMessage('Mermaid copied to clipboard');
 }
@@ -58,45 +69,68 @@ export async function copyWorkspaceMermaid(graph: WorkspaceDependencyGraph): Pro
 export async function exportWorkspaceSvgFile(
     graph: WorkspaceDependencyGraph,
     isDarkTheme: boolean,
-    escapeHtml: (value: string) => string
+    escapeHtml: (value: string) => string,
+    context?: WorkspaceExportContext
 ): Promise<void> {
     if (!ensureGraphReadyForExport(graph)) {
         return;
     }
-    const svg = buildWorkspaceGraphSvg(graph, isDarkTheme, escapeHtml);
-    await saveTextContent(svg, 'workspace-dependencies.svg', { SVG: ['svg'] });
+    const svg = buildWorkspaceGraphSvg(graph, isDarkTheme, escapeHtml, context);
+    await saveTextContent(
+        svg,
+        buildWorkspaceExportFilename('workspace-dependencies', 'svg', context),
+        { SVG: ['svg'] }
+    );
 }
 
 export async function exportWorkspaceJsonFile(
     graph: WorkspaceDependencyGraph,
-    version: string
+    version: string,
+    context?: WorkspaceExportContext
 ): Promise<void> {
     if (!ensureGraphReadyForExport(graph)) {
         return;
     }
-    const exportData = buildWorkspaceGraphJsonExportData(graph, version);
-    await saveTextContent(JSON.stringify(exportData, null, 2), 'workspace-dependencies.json', { JSON: ['json'] });
+    const exportData = buildWorkspaceGraphJsonExportData(graph, version, context);
+    await saveTextContent(
+        JSON.stringify(exportData, null, 2),
+        buildWorkspaceExportFilename('workspace-dependencies', 'json', context),
+        { JSON: ['json'] }
+    );
 }
 
 export async function exportWorkspaceDotFile(
     graph: WorkspaceDependencyGraph,
-    isDarkTheme: boolean
+    isDarkTheme: boolean,
+    context?: WorkspaceExportContext
 ): Promise<void> {
     if (!ensureGraphReadyForExport(graph)) {
         return;
     }
-    const dot = buildWorkspaceGraphDot(graph, isDarkTheme);
-    await saveTextContent(dot, 'workspace-dependencies.dot', { 'Graphviz DOT': ['dot', 'gv'] });
+    const dot = buildWorkspaceGraphDot(graph, isDarkTheme, context);
+    await saveTextContent(
+        dot,
+        buildWorkspaceExportFilename('workspace-dependencies', 'dot', context),
+        { 'Graphviz DOT': ['dot', 'gv'] }
+    );
 }
 
-export async function saveWorkspacePng(base64Data: string, suggestedFilename: string): Promise<void> {
+export async function saveWorkspacePng(
+    base64Data: string,
+    suggestedFilename: string,
+    context?: WorkspaceExportContext
+): Promise<void> {
     if (!base64Data) {
         vscode.window.showErrorMessage('No PNG data to save');
         return;
     }
 
     const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(suggestedFilename || 'workspace-dependencies.png'),
+        defaultUri: vscode.Uri.file(
+            context
+                ? buildWorkspaceExportFilename('workspace-dependencies', 'png', context)
+                : (suggestedFilename || 'workspace-dependencies.png')
+        ),
         filters: {
             'PNG Image': ['png'],
         },

@@ -87,7 +87,14 @@ describe('Condition Extractors', () => {
         });
 
         it('returns "condition" for non-binary expression', () => {
-            expect(formatCondition({ type: 'function' })).toBe('condition');
+            expect(formatCondition({
+                type: 'function',
+                name: { name: [{ type: 'default', value: 'EXISTS' }] },
+                args: {
+                    type: 'expr_list',
+                    value: [{ ast: { type: 'select' } }]
+                }
+            })).toBe('EXISTS (subquery)');
             expect(formatCondition({})).toBe('condition');
         });
 

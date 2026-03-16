@@ -21,13 +21,16 @@ export type SqlFlowWebviewMessage =
     | { command: 'requestRefresh' }
     | { command: 'persistUiState'; state: unknown }
     | { command: 'goToLine'; line: number }
+    | { command: 'traceInWorkspaceLineage'; tableName: string; nodeType: 'table' | 'view' }
     | { command: 'requestFullscreen'; enable: boolean }
     | { command: 'pinVisualization'; sql?: string; dialect?: string; name?: string }
     | { command: 'changeViewLocation'; location: ViewLocation }
     | { command: 'getViewLocationOptions' }
     | { command: 'openPinnedTab'; pinId: string }
     | { command: 'unpinTab'; pinId: string }
-    | { command: 'savePng'; data: string; filename: string };
+    | { command: 'savePng'; data: string; filename: string }
+    | { command: 'saveSvg'; data: string; filename: string }
+    | { command: 'savePdf'; data: string; filename: string };
 
 // ─── Host → Webview messages ───
 

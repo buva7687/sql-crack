@@ -123,6 +123,11 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain('this._goToLine(message.line)');
         });
 
+        it('handles traceInWorkspaceLineage requests', () => {
+            expect(source).toContain("case 'traceInWorkspaceLineage':");
+            expect(source).toContain('this._traceInWorkspaceLineage(message.tableName, message.nodeType)');
+        });
+
         it('handles pinVisualization request', () => {
             expect(source).toContain("case 'pinVisualization':");
             expect(source).toContain('createPinnedPanel');
@@ -141,6 +146,16 @@ describe('visualizationPanel.ts', () => {
         it('handles savePng request', () => {
             expect(source).toContain("case 'savePng':");
             expect(source).toContain('_savePngFile(message.data, message.filename)');
+        });
+
+        it('handles saveSvg request', () => {
+            expect(source).toContain("case 'saveSvg':");
+            expect(source).toContain('_saveSvgFile(message.data, message.filename)');
+        });
+
+        it('handles savePdf request', () => {
+            expect(source).toContain("case 'savePdf':");
+            expect(source).toContain('_savePdfFile(message.data, message.filename)');
         });
     });
 
@@ -167,6 +182,17 @@ describe('visualizationPanel.ts', () => {
         });
     });
 
+    describe('_traceInWorkspaceLineage', () => {
+        it('opens the workspace panel and forwards the lineage trace request', () => {
+            expect(source).toContain('WorkspacePanel.createOrShow(');
+            expect(source).toContain('workspacePanel.traceTableInLineage(tableName, nodeType)');
+        });
+
+        it('shows an error when extension context is unavailable', () => {
+            expect(source).toContain("'Cannot trace in workspace: extension context not available'");
+        });
+    });
+
     describe('_savePngFile', () => {
         it('shows save dialog with PNG filter', () => {
             expect(source).toContain('showSaveDialog');
@@ -187,6 +213,36 @@ describe('visualizationPanel.ts', () => {
 
         it('logs error on save failure', () => {
             expect(source).toContain("logger.error('Failed to save PNG'");
+        });
+    });
+
+    describe('_saveSvgFile', () => {
+        it('shows save dialog with SVG filter', () => {
+            expect(source).toContain("'SVG Images': ['svg']");
+        });
+
+        it('writes utf8 SVG text through VS Code filesystem API', () => {
+            expect(source).toContain("Buffer.from(svgData, 'utf8')");
+            expect(source).toContain('vscode.workspace.fs.writeFile');
+        });
+
+        it('logs error on svg save failure', () => {
+            expect(source).toContain("logger.error('Failed to save SVG'");
+        });
+    });
+
+    describe('_savePdfFile', () => {
+        it('shows save dialog with PDF filter', () => {
+            expect(source).toContain("'PDF Documents': ['pdf']");
+        });
+
+        it('converts base64 PDF payload to a buffer before writing', () => {
+            expect(source).toContain("Buffer.from(base64Data, 'base64')");
+            expect(source).toContain('vscode.workspace.fs.writeFile');
+        });
+
+        it('logs error on pdf save failure', () => {
+            expect(source).toContain("logger.error('Failed to save PDF'");
         });
     });
 

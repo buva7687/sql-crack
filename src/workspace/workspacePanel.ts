@@ -67,7 +67,10 @@ import {
     exportWorkspaceSvgFile,
     saveWorkspacePng,
 } from './panel/graphExportActions';
+import { buildLineageMarkdownExport } from './panel/lineageMarkdownExport';
 import { buildDetailedWorkspaceStats, buildIndexStatus } from './panel/workspaceStats';
+import { resolveLineageNodeId } from './handlers/lineageNodeResolution';
+import { WorkspaceExportContext, createWorkspaceExportContext } from './exportMetadata';
 
 // Shared theme
 import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/messages';
@@ -170,6 +173,46 @@ export class WorkspacePanel {
 
     public resetWorkspaceUxMetrics(): void {
         this._workspaceUxMetrics.reset();
+    }
+
+    public async traceTableInLineage(tableName: string, nodeType: 'table' | 'view' = 'table'): Promise<boolean> {
+        const normalizedTableName = tableName.trim();
+        if (!normalizedTableName) {
+            return false;
+        }
+
+        await this.buildLineageGraph();
+
+        this._currentView = 'lineage';
+        this._lineageDetailDirection = 'both';
+        this._lineageDetailExpandedNodes = [];
+
+        const lineageGraph = this._lineageGraph;
+        if (!lineageGraph) {
+            this._lineageDetailNodeId = null;
+            this.renderCurrentView();
+            vscode.window.showWarningMessage('Workspace lineage is not ready yet. Refresh the workspace index and try again.');
+            return false;
+        }
+
+        const requestedNodeId = `${nodeType}:${normalizedTableName.toLowerCase()}`;
+        const resolvedNodeId = resolveLineageNodeId(
+            lineageGraph,
+            requestedNodeId,
+            normalizedTableName,
+            nodeType
+        );
+
+        if (!resolvedNodeId) {
+            this._lineageDetailNodeId = null;
+            this.renderCurrentView();
+            vscode.window.showWarningMessage(`Could not resolve "${normalizedTableName}" in workspace lineage. Open the Lineage tab and search for it there.`);
+            return false;
+        }
+
+        this._lineageDetailNodeId = resolvedNodeId;
+        this.renderCurrentView();
+        return true;
     }
 
     /**
@@ -603,14 +646,14 @@ export class WorkspacePanel {
             }
 
             const buildVersion = this._lineageBuildVersion;
-            const buildPromise = Promise.resolve().then(() => {
+            const buildPromise = Promise.resolve().then(async () => {
                 if (this._lineageGraph) {return;}
 
                 const currentIndex = this._indexManager.getIndex();
                 if (!currentIndex) {return;}
 
                 const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
-                const graph = builder.buildFromIndex(currentIndex);
+                const graph = await builder.buildFromIndexAsync(currentIndex);
 
                 // If graph state was invalidated while building, discard stale results.
                 if (buildVersion !== this._lineageBuildVersion) {
@@ -760,6 +803,11 @@ ${bodyContent}
             return;
         }
 
+        if (format === 'copy-lineage-markdown') {
+            await this.copyCurrentLineageAsMarkdown();
+            return;
+        }
+
         if (this._isRebuilding) {
             vscode.window.showWarningMessage('Graph is being rebuilt. Please try exporting again in a moment.');
             return;
@@ -817,7 +865,11 @@ ${bodyContent}
             return;
         }
 
-        const payload = buildImpactReportExportPayload(report, this._extensionVersion);
+        const payload = buildImpactReportExportPayload(
+            report,
+            this._extensionVersion,
+            this._scopeUri?.fsPath
+        );
         const content = format === 'markdown'
             ? renderImpactReportMarkdown(payload)
             : JSON.stringify(payload, null, 2);
@@ -831,12 +883,12 @@ ${bodyContent}
      */
     private async exportAsMermaid(): Promise<void> {
         if (!this._currentGraph) {return;}
-        await exportWorkspaceMermaidFile(this._currentGraph);
+        await exportWorkspaceMermaidFile(this._currentGraph, this.createGraphExportContext(this._currentGraph));
     }
 
     private async copyMermaidToClipboard(): Promise<void> {
         if (!this._currentGraph) { return; }
-        await copyWorkspaceMermaid(this._currentGraph);
+        await copyWorkspaceMermaid(this._currentGraph, this.createGraphExportContext(this._currentGraph));
     }
 
     /**
@@ -847,7 +899,8 @@ ${bodyContent}
         await exportWorkspaceSvgFile(
             this._currentGraph,
             this._isDarkTheme,
-            escapeHtmlText
+            escapeHtmlText,
+            this.createGraphExportContext(this._currentGraph)
         );
     }
 
@@ -857,7 +910,11 @@ ${bodyContent}
      */
     private async exportAsJson(): Promise<void> {
         if (!this._currentGraph) { return; }
-        await exportWorkspaceJsonFile(this._currentGraph, this._extensionVersion);
+        await exportWorkspaceJsonFile(
+            this._currentGraph,
+            this._extensionVersion,
+            this.createGraphExportContext(this._currentGraph)
+        );
     }
 
     /**
@@ -866,7 +923,11 @@ ${bodyContent}
      */
     private async exportAsDot(): Promise<void> {
         if (!this._currentGraph) { return; }
-        await exportWorkspaceDotFile(this._currentGraph, this._isDarkTheme);
+        await exportWorkspaceDotFile(
+            this._currentGraph,
+            this._isDarkTheme,
+            this.createGraphExportContext(this._currentGraph)
+        );
     }
 
     /**
@@ -874,7 +935,53 @@ ${bodyContent}
      * Receives base64-encoded PNG data from webview and saves to user-selected location
      */
     private async savePngToFile(base64Data: string, suggestedFilename: string): Promise<void> {
-        await saveWorkspacePng(base64Data, suggestedFilename);
+        await saveWorkspacePng(
+            base64Data,
+            suggestedFilename,
+            this._currentGraph ? this.createGraphExportContext(this._currentGraph) : undefined
+        );
+    }
+
+    private createGraphExportContext(graph: WorkspaceDependencyGraph): WorkspaceExportContext {
+        return createWorkspaceExportContext({
+            view: 'graph',
+            graphMode: this._currentGraphMode,
+            searchFilter: this._currentSearchFilter,
+            scopeUri: this._scopeUri?.fsPath,
+            nodeCount: Array.isArray(graph.nodes) ? graph.nodes.length : 0,
+            edgeCount: Array.isArray(graph.edges) ? graph.edges.length : 0,
+        });
+    }
+
+    private async copyCurrentLineageAsMarkdown(): Promise<void> {
+        await this.buildLineageGraph();
+
+        const lineageGraph = this._lineageGraph;
+        const flowAnalyzer = this._flowAnalyzer;
+        const centerNodeId = this._lineageDetailNodeId;
+
+        if (!lineageGraph || !flowAnalyzer || !centerNodeId) {
+            vscode.window.showWarningMessage('Open a lineage graph first, then try Copy as Markdown.');
+            return;
+        }
+
+        const node = lineageGraph.nodes.get(centerNodeId);
+        if (!node) {
+            vscode.window.showWarningMessage('The current lineage node is no longer available. Refresh the index and reopen the graph.');
+            return;
+        }
+
+        const payload = buildLineageMarkdownExport({
+            flowAnalyzer,
+            node,
+            direction: this._lineageDetailDirection,
+            depth: resolveDefaultLineageDepthFromConfig(),
+            scopeUri: this._scopeUri?.fsPath,
+            expandedNodeCount: this._lineageDetailExpandedNodes.length,
+        });
+
+        await vscode.env.clipboard.writeText(payload.markdown);
+        vscode.window.showInformationMessage(`Copied lineage markdown for "${node.name}"`);
     }
 
     /**

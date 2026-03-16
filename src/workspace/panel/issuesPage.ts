@@ -118,7 +118,7 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                         data-filepath="${escapeHtml(item.filePath)}"
                         data-line="${item.lineNumber}"
                         data-issue-search="${escapeHtml([item.name, item.type, item.filePath, `line ${item.lineNumber}`].join(' '))}">
-                        <span class="item-type ${item.type}">${item.type}</span>
+                        <span class="item-type ${item.type === 'table' || item.type === 'view' ? item.type : 'unknown'}">${escapeHtml(item.type)}</span>
                         <div class="item-info">
                             <div class="item-name">${escapeHtml(item.name)}</div>
                             <div class="item-path">${escapeHtml(item.filePath)}</div>
@@ -127,7 +127,7 @@ export function createIssuesPageHtml(options: IssuesPageHtmlOptions): string {
                             type="button"
                             class="issue-inline-action show-in-graph-btn"
                             data-show-graph-query="${escapeHtml(item.name)}"
-                            data-show-graph-type="${item.type}"
+                            data-show-graph-type="${escapeHtml(item.type)}"
                             aria-label="Show ${escapeHtml(item.name)} in graph"
                         >Show in graph</button>
                         <span class="item-line">line ${item.lineNumber}</span>

@@ -56,4 +56,10 @@ describe('calculateEdgePath layout support', () => {
         // When dist === 0 (overlapping nodes), division by zero produces NaN without a guard.
         expect(edgeRendererSource).toContain('Math.sqrt(dx * dx + dy * dy) || 1');
     });
+
+    it('renderEdge uses calculateEdgePath with the active layout type', () => {
+        expect(edgeRendererSource).toContain('layoutType: LayoutType;');
+        expect(edgeRendererSource).toContain("path.setAttribute('d', calculateEdgePath(sourceNode, targetNode, options.layoutType));");
+        expect(rendererSource).toContain("layoutType: state.layoutType || 'vertical',");
+    });
 });

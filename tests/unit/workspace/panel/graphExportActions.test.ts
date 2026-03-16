@@ -6,6 +6,7 @@ import {
     exportWorkspaceDotFile,
     copyWorkspaceMermaid
 } from '../../../../src/workspace/panel/graphExportActions';
+import { createWorkspaceExportContext } from '../../../../src/workspace/exportMetadata';
 import { WorkspaceDependencyGraph } from '../../../../src/workspace/types';
 
 function createGraph(overrides: Partial<WorkspaceDependencyGraph> = {}): WorkspaceDependencyGraph {
@@ -36,6 +37,16 @@ function createGraph(overrides: Partial<WorkspaceDependencyGraph> = {}): Workspa
 }
 
 describe('workspace graph export actions', () => {
+    const exportContext = createWorkspaceExportContext({
+        view: 'graph',
+        graphMode: 'tables',
+        scopeUri: '/repo/sql',
+        searchFilter: { query: 'orders', nodeTypes: undefined, useRegex: false, caseSensitive: false },
+        nodeCount: 1,
+        edgeCount: 0,
+        exportedAt: '2026-03-07T12:00:00.000Z',
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
         (vscode.window as any).showSaveDialog = jest.fn().mockResolvedValue(vscode.Uri.file('/tmp/workspace-export.out'));
@@ -65,10 +76,23 @@ describe('workspace graph export actions', () => {
     it('exports when graph contains nodes', async () => {
         const graph = createGraph();
 
-        await exportWorkspaceJsonFile(graph, '0.3.8');
+        await exportWorkspaceJsonFile(graph, '0.3.8', exportContext);
 
         expect((vscode.window as any).showSaveDialog).toHaveBeenCalled();
         expect(vscode.workspace.fs.writeFile).toHaveBeenCalled();
         expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it('passes metadata-enriched mermaid content to file and clipboard exports', async () => {
+        const graph = createGraph();
+
+        await exportWorkspaceMermaidFile(graph, exportContext);
+        await copyWorkspaceMermaid(graph, exportContext);
+
+        const [, savedBuffer] = (vscode.workspace.fs.writeFile as jest.Mock).mock.calls[0];
+        const savedText = Buffer.from(savedBuffer).toString('utf8');
+        expect(savedText).toContain('%% SQL Crack Workspace Export');
+        expect(savedText).toContain('%% Graph Mode: tables');
+        expect((vscode as any).env.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('%% Scope: /repo/sql'));
     });
 });

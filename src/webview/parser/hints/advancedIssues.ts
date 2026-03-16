@@ -174,8 +174,14 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             if (subquery && subquery.sql.toLowerCase().includes('from')) {
                 // Normalize: remove extra whitespace, lowercase, remove table aliases for comparison
                 let normalized = subquery.sql.replace(/\s+/g, ' ').toLowerCase();
-                // Remove table aliases (e.g., "orders o" -> "orders")
-                normalized = normalized.replace(/\b(from|join|,)\s+(\w+)\s+(?:as\s+)?\w+\b/g, '$1 $2');
+                // Remove table aliases (e.g., "orders o" -> "orders"), but not SQL keywords
+                normalized = normalized.replace(/\b(from|join|,)\s+(\w+)\s+(?:as\s+)?(\w+)\b/g, (match, clause, table, alias) => {
+                    const sqlKeywords = new Set(['inner', 'outer', 'left', 'right', 'full', 'cross', 'natural', 'join', 'on', 'where', 'group', 'order', 'having', 'limit', 'union', 'intersect', 'except', 'select', 'from', 'set', 'into', 'values']);
+                    if (sqlKeywords.has(alias)) {
+                        return match;
+                    }
+                    return `${clause} ${table}`;
+                });
                 
                 // Determine location based on context
                 const beforeMatch = sql.substring(Math.max(0, parenPos - 100), parenPos).toLowerCase();
@@ -367,7 +373,32 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
         }
 
         // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const normalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#(?![A-Za-z0-9_])[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+        const fullNormalizedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/#(?![A-Za-z0-9_])[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+
+        // Scope SQL to the relevant CTE/subquery rather than the full query
+        let normalizedSql = fullNormalizedSql;
+        if (selectNode.parentId) {
+            const parentNode = nodes.find(n => n.id === selectNode.parentId);
+            if (parentNode && parentNode.label) {
+                const cteName = extractCteName(parentNode.label);
+                if (cteName) {
+                    // Find the CTE body: "cteName AS ( ... )"
+                    const ctePattern = new RegExp(`\\b${escapeRegex(cteName)}\\b\\s+as\\s*\\(`, 'i');
+                    const cteMatch = ctePattern.exec(fullNormalizedSql);
+                    if (cteMatch) {
+                        const bodyStart = cteMatch.index + cteMatch[0].length;
+                        let depth = 1;
+                        let bodyEnd = bodyStart;
+                        for (let ci = bodyStart; ci < fullNormalizedSql.length && depth > 0; ci++) {
+                            if (fullNormalizedSql[ci] === '(') { depth++; }
+                            else if (fullNormalizedSql[ci] === ')') { depth--; }
+                            if (depth === 0) { bodyEnd = ci; }
+                        }
+                        normalizedSql = fullNormalizedSql.substring(bodyStart, bodyEnd).trim();
+                    }
+                }
+            }
+        }
         const sqlLower = normalizedSql.toLowerCase();
 
         // Extract column names directly from SQL SELECT clause as fallback

@@ -1,4 +1,5 @@
 import { WorkspaceDependencyGraph } from './types';
+import { WorkspaceExportContext, buildWorkspaceExportCommentBlock } from './exportMetadata';
 
 export interface WorkspaceExportOption {
     format: 'clipboard-png' | 'png' | 'svg' | 'mermaid' | 'copy-mermaid' | 'json' | 'dot';
@@ -18,9 +19,14 @@ export const WORKSPACE_EXPORT_OPTIONS: WorkspaceExportOption[] = [
 
 export function generateWorkspaceMermaid(
     graph: WorkspaceDependencyGraph,
-    direction: 'TD' | 'BT'
+    direction: 'TD' | 'BT',
+    context?: WorkspaceExportContext
 ): string {
-    let mermaid = `\`\`\`mermaid\ngraph ${direction}\n`;
+    let mermaid = '```mermaid\n';
+    if (context) {
+        mermaid += `${buildWorkspaceExportCommentBlock(context, '%%')}\n`;
+    }
+    mermaid += `graph ${direction}\n`;
 
     for (const node of graph.nodes) {
         const label = node.label.replace(/"/g, '\\"');

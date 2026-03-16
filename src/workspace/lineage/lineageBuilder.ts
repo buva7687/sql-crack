@@ -55,10 +55,19 @@ export class LineageBuilder implements LineageGraph {
         this.options = options;
     }
 
+    async buildFromIndexAsync(index: WorkspaceIndex): Promise<LineageGraph> {
+        const fileSqlByPath = await this.preloadFileSql(index.files);
+        return this.buildFromIndexCore(index, fileSqlByPath);
+    }
+
     /**
      * Build lineage graph from workspace index
      */
     buildFromIndex(index: WorkspaceIndex): LineageGraph {
+        return this.buildFromIndexCore(index);
+    }
+
+    private buildFromIndexCore(index: WorkspaceIndex, fileSqlByPath?: Map<string, string>): LineageGraph {
         this.nodes.clear();
         this.edges = [];
         this.columnEdges = [];
@@ -105,19 +114,8 @@ export class LineageBuilder implements LineageGraph {
         for (const [filePath, analysis] of index.files) {
             // Only process if we don't have queries array (which would have CTEs)
             if (!analysis.queries || analysis.queries.length === 0) {
-                // filePath should be a file system path
-                if (!fs.existsSync(filePath)) {
-                    continue;
-                }
-
-                let sql: string;
-                try {
-                    sql = fs.readFileSync(filePath, 'utf8');
-                } catch (error) {
-                    // Expected in race windows (deleted/moved file) or invalid paths.
-                    logger.debug(`[LineageBuilder] Failed reading SQL file for CTE extraction (${filePath}): ${error instanceof Error ? error.message : String(error)}`);
-                    continue;
-                }
+                const sql = this.resolveFileSql(filePath, fileSqlByPath, 'debug', 'CTE extraction');
+                if (!sql) {continue;}
 
                 this.extractCTEsFromSQL(sql, filePath, cteNames);
             }
@@ -158,11 +156,55 @@ export class LineageBuilder implements LineageGraph {
 
         // Create edges from file references
         for (const [filePath, analysis] of index.files) {
-            this.addFileEdges(filePath, analysis);
+            const sql = this.resolveFileSql(filePath, fileSqlByPath, 'warn', 'CTE/alias extraction');
+            this.addFileEdges(filePath, analysis, sql);
             this.addColumnEdgesFromTransformations(filePath, analysis);
         }
 
         return this;
+    }
+
+    private async preloadFileSql(files: Map<string, FileAnalysis>): Promise<Map<string, string>> {
+        const entries = await Promise.all(
+            Array.from(files.keys()).map(async (filePath) => {
+                try {
+                    const sql = await fs.promises.readFile(filePath, 'utf8');
+                    return [filePath, sql] as const;
+                } catch {
+                    return null;
+                }
+            })
+        );
+
+        const fileSqlByPath = new Map<string, string>();
+        for (const entry of entries) {
+            if (!entry) {continue;}
+            fileSqlByPath.set(entry[0], entry[1]);
+        }
+        return fileSqlByPath;
+    }
+
+    private resolveFileSql(
+        filePath: string,
+        fileSqlByPath: Map<string, string> | undefined,
+        errorLevel: 'debug' | 'warn',
+        purpose: string
+    ): string | null {
+        if (fileSqlByPath) {
+            return fileSqlByPath.get(filePath) ?? null;
+        }
+
+        try {
+            return fs.readFileSync(filePath, 'utf8');
+        } catch (error) {
+            const message = `[LineageBuilder] Failed reading SQL file for ${purpose} (${filePath}): ${error instanceof Error ? error.message : String(error)}`;
+            if (errorLevel === 'warn') {
+                logger.warn(message);
+            } else {
+                logger.debug(message);
+            }
+            return null;
+        }
     }
 
     /**
@@ -267,7 +309,7 @@ export class LineageBuilder implements LineageGraph {
      * IMPORTANT: Edges are created per-statement, not per-file
      * This prevents false relationships between unrelated queries in the same file
      */
-    private addFileEdges(filePath: string, analysis: FileAnalysis): void {
+    private addFileEdges(filePath: string, analysis: FileAnalysis, sql?: string | null): void {
         // Collect CTE names from this file to filter them out
         const fileCteNames = new Set<string>();
         if (analysis.queries) {
@@ -281,13 +323,8 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // ALWAYS extract CTE names and subquery aliases directly from SQL file as a fallback/verification
-        try {
-            if (fs.existsSync(filePath)) {
-                const sql = fs.readFileSync(filePath, 'utf8');
-                this.extractCTEAndAliasNames(sql, fileCteNames);
-            }
-        } catch (error) {
-            logger.warn(`[LineageBuilder] Failed reading SQL file for CTE/alias extraction (${filePath}): ${error instanceof Error ? error.message : String(error)}`);
+        if (sql) {
+            this.extractCTEAndAliasNames(sql, fileCteNames);
         }
 
         // Group references by statement index for per-statement lineage
@@ -573,22 +610,12 @@ export class LineageBuilder implements LineageGraph {
 
         // 3. For CREATE VIEW, find the view from definitions
         if (statementType === 'create_view') {
-            for (const def of analysis.definitions) {
-                if (def.type === 'view') {
-                    const tableKey = getQualifiedKey(def.name, def.schema);
-                    return this.resolveTableId(tableKey, filePath);
-                }
-            }
+            return this.resolveDefinitionTargetId(query, queryIndex, analysis, filePath, 'view');
         }
 
         // 4. For CREATE TABLE (potentially CTAS), find the table from definitions
         if (statementType === 'create_table') {
-            for (const def of analysis.definitions) {
-                if (def.type === 'table') {
-                    const tableKey = getQualifiedKey(def.name, def.schema);
-                    return this.resolveTableId(tableKey, filePath);
-                }
-            }
+            return this.resolveDefinitionTargetId(query, queryIndex, analysis, filePath, 'table');
         }
 
         // 5. For CTEs, check if this query is a CTE definition
@@ -638,6 +665,51 @@ export class LineageBuilder implements LineageGraph {
         }
 
         return null;
+    }
+
+    private resolveDefinitionTargetId(
+        query: any,
+        queryIndex: number,
+        analysis: FileAnalysis,
+        filePath: string,
+        definitionType: 'table' | 'view'
+    ): string | null {
+        const matchingDefs = analysis.definitions.filter(def => def.type === definitionType);
+        if (matchingDefs.length === 0) {
+            return null;
+        }
+        if (matchingDefs.length === 1) {
+            const onlyDef = matchingDefs[0];
+            return this.resolveTableId(getQualifiedKey(onlyDef.name, onlyDef.schema), filePath);
+        }
+
+        const queryLineNumber = typeof query?.lineNumber === 'number' ? query.lineNumber : undefined;
+        const queryStatementIndex = typeof query?.statementIndex === 'number' ? query.statementIndex : queryIndex;
+        const rankedDefs = matchingDefs
+            .map((def, index) => {
+                const defStatementIndex = typeof (def as any).statementIndex === 'number' ? (def as any).statementIndex : undefined;
+                const lineDistance = queryLineNumber === undefined
+                    ? Number.MAX_SAFE_INTEGER
+                    : Math.abs((def.lineNumber || queryLineNumber) - queryLineNumber);
+                const statementDistance = defStatementIndex === undefined
+                    ? Number.MAX_SAFE_INTEGER
+                    : Math.abs(defStatementIndex - queryStatementIndex);
+                const preferredOrder = queryLineNumber !== undefined && (def.lineNumber || 0) >= queryLineNumber ? 0 : 1;
+
+                return { def, index, lineDistance, statementDistance, preferredOrder };
+            })
+            .sort((left, right) =>
+                left.statementDistance - right.statementDistance
+                || left.preferredOrder - right.preferredOrder
+                || left.lineDistance - right.lineDistance
+                || left.index - right.index
+            );
+
+        const bestDef = rankedDefs[0]?.def;
+        if (!bestDef) {
+            return null;
+        }
+        return this.resolveTableId(getQualifiedKey(bestDef.name, bestDef.schema), filePath);
     }
 
     /**

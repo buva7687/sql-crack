@@ -62,6 +62,29 @@ export class ImpactAnalyzer {
         private flowAnalyzer: FlowAnalyzer
     ) {}
 
+    private createMissingColumnTableReport(columnName: string, changeType: ChangeType): ImpactReport {
+        return {
+            changeType,
+            target: {
+                type: 'column',
+                name: columnName
+            },
+            directImpacts: [],
+            transitiveImpacts: [],
+            summary: {
+                totalAffected: 0,
+                tablesAffected: 0,
+                viewsAffected: 0,
+                queriesAffected: 0,
+                filesAffected: 0
+            },
+            severity: 'low',
+            suggestions: [
+                'Table name is required for column impact analysis.'
+            ]
+        };
+    }
+
     /**
      * Analyze impact of changing a table
      */
@@ -291,13 +314,18 @@ export class ImpactAnalyzer {
     /**
      * Analyze impact of changing a column
      */
-    analyzeColumnChange(tableName: string, columnName: string, changeType: ChangeType = 'modify'): ImpactReport {
-        const columnId = this.getColumnNodeId(tableName, columnName);
+    analyzeColumnChange(tableName: string | undefined, columnName: string, changeType: ChangeType = 'modify'): ImpactReport {
+        const normalizedTableName = tableName?.trim();
+        if (!normalizedTableName) {
+            return this.createMissingColumnTableReport(columnName, changeType);
+        }
+
+        const columnId = this.getColumnNodeId(normalizedTableName, columnName);
         const columnNode = this.graph.nodes.get(columnId);
 
         if (!columnNode) {
             // Fall back to table-level impact
-            return this.analyzeTableChange(tableName, changeType);
+            return this.analyzeTableChange(normalizedTableName, changeType);
         }
 
         // Get all downstream nodes
@@ -343,7 +371,7 @@ export class ImpactAnalyzer {
             target: {
                 type: 'column',
                 name: columnName,
-                tableName
+                tableName: normalizedTableName
             },
             directImpacts,
             transitiveImpacts,
@@ -365,7 +393,7 @@ export class ImpactAnalyzer {
         if (type === 'table') {
             return this.analyzeTableChange(oldName, 'rename');
         } else {
-            return this.analyzeColumnChange(tableName!, oldName, 'rename');
+            return this.analyzeColumnChange(tableName, oldName, 'rename');
         }
     }
 
@@ -380,7 +408,7 @@ export class ImpactAnalyzer {
         if (type === 'table') {
             return this.analyzeTableChange(name, 'drop');
         } else {
-            return this.analyzeColumnChange(tableName!, name, 'drop');
+            return this.analyzeColumnChange(tableName, name, 'drop');
         }
     }
 

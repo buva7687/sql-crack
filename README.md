@@ -463,6 +463,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 - [JSON Crack](https://jsoncrack.com/) — Visual inspiration
 - [node-sql-parser](https://github.com/taozhi8833998/node-sql-parser) — SQL parsing
 - [dagre](https://github.com/dagrejs/dagre) — Graph layout
+- [jsPDF](https://github.com/parallax/jsPDF) — PDF export generation
 
 ---
 

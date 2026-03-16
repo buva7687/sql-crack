@@ -2,7 +2,8 @@ import { ImpactReport } from '../lineage/impactAnalyzer';
 
 export function buildImpactReportExportData(
     report: ImpactReport,
-    extensionVersion: string
+    extensionVersion: string,
+    scopeUri?: string
 ): Record<string, unknown> {
     const serializeItems = (items: typeof report.directImpacts) => items.map(item => ({
         node: {
@@ -22,6 +23,10 @@ export function buildImpactReportExportData(
     return {
         version: extensionVersion,
         exportedAt: new Date().toISOString(),
+        context: {
+            view: 'impact',
+            scopeUri: scopeUri || null,
+        },
         report: {
             changeType: report.changeType,
             target: report.target,
@@ -56,6 +61,9 @@ export function generateImpactReportMarkdown(payload: Record<string, any>): stri
     lines.push('# Impact Analysis Report');
     lines.push('');
     lines.push(`- Exported: ${payload.exportedAt}`);
+    if (payload.context?.scopeUri) {
+        lines.push(`- Scope: ${payload.context.scopeUri}`);
+    }
     lines.push(`- Severity: ${report.severity.toUpperCase()}`);
     lines.push(`- Change Type: ${report.changeType.toUpperCase()}`);
     lines.push(`- Target: ${report.target.type} \`${report.target.name}\``);

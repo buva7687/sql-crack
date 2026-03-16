@@ -9,7 +9,11 @@
  * - SQL Server (TransactSQL) specific features
  */
 
+import { readFileSync } from 'fs';
+import { Parser } from 'node-sql-parser';
+import { join } from 'path';
 import { parseSql, parseSqlBatch, preprocessPostgresSyntax, preprocessOracleSyntax, stripFilterClauses } from '../../../src/webview/sqlParser';
+import { rewriteUnsupportedPostgresWindowFunctionsForCompatibility } from '../../../src/webview/parser/dialects/preprocessing';
 import { getSessionCommandInfo } from '../../../src/webview/parser/statements/ddl';
 
 describe('Dialect Support', () => {
@@ -67,6 +71,21 @@ describe('Dialect Support', () => {
 
   describe('PostgreSQL', () => {
     const dialect = 'PostgreSQL';
+    const parser = new Parser();
+    const unsupportedWindowFunctions: Array<[string, string]> = [
+      ['PERCENT_RANK', 'SELECT PERCENT_RANK() OVER (ORDER BY score) AS pct_rank FROM scores'],
+      ['CUME_DIST', 'SELECT CUME_DIST() OVER (ORDER BY score) AS cume_rank FROM scores'],
+      ['STDDEV', 'SELECT STDDEV(score) OVER () AS score_stddev FROM scores'],
+      ['STDDEV_POP', 'SELECT STDDEV_POP(score) OVER () AS score_stddev_pop FROM scores'],
+      ['STDDEV_SAMP', 'SELECT STDDEV_SAMP(score) OVER () AS score_stddev_samp FROM scores'],
+      ['VARIANCE', 'SELECT VARIANCE(score) OVER () AS score_variance FROM scores'],
+    ];
+    const supportedWindowFunctions: Array<[string, string]> = [
+      ['LAG', 'SELECT LAG(score, 1) OVER (ORDER BY score) AS prev_score FROM scores'],
+      ['LEAD', 'SELECT LEAD(score, 1) OVER (ORDER BY score) AS next_score FROM scores'],
+      ['FIRST_VALUE', 'SELECT FIRST_VALUE(score) OVER (ORDER BY score) AS first_score FROM scores'],
+      ['LAST_VALUE', 'SELECT LAST_VALUE(score) OVER (ORDER BY score) AS last_score FROM scores'],
+    ];
 
     it('parses double-quoted identifiers', () => {
       const result = parseSql('SELECT "user-name" FROM "my-table"', dialect);
@@ -139,6 +158,99 @@ describe('Dialect Support', () => {
       const result = parseSql(sql, dialect);
       expect(result.error).toBeUndefined();
       expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it.each(unsupportedWindowFunctions)(
+      'native PostgreSQL grammar rejects unsupported window function %s',
+      (_name, sql) => {
+        expect(() => parser.astify(sql, { database: 'PostgreSQL' })).toThrow();
+      }
+    );
+
+    it.each(supportedWindowFunctions)(
+      'native PostgreSQL grammar accepts supported window function %s',
+      (_name, sql) => {
+        expect(() => parser.astify(sql, { database: 'PostgreSQL' })).not.toThrow();
+      }
+    );
+
+    it('retries unsupported PostgreSQL window functions while preserving original names', () => {
+      const sql = `SELECT
+        RANK() OVER (ORDER BY score DESC) AS real_rank,
+        PERCENT_RANK() OVER (ORDER BY score) AS pct_rank,
+        AVG(score) OVER () AS real_avg,
+        STDDEV(score) OVER () AS score_stddev
+      FROM scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.hints.some(h => h.message.includes('unsupported window functions'))).toBe(true);
+
+      const windowNode = result.nodes.find(node => node.type === 'window');
+      expect(windowNode?.windowDetails?.functions.map(func => func.name)).toEqual(
+        expect.arrayContaining(['RANK', 'PERCENT_RANK', 'AVG', 'STDDEV'])
+      );
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(expect.arrayContaining(['RANK', 'PERCENT_RANK', 'AVG', 'STDDEV']));
+    });
+
+    it('preserves alias-based disambiguation when a genuine function and rewritten function share the same replacement name', () => {
+      const sql = `SELECT
+        RANK() OVER (ORDER BY score DESC) AS rnk,
+        PERCENT_RANK() OVER (ORDER BY score) AS pct_rnk
+      FROM scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+
+      const windowNode = result.nodes.find(node => node.type === 'window');
+      expect(windowNode?.windowDetails?.functions.map(func => func.name)).toEqual(['RANK', 'PERCENT_RANK']);
+    });
+
+    it('preserves unsupported PostgreSQL window function names inside nested CTEs', () => {
+      const sql = `WITH ranked_scores AS (
+        SELECT
+          score,
+          PERCENT_RANK() OVER (ORDER BY score) AS pct_rank,
+          STDDEV(score) OVER () AS score_stddev
+        FROM scores
+      )
+      SELECT pct_rank, score_stddev
+      FROM ranked_scores`;
+      const result = parseSql(sql, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(expect.arrayContaining(['PERCENT_RANK', 'STDDEV']));
+    });
+
+    it('parses Query 1 from complex analytics examples without partial fallback and preserves PostgreSQL window names', () => {
+      const examplesPath = join(__dirname, '../../../examples/complex-analytics-queries.sql');
+      const exampleSql = readFileSync(examplesPath, 'utf8');
+      const query1Start = exampleSql.indexOf('WITH employee_base_metrics AS (');
+      const query2Start = exampleSql.indexOf('-- ============================================================\n-- QUERY 2:', query1Start);
+      const query1Sql = exampleSql.slice(query1Start, query2Start).trim();
+
+      const result = parseSql(query1Sql, dialect);
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.stats.windowFunctions).toBeGreaterThan(0);
+
+      const functionNames = (result.stats.functionsUsed || [])
+        .filter(func => func.category === 'window')
+        .map(func => func.name);
+      expect(functionNames).toEqual(
+        expect.arrayContaining(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'STDDEV', 'LAG', 'LEAD'])
+      );
     });
 
     describe('preprocessPostgresSyntax', () => {
@@ -216,6 +328,46 @@ describe('Dialect Support', () => {
           "SELECT 'AT TIME ZONE test' FROM t",
           'PostgreSQL'
         );
+        expect(result).toBeNull();
+      });
+
+      it('does not contain window-function compatibility rewrites on the main PostgreSQL preprocess path', () => {
+        const preprocessingSource = readFileSync(
+          join(__dirname, '../../../src/webview/parser/dialects/preprocessing.ts'),
+          'utf8'
+        );
+        const start = preprocessingSource.indexOf('export function preprocessPostgresSyntax');
+        const end = preprocessingSource.indexOf('interface PostgresWindowCompatibilityRewrite', start);
+        const preprocessPostgresBody = preprocessingSource.slice(start, end);
+
+        expect(preprocessPostgresBody).not.toMatch(/PERCENT_RANK|CUME_DIST|STDDEV_POP|STDDEV_SAMP|STDDEV|VARIANCE/);
+      });
+    });
+
+    describe('rewriteUnsupportedPostgresWindowFunctionsForCompatibility', () => {
+      it('rewrites only unsupported PostgreSQL functions used with OVER()', () => {
+        const sql = `SELECT
+          STDDEV(score) AS plain_stddev,
+          STDDEV(score) OVER () AS window_stddev,
+          PERCENT_RANK() OVER (ORDER BY score) AS pct_rank
+        FROM scores`;
+        const result = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, 'PostgreSQL');
+
+        expect(result).not.toBeNull();
+        expect(result!.sql).toContain('STDDEV(score) AS plain_stddev');
+        expect(result!.sql).toContain('AVG(score) OVER () AS window_stddev');
+        expect(result!.sql).toContain('RANK() OVER (ORDER BY score) AS pct_rank');
+      });
+
+      it('does not rewrite function names inside comments or string literals', () => {
+        const sql = `SELECT
+          'PERCENT_RANK() OVER (ORDER BY score)' AS note,
+          score
+        FROM scores
+        -- STDDEV(score) OVER ()
+        WHERE score > 0`;
+        const result = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, 'PostgreSQL');
+
         expect(result).toBeNull();
       });
     });
@@ -604,6 +756,54 @@ describe('Dialect Support', () => {
       expect(result.partial).toBeUndefined();
       expect(result.nodes.some(n => n.type === 'result' && n.label === 'TABLE archived_orders')).toBe(true);
       expect(result.nodes.some(n => n.type === 'table' && n.label === 'orders')).toBe(true);
+    });
+
+    it('parses AT TIME ZONE expressions without recovery failure', () => {
+      const result = parseSql(
+        "select CURRENT_TIMESTAMP AT TIME ZONE 'Antarctica/South_Pole' AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses PostgreSQL-style :: casts without recovery failure', () => {
+      const result = parseSql(
+        "SELECT CURRENT_TIMESTAMP::timestamp AS report_ts, '2026-03-10'::date AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses PostgreSQL-style type-prefixed literals without recovery failure', () => {
+      const result = parseSql(
+        "select TIMESTAMP '2026-03-10 12:34:56' AS report_ts, DATE '2026-03-10' AS report_date;",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.length).toBeGreaterThan(0);
+    });
+
+    it('parses combined PostgreSQL-derived time syntax without recovery failure', () => {
+      const result = parseSql(`
+        SELECT
+          date_bin('15 minutes'::interval, created_at, TIMESTAMPTZ '1970-01-01 00:00:00+00') AS bucket,
+          created_at AT TIME ZONE 'UTC' AS utc_time,
+          created_at::date AS created_date
+        FROM events
+        WHERE created_at > now() - INTERVAL '24 hours'
+      `, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.some(n => n.label === 'events')).toBe(true);
     });
   });
 

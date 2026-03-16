@@ -55,8 +55,39 @@ describe('parser worker migration prep', () => {
 
     it.todo('preserves non-empty tableUsage data across worker boundary for single-query parse results');
     it.todo('preserves non-empty tableUsage data across worker boundary for batch parse results');
-    it.todo('cancels in-flight parseAsync work when a newer parseAsync request starts');
-    it.todo('cancels in-flight parseBatchAsync work when a newer parseBatchAsync request starts');
+    it('cancels queued parseAsync work when a newer parseAsync request starts', async () => {
+        jest.useFakeTimers();
+        try {
+            const olderParse = parseAsync('SELECT 1', 'MySQL');
+            const newerParse = parseAsync('SELECT 2', 'MySQL');
+
+            jest.runOnlyPendingTimers();
+
+            const [olderResult, newerResult] = await Promise.all([olderParse, newerParse]);
+
+            expect(olderResult.error).toBe('Parse cancelled');
+            expect(newerResult.error).toBeUndefined();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('cancels queued parseBatchAsync work when a newer parseBatchAsync request starts', async () => {
+        jest.useFakeTimers();
+        try {
+            const olderParse = parseBatchAsync('SELECT 1;', 'MySQL');
+            const newerParse = parseBatchAsync('SELECT 2; SELECT 3;', 'MySQL');
+
+            jest.runOnlyPendingTimers();
+
+            const [olderResult, newerResult] = await Promise.all([olderParse, newerParse]);
+
+            expect(olderResult.queries[0]?.error).toBe('Parse cancelled');
+            expect(newerResult.queries[0]?.error).toBeUndefined();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
     it.todo('timeouts terminate the parser worker and respawn a clean worker');
     it.todo('compare-mode baseline parse cannot overwrite a newer interaction state');
     it.todo('pinned-tab restore parse flow is cancellation-safe during rapid refresh/switch');

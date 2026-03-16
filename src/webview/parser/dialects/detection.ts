@@ -278,8 +278,16 @@ export function detectDialect(sql: string): DialectDetectionResult {
 
     const topMatch = matchedDialects[0];
     const secondMatchScore = matchedDialects[1]?.score ?? 0;
+    const hasOnlyOracleMinusSignal =
+        topMatch.dialect === 'Oracle'
+        && (scores.Oracle || 0) === 1
+        && syntax.hasOracleMinus;
+    const hasOnlyTeradataSampleSignal =
+        topMatch.dialect === 'Teradata'
+        && (scores.Teradata || 0) === 2
+        && syntax.hasTeradataSample;
     const isHighConfidence =
-        matchedDialects.length === 1 ||
+        (matchedDialects.length === 1 && !hasOnlyOracleMinusSignal && !hasOnlyTeradataSampleSignal) ||
         (topMatch.score >= 3 && topMatch.score >= secondMatchScore + 2);
 
     if (!isHighConfidence) {

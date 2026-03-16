@@ -102,21 +102,6 @@ export const UI_THEME = {
 } as const;
 
 // ============================================================
-// Status Colors - For error/warning/success states
-// ============================================================
-
-export const STATUS_COLORS = {
-    error: '#f87171',
-    errorDark: '#ef4444',
-    warning: '#fbbf24',
-    warningDark: '#f59e0b',
-    success: '#34d399',
-    successDark: '#10b981',
-    info: '#60a5fa',
-    infoDark: '#3b82f6',
-} as const;
-
-// ============================================================
 // Complexity Colors - For query complexity indicators
 // ============================================================
 
@@ -125,6 +110,14 @@ export const COMPLEXITY_COLORS: Record<string, string> = {
     'Moderate': '#eab308',    // Yellow
     'Complex': '#f97316',     // Orange
     'Very Complex': '#ef4444', // Red
+} as const;
+
+/** Text color to use on each complexity badge background for WCAG AA contrast. */
+export const COMPLEXITY_TEXT_COLORS: Record<string, string> = {
+    'Simple': 'white',
+    'Moderate': '#713f12',   // Dark amber — white on #eab308 is only ~1.85:1; this is >7:1
+    'Complex': 'white',
+    'Very Complex': 'white',
 } as const;
 
 // ============================================================

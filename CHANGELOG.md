@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-03-15
+
+### Added
+
+- **SQL Flow export preview modal**: Added a preview-first export flow for PNG, SVG, and PDF with live option updates before saving.
+- **PDF export support**: Added PDF export in SQL Flow using `jsPDF`, including page size/orientation handling through the preview workflow.
+- **Cross-panel workspace trace**: Added `Show in Workspace Lineage` from SQL Flow table/view nodes to jump directly into the workspace lineage graph.
+- **Lineage markdown copy**: Added `Copy as Markdown` for the current workspace lineage detail graph.
+- **Workspace export metadata context**: Added shared workspace export metadata helpers so graph exports can carry consistent view/scope/filter/count information.
+
+### Changed
+
+- **SQL Flow export architecture**: Split export preparation, artifact generation, and PDF handling into modular helpers to keep the main export entry point smaller and reusable.
+- **Workspace lineage resolution**: Extracted lineage node resolution into a dedicated helper so cross-panel tracing and workspace lineage actions share one normalization path.
+- **Workspace graph export payloads**: Mermaid, JSON, DOT, SVG, and PNG save flows now use consistent export context and metadata-aware filenames/comments where appropriate.
+- **Impact export context**: Impact report exports now include workspace scope context in their payload/markdown output.
+
+### Fixed
+
+- **PostgreSQL window-function compatibility retry**: Queries using PostgreSQL window functions unsupported by `node-sql-parser` (`PERCENT_RANK`, `CUME_DIST`, `STDDEV`, `STDDEV_POP`, `STDDEV_SAMP`, `VARIANCE`) now retry through a narrow PostgreSQL compatibility rewrite only after the native parse fails. The retry restores original function names onto the AST before extraction, so SQL Flow window details and function usage stats preserve the real PostgreSQL function names instead of compatibility stand-ins.
+- **SQL Flow PNG preview/footer layout**: Export preview status chips and footer actions now remain visible when preview dimensions change.
+- **Export preview tab sync**: Switching between PNG, SVG, and PDF preview tabs now keeps the selected format state in sync.
+- **PDF orientation/render output**: Corrected PDF generation issues during the export-preview rollout and moved final output generation onto the `jsPDF` backend.
+- **Dark export contrast**: Dark-background SQL Flow exports now keep flow arrows/edges visible with stronger export-time contrast overrides.
+- **Workspace share/export completeness**: Workspace graph exports now include metadata blocks/comments instead of exporting context-free payloads.
+- **Edge rendering layout support**: Edges now render with the active layout type (horizontal, force, radial) instead of always using vertical geometry.
+- **Dead column detection SQL scope**: Dead column analysis now scopes to the owning CTE body instead of matching the first `SELECT...FROM` in the entire query.
+- **Alias normalization regex**: The duplicate-subquery alias normalizer no longer strips SQL keywords (`INNER`, `LEFT`, etc.) as table aliases.
+- **Column lineage payload consistency**: `columnLineageResult` now uses a single normalized payload shape from both lineage request and column selection handlers.
+- **Impact analyzer null safety**: Column rename/drop analysis no longer crashes when `tableName` is undefined.
+- **Batch line matching**: Statement start-line recovery uses full first-line matching with second-line verification for short statements instead of a fragile 30-char prefix.
+- **Performance score for clean queries**: Queries with zero performance issues now receive a score of 100 instead of `undefined`.
+- **Column name resolution**: `resolveColumnName` now handles function calls, aggregates, binary expressions, casts, and column refs instead of returning `?`.
+- **Synchronous fs in lineage builder**: Workspace lineage build path now preloads SQL asynchronously instead of blocking with `readFileSync`.
+- **Statement splitting quote handling**: `splitting.ts` now handles SQL-standard doubled-quote escaping (`''`/`""`) instead of relying on backslash detection.
+- **Stale document reference**: `lastActiveSqlDocument` is now cleared when the document is closed, preventing stale refresh.
+- **Auto-refresh whitespace guard**: Debounced auto-refresh now checks `hasExecutableSql()` before sending comment-only/whitespace-only content to the webview.
+- **Async parser cancellation**: `parserClient.ts` now cancels stale queued parse requests before synchronous parsing begins.
+- **Logger idempotency**: `Logger.initialize()` no longer creates duplicate OutputChannels on repeated calls; pre-init messages are buffered and flushed on initialization.
+- **Multi-definition lineage resolution**: Files with multiple `CREATE VIEW`/`CREATE TABLE` definitions now resolve lineage targets by statement proximity instead of first match.
+- **DELETE dialect handling**: `delete.ts` `parseSelectAst` now accepts the active context dialect instead of hardcoding PostgreSQL.
+- **MySQL backtick splitting**: `splitSqlStatements` now recognizes backtick-quoted identifiers, preventing incorrect splitting on embedded semicolons.
+- **Diagnostics line-zero handling**: Parse error line mapping now uses nullish coalescing instead of a truthy check, correctly handling line 0.
+- **Workspace alerts event guard**: `viewAlerts.ts` click handler now guards `event.target instanceof Element` before calling `closest()`.
+- **Shape safety guards**: Added `Array.isArray` guards for `ast.from` in column extraction and `stmt.with` in reference extraction to handle singular AST objects.
+- **Global parser context**: Removed module-global mutable `ctx` from `sqlParser.ts`; parser context is now passed explicitly, eliminating reentrancy hazards.
+- **Condition formatting**: `formatCondition` now renders `EXISTS`, `BETWEEN`, `IS NULL`, `IN`, and `NOT` conditions with proper detail instead of a generic label.
+- **Nested block comment scanning**: `extractLeadingCommentDialect` now tracks comment depth for nested `/* ... /* ... */ ... */` blocks.
+- **Dialect detection confidence**: Lone `MINUS` and `SAMPLE` heuristic signals no longer trigger high-confidence Oracle/Teradata dialect detection.
+- **Operation node type model**: `'operation'` is now a formal member of the `NodeType` union with proper color/icon wiring, replacing `as any` casts in warehouse DDL parsing.
+- **Batch tabs HTML escaping**: `escapeHtml` in `batchTabs.ts` now includes single-quote replacement (`'` → `&#039;`).
+- **Issues page CSS class safety**: `item.type` in `issuesPage.ts` is now allowlisted to known values (`table`/`view`) for CSS class context and escaped for text content.
+- **Merge stats accuracy**: `buildStats()` in `merge.ts` now masks string literals before running keyword regexes, preventing overcounting from values like `'COUNT of SUM items'`.
+- **Merge ID generation**: `merge.ts` now uses a monotonic counter (`mergeGenId`) for node/edge IDs instead of depending on `nodes.length` insertion order.
+- **Jinja MySQL quote handling**: `createCommentMask` in `jinjaPreprocessor.ts` now handles MySQL backslash-escaped single quotes (`\'`).
+
+### Config
+
+- **tsconfig outDir alignment**: Changed `outDir` from `"out"` to `"dist"` to match webpack output directory.
+- **ts-jest version range**: Updated to `"^29.4.6 || ^30.0.0"` to auto-upgrade when ts-jest v30 ships.
+- **Jest tsconfig**: `jest.config.js` now uses `tsconfig.tests.json` which includes test files.
+
+### Tests
+
+- Added PostgreSQL regression coverage for unsupported native window-function parsing, compatibility retry with preserved function names, and Query 1 from `examples/complex-analytics-queries.sql`.
+- Added regression coverage for export preview wiring, PDF artifact generation, cross-panel workspace trace resolution, workspace graph export metadata, lineage markdown export, and lineage header export actions.
+- Added 33 source-reading regression anchors in `archiveConfirmedBugs.regressions.test.ts` covering all audit fixes.
+- Added behavioral tests for logger pre-init buffering, logger idempotency, edge layout routing, impact analyzer null safety, multi-definition lineage proximity, and async parser cancellation.
+
+## [0.5.6] - 2026-03-10
+
+### Fixed
+
+- **Redshift PostgreSQL-derived time/literal syntax compatibility** ([#71](https://github.com/buva7687/sql-crack/issues/71)): Redshift queries now reuse the PostgreSQL-compatible preprocessing path for `AT TIME ZONE` and type-prefixed literals before parsing, preventing `Failed to recover query visualization` for statements like `CURRENT_TIMESTAMP AT TIME ZONE 'Antarctica/South_Pole'` and improving compatibility for `TIMESTAMP '...'` / `DATE '...'` literals. Added release guards for adjacent PostgreSQL-derived Redshift syntax including `::` casts and mixed time-expression queries so this patch covers the immediate follow-on compatibility family.
+
+### Tests
+
+- Added Redshift regression cases covering `AT TIME ZONE` and type-prefixed literal parsing, and updated the Redshift example fixture with the reported repro query.
+
 ## [0.5.5] - 2026-03-10
 
 ### Added
@@ -1189,6 +1268,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.6.0]: https://github.com/buva7687/sql-crack/compare/v0.5.6...v0.6.0
+[0.5.6]: https://github.com/buva7687/sql-crack/compare/v0.5.5...v0.5.6
+[0.5.5]: https://github.com/buva7687/sql-crack/compare/v0.5.4...v0.5.5
+[0.5.4]: https://github.com/buva7687/sql-crack/compare/v0.5.3...v0.5.4
+[0.5.3]: https://github.com/buva7687/sql-crack/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/buva7687/sql-crack/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/buva7687/sql-crack/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/buva7687/sql-crack/compare/v0.4.3...v0.5.0

@@ -134,7 +134,7 @@ function createSourceNode(
     const id = genId('source');
     nodes.push({
         id,
-        type: 'operation' as any,
+        type: 'operation',
         label,
         description,
         details,
@@ -310,7 +310,7 @@ function attachQuerySource(
     const approxNodeId = args.genId('source');
     nodes.push({
         id: approxNodeId,
-        type: 'operation' as any,
+        type: 'operation',
         label: 'SELECT',
         description: 'Approximated source query',
         details: [querySql.replace(/\s+/g, ' ').slice(0, 140)],

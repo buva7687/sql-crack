@@ -24,3 +24,4 @@ INTO myschema.mytable
 FROM (
 SELECT current_date as mydate
   ) AS src;
+select CURRENT_TIMESTAMP AT TIME ZONE 'Antarctica/South_Pole' AS report_date;

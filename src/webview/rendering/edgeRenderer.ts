@@ -107,6 +107,7 @@ export interface RenderEdgeOptions {
     isDark: boolean;
     nodeMap: Map<string, FlowNode>;
     allNodes: FlowNode[];
+    layoutType: LayoutType;
     onEdgeClick?: (edge: FlowEdge) => void;
 }
 
@@ -125,14 +126,8 @@ export function renderEdge(edge: FlowEdge, parent: SVGGElement, options: RenderE
     const defaultStroke = theme.default;
     const defaultWidth = theme.strokeWidth;
 
-    const x1 = sourceNode.x + sourceNode.width / 2;
-    const y1 = sourceNode.y + sourceNode.height;
-    const x2 = targetNode.x + targetNode.width / 2;
-    const y2 = targetNode.y;
-
-    const midY = (y1 + y2) / 2;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+    path.setAttribute('d', calculateEdgePath(sourceNode, targetNode, options.layoutType));
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', defaultStroke);
     path.setAttribute('stroke-width', String(defaultWidth));

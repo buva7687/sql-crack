@@ -10,6 +10,11 @@ const IDENTIFIER = `(?:${QUOTED_IDENTIFIER}|${IDENTIFIER_PART})`;
 const QUALIFIED_IDENTIFIER = `${IDENTIFIER}(?:\\.${IDENTIFIER})*`;
 const IDENTIFIER_WRAPPER_PATTERN = /[`"'\[\]]/g;
 
+let mergeIdCounter = 0;
+function mergeGenId(prefix: string): string {
+    return `${prefix}_${mergeIdCounter++}`;
+}
+
 function normalizeObjectName(raw: string): string {
     const parts = raw.split('.').map((part) => part.replace(IDENTIFIER_WRAPPER_PATTERN, '')).filter(Boolean);
     return parts[parts.length - 1] || raw.replace(IDENTIFIER_WRAPPER_PATTERN, '');
@@ -176,7 +181,7 @@ function ensureTableNode(
     }
 
     const node = createTableNode(label, accessMode, operationType);
-    node.id = `merge_table_${nodes.length}`;
+    node.id = mergeGenId('merge_table');
     nodes.push(node);
     return node;
 }
@@ -189,7 +194,7 @@ function buildStats(nodes: FlowNode[], edges: FlowEdge[], sql: string): QuerySta
     );
     const joins = edges.filter(edge => edge.clauseType === 'join').length;
     const ctes = nodes.filter(node => node.tableCategory === 'cte_reference' || node.type === 'cte').length;
-    const cleaned = stripSqlComments(sql);
+    const cleaned = maskStringsAndComments(sql);
     const subqueries = (cleaned.match(/\(\s*SELECT\b/gi) || []).length;
     const aggregations = (cleaned.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length;
     const windowFunctions = (cleaned.match(/\bOVER\s*\(/gi) || []).length;
@@ -221,6 +226,7 @@ function buildStats(nodes: FlowNode[], edges: FlowEdge[], sql: string): QuerySta
 }
 
 export function tryParseCompatibleMergeStatement(sql: string, dialect: SqlDialect): ParseResult | null {
+    mergeIdCounter = 0;
     if (!MERGE_COMPATIBILITY_DIALECTS.includes(dialect)) {
         return null;
     }
@@ -274,7 +280,7 @@ export function tryParseCompatibleMergeStatement(sql: string, dialect: SqlDialec
     let mergeNode = result.nodes.find(node => node.type === 'result' && node.label === mergeLabel);
     if (!mergeNode) {
         mergeNode = {
-            id: `merge_stmt_${result.nodes.length}`,
+            id: mergeGenId('merge_stmt'),
             type: 'result',
             label: mergeLabel,
             description: mergeDescriptionParts.join(' | '),
@@ -298,7 +304,7 @@ export function tryParseCompatibleMergeStatement(sql: string, dialect: SqlDialec
     const mergeTargetEdgeKey = `${targetNode.id}:${mergeNode.id}:merge_target`;
     if (!edgeIds.has(mergeTargetEdgeKey)) {
         result.edges.push({
-            id: `merge_edge_${result.edges.length}`,
+            id: mergeGenId('merge_edge'),
             source: targetNode.id,
             target: mergeNode.id,
             sqlClause: 'INTO',
@@ -313,7 +319,7 @@ export function tryParseCompatibleMergeStatement(sql: string, dialect: SqlDialec
             continue;
         }
         result.edges.push({
-            id: `merge_edge_${result.edges.length}`,
+            id: mergeGenId('merge_edge'),
             source: sourceNode.id,
             target: mergeNode.id,
             sqlClause: 'USING',

@@ -6,13 +6,71 @@
  * Web Worker implementation is deferred to future work due to bundling complexity.
  */
 
-import { ParseResult, BatchParseResult, SqlDialect, ValidationError, ValidationLimits } from './types';
+import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationError, ValidationLimits } from './types';
 import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
 
 function yieldToMainLoop(): Promise<void> {
     return new Promise(resolve => {
         setTimeout(resolve, 0);
     });
+}
+
+let nextParseRequestId = 0;
+let latestParseRequestId = 0;
+let cancelledParseRequestId = 0;
+let pendingParseRequests = 0;
+
+function createEmptyStats(): QueryStats {
+    return {
+        tables: 0,
+        joins: 0,
+        subqueries: 0,
+        ctes: 0,
+        aggregations: 0,
+        windowFunctions: 0,
+        unions: 0,
+        conditions: 0,
+        complexity: 'Simple',
+        complexityScore: 0,
+    };
+}
+
+function createCancelledParseResult(sql: string): ParseResult {
+    return {
+        nodes: [],
+        edges: [],
+        stats: createEmptyStats(),
+        hints: [],
+        sql,
+        columnLineage: [],
+        tableUsage: new Map(),
+        error: 'Parse cancelled',
+    };
+}
+
+function createCancelledBatchParseResult(sql: string): BatchParseResult {
+    return {
+        queries: [createCancelledParseResult(sql)],
+        totalStats: createEmptyStats(),
+        parseErrors: [{ queryIndex: 0, message: 'Parse cancelled', sql }],
+        successCount: 0,
+        errorCount: 1,
+    };
+}
+
+function beginParseRequest(): number {
+    const requestId = ++nextParseRequestId;
+    latestParseRequestId = requestId;
+    pendingParseRequests++;
+    return requestId;
+}
+
+function finishParseRequest(): void {
+    pendingParseRequests = Math.max(0, pendingParseRequests - 1);
+}
+
+function isParseRequestStale(requestId: number): boolean {
+    return requestId <= cancelledParseRequestId || requestId !== latestParseRequestId;
 }
 
 /**
@@ -27,8 +85,16 @@ export async function parseAsync(
     dialect: SqlDialect = 'MySQL',
     options: ParseOptions = {}
 ): Promise<ParseResult> {
-    await yieldToMainLoop();
-    return parseSql(sql, dialect, options);
+    const requestId = beginParseRequest();
+    try {
+        await yieldToMainLoop();
+        if (isParseRequestStale(requestId)) {
+            return createCancelledParseResult(sql);
+        }
+        return parseSql(sql, dialect, options);
+    } finally {
+        finishParseRequest();
+    }
 }
 
 /**
@@ -45,8 +111,16 @@ export async function parseBatchAsync(
     options: BatchParseOptions = {}
 ): Promise<BatchParseResult> {
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
-    await yieldToMainLoop();
-    return parseSqlBatch(sql, dialect, appliedLimits, options);
+    const requestId = beginParseRequest();
+    try {
+        await yieldToMainLoop();
+        if (isParseRequestStale(requestId)) {
+            return createCancelledBatchParseResult(sql);
+        }
+        return parseSqlBatch(sql, dialect, appliedLimits, options);
+    } finally {
+        finishParseRequest();
+    }
 }
 
 /**
@@ -88,6 +162,7 @@ export function isWorkerSupported(): boolean {
  */
 export function terminateWorker(): void {
     // Worker implementation deferred - no-op for now
+    cancelPendingParse();
 }
 
 /**
@@ -114,7 +189,7 @@ export async function parseWithFallback(
  * Note: Worker implementation is deferred. This is a no-op currently.
  */
 export function cancelPendingParse(): void {
-    // Worker implementation deferred - no-op for now
+    cancelledParseRequestId = latestParseRequestId;
 }
 
 /**
@@ -131,7 +206,7 @@ export function getWorkerStatus(): {
     return {
         supported: false,
         active: false,
-        pendingRequests: 0,
+        pendingRequests: pendingParseRequests,
         implementation: 'deferred'
     };
 }

@@ -22,10 +22,11 @@ describe('workspace/panel/impactExport.ts', () => {
                 suggestions: [],
             };
 
-            const result: any = buildImpactReportExportData(report, '1.0.0');
+            const result: any = buildImpactReportExportData(report, '1.0.0', '/repo/sql');
 
             expect(result.version).toBe('1.0.0');
             expect(result.exportedAt).toBeDefined();
+            expect(result.context.scopeUri).toBe('/repo/sql');
         });
 
         it('serializes direct impacts', () => {
@@ -159,10 +160,13 @@ describe('workspace/panel/impactExport.ts', () => {
         });
 
         it('generates markdown header', () => {
-            const markdown = generateImpactReportMarkdown(createPayload());
+            const markdown = generateImpactReportMarkdown(createPayload({
+                context: { view: 'impact', scopeUri: '/repo/sql' }
+            }));
 
             expect(markdown).toContain('# Impact Analysis Report');
             expect(markdown).toContain('Exported: 2024-01-15T10:30:00.000Z');
+            expect(markdown).toContain('Scope: /repo/sql');
         });
 
         it('includes severity and change type in uppercase', () => {
