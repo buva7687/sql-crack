@@ -6,97 +6,20 @@ import { EDGE_COLORS, EDGE_DASH_PATTERNS, UI_COLORS, CONDITION_COLORS, getEdgeDa
 import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { escapeHtml } from '../../shared/stringUtils';
-
-/**
- * Return a legible text color for a badge given its background color.
- * Parses hex or rgb() backgrounds and applies the W3C relative luminance formula.
- */
-function contrastTextForBadge(bg: string): string {
-    let r = 0, g = 0, b = 0;
-    if (bg.startsWith('#')) {
-        const hex = bg.replace('#', '');
-        const full = hex.length === 3
-            ? hex.split('').map(c => c + c).join('')
-            : hex;
-        r = parseInt(full.substring(0, 2), 16);
-        g = parseInt(full.substring(2, 4), 16);
-        b = parseInt(full.substring(4, 6), 16);
-    } else {
-        const m = bg.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        if (m) { r = +m[1]; g = +m[2]; b = +m[3]; }
-    }
-    // Perceived brightness (YIQ)
-    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    return brightness > 160 ? '#1e293b' : '#ffffff';
-}
+import {
+    calculateEdgePath as calculateEdgePathPure,
+    contrastTextForBadge,
+} from './computations';
 
 // ============================================================
-// Edge Path Calculation
+// Edge Path Calculation  (delegates to pure computations module)
 // ============================================================
 
 /**
  * Calculate edge SVG path between two nodes based on layout type.
  */
 export function calculateEdgePath(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType): string {
-    if (layoutType === 'horizontal') {
-        const sx = sourceNode.x + sourceNode.width;
-        const sy = sourceNode.y + sourceNode.height / 2;
-        const tx = targetNode.x;
-        const ty = targetNode.y + targetNode.height / 2;
-        const midX = (sx + tx) / 2;
-        return `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
-    } else if (layoutType === 'force' || layoutType === 'radial') {
-        const sourceCenterX = sourceNode.x + sourceNode.width / 2;
-        const sourceCenterY = sourceNode.y + sourceNode.height / 2;
-        const targetCenterX = targetNode.x + targetNode.width / 2;
-        const targetCenterY = targetNode.y + targetNode.height / 2;
-
-        const angle = Math.atan2(targetCenterY - sourceCenterY, targetCenterX - sourceCenterX);
-
-        let sx: number, sy: number, tx: number, ty: number;
-
-        if (Math.abs(angle) < Math.PI / 4) {
-            sx = sourceNode.x + sourceNode.width;
-            sy = sourceCenterY;
-            tx = targetNode.x;
-            ty = targetCenterY;
-        } else if (Math.abs(angle) > 3 * Math.PI / 4) {
-            sx = sourceNode.x;
-            sy = sourceCenterY;
-            tx = targetNode.x + targetNode.width;
-            ty = targetCenterY;
-        } else if (angle > 0) {
-            sx = sourceCenterX;
-            sy = sourceNode.y + sourceNode.height;
-            tx = targetCenterX;
-            ty = targetNode.y;
-        } else {
-            sx = sourceCenterX;
-            sy = sourceNode.y;
-            tx = targetCenterX;
-            ty = targetNode.y + targetNode.height;
-        }
-
-        const dx = tx - sx;
-        const dy = ty - sy;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const curvature = Math.min(dist * 0.3, 50);
-
-        const midX = (sx + tx) / 2;
-        const midY = (sy + ty) / 2;
-        const perpX = -dy / dist * curvature;
-        const perpY = dx / dist * curvature;
-
-        return `M ${sx} ${sy} Q ${midX + perpX} ${midY + perpY}, ${tx} ${ty}`;
-    } else {
-        // Vertical/compact
-        const sx = sourceNode.x + sourceNode.width / 2;
-        const sy = sourceNode.y + sourceNode.height;
-        const tx = targetNode.x + targetNode.width / 2;
-        const ty = targetNode.y;
-        const midY = (sy + ty) / 2;
-        return `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
-    }
+    return calculateEdgePathPure(sourceNode, targetNode, layoutType);
 }
 
 // ============================================================

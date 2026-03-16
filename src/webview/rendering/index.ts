@@ -21,3 +21,12 @@ export type {
     RenderCloudSubflowOptions,
     RenderSubflowOptions,
 } from './cloudRenderer';
+
+// Pure computation functions — no DOM dependencies, directly testable
+export {
+    calculateEdgePath as calculateEdgePathPure,
+    contrastTextForBadge,
+    computeCloudArrowPath,
+    calculateQueryDepth,
+    getQueryComplexityInfo,
+} from './computations';
