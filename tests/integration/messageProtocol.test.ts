@@ -1,14 +1,21 @@
 /**
  * Integration test: Message protocol contracts
  *
- * Validates that both webview panels' message types are consistent
- * and that the MessageHandler covers all expected commands.
+ * Part 1 — Source-reading guards: validate type definitions and handler switch coverage.
+ * Part 2 — Runtime handler tests: call MessageHandler.handleMessage() directly
+ *           with a mock context and verify state mutations + dispatch.
  */
 
 jest.mock('vscode');
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { MessageHandler, type MessageHandlerContext } from '../../src/workspace/handlers/messageHandler';
+import {
+    getWorkspaceRequestId,
+    attachWorkspaceRequestId,
+    inferMissingDataReason,
+} from '../../src/workspace/handlers/messageMetadata';
 
 const MESSAGES_DIR = path.join(__dirname, '../../src/shared/messages');
 const HANDLER_PATH = path.join(__dirname, '../../src/workspace/handlers/messageHandler.ts');
@@ -159,5 +166,255 @@ describe('Message Protocol Contracts', () => {
             // VisualizationPanel handles it
             expect(vizPanelSource).toContain("'traceInWorkspaceLineage'");
         });
+    });
+});
+
+// ============================================================
+// Part 2 — Runtime handler tests
+// ============================================================
+
+function createMockContext(overrides: Partial<MessageHandlerContext> = {}): MessageHandlerContext {
+    const state = {
+        currentView: 'graph' as 'graph' | 'lineage' | 'impact' | 'issues',
+        currentGraphMode: 'tables' as 'files' | 'tables',
+        searchFilter: { query: '', nodeTypes: undefined as undefined, useRegex: false, caseSensitive: false },
+        showHelp: false,
+        isDarkTheme: true,
+        lineageLegendVisible: true,
+        lineageDetailNodeId: null as string | null,
+        lineageDetailDirection: 'both' as 'both' | 'upstream' | 'downstream',
+        lineageDetailExpandedNodes: [] as string[],
+    };
+
+    return {
+        panel: {
+            webview: {
+                postMessage: jest.fn().mockResolvedValue(true),
+                html: '',
+            },
+        } as any,
+
+        getCurrentGraph: jest.fn().mockReturnValue(null),
+        setCurrentGraph: jest.fn(),
+        getCurrentView: jest.fn(() => state.currentView),
+        setCurrentView: jest.fn((v: any) => { state.currentView = v; }),
+        getCurrentSearchFilter: jest.fn(() => state.searchFilter),
+        setCurrentSearchFilter: jest.fn((f: any) => { state.searchFilter = f; }),
+        getCurrentGraphMode: jest.fn(() => state.currentGraphMode),
+        setCurrentGraphMode: jest.fn((m: any) => { state.currentGraphMode = m; }),
+        getShowHelp: jest.fn(() => state.showHelp),
+        setShowHelp: jest.fn((v: boolean) => { state.showHelp = v; }),
+
+        getLineageGraph: jest.fn().mockReturnValue(null),
+        setLineageGraph: jest.fn(),
+        getLineageBuilder: jest.fn().mockReturnValue(null),
+        setLineageBuilder: jest.fn(),
+        getFlowAnalyzer: jest.fn().mockReturnValue(null),
+        setFlowAnalyzer: jest.fn(),
+        getImpactAnalyzer: jest.fn().mockReturnValue(null),
+        setImpactAnalyzer: jest.fn(),
+        getColumnLineageTracker: jest.fn().mockReturnValue(null),
+        setColumnLineageTracker: jest.fn(),
+        getSelectedLineageNode: jest.fn().mockReturnValue(null),
+        setSelectedLineageNode: jest.fn(),
+        getCurrentImpactReport: jest.fn().mockReturnValue(null),
+        setCurrentImpactReport: jest.fn(),
+        getCurrentFlowResult: jest.fn().mockReturnValue(null),
+        setCurrentFlowResult: jest.fn(),
+        getLineageLegendVisible: jest.fn(() => state.lineageLegendVisible),
+        setLineageLegendVisible: jest.fn((v: boolean) => { state.lineageLegendVisible = v; }),
+        getLineageDetailNodeId: jest.fn(() => state.lineageDetailNodeId),
+        setLineageDetailNodeId: jest.fn((v: string | null) => { state.lineageDetailNodeId = v; }),
+        getLineageDetailDirection: jest.fn(() => state.lineageDetailDirection),
+        setLineageDetailDirection: jest.fn((v: any) => { state.lineageDetailDirection = v; }),
+        getLineageDetailExpandedNodes: jest.fn(() => state.lineageDetailExpandedNodes),
+        setLineageDetailExpandedNodes: jest.fn((v: string[]) => { state.lineageDetailExpandedNodes = v; }),
+
+        getTableExplorer: jest.fn().mockReturnValue({}),
+        getLineageView: jest.fn().mockReturnValue({}),
+        getImpactView: jest.fn().mockReturnValue({}),
+        getDefaultLineageDepth: jest.fn().mockReturnValue(3),
+
+        getIsDarkTheme: jest.fn(() => state.isDarkTheme),
+        setIsDarkTheme: jest.fn((v: boolean) => { state.isDarkTheme = v; }),
+
+        getIsRebuilding: jest.fn().mockReturnValue(false),
+        getHasPendingIndexChanges: jest.fn().mockReturnValue(false),
+
+        renderCurrentView: jest.fn(),
+        getWebviewHtml: jest.fn().mockReturnValue('<html></html>'),
+        getThemeCss: jest.fn().mockReturnValue('body { color: #fff; }'),
+        buildIndexWithProgress: jest.fn().mockResolvedValue(undefined),
+        rebuildAndRenderGraph: jest.fn().mockResolvedValue(undefined),
+        buildLineageGraph: jest.fn().mockResolvedValue(undefined),
+        handleExport: jest.fn().mockResolvedValue(undefined),
+        savePngToFile: jest.fn().mockResolvedValue(undefined),
+        trackUxEvent: jest.fn(),
+
+        ...overrides,
+    };
+}
+
+describe('MessageHandler runtime dispatch', () => {
+    let handler: MessageHandler;
+    let ctx: MessageHandlerContext;
+
+    beforeEach(() => {
+        ctx = createMockContext();
+        handler = new MessageHandler(ctx);
+    });
+
+    it('switchView sets view and triggers render', async () => {
+        await handler.handleMessage({ command: 'switchView', view: 'lineage' } as any);
+        expect(ctx.setCurrentView).toHaveBeenCalledWith('lineage');
+        expect(ctx.renderCurrentView).toHaveBeenCalled();
+    });
+
+    it('refresh triggers index build and graph rebuild', async () => {
+        await handler.handleMessage({ command: 'refresh' } as any);
+        expect(ctx.buildIndexWithProgress).toHaveBeenCalled();
+        expect(ctx.rebuildAndRenderGraph).toHaveBeenCalled();
+    });
+
+    it('switchGraphMode validates mode and clears search', async () => {
+        await handler.handleMessage({ command: 'switchGraphMode', mode: 'files' } as any);
+        expect(ctx.setCurrentGraphMode).toHaveBeenCalledWith('files');
+        expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
+            expect.objectContaining({ query: '' })
+        );
+        expect(ctx.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(ctx.rebuildAndRenderGraph).toHaveBeenCalled();
+    });
+
+    it('switchGraphMode normalizes invalid mode to tables', async () => {
+        await handler.handleMessage({ command: 'switchGraphMode', mode: 'bogus' } as any);
+        expect(ctx.setCurrentGraphMode).toHaveBeenCalledWith('tables');
+    });
+
+    it('search updates filter and re-renders HTML when graph exists', async () => {
+        const graph = { nodes: [], edges: [], stats: {} } as any;
+        (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
+        const filter = { query: 'users', nodeTypes: undefined, useRegex: false, caseSensitive: false };
+        await handler.handleMessage({ command: 'search', filter } as any);
+        expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(filter);
+        expect(ctx.getWebviewHtml).toHaveBeenCalledWith(graph, filter);
+    });
+
+    it('clearSearch resets filter and re-renders', async () => {
+        const graph = { nodes: [], edges: [], stats: {} } as any;
+        (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
+        await handler.handleMessage({ command: 'clearSearch' } as any);
+        expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
+            expect.objectContaining({ query: '' })
+        );
+    });
+
+    it('toggleHelp flips help state and re-renders', async () => {
+        await handler.handleMessage({ command: 'toggleHelp' } as any);
+        expect(ctx.setShowHelp).toHaveBeenCalledWith(true); // was false
+        expect(ctx.renderCurrentView).toHaveBeenCalled();
+    });
+
+    it('toggleTheme flips theme and sends themeChanged message', async () => {
+        await handler.handleMessage({ command: 'toggleTheme' } as any);
+        expect(ctx.setIsDarkTheme).toHaveBeenCalledWith(false); // was true
+        expect(ctx.panel.webview.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ command: 'themeChanged', isDark: false })
+        );
+    });
+
+    it('export delegates to handleExport with format', async () => {
+        await handler.handleMessage({ command: 'export', format: 'png' } as any);
+        expect(ctx.handleExport).toHaveBeenCalledWith('png');
+    });
+
+    it('trackUxEvent forwards event to context', async () => {
+        await handler.handleMessage({ command: 'trackUxEvent', event: 'click_node', metadata: { x: 1 } } as any);
+        expect(ctx.trackUxEvent).toHaveBeenCalledWith('click_node', { x: 1 });
+    });
+
+    it('trackUxEvent ignores empty event string', async () => {
+        await handler.handleMessage({ command: 'trackUxEvent', event: '' } as any);
+        expect(ctx.trackUxEvent).not.toHaveBeenCalled();
+    });
+
+    it('setLineageLegendVisibility sets state directly', async () => {
+        await handler.handleMessage({ command: 'setLineageLegendVisibility', visible: false } as any);
+        expect(ctx.setLineageLegendVisible).toHaveBeenCalledWith(false);
+    });
+
+    it('savePng delegates to savePngToFile', async () => {
+        await handler.handleMessage({ command: 'savePng', data: 'base64data', filename: 'graph.png' } as any);
+        expect(ctx.savePngToFile).toHaveBeenCalledWith('base64data', 'graph.png');
+    });
+
+    it('switchToLineageView sets view to lineage and clears detail', async () => {
+        await handler.handleMessage({ command: 'switchToLineageView' } as any);
+        expect(ctx.setCurrentView).toHaveBeenCalledWith('lineage');
+        expect(ctx.setLineageDetailNodeId).toHaveBeenCalledWith(null);
+        expect(ctx.buildLineageGraph).toHaveBeenCalled();
+    });
+
+    it('disposed handler silently ignores messages', async () => {
+        handler.markDisposed();
+        await handler.handleMessage({ command: 'refresh' } as any);
+        expect(ctx.buildIndexWithProgress).not.toHaveBeenCalled();
+    });
+
+    it('handler catches errors without throwing', async () => {
+        (ctx.buildIndexWithProgress as jest.Mock).mockRejectedValue(new Error('boom'));
+        // Should not throw
+        await handler.handleMessage({ command: 'refresh' } as any);
+    });
+
+    it('showInGraph sets search filter, switches to graph view, and renders HTML', async () => {
+        const graph = { nodes: [], edges: [], stats: {} } as any;
+        (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
+        await handler.handleMessage({ command: 'showInGraph', query: 'orders', nodeType: 'table' } as any);
+        expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
+            expect.objectContaining({ query: 'orders' })
+        );
+        expect(ctx.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(ctx.getWebviewHtml).toHaveBeenCalled();
+    });
+});
+
+describe('Message metadata utilities', () => {
+    it('getWorkspaceRequestId extracts valid numeric requestId', () => {
+        expect(getWorkspaceRequestId({ command: 'refresh', requestId: 42 } as any)).toBe(42);
+    });
+
+    it('getWorkspaceRequestId returns undefined for missing requestId', () => {
+        expect(getWorkspaceRequestId({ command: 'refresh' } as any)).toBeUndefined();
+    });
+
+    it('getWorkspaceRequestId rejects negative and non-finite values', () => {
+        expect(getWorkspaceRequestId({ command: 'refresh', requestId: -1 } as any)).toBeUndefined();
+        expect(getWorkspaceRequestId({ command: 'refresh', requestId: NaN } as any)).toBeUndefined();
+        expect(getWorkspaceRequestId({ command: 'refresh', requestId: Infinity } as any)).toBeUndefined();
+    });
+
+    it('getWorkspaceRequestId floors fractional values', () => {
+        expect(getWorkspaceRequestId({ command: 'refresh', requestId: 7.9 } as any)).toBe(7);
+    });
+
+    it('attachWorkspaceRequestId adds requestId to message data', () => {
+        const msg = { command: 'lineageResult' as const, data: { nodes: [] } };
+        const result = attachWorkspaceRequestId(msg as any, 99);
+        expect(result.data.requestId).toBe(99);
+    });
+
+    it('attachWorkspaceRequestId returns original message when requestId is undefined', () => {
+        const msg = { command: 'lineageResult' as const, data: {} };
+        const result = attachWorkspaceRequestId(msg as any, undefined);
+        expect(result).toBe(msg);
+    });
+
+    it('inferMissingDataReason returns correct reasons', () => {
+        expect(inferMissingDataReason({ changesSinceIndex: 5, parseErrorCount: 0 })).toBe('stale_index');
+        expect(inferMissingDataReason({ changesSinceIndex: 0, parseErrorCount: 0, knownMissingDueToScope: true })).toBe('excluded_file');
+        expect(inferMissingDataReason({ changesSinceIndex: 0, parseErrorCount: 0, requestedNodeType: 'external' })).toBe('external_unresolved');
+        expect(inferMissingDataReason({ changesSinceIndex: 0, parseErrorCount: 3 })).toBe('parse_error');
+        expect(inferMissingDataReason({ changesSinceIndex: 0, parseErrorCount: 0 })).toBe('not_found');
     });
 });
