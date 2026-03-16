@@ -16,6 +16,7 @@ import {
     preprocessPostgresSyntax,
     preprocessRedshiftSyntax,
     preprocessRedshiftTypes,
+    rewriteUnsupportedPostgresWindowFunctionsForCompatibility,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
@@ -122,13 +123,6 @@ export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
 export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessRedshiftSyntax, preprocessRedshiftTypes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
-/**
- * Current parser context. All parser state is consolidated here rather than
- * in scattered module-level variables. This context is reset atomically at
- * the start of each parseSql call.
- */
-let ctx: ParserContext = createFreshContext('MySQL');
-
 // Track table usage
 function trackTableUsage(context: ParserContext, tableName: string): void {
     const normalizedName = tableName.toLowerCase();
@@ -170,14 +164,8 @@ function calculateComplexity(context: ParserContext): void {
     }
 }
 
-function genId(context: ParserContext, prefix: string): string;
-function genId(prefix: string): string;
-function genId(contextOrPrefix: ParserContext | string, prefix?: string): string {
-    if (typeof contextOrPrefix === 'string') {
-        return `${contextOrPrefix}_${ctx.nodeCounter++}`;
-    }
-    const resolvedPrefix = prefix ?? 'node';
-    return `${resolvedPrefix}_${contextOrPrefix.nodeCounter++}`;
+function genId(context: ParserContext, prefix: string): string {
+    return `${prefix}_${context.nodeCounter++}`;
 }
 
 export interface ParseOptions {
@@ -209,41 +197,50 @@ const DIALECT_DIRECTIVE_MATCHERS: Array<{ pattern: RegExp; dialect: SqlDialect }
 ];
 
 function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
-    const lines = stmt.split('\n');
-    let inBlockComment = false;
-    const commentLines: string[] = [];
+    let index = 0;
+    const commentSegments: string[] = [];
 
-    for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) {
+    while (index < stmt.length) {
+        while (index < stmt.length && /\s/.test(stmt[index])) {
+            index++;
+        }
+
+        if (stmt.startsWith('--', index)) {
+            const end = stmt.indexOf('\n', index);
+            const line = end === -1 ? stmt.slice(index + 2) : stmt.slice(index + 2, end);
+            commentSegments.push(line.trim());
+            index = end === -1 ? stmt.length : end + 1;
             continue;
         }
 
-        if (inBlockComment) {
-            commentLines.push(line);
-            if (line.includes('*/')) {
-                inBlockComment = false;
+        if (stmt.startsWith('/*', index)) {
+            let depth = 1;
+            let cursor = index + 2;
+
+            while (cursor < stmt.length && depth > 0) {
+                if (stmt.startsWith('/*', cursor)) {
+                    depth++;
+                    cursor += 2;
+                    continue;
+                }
+                if (stmt.startsWith('*/', cursor)) {
+                    depth--;
+                    cursor += 2;
+                    continue;
+                }
+                cursor++;
             }
-            continue;
-        }
 
-        if (line.startsWith('--')) {
-            commentLines.push(line.replace(/^--\s?/, ''));
-            continue;
-        }
-
-        if (line.startsWith('/*')) {
-            commentLines.push(line);
-            if (!line.includes('*/')) {
-                inBlockComment = true;
-            }
+            const block = stmt.slice(index, cursor);
+            commentSegments.push(block.replace(/\/\*|\*\//g, ' '));
+            index = cursor;
             continue;
         }
 
         break;
     }
 
-    const directiveText = commentLines.join('\n');
+    const directiveText = commentSegments.join('\n');
     const directiveMatch = directiveText.match(/dialect\s*:\s*([^\n]+)/i);
     if (!directiveMatch) {
         return null;
@@ -436,9 +433,21 @@ export function parseSqlBatch(
         const stmtLineCount = countLines(stmt);
 
         // Find the starting line of this statement in the original SQL
+        // Use the full first line for matching; for short lines also verify
+        // the next line to reduce false matches on duplicated prefixes
         let stmtStartLine = currentLine;
+        const matchPrefix = stmtFirstLine.trimEnd();
+        const stmtSecondLine = firstNewlineIdx !== -1
+            ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
+            : '';
         for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lines[i].includes(stmtFirstLine.substring(0, Math.min(30, stmtFirstLine.length)))) {
+            if (lines[i].includes(matchPrefix)) {
+                // For short prefixes, verify the next line matches too
+                if (matchPrefix.length < 30 && stmtSecondLine && i + 1 < lines.length) {
+                    if (!lines[i + 1].includes(stmtSecondLine)) {
+                        continue;
+                    }
+                }
                 stmtStartLine = i + 1;
                 break;
             }
@@ -782,6 +791,124 @@ function isDebugLoggingEnabled(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).debugLogging);
 }
 
+function normalizeAstFunctionName(name: any): string | null {
+    if (typeof name === 'string') {
+        return name.toUpperCase();
+    }
+    if (typeof name?.name === 'string') {
+        return String(name.name).toUpperCase();
+    }
+    if (Array.isArray(name?.name) && name.name.length > 0) {
+        const firstName = name.name[0]?.value;
+        return typeof firstName === 'string' ? firstName.toUpperCase() : null;
+    }
+    if (typeof name?.value === 'string') {
+        return name.value.toUpperCase();
+    }
+    return null;
+}
+
+function visitSelectStatements(node: any, visit: (stmt: any) => void, seen = new Set<any>()): void {
+    if (!node || typeof node !== 'object' || seen.has(node)) {
+        return;
+    }
+
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            visitSelectStatements(item, visit, seen);
+        }
+        return;
+    }
+
+    if (node.type === 'select' && Array.isArray(node.columns)) {
+        visit(node);
+    }
+
+    for (const value of Object.values(node)) {
+        if (value && typeof value === 'object') {
+            visitSelectStatements(value, visit, seen);
+        }
+    }
+}
+
+function restorePostgresCompatibilityWindowFunctionNames(
+    ast: any,
+    rewrites: Array<{ alias: string | null; originalName: string; replacementName: string }>
+): void {
+    if (!rewrites.length) {
+        return;
+    }
+
+    const remaining = rewrites.map(rewrite => ({ ...rewrite, used: false }));
+    visitSelectStatements(ast, stmt => {
+        for (const column of stmt.columns || []) {
+            const expr = column?.expr;
+            if (!expr?.over) {
+                continue;
+            }
+
+            const currentName = normalizeAstFunctionName(expr.name);
+            if (!currentName) {
+                continue;
+            }
+
+            const alias = typeof column.as === 'string' ? column.as : null;
+            const rewrite = remaining.find(entry =>
+                !entry.used
+                && entry.replacementName === currentName
+                && (entry.alias === null || entry.alias === alias)
+            );
+            if (!rewrite) {
+                continue;
+            }
+
+            expr.name = rewrite.originalName;
+            rewrite.used = true;
+        }
+    });
+}
+
+function tryParsePostgresWindowCompatibilityAstFallback(
+    parser: Parser,
+    sql: string,
+    dialect: SqlDialect,
+    context: ParserContext
+): any | null {
+    if (dialect !== 'PostgreSQL') {
+        return null;
+    }
+
+    const keyword = getLeadingKeyword(sql);
+    if (keyword !== 'SELECT' && keyword !== 'WITH') {
+        return null;
+    }
+
+    const compatibilityRewrite = rewriteUnsupportedPostgresWindowFunctionsForCompatibility(sql, dialect);
+    if (!compatibilityRewrite) {
+        return null;
+    }
+
+    try {
+        const ast = parser.astify(compatibilityRewrite.sql, { database: 'PostgreSQL' });
+        restorePostgresCompatibilityWindowFunctionNames(ast, compatibilityRewrite.rewrites);
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Retried PostgreSQL parse with compatibility rewrites for unsupported window functions',
+            suggestion: 'Window functions like PERCENT_RANK, CUME_DIST, and STDDEV variants were parsed through a compatibility rewrite, but their original names are preserved in the visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+        return ast;
+    } catch (e) {
+        if (isDebugLoggingEnabled()) {
+            console.debug('[sqlParser] PostgreSQL window compatibility parse failed:', e);
+        }
+        return null;
+    }
+}
+
 function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: SqlDialect): any | null {
     const keyword = getLeadingKeyword(sql);
     if (!keyword) {
@@ -1036,19 +1163,18 @@ function applyParserCompatibilityPreprocessing(
 }
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: ParseOptions = {}): ParseResult {
-    // Reset all parser state atomically by creating a fresh context
-    ctx = createFreshContext(dialect);
+    const context = createFreshContext(dialect);
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
 
     if (!sql || !sql.trim()) {
-        return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
+        return { nodes, edges, stats: context.stats, hints: context.hints, sql, columnLineage: [], tableUsage: new Map(), error: 'No SQL provided' };
     }
 
     const bulkResult = tryParseBulkDataStatement({
-        context: ctx,
+        context,
         sql,
-        genId: (prefix) => genId(ctx, prefix),
+        genId: (prefix) => genId(context, prefix),
         processSelect,
     });
     if (bulkResult) {
@@ -1058,9 +1184,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     }
 
     const warehouseDdlResult = tryParseWarehouseDdlStatement({
-        context: ctx,
+        context,
         sql,
-        genId: (prefix) => genId(ctx, prefix),
+        genId: (prefix) => genId(context, prefix),
         processSelect,
     });
     if (warehouseDdlResult) {
@@ -1070,7 +1196,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     }
 
     // Check if this is a session/utility command that node-sql-parser doesn't support
-    const sessionResult = tryParseSessionCommand(ctx, sql, (prefix) => genId(ctx, prefix));
+    const sessionResult = tryParseSessionCommand(context, sql, (prefix) => genId(context, prefix));
     if (sessionResult) {
         return sessionResult;
     }
@@ -1081,9 +1207,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     }
 
     const deleteCompatibilityResult = tryParseCompatibleDeleteStatement({
-        context: ctx,
+        context,
         sql,
-        genId: (prefix) => genId(ctx, prefix),
+        genId: (prefix) => genId(context, prefix),
         processSelect,
         parseSql,
     });
@@ -1094,9 +1220,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     }
 
     const oracleInsertCompatibilityResult = tryParseCompatibleOracleInsertStatement({
-        context: ctx,
+        context,
         sql,
-        genId: (prefix) => genId(ctx, prefix),
+        genId: (prefix) => genId(context, prefix),
         processSelect,
     });
     if (oracleInsertCompatibilityResult) {
@@ -1105,7 +1231,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         return oracleInsertCompatibilityResult;
     }
 
-    sql = applyParserCompatibilityPreprocessing(sql, dialect, ctx);
+    sql = applyParserCompatibilityPreprocessing(sql, dialect, context);
 
     const parser = new Parser();
 
@@ -1121,6 +1247,15 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             try {
                 return parser.astify(sqlText, { database: parserDialect });
             } catch (parseError) {
+                const postgresWindowCompatibilityAst = tryParsePostgresWindowCompatibilityAstFallback(
+                    parser,
+                    sqlText,
+                    targetDialect,
+                    context
+                );
+                if (postgresWindowCompatibilityAst) {
+                    return postgresWindowCompatibilityAst;
+                }
                 const fallbackAst = tryParseDialectProxyAstFallback(parser, sqlText, targetDialect);
                 if (!fallbackAst) {
                     throw parseError;
@@ -1143,12 +1278,12 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             }
 
             try {
-                const retrySql = applyParserCompatibilityPreprocessing(sql, retryDialect, ctx);
+                const retrySql = applyParserCompatibilityPreprocessing(sql, retryDialect, context);
 
                 ast = parseWithDialect(retryDialect, retrySql);
                 effectiveDialect = retryDialect;
-                ctx.dialect = retryDialect;
-                ctx.hints.push({
+                context.dialect = retryDialect;
+                context.hints.push({
                     type: 'info',
                     message: `Auto-retried parse with ${retryDialect} dialect after ${dialect} parse failure`,
                     suggestion: 'If this dialect is expected, switch the parser dialect in the toolbar for consistent parsing.',
@@ -1184,7 +1319,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         // Warn if parsing approached the timeout (>70% of limit)
         if (parseDurationMs > PARSE_TIMEOUT_MS * 0.7) {
-            ctx.hints.push({
+            context.hints.push({
                 type: 'warning',
                 message: `Query parsing took ${(parseDurationMs / 1000).toFixed(1)}s — approaching ${(PARSE_TIMEOUT_MS / 1000).toFixed(0)}s timeout limit`,
                 suggestion: 'Consider simplifying this query or breaking it into smaller parts for better performance.',
@@ -1195,23 +1330,23 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         const statements = Array.isArray(ast) ? ast : [ast];
 
         for (const stmt of statements) {
-            processStatement(ctx, stmt, nodes, edges);
+            processStatement(context, stmt, nodes, edges);
         }
 
         // Calculate complexity
-        calculateComplexity(ctx);
+        calculateComplexity(context);
 
         // Generate optimization hints
-        generateHints(ctx, statements[0]);
+        generateHints(context, statements[0]);
 
         // Detect dialect-specific syntax patterns
-        detectDialectSpecificSyntax(ctx, sql, effectiveDialect);
+        detectDialectSpecificSyntax(context, sql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
-        detectAdvancedIssues(ctx, nodes, sql);
+        detectAdvancedIssues(context, nodes, sql);
 
         // Calculate enhanced complexity metrics
-        calculateEnhancedMetrics(ctx, nodes, edges);
+        calculateEnhancedMetrics(context, nodes, edges);
 
         // Extract the inner SELECT from DDL statements (CREATE/REPLACE VIEW, CREATE TABLE AS SELECT)
         // so column lineage and performance analysis can operate on the SELECT's structure
@@ -1230,19 +1365,19 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         // Pass existing hints so performance analyzer can merge overlapping hints
         // (e.g., duplicate subquery hints + repeated table scan hints)
         if (statements[0]) {
-            const perfAnalysis = analyzePerformance(innerSelectStmt, nodes, edges, ctx.tableUsageMap, ctx.hints);
-            ctx.hints.push(...perfAnalysis.hints);
+            const perfAnalysis = analyzePerformance(innerSelectStmt, nodes, edges, context.tableUsageMap, context.hints);
+            context.hints.push(...perfAnalysis.hints);
 
             // Filter out hints that were merged into performance hints
             // (marked with _merged flag by detectRepeatedScans)
-            const mergedCount = ctx.hints.filter(h => (h as any)._merged).length;
+            const mergedCount = context.hints.filter(h => (h as any)._merged).length;
             if (mergedCount > 0) {
-                ctx.hints = ctx.hints.filter(h => !(h as any)._merged);
+                context.hints = context.hints.filter(h => !(h as any)._merged);
             }
         }
 
         // Calculate performance score after all hints are collected (0-100, higher is better)
-        const perfHints = ctx.hints.filter(h => h.category === 'performance');
+        const perfHints = context.hints.filter(h => h.category === 'performance');
         if (perfHints.length > 0) {
             const highSeverityCount = perfHints.filter(h => h.severity === 'high').length;
             const mediumSeverityCount = perfHints.filter(h => h.severity === 'medium').length;
@@ -1254,8 +1389,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             score -= mediumSeverityCount * 8; // Medium severity issues cost 8 points
             score -= lowSeverityCount * 3;    // Low severity issues cost 3 points
 
-            ctx.stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
-            ctx.stats.performanceIssues = perfHints.length;
+            context.stats.performanceScore = Math.max(0, Math.min(100, Math.round(score)));
+            context.stats.performanceIssues = perfHints.length;
+        } else {
+            context.stats.performanceScore = 100;
+            context.stats.performanceIssues = 0;
         }
 
         // Use dagre for layout
@@ -1274,11 +1412,11 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         calculateColumnPositions(nodes);
 
         // Update stats.tables to reflect the actual number of unique tables (including from CTEs and subqueries)
-        ctx.stats.tables = ctx.tableUsageMap.size;
+        context.stats.tables = context.tableUsageMap.size;
 
         // Convert functionsUsed Set to sorted FunctionUsage array
-        if (ctx.functionsUsed.size > 0) {
-            ctx.stats.functionsUsed = Array.from(ctx.functionsUsed)
+        if (context.functionsUsed.size > 0) {
+            context.stats.functionsUsed = Array.from(context.functionsUsed)
                 .map(entry => {
                     const [name, category] = entry.split(':');
                     return { name, category: category as import('./types/parser').FunctionCategory };
@@ -1286,7 +1424,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
                 .sort((a, b) => a.name.localeCompare(b.name));
         }
 
-        return { nodes, edges, stats: ctx.stats, hints: ctx.hints, sql, columnLineage, columnFlows, tableUsage: ctx.tableUsageMap };
+        return { nodes, edges, stats: context.stats, hints: context.hints, sql, columnLineage, columnFlows, tableUsage: context.tableUsageMap };
     } catch (err) {
         const originalError = err instanceof Error ? err.message : 'Parse error';
         let message = originalError;
@@ -1313,8 +1451,8 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         if (originalError.includes('found') || originalError.includes('Expected')) {
             if (hasPipeConcat && (syntaxHint === '|' || syntaxHint === '||' || originalError.includes('||'))) {
-                message = `|| concatenation operator failed to parse in ${ctx.dialect}. Try PostgreSQL or MySQL dialect which supports || concatenation.`;
-            } else if (ctx.dialect === 'MySQL') {
+                message = `|| concatenation operator failed to parse in ${context.dialect}. Try PostgreSQL or MySQL dialect which supports || concatenation.`;
+            } else if (context.dialect === 'MySQL') {
                 // MySQL-specific issues - check in order of likelihood
                 if (hasParenthesizedUnion && hasIntervalQuoted) {
                     message = `This query uses PostgreSQL syntax (INTERVAL '...' and parenthesized UNION). Try PostgreSQL dialect.`;
@@ -1329,17 +1467,17 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
             else if (upperSql.includes('INTERSECT') || upperSql.includes('EXCEPT')) {
                 const dialectsWithSupport = ['MySQL', 'PostgreSQL'];
-                if (!dialectsWithSupport.includes(ctx.dialect)) {
-                    message = `INTERSECT/EXCEPT not supported in ${ctx.dialect}. Try MySQL or PostgreSQL dialect.`;
+                if (!dialectsWithSupport.includes(context.dialect)) {
+                    message = `INTERSECT/EXCEPT not supported in ${context.dialect}. Try MySQL or PostgreSQL dialect.`;
                 }
             }
             // Check for recursive CTE
-            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(ctx.dialect)) {
-                message = `RECURSIVE CTE not supported in ${ctx.dialect}. Try PostgreSQL or MySQL dialect.`;
+            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(context.dialect)) {
+                message = `RECURSIVE CTE not supported in ${context.dialect}. Try PostgreSQL or MySQL dialect.`;
             }
             // Generic parse error - include original error details for better debugging
             else {
-                message = `SQL syntax not recognized by ${ctx.dialect} parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
+                message = `SQL syntax not recognized by ${context.dialect} parser${syntaxHint ? ` (near '${syntaxHint}')` : ''}. Try PostgreSQL dialect (most compatible).`;
             }
         }
 
@@ -1350,14 +1488,14 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         // Even when parsing fails, try to detect dialect-specific syntax
         // to provide helpful hints to users
-        detectDialectSpecificSyntax(ctx, sql, dialect);
+        detectDialectSpecificSyntax(context, sql, dialect);
 
         // If auto-detect is disabled and dialect-specific syntax was found,
         // nudge the user to enable it
         if (options.allowDialectFallback === false) {
             const detectedResult = detectDialect(sql);
             if (detectedResult.dialect && detectedResult.dialect !== dialect) {
-                ctx.hints.push({
+                context.hints.push({
                     type: 'info',
                     message: 'Dialect auto-detection is disabled',
                     suggestion: `This query looks like ${detectedResult.dialect} but is being parsed as ${dialect}. Enable sqlCrack.autoDetectDialect in Settings for automatic dialect switching.`,
@@ -1380,8 +1518,8 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             severity: 'high',
         });
 
-        // Merge dialect-specific hints from ctx (populated by detectDialectSpecificSyntax above)
-        fallbackResult.hints.push(...ctx.hints);
+        // Merge dialect-specific hints from the parse context (populated by detectDialectSpecificSyntax above)
+        fallbackResult.hints.push(...context.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
         assignLineNumbers(fallbackResult.nodes, sql);
@@ -1390,109 +1528,113 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 }
 
 function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
-    ctx = context;
     if (!stmt || !stmt.type || typeof stmt.type !== 'string') { return null; }
 
-    ctx.statementType = stmt.type.toLowerCase();
+    const previousStatementType = context.statementType;
+    context.statementType = stmt.type.toLowerCase();
 
-    if (ctx.statementType === 'select') {
-        return processSelect(context, stmt, nodes, edges);
-    }
-
-    // For non-SELECT, create a simple representation
-    const rootId = genId('stmt');
-
-    const { label, description, objectName } = getStatementPresentation(stmt, ctx.statementType);
-
-    const ddlRootId = tryProcessDdlStatement(
-        context,
-        stmt,
-        nodes,
-        edges,
-        rootId,
-        objectName,
-        (prefix) => genId(prefix),
-        processSelect
-    );
-    if (ddlRootId) {
-        return ddlRootId;
-    }
-
-    const dmlRootId = tryProcessDmlStatements({
-        context,
-        stmt,
-        nodes,
-        edges,
-        rootId,
-        label,
-        description,
-        genId: (prefix) => genId(prefix),
-        processSelect,
-        getTableName,
-        extractConditions
-    });
-    if (dmlRootId) {
-        applyReturningDetails(stmt, nodes.find(node => node.id === dmlRootId));
-        return dmlRootId;
-    }
-
-    // Calculate width based on label length
-    const labelWidth = Math.min(420, Math.max(160, label.length * 10 + 40));
-
-    nodes.push({
-        id: rootId,
-        type: 'result',
-        label: label,
-        description: description,
-        x: 0, y: 0, width: labelWidth, height: 60
-    });
-    applyReturningDetails(stmt, nodes[nodes.length - 1]);
-
-    // Process table for UPDATE/DELETE/INSERT
-    // Phase 1 Feature: Read vs Write Differentiation
-    // Mark write operations with accessMode and operationType for visual distinction
-    if (stmt.table) {
-        const tables = ctx.statementType === 'delete'
-            ? resolveDeleteTargetTableNames(stmt, getTableName)
-            : (Array.isArray(stmt.table) ? stmt.table : [stmt.table]);
-        // Determine operation type and access mode for write operations
-        const opType = ctx.statementType === 'insert'
-            ? 'INSERT'
-            : ctx.statementType === 'replace'
-                ? 'REPLACE'
-            : ctx.statementType === 'update'
-                ? 'UPDATE'
-                : ctx.statementType === 'delete'
-                    ? 'DELETE'
-                    : ctx.statementType === 'merge'
-                        ? 'MERGE'
-                        : ctx.statementType === 'truncate'
-                            ? 'TRUNCATE'
-                            : undefined;
-        const accessMode: 'write' = 'write';
-
-        for (const t of tables) {
-            ctx.stats.tables++;
-            const tableId = genId('table');
-            const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
-            nodes.push({
-                id: tableId,
-                type: 'table',
-                label: String(tableName),
-                description: 'Target table',
-                accessMode: accessMode, // Mark as write operation for red border/badge
-                operationType: opType,  // Store operation type for badge display
-                x: 0, y: 0, width: 140, height: 60
-            });
-            edges.push({
-                id: genId('e'),
-                source: tableId,
-                target: rootId
-            });
+    try {
+        if (context.statementType === 'select') {
+            return processSelect(context, stmt, nodes, edges);
         }
-    }
 
-    return rootId;
+        // For non-SELECT, create a simple representation
+        const rootId = genId(context, 'stmt');
+
+        const { label, description, objectName } = getStatementPresentation(stmt, context.statementType);
+
+        const ddlRootId = tryProcessDdlStatement(
+            context,
+            stmt,
+            nodes,
+            edges,
+            rootId,
+            objectName,
+            (prefix) => genId(context, prefix),
+            processSelect
+        );
+        if (ddlRootId) {
+            return ddlRootId;
+        }
+
+        const dmlRootId = tryProcessDmlStatements({
+            context,
+            stmt,
+            nodes,
+            edges,
+            rootId,
+            label,
+            description,
+            genId: (prefix) => genId(context, prefix),
+            processSelect,
+            getTableName,
+            extractConditions
+        });
+        if (dmlRootId) {
+            applyReturningDetails(stmt, nodes.find(node => node.id === dmlRootId));
+            return dmlRootId;
+        }
+
+        // Calculate width based on label length
+        const labelWidth = Math.min(420, Math.max(160, label.length * 10 + 40));
+
+        nodes.push({
+            id: rootId,
+            type: 'result',
+            label: label,
+            description: description,
+            x: 0, y: 0, width: labelWidth, height: 60
+        });
+        applyReturningDetails(stmt, nodes[nodes.length - 1]);
+
+        // Process table for UPDATE/DELETE/INSERT
+        // Phase 1 Feature: Read vs Write Differentiation
+        // Mark write operations with accessMode and operationType for visual distinction
+        if (stmt.table) {
+            const tables = context.statementType === 'delete'
+                ? resolveDeleteTargetTableNames(stmt, getTableName)
+                : (Array.isArray(stmt.table) ? stmt.table : [stmt.table]);
+            // Determine operation type and access mode for write operations
+            const opType = context.statementType === 'insert'
+                ? 'INSERT'
+                : context.statementType === 'replace'
+                    ? 'REPLACE'
+                : context.statementType === 'update'
+                    ? 'UPDATE'
+                    : context.statementType === 'delete'
+                        ? 'DELETE'
+                        : context.statementType === 'merge'
+                            ? 'MERGE'
+                            : context.statementType === 'truncate'
+                                ? 'TRUNCATE'
+                                : undefined;
+            const accessMode: 'write' = 'write';
+
+            for (const t of tables) {
+                context.stats.tables++;
+                const tableId = genId(context, 'table');
+                const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
+                nodes.push({
+                    id: tableId,
+                    type: 'table',
+                    label: String(tableName),
+                    description: 'Target table',
+                    accessMode: accessMode,
+                    operationType: opType,
+                    x: 0, y: 0, width: 140, height: 60
+                });
+                edges.push({
+                    id: genId(context, 'e'),
+                    source: tableId,
+                    target: rootId
+                });
+            }
+        }
+
+        return rootId;
+    } finally {
+        context.statementType = previousStatementType;
+    }
 }
 
 function processSelect(
@@ -1508,7 +1650,7 @@ function processSelect(
         nodes,
         edges,
         {
-            genId: (prefix) => genId(prefix),
+            genId: (prefix) => genId(context, prefix),
             processStatement,
             trackTableUsage,
             trackFunctionUsage

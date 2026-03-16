@@ -32,6 +32,11 @@ import {
     inferMissingDataReason,
 } from './messageMetadata';
 import { toImpactReportResult } from './impactPayload';
+import {
+    findSimilarTableNames,
+    resolveLineageNodeId,
+    resolveRequestedLineageNodeId,
+} from './lineageNodeResolution';
 
 /**
  * Context interface for message handler
@@ -108,60 +113,6 @@ export interface MessageHandlerContext {
 /**
  * Message handler class for workspace panel webview messages
  */
-/**
- * Simple edit distance (Levenshtein) between two strings.
- * Used for fuzzy table name suggestions when a lookup fails.
- */
-function editDistance(a: string, b: string): number {
-    const la = a.length, lb = b.length;
-    if (la === 0) { return lb; }
-    if (lb === 0) { return la; }
-    const dp: number[] = Array.from({ length: lb + 1 }, (_, i) => i);
-    for (let i = 1; i <= la; i++) {
-        let prev = dp[0];
-        dp[0] = i;
-        for (let j = 1; j <= lb; j++) {
-            const tmp = dp[j];
-            dp[j] = a[i - 1] === b[j - 1]
-                ? prev
-                : 1 + Math.min(prev, dp[j], dp[j - 1]);
-            prev = tmp;
-        }
-    }
-    return dp[lb];
-}
-
-/**
- * Find table names similar to `query` from the lineage graph.
- * Returns up to `limit` suggestions sorted by edit distance.
- */
-export function findSimilarTableNames(
-    graph: LineageGraph,
-    query: string,
-    limit = 3
-): string[] {
-    const queryLower = query.toLowerCase();
-    const candidates: Array<{ name: string; distance: number }> = [];
-
-    for (const [, node] of graph.nodes) {
-        if (node.type === 'column') { continue; }
-        const nameLower = node.name.toLowerCase();
-        // Substring match — always include
-        if (nameLower.includes(queryLower) || queryLower.includes(nameLower)) {
-            candidates.push({ name: node.name, distance: 0 });
-            continue;
-        }
-        const dist = editDistance(queryLower, nameLower);
-        // Only suggest if within ~40% of the query length
-        if (dist <= Math.max(3, Math.ceil(queryLower.length * 0.4))) {
-            candidates.push({ name: node.name, distance: dist });
-        }
-    }
-
-    candidates.sort((a, b) => a.distance - b.distance);
-    return candidates.slice(0, limit).map(c => c.name);
-}
-
 function createEmptyLineageGraph(): LineageGraph {
     return {
         nodes: new Map(),
@@ -872,14 +823,14 @@ export class MessageHandler {
 
         this.postRequestMessage({
             command: 'columnLineageResult',
-            data: {
-                tableId: resolvedTableId,
-                tableName: resolvedTableNode?.name || tableName,
+            data: this.buildColumnLineageResultPayload(
+                resolvedTableId,
+                resolvedTableNode?.name || tableName,
                 columnName,
-                upstream: lineage.upstream,
-                downstream: lineage.downstream,
+                lineage.upstream,
+                lineage.downstream,
                 html
-            }
+            )
         }, requestId);
     }
 
@@ -1099,7 +1050,7 @@ export class MessageHandler {
             return;
         }
 
-        const resolvedNodeId = this.resolveRequestedLineageNodeId(
+        const resolvedNodeId = resolveRequestedLineageNodeId(
             lineageGraph,
             nodeId,
             nodeLabel,
@@ -1127,28 +1078,6 @@ export class MessageHandler {
             command: 'lineageGraphResult',
             data: { html, nodeId: resolvedNodeId, direction, expandedNodes: expandedNodes || [] }
         }, requestId);
-    }
-
-    private resolveRequestedLineageNodeId(
-        lineageGraph: LineageGraph,
-        requestedNodeId: string,
-        nodeLabel?: string,
-        nodeType?: string
-    ): string {
-        if (lineageGraph.nodes.has(requestedNodeId)) {
-            return requestedNodeId;
-        }
-
-        const label = nodeLabel?.trim() || '';
-        const type = nodeType?.trim() || '';
-        if (label && type) {
-            const resolved = this.resolveLineageNodeId(lineageGraph, requestedNodeId, label, type);
-            if (resolved) {
-                return resolved;
-            }
-        }
-
-        return requestedNodeId;
     }
 
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
@@ -1197,10 +1126,14 @@ export class MessageHandler {
             this.postRequestMessage({
                 command: 'columnLineageResult',
                 data: {
-                    tableId,
-                    columnName,
-                    upstream: [],
-                    downstream: [],
+                    ...this.buildColumnLineageResultPayload(
+                        tableId,
+                        this.getColumnLineageTableLabel(tableId),
+                        columnName,
+                        [],
+                        [],
+                        ''
+                    ),
                     warning: 'This table is not available in the lineage index yet. Refresh and retry column tracing.',
                     warningReason: inferMissingDataReason({
                         changesSinceIndex: this._context.getHasPendingIndexChanges() ? 1 : 0,
@@ -1217,81 +1150,56 @@ export class MessageHandler {
             columnName
         );
 
+        const html = this._context.getLineageView().generateColumnLineageView(lineage);
+
         // Send result back to webview
         this.postRequestMessage({
             command: 'columnLineageResult',
-            data: {
+            data: this.buildColumnLineageResultPayload(
                 tableId,
+                selectedTable.name,
                 columnName,
-                upstream: lineage.upstream,
-                downstream: lineage.downstream
-            }
+                lineage.upstream,
+                lineage.downstream,
+                html
+            )
         }, requestId);
+    }
+
+    private buildColumnLineageResultPayload(
+        tableId: string,
+        tableName: string,
+        columnName: string,
+        upstream: unknown[],
+        downstream: unknown[],
+        html: string
+    ): {
+        tableId: string;
+        tableName: string;
+        columnName: string;
+        upstream: unknown[];
+        downstream: unknown[];
+        html: string;
+    } {
+        return {
+            tableId,
+            tableName,
+            columnName,
+            upstream,
+            downstream,
+            html
+        };
+    }
+
+    private getColumnLineageTableLabel(tableId: string): string {
+        const separatorIndex = tableId.indexOf(':');
+        return separatorIndex >= 0 ? tableId.slice(separatorIndex + 1) : tableId;
     }
 
     private async handleClearColumnSelection(): Promise<void> {
         this.postMessage({
             command: 'columnSelectionCleared'
         });
-    }
-
-    /**
-     * Resolve a workspace graph node ID (e.g. "table_5") to a lineage graph node ID (e.g. "table:daily_sales").
-     * Falls back to matching by type:label_lowercase and then by name substring.
-     */
-    private resolveLineageNodeId(
-        lineageGraph: LineageGraph,
-        graphNodeId: string,
-        nodeLabel: string,
-        nodeType: string
-    ): string | null {
-        // Direct match (unlikely since graph IDs differ from lineage IDs)
-        if (lineageGraph.nodes.has(graphNodeId)) {
-            return graphNodeId;
-        }
-
-        // Try type:label_lowercase (the lineage graph ID format)
-        const nameLower = nodeLabel.toLowerCase();
-        const candidateId = `${nodeType}:${nameLower}`;
-        if (lineageGraph.nodes.has(candidateId)) {
-            return candidateId;
-        }
-
-        // Try common type alternatives — external nodes may be stored as table/view/external in the lineage graph
-        const typeAlternatives = nodeType === 'view'
-            ? ['view', 'table']
-            : nodeType === 'table'
-                ? ['table', 'view']
-                : nodeType === 'external'
-                    ? ['external', 'table', 'view']
-                    : [nodeType];
-        for (const t of typeAlternatives) {
-            const altId = `${t}:${nameLower}`;
-            if (lineageGraph.nodes.has(altId)) {
-                return altId;
-            }
-        }
-
-        // Fallback: scan all nodes for matching name (including qualified/unqualified variants)
-        const normalizedLabel = nameLower
-            .replace(/^["'`]+/, '')
-            .replace(/["'`]+$/, '');
-        for (const [id, node] of lineageGraph.nodes) {
-            if (node.type === 'column') { continue; }
-            const nodeNameLower = node.name.toLowerCase();
-            const nodeTerminal = nodeNameLower.split('.').pop() || nodeNameLower;
-            if (
-                nodeNameLower === nameLower ||
-                nodeNameLower === normalizedLabel ||
-                nodeTerminal === nameLower ||
-                nodeTerminal === normalizedLabel ||
-                nodeNameLower.endsWith('.' + normalizedLabel)
-            ) {
-                return id;
-            }
-        }
-
-        return null;
     }
 
     private async handleExportNodeLineage(
@@ -1308,7 +1216,7 @@ export class MessageHandler {
             return;
         }
 
-        const resolvedId = this.resolveLineageNodeId(lineageGraph, nodeId, nodeLabel, nodeType);
+        const resolvedId = resolveLineageNodeId(lineageGraph, nodeId, nodeLabel, nodeType);
         const node = resolvedId ? lineageGraph.nodes.get(resolvedId) : undefined;
 
         // Some workspace graph nodes (especially unresolved external refs) may not

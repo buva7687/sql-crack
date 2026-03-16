@@ -63,10 +63,24 @@ function trackFunctionUsage(
 function resolveColumnName(col: any): string {
     if (col === null || col === undefined) { return '?'; }
     if (typeof col === 'string') { return col; }
-    // PostgreSQL wraps column as { expr: { type: 'default', value: 'name' } }
+    if (typeof col === 'number') { return String(col); }
     if (typeof col === 'object') {
+        // PostgreSQL wraps column as { expr: { type: 'default', value: 'name' } }
         if (col.expr?.value) { return String(col.expr.value); }
         if (col.value) { return String(col.value); }
+        // column_ref: { table: 't', column: 'name' }
+        if (col.column) { return resolveColumnName(col.column); }
+        // Function call: { type: 'function', name: { ... } }
+        if (col.type === 'function' && col.name) {
+            const fname = typeof col.name === 'string' ? col.name : col.name?.name?.[0]?.value || col.name;
+            return typeof fname === 'string' ? `${fname}(...)` : '?';
+        }
+        // Aggregate expression: { type: 'aggr_func', name: 'COUNT' }
+        if (col.type === 'aggr_func' && col.name) { return `${col.name}(...)`; }
+        // Binary expression: { type: 'binary_expr', operator: '+', left, right }
+        if (col.type === 'binary_expr' && col.operator) { return `expr(${col.operator})`; }
+        // Cast: { type: 'cast', expr, target }
+        if (col.type === 'cast' && col.expr) { return `CAST(${resolveColumnName(col.expr)})`; }
     }
     return '?';
 }

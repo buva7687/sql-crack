@@ -5,7 +5,7 @@
  * in the workspace panel message handler.
  */
 
-import { findSimilarTableNames } from '../../../../src/workspace/handlers/messageHandler';
+import { findSimilarTableNames } from '../../../../src/workspace/handlers/lineageNodeResolution';
 import type { LineageGraph, LineageNode } from '../../../../src/workspace/lineage/types';
 
 // Helper to create a minimal lineage graph with the given table names
@@ -90,7 +90,7 @@ describe('Item #8: Workspace Panel Error Messages', () => {
 
             const results = findSimilarTableNames(graphWithCols, 'users_id');
             // Should not include the column
-            expect(results.every(r => r !== 'users_id')).toBe(true);
+            expect(results.every((result) => result !== 'users_id')).toBe(true);
         });
 
         it('should handle empty graph', () => {

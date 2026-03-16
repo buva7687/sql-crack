@@ -22,6 +22,16 @@ describe('ColumnExtractor', () => {
         expect(aliasMap.get('orders')).toBe('orders');
     });
 
+    it('handles singular FROM and JOIN objects without throwing', () => {
+        const aliasMap = extractor.buildAliasMap({
+            from: { table: 'users', as: 'u' },
+            join: { table: { table: 'orders', as: 'o' } }
+        });
+
+        expect(aliasMap.get('u')).toBe('users');
+        expect(aliasMap.get('o')).toBe('orders');
+    });
+
     it('extracts direct and computed select columns with resolved source tables', () => {
         const ast = parseSelect('SELECT u.id, u.name AS full_name, COUNT(*) AS total FROM users u');
         const aliasMap = extractor.buildAliasMap(ast);
@@ -66,6 +76,23 @@ describe('ColumnExtractor', () => {
         expect(whereColumns).toEqual([
             expect.objectContaining({ columnName: 'active', tableName: 'u', usedIn: 'where' }),
         ]);
+    });
+
+    it('handles singular join sources when extracting join columns', () => {
+        const joinColumns = extractor.extractUsedColumns({
+            from: {
+                on: {
+                    type: 'binary_expr',
+                    left: { type: 'column_ref', table: 'u', column: 'id' },
+                    right: { type: 'column_ref', table: 'o', column: 'user_id' }
+                }
+            }
+        }, 'join');
+
+        expect(joinColumns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ columnName: 'id', tableName: 'u', usedIn: 'join' }),
+            expect.objectContaining({ columnName: 'user_id', tableName: 'o', usedIn: 'join' }),
+        ]));
     });
 
     it('extracts GROUP BY, HAVING, and ORDER BY column references from parser AST shapes', () => {

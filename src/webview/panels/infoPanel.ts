@@ -7,6 +7,7 @@ import type {
 import {
     BADGE_COLORS,
     COMPLEXITY_COLORS,
+    COMPLEXITY_TEXT_COLORS,
     HINT_COLORS,
     STATUS_COLORS,
     UI_COLORS,
@@ -419,7 +420,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
                 <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
                 <span style="
                     background: ${COMPLEXITY_COLORS[currentStats.complexity]};
-                    color: white;
+                    color: ${COMPLEXITY_TEXT_COLORS[currentStats.complexity] ?? 'white'};
                     padding: 2px 8px;
                     border-radius: 4px;
                     font-size: 10px;

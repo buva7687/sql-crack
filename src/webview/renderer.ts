@@ -149,9 +149,14 @@ import {
     copyMermaidToClipboard as copyMermaidToClipboardFeature,
     copyToClipboard as copyToClipboardFeature,
     exportToMermaid as exportToMermaidFeature,
+    openExportPreview as openExportPreviewFeature,
     exportToPng as exportToPngFeature,
     exportToSvg as exportToSvgFeature,
 } from './features/export';
+import {
+    canTraceInWorkspaceLineage as canTraceInWorkspaceLineageFeature,
+    traceInWorkspaceLineage as traceInWorkspaceLineageFeature,
+} from './features/workspaceTrace';
 import {
     clearSearchFeature,
     createSearchRuntimeState,
@@ -1887,6 +1892,7 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
         isDark: state.isDarkTheme,
         nodeMap: renderNodeMap,
         allNodes: currentNodes,
+        layoutType: state.layoutType || 'vertical',
         onEdgeClick: handleEdgeClick,
     });
 }
@@ -2560,6 +2566,10 @@ export function exportToSvg(): void {
     exportToSvgFeature(getExportFeatureContext());
 }
 
+export function openExportPreview(initialFormat: 'png' | 'svg' | 'pdf' = 'png'): void {
+    openExportPreviewFeature(getExportFeatureContext(), initialFormat);
+}
+
 export function exportToMermaid(): void {
     exportToMermaidFeature(getExportFeatureContext());
 }
@@ -2608,6 +2618,7 @@ function getNodeIcon(type: FlowNode['type']): string {
         filter: '⧩',
         join: '⋈',
         aggregate: 'Σ',
+        operation: '⚙',
         sort: '↕',
         limit: '⊟',
         select: '▤',
@@ -2676,6 +2687,7 @@ const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description:
     filter: { color: NODE_COLORS.filter, icon: '⧩', description: 'WHERE/HAVING filter' },
     join: { color: NODE_COLORS.join, icon: '⋈', description: 'JOIN operation' },
     aggregate: { color: NODE_COLORS.aggregate, icon: 'Σ', description: 'GROUP BY aggregation' },
+    operation: { color: NODE_COLORS.operation, icon: '⚙', description: 'Operation step' },
     sort: { color: NODE_COLORS.sort, icon: '↕', description: 'ORDER BY sorting' },
     limit: { color: NODE_COLORS.limit, icon: '⊟', description: 'LIMIT clause' },
     select: { color: NODE_COLORS.select, icon: '▤', description: 'Column projection' },
@@ -3339,6 +3351,7 @@ function showContextMenu(node: FlowNode, e: MouseEvent): void {
         isDarkTheme: state.isDarkTheme,
         node,
         onAction: handleContextMenuAction,
+        showWorkspaceTraceAction: canTraceInWorkspaceLineageFeature(node),
     });
 }
 
@@ -3390,6 +3403,11 @@ function handleContextMenuAction(action: string | null, node: FlowNode): void {
             navigator.clipboard.writeText(node.label).then(() => {
                 showCopyFeedback('Node name copied!');
             });
+            break;
+        case 'trace-workspace-lineage':
+            if (!traceInWorkspaceLineageFeature(node, window.vscodeApi)) {
+                showCopyFeedback('Workspace lineage unavailable');
+            }
             break;
         case 'copy-details':
             if (node.details && node.details.length > 0) {

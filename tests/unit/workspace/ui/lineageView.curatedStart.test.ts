@@ -221,4 +221,11 @@ describe('LineageView curated start content', () => {
         buildGraphSpy.mockRestore();
         generateSvgSpy.mockRestore();
     });
+
+    it('renders copy-as-markdown action in lineage graph header', () => {
+        const html = new LineageView().generateLineageGraphView(createGraph(), 'table:orders');
+
+        expect(html).toContain('data-action="copy-lineage-markdown"');
+        expect(html).toContain('Copy as Markdown');
+    });
 });

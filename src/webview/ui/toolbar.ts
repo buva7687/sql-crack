@@ -30,6 +30,7 @@ export interface ToolbarCallbacks {
     getZoomLevel: () => number;
     onExportPng: () => void;
     onExportSvg: () => void;
+    onOpenExportPreview: (format: 'png' | 'svg' | 'pdf') => void;
     onExportMermaid: () => void;
     onCopyToClipboard: () => void;
     onCopyMermaidToClipboard?: () => void;

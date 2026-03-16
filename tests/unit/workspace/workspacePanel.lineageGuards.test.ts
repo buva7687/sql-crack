@@ -28,8 +28,8 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         } as any;
 
         const buildSpy = jest
-            .spyOn(LineageBuilder.prototype, 'buildFromIndex')
-            .mockReturnValue(mockGraph);
+            .spyOn(LineageBuilder.prototype, 'buildFromIndexAsync')
+            .mockResolvedValue(mockGraph);
 
         const context: any = {
             _lineageGraph: null,
@@ -66,8 +66,8 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         } as any;
 
         const buildSpy = jest
-            .spyOn(LineageBuilder.prototype, 'buildFromIndex')
-            .mockReturnValue(mockGraph);
+            .spyOn(LineageBuilder.prototype, 'buildFromIndexAsync')
+            .mockResolvedValue(mockGraph);
 
         const context: any = {
             _lineageGraph: null,

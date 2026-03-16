@@ -48,6 +48,24 @@ describe('parserClient', () => {
             }
         });
 
+        it('cancels an older queued parse when a newer parseAsync request starts', async () => {
+            jest.useFakeTimers();
+            try {
+                const olderParse = parseAsync('SELECT 1', 'MySQL');
+                const newerParse = parseAsync('SELECT 2', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+
+                const [olderResult, newerResult] = await Promise.all([olderParse, newerParse]);
+
+                expect(olderResult.error).toBe('Parse cancelled');
+                expect(newerResult.error).toBeUndefined();
+                expect(newerResult.nodes.length).toBeGreaterThan(0);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('should parse SQL asynchronously', async () => {
             const result = await parseAsync(testSql, 'MySQL');
 
@@ -145,6 +163,27 @@ describe('parserClient', () => {
                 jest.runOnlyPendingTimers();
                 await pending;
                 expect(resolved).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('cancels an older queued batch parse when a newer parseBatchAsync request starts', async () => {
+            jest.useFakeTimers();
+            try {
+                const olderParse = parseBatchAsync('SELECT 1;', 'MySQL');
+                const newerParse = parseBatchAsync('SELECT 2; SELECT 3;', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+
+                const [olderResult, newerResult] = await Promise.all([olderParse, newerParse]);
+
+                expect(olderResult.queries[0]?.error).toBe('Parse cancelled');
+                expect(olderResult.parseErrors).toEqual([
+                    expect.objectContaining({ message: 'Parse cancelled' }),
+                ]);
+                expect(newerResult.queries.length).toBeGreaterThan(0);
+                expect(newerResult.queries[0]?.error).toBeUndefined();
             } finally {
                 jest.useRealTimers();
             }
@@ -309,6 +348,21 @@ describe('parserClient', () => {
 
             expect(true).toBe(true); // Should not throw
         });
+
+        it('cancels a queued parse before synchronous parsing starts', async () => {
+            jest.useFakeTimers();
+            try {
+                const pending = parseAsync('SELECT 1', 'MySQL');
+                cancelPendingParse();
+
+                jest.runOnlyPendingTimers();
+
+                const result = await pending;
+                expect(result.error).toBe('Parse cancelled');
+            } finally {
+                jest.useRealTimers();
+            }
+        });
     });
 
     describe('getWorkerStatus', () => {
@@ -331,6 +385,22 @@ describe('parserClient', () => {
             const status = getWorkerStatus();
             expect(status.active).toBe(false);
             expect(status.implementation).toBe('deferred');
+        });
+
+        it('tracks queued parse requests while waiting on the macrotask boundary', async () => {
+            jest.useFakeTimers();
+            try {
+                const pending = parseAsync('SELECT 1', 'MySQL');
+
+                expect(getWorkerStatus().pendingRequests).toBeGreaterThanOrEqual(1);
+
+                jest.runOnlyPendingTimers();
+                await pending;
+
+                expect(getWorkerStatus().pendingRequests).toBe(0);
+            } finally {
+                jest.useRealTimers();
+            }
         });
     });
 

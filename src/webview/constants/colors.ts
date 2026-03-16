@@ -3,6 +3,7 @@
 
 import { NodeType, Severity } from '../types';
 import type { ColorblindMode } from '../../shared/theme';
+import { COMPLEXITY_COLORS as SHARED_COMPLEXITY_COLORS, COMPLEXITY_TEXT_COLORS as SHARED_COMPLEXITY_TEXT_COLORS } from '../../shared/theme';
 import { ICONS } from '../../shared/icons';
 
 // ============================================================
@@ -280,6 +281,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
     filter: '#c4b5fd',     // light purple (purple-300)
     join: '#f9a8d4',       // light pink (pink-300)
     aggregate: '#fcd34d',  // light amber (amber-300)
+    operation: '#fdba74',  // light orange (orange-300)
     sort: '#86efac',       // light green (green-300)
     limit: '#67e8f9',      // light cyan (cyan-300)
     select: '#a5b4fc',     // light indigo (indigo-300)
@@ -298,6 +300,7 @@ export const COLORBLIND_NODE_COLORS: Record<Exclude<ColorblindMode, 'off'>, Reco
         filter: '#56B4E9',
         join: '#CC79A7',
         aggregate: '#E69F00',
+        operation: '#D55E00',
         sort: '#009E73',
         limit: '#2F6BFF',
         select: '#3F4A8A',
@@ -314,6 +317,7 @@ export const COLORBLIND_NODE_COLORS: Record<Exclude<ColorblindMode, 'off'>, Reco
         filter: '#56B4E9',
         join: '#CC79A7',
         aggregate: '#E69F00',
+        operation: '#D55E00',
         sort: '#009E73',
         limit: '#2F6BFF',
         select: '#3F4A8A',
@@ -330,6 +334,7 @@ export const COLORBLIND_NODE_COLORS: Record<Exclude<ColorblindMode, 'off'>, Reco
         filter: '#5F7ADB',
         join: '#C23B75',
         aggregate: '#C67A00',
+        operation: '#A24D00',
         sort: '#00A86B',
         limit: '#0077CC',
         select: '#4E4BA8',
@@ -373,12 +378,8 @@ export const HINT_COLORS = {
     info: { bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', icon: ICONS.info },
 } as const;
 
-export const COMPLEXITY_COLORS: Record<string, string> = {
-    'Simple': '#22c55e',
-    'Moderate': '#eab308',
-    'Complex': '#f97316',
-    'Very Complex': '#ef4444',
-};
+export const COMPLEXITY_COLORS: Record<string, string> = SHARED_COMPLEXITY_COLORS;
+export const COMPLEXITY_TEXT_COLORS: Record<string, string> = SHARED_COMPLEXITY_TEXT_COLORS;
 
 // ============================================================
 // Transformation Colors - For column lineage transformations

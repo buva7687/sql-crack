@@ -36,6 +36,7 @@ describe('workspace panel export metadata version', () => {
 
         await (WorkspacePanel.prototype as any).exportAsJson.call({
             _extensionVersion: '0.1.4',
+            createGraphExportContext: () => undefined,
             _currentGraph: {
                 nodes: [{ id: 'n1', label: 'orders', type: 'table', x: 0, y: 0, width: 100, height: 50 }],
                 edges: [],

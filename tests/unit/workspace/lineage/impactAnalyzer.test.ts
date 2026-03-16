@@ -175,6 +175,16 @@ describe('ImpactAnalyzer', () => {
     });
 
     describe('analyzeColumnChange', () => {
+        it('returns a safe report when table name is missing', () => {
+            const { analyzer } = makeAnalyzer([], []);
+            const report = analyzer.analyzeColumnChange(undefined, 'amount');
+
+            expect(report.target.type).toBe('column');
+            expect(report.target.name).toBe('amount');
+            expect(report.summary.totalAffected).toBe(0);
+            expect(report.suggestions).toContain('Table name is required for column impact analysis.');
+        });
+
         it('falls back to table-level when column node not found', () => {
             const nodes = [makeNode('table:orders', 'table', 'orders')];
             const { analyzer } = makeAnalyzer(nodes, []);

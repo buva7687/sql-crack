@@ -26,6 +26,7 @@ export interface ShowContextMenuOptions {
     isDarkTheme: boolean;
     node: FlowNode;
     onAction: (action: string | null, node: FlowNode) => void;
+    showWorkspaceTraceAction?: boolean;
 }
 
 const contextMenuCleanupMap = new WeakMap<HTMLDivElement, () => void>();
@@ -44,7 +45,7 @@ function closeContextMenu(menu: HTMLDivElement): void {
 }
 
 export function showContextMenu(options: ShowContextMenuOptions): void {
-    const { colors, contextMenuElement, event, icons, isDarkTheme, node, onAction } = options;
+    const { colors, contextMenuElement, event, icons, isDarkTheme, node, onAction, showWorkspaceTraceAction = false } = options;
     if (!contextMenuElement) {
         return;
     }
@@ -104,6 +105,15 @@ export function showContextMenu(options: ShowContextMenuOptions): void {
             <span>Copy node name</span>
         </div>
     `;
+
+    if (showWorkspaceTraceAction) {
+        menuItems += `
+            <div class="ctx-menu-item" role="menuitem" tabindex="-1" data-action="trace-workspace-lineage" style="${menuItemStyle}">
+                <span style="width: 16px; display: inline-flex;">${icons.search}</span>
+                <span>Show in Workspace Lineage</span>
+            </div>
+        `;
+    }
 
     if (node.details && node.details.length > 0) {
         menuItems += `

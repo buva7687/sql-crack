@@ -1,13 +1,21 @@
 import { getReferenceTypeColor, getWorkspaceNodeColor } from '../../shared';
+import {
+    WorkspaceExportContext,
+    buildWorkspaceExportCommentBlock,
+    buildWorkspaceExportMetadata,
+    buildWorkspaceSvgMetadata,
+} from '../exportMetadata';
 import { WorkspaceDependencyGraph, WorkspaceNode } from '../types';
 
 export function buildWorkspaceGraphJsonExportData(
     graph: WorkspaceDependencyGraph,
-    version: string
+    version: string,
+    context?: WorkspaceExportContext
 ): Record<string, unknown> {
     return {
         version,
-        exportedAt: new Date().toISOString(),
+        exportedAt: context?.exportedAt || new Date().toISOString(),
+        metadata: context ? buildWorkspaceExportMetadata(context) : undefined,
         graph: {
             nodes: graph.nodes.map(node => ({
                 id: node.id,
@@ -36,8 +44,15 @@ export function buildWorkspaceGraphJsonExportData(
     };
 }
 
-export function buildWorkspaceGraphDot(graph: WorkspaceDependencyGraph, isDarkTheme: boolean): string {
+export function buildWorkspaceGraphDot(
+    graph: WorkspaceDependencyGraph,
+    isDarkTheme: boolean,
+    context?: WorkspaceExportContext
+): string {
     let dot = 'digraph WorkspaceDependencies {\n';
+    if (context) {
+        dot += `${buildWorkspaceExportCommentBlock(context, '//')}\n`;
+    }
     dot += '    // Graph settings\n';
     dot += '    rankdir=TB;\n';
     dot += '    node [shape=box, style="rounded,filled", fontname="Arial"];\n';
@@ -64,7 +79,8 @@ export function buildWorkspaceGraphDot(graph: WorkspaceDependencyGraph, isDarkTh
 export function buildWorkspaceGraphSvg(
     graph: WorkspaceDependencyGraph,
     isDarkTheme: boolean,
-    escapeHtml: (value: string) => string
+    escapeHtml: (value: string) => string,
+    context?: WorkspaceExportContext
 ): string {
     const validNodes = graph.nodes.filter((node) =>
         Number.isFinite(node.x)
@@ -121,6 +137,7 @@ export function buildWorkspaceGraphSvg(
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+${context ? `${buildWorkspaceSvgMetadata(context, escapeHtml)}\n` : ''}
 ${edgesHtml}
 ${nodesHtml}
 </svg>`;

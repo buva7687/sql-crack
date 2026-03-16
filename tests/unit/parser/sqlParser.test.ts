@@ -888,6 +888,22 @@ SELECT * FROM orders;`;
       expect(result.queryLineRanges?.length).toBe(2);
     });
 
+    it('respects nested block-comment dialect directives when picking per-statement dialect', () => {
+      const sql = `
+/* outer comment
+   /* nested comment */
+   dialect: PostgreSQL
+*/
+SELECT $$hello$$ AS msg;
+`;
+      const result = parseSqlBatch(sql, 'MySQL');
+
+      expect(result.queries).toHaveLength(1);
+      expect(result.queries[0].partial).not.toBe(true);
+      expect(result.queries[0].error).toBeUndefined();
+      expect(result.queries[0].nodes.length).toBeGreaterThan(0);
+    });
+
     it('handles invalid SQL in batch with fallback parser', () => {
       const sql = `SELECT 1;
 SELECT
