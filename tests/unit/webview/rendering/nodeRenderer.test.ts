@@ -73,11 +73,11 @@ describe('nodeRenderer', () => {
             const node = makeNode({ type: 'cluster' as any, label: 'Group A' });
             renderClusterNodeVisual(node, group, makeDeps());
 
-            const fakeGroup_ = group as unknown as FakeElement;
-            expect(fakeGroup_.children.length).toBe(3);
+            const fakeGroupEl = group as unknown as FakeElement;
+            expect(fakeGroupEl.children.length).toBe(3);
 
             // First child: rect
-            const rect = fakeGroup_.children[0];
+            const rect = fakeGroupEl.children[0];
             expect(rect.tagName).toBe('rect');
             expect(rect.attrs.get('x')).toBe('50');
             expect(rect.attrs.get('y')).toBe('100');
@@ -86,12 +86,12 @@ describe('nodeRenderer', () => {
             expect(rect.attrs.get('stroke-dasharray')).toBe('6,3');
 
             // Second child: label text
-            const label = fakeGroup_.children[1];
+            const label = fakeGroupEl.children[1];
             expect(label.tagName).toBe('text');
             expect(label.textContent).toBe('Group A');
 
             // Third child: expand icon
-            const icon = fakeGroup_.children[2];
+            const icon = fakeGroupEl.children[2];
             expect(icon.tagName).toBe('text');
             expect(icon.textContent).toBe('+');
         });

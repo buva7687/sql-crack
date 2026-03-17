@@ -421,7 +421,9 @@ src/
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
-- ✅ **Phase 7** — Export preview with PDF support, Web Worker parsing (off-main-thread for large files), architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage)
+- ✅ **Phase 7** — Export preview with PDF support
+
+`0.7.0` branch status: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are implemented on `0.7.0_release` but not released yet.
 
 **Planned**:
 - Diff-aware visualization for PR reviews

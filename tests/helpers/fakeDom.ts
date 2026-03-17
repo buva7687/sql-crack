@@ -94,8 +94,12 @@ export function createFakeElement(tagName: string, namespaceURI: string | null =
         attrs,
         setAttribute: jest.fn((name: string, value: string) => {
             attrs.set(name, value);
-            if (name === 'id') el.id = value;
-            if (name === 'class') el.className = value;
+            if (name === 'id') {
+                el.id = value;
+            }
+            if (name === 'class') {
+                el.className = value;
+            }
         }),
         getAttribute: jest.fn((name: string) => attrs.get(name) ?? null),
         removeAttribute: jest.fn((name: string) => attrs.delete(name)),
@@ -136,14 +140,18 @@ export function createFakeElement(tagName: string, namespaceURI: string | null =
         }),
         removeChild: jest.fn((child: FakeElement) => {
             const idx = el.children.indexOf(child);
-            if (idx >= 0) el.children.splice(idx, 1);
+            if (idx >= 0) {
+                el.children.splice(idx, 1);
+            }
             child.parentElement = null;
             return child;
         }),
         remove: jest.fn(() => {
             if (el.parentElement) {
                 const idx = el.parentElement.children.indexOf(el);
-                if (idx >= 0) el.parentElement.children.splice(idx, 1);
+                if (idx >= 0) {
+                    el.parentElement.children.splice(idx, 1);
+                }
                 el.parentElement = null;
             }
         }),
@@ -161,14 +169,18 @@ export function createFakeElement(tagName: string, namespaceURI: string | null =
         }),
 
         addEventListener: jest.fn((type: string, handler: Function) => {
-            if (!listeners.has(type)) listeners.set(type, []);
+            if (!listeners.has(type)) {
+                listeners.set(type, []);
+            }
             listeners.get(type)!.push(handler);
         }),
         removeEventListener: jest.fn((type: string, handler: Function) => {
             const arr = listeners.get(type);
             if (arr) {
                 const idx = arr.indexOf(handler);
-                if (idx >= 0) arr.splice(idx, 1);
+                if (idx >= 0) {
+                    arr.splice(idx, 1);
+                }
             }
         }),
         dispatchEvent: jest.fn((event: { type: string }) => {
@@ -206,9 +218,13 @@ function matchesSelector(el: FakeElement, selector: string): boolean {
 
 function findDescendant(root: FakeElement, selector: string): FakeElement | null {
     for (const child of root.children) {
-        if (matchesSelector(child, selector)) return child;
+        if (matchesSelector(child, selector)) {
+            return child;
+        }
         const found = findDescendant(child, selector);
-        if (found) return found;
+        if (found) {
+            return found;
+        }
     }
     return null;
 }
@@ -216,7 +232,9 @@ function findDescendant(root: FakeElement, selector: string): FakeElement | null
 function findAllDescendants(root: FakeElement, selector: string): FakeElement[] {
     const results: FakeElement[] = [];
     for (const child of root.children) {
-        if (matchesSelector(child, selector)) results.push(child);
+        if (matchesSelector(child, selector)) {
+            results.push(child);
+        }
         results.push(...findAllDescendants(child, selector));
     }
     return results;

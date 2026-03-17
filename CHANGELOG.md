@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-03-22
+## [0.7.0] - Planned
+
+> Planned release. The entries below reflect work already landed on
+> `0.7.0_release` and validated locally, but not yet shipped.
 
 ### Added
 
@@ -32,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added 290 new tests across 9 files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion. Total suite: 3,390 passing, zero regressions.
+- Added 296 new tests across 9 new debt-remediation files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion.
+- Expanded worker/runtime regression coverage in `parser.worker.test.ts`, `parserClient.test.ts`, `parserWorkerMigrationPrep.test.ts`, `parserWorkerWiringPrep.test.ts`, `compareModeWiring.test.ts`, `visualizationPanel.test.ts`, and `runtimeConfigContract.test.ts` so the off-main-thread parsing path and webview bootstrap contract are explicitly guarded.
+- Current branch validation: 250 suites, 3,390 tests passing with zero failures.
 
 ## [0.6.0] - 2026-03-15
 
@@ -718,7 +723,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQL Server dialect in settings** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Users can now select "SQL Server" directly in the `sqlCrack.defaultDialect` setting. Previously only "TransactSQL" was available, which was confusing since the toolbar shows "SQL Server".
 - **Default layout not applying on first open** ([#46](https://github.com/buva7687/sql-crack/issues/46)): The `sqlCrack.defaultLayout` setting (e.g., `"horizontal"`) now takes effect immediately when opening the visualization. Previously the parser's vertical positions were used regardless of the setting.
 - **Node drag disconnects edges** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Dragging nodes in horizontal, force, or radial layouts no longer detaches edges. Edge recalculation now uses the layout-aware `calculateEdgePath()` instead of hardcoded vertical-only math.
-- **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as `[object Object](...)`. Function names are now unwrapped from nested AST identifier objects before expression formatting.
+- **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as broken `[object Object]` placeholders. Function names are now unwrapped from nested AST identifier objects before expression formatting.
 - **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, making line/column diagnostics actionable when comments/whitespace shift line numbers. The stored SQL context for parse errors was increased from 200 to 500 characters to improve source-line extraction reliability.
 - **Cross-dialect fallback parsing reliability**: Reduced false positives in dialect detection where time literals like `00:00:00` could be misclassified as dialect-specific path syntax. Also ensured dialect auto-retry applies compatibility preprocessing when needed (`AT TIME ZONE`, type-prefixed literals), reducing unnecessary regex fallback on valid SQL.
 - **False "Unused CTE" hints for chained CTEs**: CTE-to-CTE references (e.g., `high_value_customers` referencing `customer_totals` via JOIN) were not detected, causing valid CTEs to be flagged as unused. The detection now recursively checks CTE children including join nodes, and correctly strips `WITH RECURSIVE` prefixes.
