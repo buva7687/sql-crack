@@ -98,6 +98,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **PostgreSQL Syntax Preprocessing** | Automatically rewrites `AT TIME ZONE`, `timestamptz '...'`, and other type-prefixed literals for full AST parsing, including during dialect auto-retry |
 | **Safer Dialect Detection** | Reduces false positives in dialect pattern matching (for example time literals like `00:00:00`) so valid queries are less likely to fall back unnecessarily |
 | **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
+| **Web Worker Parsing** | SQL parsing runs off the main thread via a dedicated Web Worker, keeping the UI responsive during large queries. Falls back to synchronous parsing when workers are unavailable. |
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
 | **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
@@ -420,10 +421,9 @@ src/
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
-- ✅ **Phase 7** — Export preview with PDF support, architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage)
+- ✅ **Phase 7** — Export preview with PDF support, Web Worker parsing (off-main-thread for large files), architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage)
 
 **Planned**:
-- Web Worker parsing (off-main-thread SQL parsing for large files)
 - Diff-aware visualization for PR reviews
 - dbt integration — deep: cross-file `ref()` resolution, manifest.json, macro following (basic Jinja preprocessing shipped in 0.5.2)
 - Performance regression detection

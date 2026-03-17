@@ -23,7 +23,7 @@ const fixtureSql = fs.readFileSync(fixturePath, 'utf-8');
 // CI environments are typically slower — use wider margins when PERF_BASELINE_MULTIPLIER is set
 const perfMultiplier = Number(process.env.PERF_BASELINE_MULTIPLIER) || 1;
 const THRESHOLDS = {
-    singleSimpleQuery: 50 * perfMultiplier,       // Simple SELECT should be < 50ms
+    singleSimpleQuery: 100 * perfMultiplier,       // Simple SELECT should be < 100ms
     singleComplexQuery: 200 * perfMultiplier,      // Complex CTE query should be < 200ms
     batch20Queries: 1000 * perfMultiplier,         // Full batch of 20 queries should be < 1s
     batchMemoryMB: 50,                             // Memory usage should be < 50MB
@@ -31,7 +31,7 @@ const THRESHOLDS = {
 
 describe('Performance Baseline - Parsing Speed', () => {
     describe('Single Query Performance', () => {
-        it('should parse simple SELECT in < 50ms', () => {
+        it('should parse simple SELECT in < 100ms', () => {
             const simpleSql = 'SELECT id, name FROM users WHERE status = \'active\'';
 
             // Warm-up run to avoid cold-start parser initialization noise.

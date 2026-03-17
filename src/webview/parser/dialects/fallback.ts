@@ -117,6 +117,8 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         }
 
         const subsequentCtePattern = new RegExp(`,\\s*(${identifier})\\s+AS\\s*\\(`, 'giu');
+        // Resume search after the first CTE body if we found its closing paren;
+        // otherwise fall back to just past the first CTE match to avoid re-matching it.
         subsequentCtePattern.lastIndex = bodyClose !== -1 ? bodyClose + 1 : firstCtePattern.lastIndex;
         let subMatch;
         while ((subMatch = subsequentCtePattern.exec(commentStripped)) !== null) {

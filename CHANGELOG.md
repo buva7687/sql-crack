@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Extension activation guards**: Validates `normalizeDialect()`, command declarations, keybindings, configuration schema, activation events, and message protocol type coverage via source-reading assertions. Runtime tests call real `activate()` with mock context and verify command registrations, event listeners, diagnostic collection, logger initialization, and VisualizationPanel wiring.
 - **Message protocol tests**: Source-reading guards + runtime `MessageHandler.handleMessage()` dispatch tests validating state mutations, error resilience, and disposed-handler safety. Includes `messageMetadata` utility tests for requestId extraction/attachment and missing-data-reason inference.
 - **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, `normalizeAdvancedLimit()` clamping (NaN, Infinity, boundary, fractional), custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface. Runtime tests call `activate()` to verify config loading and config-change handler reload behavior.
+- **Web Worker parsing**: SQL parsing now runs off the main thread via a dedicated Web Worker (`parser.worker.ts`), keeping the UI responsive during large queries. Includes CSP unlock (`worker-src`), webpack worker bundle, `parserClient.ts` worker manager with timeout/respawn/cancellation, and URI injection via `visualizationPanel.ts`. Falls back to synchronous parsing when workers are unavailable.
 
 ### Changed
 
@@ -25,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Query depth reconverging DAG bug**: `calculateQueryDepth()` used a single global `visited` set that prevented revisiting a shared ancestor through a longer path, undercounting depth for diamond-shaped DAGs. Replaced with per-node best-depth tracking and an `onStack` cycle guard so reconverging graphs report the true longest path.
+- **Defensive AST null guard**: `parseSql` now filters null entries from the AST statements array before processing, preventing downstream errors if `node-sql-parser` emits `[null]`.
+- **Delete handler dedup**: Workspace file watcher delete handler now skips duplicate events for the same file path while a removal is already in flight, preventing counter drift under rapid deletions.
+- **Perf baseline threshold**: Bumped simple-query performance threshold from 50ms to 100ms to reduce false failures in slower CI environments.
 
 ### Tests
 
