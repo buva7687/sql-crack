@@ -3,12 +3,50 @@
  *
  * Verifies that extension.activate() registers all expected commands,
  * sets up file watchers, and reads configuration correctly.
+ *
+ * Two tiers:
+ *   1. Source-reading guards (existing) — catch gross deletions
+ *   2. Runtime activation tests — call real activate() with mock context
  */
 
 jest.mock('vscode');
+jest.mock('../../src/visualizationPanel', () => ({
+    VisualizationPanel: {
+        setContext: jest.fn(),
+        setActiveEditorActivity: jest.fn(),
+        currentPanel: null,
+        sourceDocumentUri: null,
+        getPinnedTabs: jest.fn().mockReturnValue([]),
+        createOrShow: jest.fn(),
+        refresh: jest.fn(),
+        markAsStale: jest.fn(),
+        sendCursorPosition: jest.fn(),
+        sendQueryIndex: jest.fn(),
+        openPinnedTab: jest.fn(),
+    },
+}));
+jest.mock('../../src/workspace', () => ({
+    WorkspacePanel: {
+        createOrShow: jest.fn().mockResolvedValue(undefined),
+        currentPanel: null,
+    },
+}));
+jest.mock('../../src/logger', () => ({
+    logger: {
+        initialize: jest.fn(),
+        info: jest.fn(),
+        debug: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        show: jest.fn(),
+    },
+}));
 
 import * as vscode from 'vscode';
-import { normalizeDialect } from '../../src/extension';
+import { normalizeDialect, activate } from '../../src/extension';
+import { VisualizationPanel } from '../../src/visualizationPanel';
+import { logger } from '../../src/logger';
+import { isAggregateFunction } from '../../src/dialects/functionRegistry';
 
 // ============================================================
 // Tests
@@ -156,6 +194,98 @@ describe('Extension Activation Wiring', () => {
             expect(source).toContain("command: 'export'");
             expect(source).toContain("command: 'openFile'");
             expect(source).toContain("command: 'exploreTable'");
+        });
+    });
+
+    // ============================================================
+    // Runtime activation tests — call real activate() with mock context
+    // ============================================================
+
+    describe('Runtime activation', () => {
+        let context: vscode.ExtensionContext;
+
+        beforeEach(() => {
+            jest.clearAllMocks();
+            // Use the mock helper from the vscode mock
+            const mockVscode = require('vscode');
+            context = mockVscode.createMockExtensionContext();
+        });
+
+        it('activate() runs without throwing', () => {
+            expect(() => activate(context)).not.toThrow();
+        });
+
+        it('pushes subscriptions for all commands and listeners', () => {
+            activate(context);
+            // 5 commands + diagnosticCollection + diagnosticCodeActionProvider wrapper
+            // + activeEditorListener + cursorChangeListener
+            // + documentOpen/Save/Close/Change listeners + configChangeListener
+            // = at least 13 subscriptions
+            expect(context.subscriptions.length).toBeGreaterThanOrEqual(13);
+        });
+
+        it('registers all expected commands via vscode.commands.registerCommand', () => {
+            activate(context);
+            const registerCalls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+            const registeredIds = registerCalls.map((call: unknown[]) => call[0]);
+
+            expect(registeredIds).toContain('sql-crack.visualize');
+            expect(registeredIds).toContain('sql-crack.refresh');
+            expect(registeredIds).toContain('sql-crack.restorePinnedTabs');
+            expect(registeredIds).toContain('sql-crack.analyzeWorkspace');
+            expect(registeredIds).toContain('sql-crack.showWorkspaceUxMetrics');
+        });
+
+        it('creates a diagnostic collection', () => {
+            activate(context);
+            expect(vscode.languages.createDiagnosticCollection).toHaveBeenCalledWith('sql-crack');
+        });
+
+        it('registers a code action provider', () => {
+            activate(context);
+            expect(vscode.languages.registerCodeActionsProvider).toHaveBeenCalled();
+        });
+
+        it('initializes the logger', () => {
+            activate(context);
+            expect(logger.initialize).toHaveBeenCalledWith(context);
+        });
+
+        it('sets VisualizationPanel context', () => {
+            activate(context);
+            expect(VisualizationPanel.setContext).toHaveBeenCalledWith(context);
+        });
+
+        it('registers activeTextEditor change listener', () => {
+            activate(context);
+            expect((vscode.window as any).onDidChangeActiveTextEditor).toHaveBeenCalled();
+        });
+
+        it('registers text editor selection change listener', () => {
+            activate(context);
+            expect((vscode.window as any).onDidChangeTextEditorSelection).toHaveBeenCalled();
+        });
+
+        it('registers document change listener', () => {
+            activate(context);
+            expect(vscode.workspace.onDidChangeTextDocument).toHaveBeenCalled();
+        });
+
+        it('registers configuration change listener', () => {
+            activate(context);
+            expect(vscode.workspace.onDidChangeConfiguration).toHaveBeenCalled();
+        });
+
+        it('registers document open/save/close listeners', () => {
+            activate(context);
+            expect(vscode.workspace.onDidOpenTextDocument).toHaveBeenCalled();
+            expect(vscode.workspace.onDidSaveTextDocument).toHaveBeenCalled();
+            expect(vscode.workspace.onDidCloseTextDocument).toHaveBeenCalled();
+        });
+
+        it('reads configuration during activation (loads custom functions)', () => {
+            activate(context);
+            expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('sqlCrack');
         });
     });
 });

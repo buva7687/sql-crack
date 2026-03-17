@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Pure rendering computations module**: Extracted `calculateEdgePath`, `contrastTextForBadge`, `computeCloudArrowPath`, `calculateQueryDepth`, and `getQueryComplexityInfo` from DOM-dependent rendering modules into a standalone `computations.ts` — zero DOM imports, directly testable in Jest.
+- **Pure rendering computations module**: Extracted `calculateEdgePath`, `contrastTextForBadge`, `computeCloudArrowPath`, `calculateQueryDepth`, `getQueryComplexityInfo`, and `calculateStackedCloudOffsets` from DOM-dependent rendering modules into a standalone `computations.ts` — zero DOM imports, directly testable in Jest.
 - **Shared fake DOM test helper**: Added `tests/helpers/fakeDom.ts` providing lightweight `FakeElement` / `FakeDocument` objects that track `setAttribute`, children, style mutations, and event listeners without requiring jsdom. Enables direct-import testing of `nodeRenderer.ts`, `edgeRenderer.ts`, and `cloudRenderer.ts`.
 - **Workspace pipeline integration test**: Test exercising SQL strings → SchemaExtractor + ReferenceExtractor → WorkspaceIndex → LineageBuilder → `buildDependencyGraph` → `GraphBuilder` with assertions on nodes, edges, upstream/downstream relationships, graph conversion, filtering, focus, and path highlighting.
-- **Extension activation source-reading guards**: Validates `normalizeDialect()`, command declarations, keybindings, configuration schema, activation events, and message protocol type coverage via source-reading assertions.
+- **Extension activation guards**: Validates `normalizeDialect()`, command declarations, keybindings, configuration schema, activation events, and message protocol type coverage via source-reading assertions. Runtime tests call real `activate()` with mock context and verify command registrations, event listeners, diagnostic collection, logger initialization, and VisualizationPanel wiring.
 - **Message protocol tests**: Source-reading guards + runtime `MessageHandler.handleMessage()` dispatch tests validating state mutations, error resilience, and disposed-handler safety. Includes `messageMetadata` utility tests for requestId extraction/attachment and missing-data-reason inference.
-- **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface.
+- **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, `normalizeAdvancedLimit()` clamping (NaN, Infinity, boundary, fractional), custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface. Runtime tests call `activate()` to verify config loading and config-change handler reload behavior.
 
 ### Changed
 
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added 248 new tests across 9 files: `computations.test.ts` (36), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (15), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (39). Includes reconverging DAG depth tests, runtime handler dispatch, and full pipeline graph conversion. Total suite: 3,348 passing, zero regressions.
+- Added 290 new tests across 9 files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion. Total suite: 3,390 passing, zero regressions.
 
 ## [0.6.0] - 2026-03-15
 

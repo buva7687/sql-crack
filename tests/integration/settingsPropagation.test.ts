@@ -12,11 +12,43 @@
  */
 
 jest.mock('vscode');
+jest.mock('../../src/visualizationPanel', () => ({
+    VisualizationPanel: {
+        setContext: jest.fn(),
+        setActiveEditorActivity: jest.fn(),
+        currentPanel: null,
+        sourceDocumentUri: null,
+        getPinnedTabs: jest.fn().mockReturnValue([]),
+        createOrShow: jest.fn(),
+        refresh: jest.fn(),
+        markAsStale: jest.fn(),
+        sendCursorPosition: jest.fn(),
+        sendQueryIndex: jest.fn(),
+        openPinnedTab: jest.fn(),
+    },
+}));
+jest.mock('../../src/workspace', () => ({
+    WorkspacePanel: {
+        createOrShow: jest.fn().mockResolvedValue(undefined),
+        currentPanel: null,
+    },
+}));
+jest.mock('../../src/logger', () => ({
+    logger: {
+        initialize: jest.fn(),
+        info: jest.fn(),
+        debug: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        show: jest.fn(),
+    },
+}));
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 
-import { normalizeDialect } from '../../src/extension';
+import { normalizeDialect, normalizeAdvancedLimit, activate } from '../../src/extension';
 import { setCustomFunctions, getFunctionsForDialect, isAggregateFunction, isWindowFunction } from '../../src/dialects/functionRegistry';
 
 // ============================================================
@@ -378,6 +410,131 @@ describe('Settings Propagation', () => {
             for (const mode of pkgModes) {
                 expect(themeSource).toContain(`'${mode}'`);
             }
+        });
+    });
+
+    // --------------------------------------------------------
+    // 9. normalizeAdvancedLimit — runtime clamping unit tests
+    // --------------------------------------------------------
+    describe('normalizeAdvancedLimit()', () => {
+        it('returns fallback for non-number input', () => {
+            expect(normalizeAdvancedLimit(undefined, 50, 1, 500)).toBe(50);
+            expect(normalizeAdvancedLimit(null, 50, 1, 500)).toBe(50);
+            expect(normalizeAdvancedLimit('abc', 50, 1, 500)).toBe(50);
+            expect(normalizeAdvancedLimit(true, 50, 1, 500)).toBe(50);
+        });
+
+        it('returns fallback for NaN', () => {
+            expect(normalizeAdvancedLimit(NaN, 100, 10, 10000)).toBe(100);
+        });
+
+        it('returns fallback for Infinity', () => {
+            expect(normalizeAdvancedLimit(Infinity, 100, 10, 10000)).toBe(100);
+            expect(normalizeAdvancedLimit(-Infinity, 100, 10, 10000)).toBe(100);
+        });
+
+        it('clamps below min', () => {
+            expect(normalizeAdvancedLimit(0, 50, 1, 500)).toBe(1);
+            expect(normalizeAdvancedLimit(-10, 50, 1, 500)).toBe(1);
+        });
+
+        it('clamps above max', () => {
+            expect(normalizeAdvancedLimit(9999, 50, 1, 500)).toBe(500);
+            expect(normalizeAdvancedLimit(50000, 100, 10, 10000)).toBe(10000);
+        });
+
+        it('passes through values within range', () => {
+            expect(normalizeAdvancedLimit(50, 100, 10, 10000)).toBe(50);
+            expect(normalizeAdvancedLimit(250, 50, 1, 500)).toBe(250);
+        });
+
+        it('rounds fractional values', () => {
+            expect(normalizeAdvancedLimit(49.7, 50, 1, 500)).toBe(50);
+            expect(normalizeAdvancedLimit(49.2, 50, 1, 500)).toBe(49);
+        });
+
+        it('handles boundary values exactly', () => {
+            expect(normalizeAdvancedLimit(1, 50, 1, 500)).toBe(1);
+            expect(normalizeAdvancedLimit(500, 50, 1, 500)).toBe(500);
+        });
+    });
+
+    // --------------------------------------------------------
+    // 10. Runtime: activate() loads custom functions from config
+    // --------------------------------------------------------
+    describe('Runtime config loading via activate()', () => {
+        let context: vscode.ExtensionContext;
+        const mockVscode = require('vscode');
+
+        beforeEach(() => {
+            jest.clearAllMocks();
+            context = mockVscode.createMockExtensionContext();
+            // Set up mock config with custom functions
+            mockVscode.__setMockConfig('sqlCrack', {
+                'customAggregateFunctions': ['MY_TEST_AGG'],
+                'customWindowFunctions': ['MY_TEST_WIN'],
+                'additionalFileExtensions': ['.psql', 'hql'],
+            });
+        });
+
+        afterEach(() => {
+            mockVscode.__resetMockConfig();
+            // Reset custom functions
+            setCustomFunctions([], []);
+        });
+
+        it('activate() reads custom functions from config and injects them', () => {
+            activate(context);
+            // loadCustomFunctions() should have called setCustomFunctions with the config values
+            expect(isAggregateFunction('MY_TEST_AGG', 'MySQL')).toBe(true);
+        });
+
+        it('activate() reads additionalFileExtensions from config', () => {
+            activate(context);
+            // After activation, getConfiguration should have been called for 'sqlCrack'
+            expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('sqlCrack');
+        });
+
+        it('config change handler reloads custom functions when setting changes', () => {
+            activate(context);
+
+            // Get the onDidChangeConfiguration handler
+            const configChangeCalls = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls;
+            expect(configChangeCalls.length).toBeGreaterThan(0);
+            const configChangeHandler = configChangeCalls[0][0];
+
+            // Update the mock config
+            mockVscode.__setMockConfig('sqlCrack', {
+                'customAggregateFunctions': ['RELOADED_AGG'],
+                'customWindowFunctions': [],
+            });
+
+            // Trigger the handler with an event that affects custom functions
+            configChangeHandler({
+                affectsConfiguration: (section: string) =>
+                    section === 'sqlCrack.customAggregateFunctions' ||
+                    section === 'sqlCrack.customWindowFunctions',
+            });
+
+            expect(isAggregateFunction('RELOADED_AGG', 'MySQL')).toBe(true);
+        });
+
+        it('config change handler ignores unrelated setting changes', () => {
+            activate(context);
+
+            const configChangeCalls = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls;
+            const configChangeHandler = configChangeCalls[0][0];
+
+            // Reset to verify no reload happens
+            setCustomFunctions([], []);
+
+            // Trigger with unrelated setting
+            configChangeHandler({
+                affectsConfiguration: () => false,
+            });
+
+            // Custom functions should NOT have been reloaded (still empty)
+            expect(isAggregateFunction('MY_TEST_AGG', 'MySQL')).toBe(false);
         });
     });
 });

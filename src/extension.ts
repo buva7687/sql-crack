@@ -122,7 +122,7 @@ function hasExecutableSql(sql: string): boolean {
     return stripSqlComments(rewritten).trim().length > 0;
 }
 
-function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
+export function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
     if (typeof raw !== 'number' || !Number.isFinite(raw)) {
         return fallback;
     }

@@ -215,7 +215,8 @@ export const workspace = {
     onDidChangeWorkspaceFolders: jest.fn(() => ({ dispose: jest.fn() })),
     onDidOpenTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
     onDidCloseTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
-    onDidSaveTextDocument: jest.fn(() => ({ dispose: jest.fn() }))
+    onDidSaveTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
+    onDidChangeTextDocument: jest.fn(() => ({ dispose: jest.fn() }))
 };
 
 // ============================================================================
@@ -423,7 +424,9 @@ export const window = {
     })),
     activeTextEditor: undefined,
     visibleTextEditors: [],
-    activeColorTheme: { kind: 2 } // Default: Dark (ColorThemeKind.Dark)
+    activeColorTheme: { kind: 2 }, // Default: Dark (ColorThemeKind.Dark)
+    onDidChangeActiveTextEditor: jest.fn(() => ({ dispose: jest.fn() })),
+    onDidChangeTextEditorSelection: jest.fn(() => ({ dispose: jest.fn() }))
 };
 
 // ============================================================================

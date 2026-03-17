@@ -29,4 +29,6 @@ export {
     computeCloudArrowPath,
     calculateQueryDepth,
     getQueryComplexityInfo,
+    calculateStackedCloudOffsets,
 } from './computations';
+export type { CloudOffsetInfo, CalculateStackedCloudOffsetsOptions } from './computations';

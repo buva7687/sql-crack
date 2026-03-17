@@ -9,7 +9,12 @@ import {
     computeCloudArrowPath,
     calculateQueryDepth,
     getQueryComplexityInfo,
+    calculateStackedCloudOffsets,
 } from '../../../../src/webview/rendering/computations';
+import {
+    layoutSubflowNodes,
+    layoutSubflowNodesVertical,
+} from '../../../../src/webview/rendering/cloudRenderer';
 import { FlowNode, FlowEdge } from '../../../../src/webview/types';
 
 // ============================================================
@@ -367,5 +372,219 @@ describe('getQueryComplexityInfo', () => {
         expect(info.nodeCount).toBe(0);
         expect(info.tableCount).toBe(0);
         expect(info.depth).toBe(0);
+    });
+});
+
+// ============================================================
+// layoutSubflowNodes  (from cloudRenderer.ts — dagre-based, pure)
+// ============================================================
+
+describe('layoutSubflowNodes', () => {
+    it('returns default size for empty children', () => {
+        const result = layoutSubflowNodes([], []);
+        expect(result.width).toBe(200);
+        expect(result.height).toBe(100);
+    });
+
+    it('lays out single node with dagre LR', () => {
+        const children = [makeNode({ id: 'c1', label: 'SELECT' })];
+        const result = layoutSubflowNodes(children, []);
+        expect(result.width).toBeGreaterThan(0);
+        expect(result.height).toBeGreaterThan(0);
+        // Node should have x,y set by dagre
+        expect(typeof children[0].x).toBe('number');
+        expect(typeof children[0].y).toBe('number');
+    });
+
+    it('lays out two connected nodes left-to-right', () => {
+        const children = [
+            makeNode({ id: 'a', label: 'source' }),
+            makeNode({ id: 'b', label: 'target' }),
+        ];
+        const edges = [makeEdge('a', 'b')];
+        const result = layoutSubflowNodes(children, edges);
+        expect(result.width).toBeGreaterThan(0);
+        // In LR mode, source should be left of target
+        expect(children[0].x).toBeLessThan(children[1].x);
+    });
+
+    it('sets child width based on label length', () => {
+        const short = [makeNode({ id: 's', label: 'ab' })];
+        const long = [makeNode({ id: 'l', label: 'a_very_long_table_name_here' })];
+        layoutSubflowNodes(short, []);
+        layoutSubflowNodes(long, []);
+        expect(long[0].width).toBeGreaterThan(short[0].width);
+    });
+
+    it('clamps child width between 80 and 280', () => {
+        const tiny = [makeNode({ id: 't', label: '' })];
+        const huge = [makeNode({ id: 'h', label: 'x'.repeat(100) })];
+        layoutSubflowNodes(tiny, []);
+        layoutSubflowNodes(huge, []);
+        expect(tiny[0].width).toBeGreaterThanOrEqual(80);
+        expect(huge[0].width).toBeLessThanOrEqual(280);
+    });
+});
+
+// ============================================================
+// layoutSubflowNodesVertical  (from cloudRenderer.ts — dagre TB)
+// ============================================================
+
+describe('layoutSubflowNodesVertical', () => {
+    it('returns default size for empty children', () => {
+        const result = layoutSubflowNodesVertical([], []);
+        expect(result.width).toBe(120);
+        expect(result.height).toBe(100);
+    });
+
+    it('lays out single node with dagre TB', () => {
+        const children = [makeNode({ id: 'v1', label: 'node' })];
+        const result = layoutSubflowNodesVertical(children, []);
+        expect(result.width).toBeGreaterThan(0);
+        expect(result.height).toBeGreaterThan(0);
+    });
+
+    it('sets fixed child dimensions (180 x 60)', () => {
+        const children = [makeNode({ id: 'v2', label: 'test' })];
+        layoutSubflowNodesVertical(children, []);
+        expect(children[0].width).toBe(180);
+        expect(children[0].height).toBe(60);
+    });
+
+    it('lays out two connected nodes top-to-bottom', () => {
+        const children = [
+            makeNode({ id: 'top', label: 'source' }),
+            makeNode({ id: 'bot', label: 'target' }),
+        ];
+        const edges = [makeEdge('top', 'bot')];
+        layoutSubflowNodesVertical(children, edges);
+        expect(children[0].y).toBeLessThan(children[1].y);
+    });
+
+    it('handles three-node chain', () => {
+        const children = [
+            makeNode({ id: 'a', label: 'A' }),
+            makeNode({ id: 'b', label: 'B' }),
+            makeNode({ id: 'c', label: 'C' }),
+        ];
+        const edges = [makeEdge('a', 'b'), makeEdge('b', 'c')];
+        const result = layoutSubflowNodesVertical(children, edges);
+        expect(result.height).toBeGreaterThan(100);
+        expect(children[0].y).toBeLessThan(children[1].y);
+        expect(children[1].y).toBeLessThan(children[2].y);
+    });
+});
+
+// ============================================================
+// calculateStackedCloudOffsets  (extracted from cloudPositioning.ts)
+// ============================================================
+
+describe('calculateStackedCloudOffsets', () => {
+    // Mock layout function returning fixed sizes
+    const mockLayout = jest.fn().mockReturnValue({ width: 150, height: 100 });
+
+    beforeEach(() => {
+        mockLayout.mockClear();
+    });
+
+    it('returns empty array for no expandable nodes', () => {
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: [],
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        expect(result).toEqual([]);
+    });
+
+    it('returns one offset for a single node', () => {
+        const nodes = [makeNode({ id: 'n1', x: 100, y: 200, width: 180, height: 60, children: [] })];
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0].nodeId).toBe('n1');
+        expect(typeof result[0].offsetX).toBe('number');
+        expect(typeof result[0].offsetY).toBe('number');
+    });
+
+    it('places clouds above nodes (negative offsetY)', () => {
+        const nodes = [makeNode({ id: 'n1', x: 100, y: 200, width: 180, height: 60, children: [] })];
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        expect(result[0].offsetY).toBeLessThan(0);
+    });
+
+    it('prevents horizontal overlap between two adjacent clouds', () => {
+        const nodes = [
+            makeNode({ id: 'n1', x: 100, y: 200, width: 180, height: 60, children: [] }),
+            makeNode({ id: 'n2', x: 120, y: 200, width: 180, height: 60, children: [] }),
+        ];
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        expect(result).toHaveLength(2);
+        // Cloud 2 should be shifted right so it doesn't overlap cloud 1
+        const cloud1X = nodes[0].x + result[0].offsetX;
+        const cloud2X = nodes[1].x + result[1].offsetX;
+        // Cloud widths: 150 + 15*2 = 180 (layout width + padding*2)
+        const cloudWidth = 150 + 15 * 2;
+        expect(cloud2X).toBeGreaterThanOrEqual(cloud1X + cloudWidth);
+    });
+
+    it('calls layoutSubflowNodesVertical for each node', () => {
+        const child1: FlowNode = makeNode({ id: 'child1', label: 'c1' });
+        const child2: FlowNode = makeNode({ id: 'child2', label: 'c2' });
+        const nodes = [
+            makeNode({ id: 'n1', x: 0, y: 100, width: 180, height: 60, children: [child1] }),
+            makeNode({ id: 'n2', x: 300, y: 100, width: 180, height: 60, children: [child2] }),
+        ];
+        calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        expect(mockLayout).toHaveBeenCalledTimes(2);
+    });
+
+    it('well-spaced nodes do not get shifted', () => {
+        const nodes = [
+            makeNode({ id: 'n1', x: 0, y: 100, width: 180, height: 60, children: [] }),
+            makeNode({ id: 'n2', x: 1000, y: 100, width: 180, height: 60, children: [] }),
+        ];
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        // Both clouds should be centered on their nodes
+        // Cloud 1 center = n1.x + n1.width/2 = 90, Cloud 2 center = n2.x + n2.width/2 = 1090
+        // offsetX = cloudX - node.x = (center - cloudWidth/2) - node.x
+        const cloudWidth = 150 + 15 * 2;
+        const expectedOffset1 = (90 - cloudWidth / 2) - 0;
+        const expectedOffset2 = (1090 - cloudWidth / 2) - 1000;
+        expect(result[0].offsetX).toBe(expectedOffset1);
+        expect(result[1].offsetX).toBe(expectedOffset2);
+    });
+
+    it('sorts by x position regardless of input order', () => {
+        const nodes = [
+            makeNode({ id: 'right', x: 500, y: 100, width: 180, height: 60, children: [] }),
+            makeNode({ id: 'left', x: 0, y: 100, width: 180, height: 60, children: [] }),
+        ];
+        const result = calculateStackedCloudOffsets({
+            expandableNodes: nodes,
+            currentEdges: [],
+            layoutSubflowNodesVertical: mockLayout,
+        });
+        // Result order follows the sorted cloudInfos, but nodeId maps back
+        expect(result.map(r => r.nodeId)).toContain('left');
+        expect(result.map(r => r.nodeId)).toContain('right');
     });
 });
