@@ -522,6 +522,21 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('command: \'getLineageGraph\'');
     });
 
+    it('handles lightweight showInGraphResult messages without forcing a full webview rebuild', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("case 'showInGraphResult':");
+        expect(script).toContain("switchToView('graph', true);");
+        expect(script).toContain("searchInput.value = message.data?.query || '';");
+        expect(script).toContain("jumpToSearchMatch(0, { autoZoom: true, track: false });");
+    });
+
     it('registers wheel handlers as non-passive where preventDefault is used', () => {
         const script = getWebviewScript({
             nonce: 'test',

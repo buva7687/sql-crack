@@ -2,6 +2,7 @@ import { FocusMode } from '../../types';
 import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { formatRelativeTime } from '../../../shared/time';
+import { escapeHtml } from '../../../shared/stringUtils';
 
 interface ToolbarMenuCallbacks {
     isDarkTheme: () => boolean;
@@ -457,8 +458,8 @@ function createPinnedTabsDropdown(
         item.innerHTML = `
             <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.pin}</span>
             <div style="flex: 1; overflow: hidden;">
-                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • <span title="${absoluteTimeStr}">${relativeTimeStr}</span></div>
+                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(pin.name)}</div>
+                <div style="font-size: 10px; color: #64748b;">${escapeHtml(pin.dialect)} • <span title="${escapeHtml(absoluteTimeStr)}">${escapeHtml(relativeTimeStr)}</span></div>
             </div>
         `;
 

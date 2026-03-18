@@ -89,6 +89,10 @@ describe('Message Protocol Contracts', () => {
             expect(source).toContain("command: 'search'");
             expect(source).toContain("command: 'export'");
         });
+
+        it('HostMessage covers in-webview graph navigation updates', () => {
+            expect(source).toContain("command: 'showInGraphResult'");
+        });
     });
 
     describe('Workspace MessageHandler coverage', () => {
@@ -368,15 +372,67 @@ describe('MessageHandler runtime dispatch', () => {
         await handler.handleMessage({ command: 'refresh' } as any);
     });
 
-    it('showInGraph sets search filter, switches to graph view, and renders HTML', async () => {
+    it('showInGraph sets search filter, switches to graph view, and posts an in-webview update when already on the main workspace UI', async () => {
         const graph = { nodes: [], edges: [], stats: {} } as any;
         (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
+        (ctx.getCurrentView as jest.Mock).mockReturnValue('lineage');
         await handler.handleMessage({ command: 'showInGraph', query: 'orders', nodeType: 'table' } as any);
         expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
             expect.objectContaining({ query: 'orders' })
         );
         expect(ctx.setCurrentView).toHaveBeenCalledWith('graph');
-        expect(ctx.getWebviewHtml).toHaveBeenCalled();
+        expect(ctx.panel.webview.postMessage).toHaveBeenCalledWith({
+            command: 'showInGraphResult',
+            data: { query: 'orders' }
+        });
+        expect(ctx.getWebviewHtml).not.toHaveBeenCalled();
+    });
+
+    it('showInGraph re-renders when invoked from the issues page', async () => {
+        const graph = { nodes: [], edges: [], stats: {} } as any;
+        (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
+        (ctx.getCurrentView as jest.Mock).mockReturnValue('issues');
+
+        await handler.handleMessage({ command: 'showInGraph', query: 'orders', nodeType: 'table' } as any);
+
+        expect(ctx.renderCurrentView).toHaveBeenCalled();
+    });
+
+    it('getLineage attaches the originating request id to lineageResult', async () => {
+        const flowResult = {
+            nodes: [{ id: 'table:orders', name: 'orders', type: 'table', filePath: '/repo/orders.sql', lineNumber: 4 }],
+            edges: [],
+            paths: [],
+            depth: 2,
+        };
+        (ctx.getFlowAnalyzer as jest.Mock).mockReturnValue({
+            getUpstream: jest.fn(() => flowResult),
+            getDownstream: jest.fn(() => flowResult),
+        });
+        (ctx.getLineageGraph as jest.Mock).mockReturnValue({
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        });
+
+        await handler.handleMessage({
+            command: 'getLineage',
+            nodeId: 'table:orders',
+            direction: 'upstream',
+            requestId: 17,
+        } as any);
+
+        expect(ctx.panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'lineageResult',
+            data: expect.objectContaining({
+                requestId: 17,
+                nodeId: 'table:orders',
+                direction: 'upstream',
+            }),
+        }));
     });
 });
 

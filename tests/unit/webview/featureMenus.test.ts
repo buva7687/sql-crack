@@ -260,4 +260,37 @@ describe('featureMenus toolbar ui', () => {
         expect(onUnpinTab).toHaveBeenCalledWith('pin-1');
         expect(pinItem?.remove).toHaveBeenCalled();
     });
+
+    it('escapes pinned visualization labels before inserting menu markup', () => {
+        const body = createElement('body');
+        global.document = {
+            createElement: jest.fn((tag: string) => createElement(tag)),
+            body: body as unknown as HTMLBodyElement,
+            addEventListener: jest.fn(),
+        } as unknown as Document;
+        global.window = {
+            innerWidth: 500,
+            addEventListener: jest.fn(),
+        } as unknown as Window & typeof globalThis;
+
+        createPinnedTabsButton({
+            isDarkTheme: () => false,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => 'all',
+            onChangeViewLocation: jest.fn(),
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, [
+            { id: 'pin-1', name: '<img src=x onerror=alert(1)>', sql: 'select 1', dialect: 'PostgreSQL', timestamp: Date.UTC(2026, 1, 28, 12, 0, 0) },
+        ], {
+            documentListeners: [],
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        });
+
+        const dropdown = body.children.find((child) => child.id === 'pinned-tabs-dropdown');
+        const pinItem = dropdown?.children.find((child) => child.tagName === 'div' && child !== dropdown.children[0]);
+        expect(pinItem?.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+        expect(pinItem?.innerHTML).not.toContain('<img src=x onerror=alert(1)>');
+    });
 });

@@ -89,6 +89,30 @@ export class WorkspaceScanner {
         return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
     }
 
+    private decodeSqlContent(bytes: Uint8Array): string {
+        let text = new TextDecoder('utf-8').decode(bytes);
+        if (text.charCodeAt(0) === 0xFEFF) {
+            text = text.slice(1);
+        }
+        return text;
+    }
+
+    private async readSqlText(uri: vscode.Uri, expectedSize: number): Promise<string> {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (bytes.length === 0 && expectedSize > 0) {
+            const document = await vscode.workspace.openTextDocument(uri);
+            return document.getText();
+        }
+
+        const decoded = this.decodeSqlContent(bytes);
+        if (decoded.includes('\uFFFD')) {
+            const document = await vscode.workspace.openTextDocument(uri);
+            return document.getText();
+        }
+
+        return decoded;
+    }
+
     /**
      * Analyze a single SQL file
      */
@@ -111,9 +135,8 @@ export class WorkspaceScanner {
                 };
             }
 
-            // Read file content
-            const document = await vscode.workspace.openTextDocument(uri);
-            const sql = document.getText();
+            // Read file content without creating a TextDocument model unless decoding needs a fallback.
+            const sql = await this.readSqlText(uri, stat.size);
 
             // Generate content hash for change detection
             const contentHash = this.generateContentHash(sql);
