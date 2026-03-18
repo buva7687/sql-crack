@@ -291,22 +291,23 @@ describe('MessageHandler runtime dispatch', () => {
         expect(ctx.setCurrentGraphMode).toHaveBeenCalledWith('tables');
     });
 
-    it('search updates filter and re-renders HTML when graph exists', async () => {
+    it('search updates filter without re-rendering the workspace webview', async () => {
         const graph = { nodes: [], edges: [], stats: {} } as any;
         (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
         const filter = { query: 'users', nodeTypes: undefined, useRegex: false, caseSensitive: false };
         await handler.handleMessage({ command: 'search', filter } as any);
         expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(filter);
-        expect(ctx.getWebviewHtml).toHaveBeenCalledWith(graph, filter);
+        expect(ctx.getWebviewHtml).not.toHaveBeenCalled();
     });
 
-    it('clearSearch resets filter and re-renders', async () => {
+    it('clearSearch resets filter without re-rendering the workspace webview', async () => {
         const graph = { nodes: [], edges: [], stats: {} } as any;
         (ctx.getCurrentGraph as jest.Mock).mockReturnValue(graph);
         await handler.handleMessage({ command: 'clearSearch' } as any);
         expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
             expect.objectContaining({ query: '' })
         );
+        expect(ctx.getWebviewHtml).not.toHaveBeenCalled();
     });
 
     it('toggleHelp flips help state and re-renders', async () => {

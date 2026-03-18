@@ -2,25 +2,52 @@ export function getTooltipScriptFragment(): string {
     return `
         // ========== Tooltip Functions ==========
         function sanitizeTooltipHtml(html) {
-            // Escape everything first, then restore only known-safe tooltip tags
-            var div = document.createElement('div');
-            div.textContent = html;
-            var safe = div.innerHTML;
-            // Restore only the structural tags used by tooltip content:
-            // <div>, <ul>, <li>, <strong>, <span>, <br> — with optional class/style attributes.
-            // Note: innerHTML escapes < > & but leaves " as literal quotes (not &quot;).
-            safe = safe.replace(/&lt;(div|ul|li|strong|span|br)(\\s+(?:class|style)="[^"]*?")*\\s*\\/?&gt;/gi, function(m, tag, attrs) {
-                var restored = '<' + tag;
-                if (attrs) restored += attrs;
-                return restored + '>';
+            const template = document.createElement('template');
+            template.innerHTML = typeof html === 'string' ? html : '';
+
+            const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);
+            const allowedClassPattern = /^[a-z0-9_-]+$/i;
+
+            function sanitizeNode(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    return document.createTextNode(node.textContent || '');
+                }
+
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    return document.createDocumentFragment();
+                }
+
+                const element = node;
+                if (!allowedTags.has(element.tagName)) {
+                    const fragment = document.createDocumentFragment();
+                    Array.from(element.childNodes).forEach((child) => {
+                        fragment.appendChild(sanitizeNode(child));
+                    });
+                    return fragment;
+                }
+
+                const clean = document.createElement(element.tagName.toLowerCase());
+                const className = element.getAttribute('class') || '';
+                const safeClassName = className
+                    .split(/\\s+/)
+                    .filter((token) => allowedClassPattern.test(token))
+                    .join(' ');
+                if (safeClassName) {
+                    clean.setAttribute('class', safeClassName);
+                }
+
+                Array.from(element.childNodes).forEach((child) => {
+                    clean.appendChild(sanitizeNode(child));
+                });
+
+                return clean;
+            }
+
+            const container = document.createElement('div');
+            Array.from(template.content.childNodes).forEach((child) => {
+                container.appendChild(sanitizeNode(child));
             });
-            // Closing tags
-            safe = safe.replace(/&lt;\\\/(div|ul|li|strong|span)&gt;/gi, '</$1>');
-            // Restore common HTML entities
-            safe = safe.replace(/&amp;(middot|nbsp|bull|ndash|mdash|amp|lt|gt|quot|#39|#x27);/gi, '&$1;');
-            // Safety net: strip any remaining on* event handler attributes
-            safe = safe.replace(/\\s+on\\w+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '');
-            return safe;
+            return container.innerHTML;
         }
         function showTooltip(e, content) {
             tooltip.innerHTML = sanitizeTooltipHtml(content);

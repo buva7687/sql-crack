@@ -108,6 +108,12 @@ describe('LineageBuilder', () => {
         jest.resetAllMocks();
         // Default: files don't exist (no CTE regex fallback from disk)
         mockedFs.existsSync.mockReturnValue(false);
+        Object.defineProperty(mockedFs, 'promises', {
+            configurable: true,
+            value: {
+                readFile: jest.fn(),
+            },
+        });
     });
 
     describe('buildFromIndex', () => {
@@ -283,6 +289,21 @@ describe('LineageBuilder', () => {
             builder.buildFromIndex(index2);
             expect(builder.nodes.has('table:old_table')).toBe(false);
             expect(builder.nodes.has('table:new_table')).toBe(true);
+        });
+    });
+
+    describe('buildFromIndexAsync', () => {
+        it('uses a bounded worker pool instead of Promise.all over every SQL file', () => {
+            const source = jest.requireActual('fs').readFileSync(
+                path.join(__dirname, '../../../../src/workspace/lineage/lineageBuilder.ts'),
+                'utf-8'
+            );
+
+            expect(source).toContain('const MAX_PRELOAD_CONCURRENCY = 20;');
+            expect(source).toContain('const workerCount = Math.min(MAX_PRELOAD_CONCURRENCY, filePaths.length);');
+            expect(source).toContain('const workers = Array.from({ length: workerCount }, async () => {');
+            expect(source).toContain('await Promise.all(workers);');
+            expect(source).not.toContain('Array.from(files.keys()).map(async (filePath) => {');
         });
     });
 

@@ -64,21 +64,18 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
         expect(source).toContain('function sanitizeTooltipHtml');
     });
 
-    it('should escape all HTML first via textContent, then restore only safe tags', () => {
-        // The sanitizer must escape everything first (textContent → innerHTML)
-        expect(source).toContain('div.textContent = html');
-        expect(source).toContain('div.innerHTML');
-        // Then selectively restore only allowlisted structural tags
-        // Should only allow div, ul, li, strong, span, br — no script, img, iframe, etc.
-        expect(source).toMatch(/div\|ul\|li\|strong\|span\|br/);
+    it('should sanitize tooltip html through a DOM allowlist of safe structural tags', () => {
+        expect(source).toContain("const template = document.createElement('template');");
+        expect(source).toContain("const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);");
+        expect(source).toContain("if (!allowedTags.has(element.tagName)) {");
+        expect(source).toContain('fragment.appendChild(sanitizeNode(child));');
     });
 
-    it('should only restore class and style attributes, not event handlers', () => {
-        // The allowlist regex should permit class and style only.
-        // Note: innerHTML escapes < > & but leaves " as literal quotes (not &quot;),
-        // so the regex matches literal " not &quot;.
-        expect(source).toMatch(/class\|style/);
-        // Should NOT contain any pattern that passes through on* attributes
+    it('should preserve only safe class tokens and should not pass through inline styles or event handlers', () => {
+        expect(source).toContain("const allowedClassPattern = /^[a-z0-9_-]+$/i;");
+        expect(source).toContain("clean.setAttribute('class', safeClassName);");
+        expect(source).not.toMatch(/sanitizeTooltipHtml[\s\S]*setAttribute\('style'/);
+        expect(source).not.toContain('class|style');
         expect(source).not.toMatch(/sanitizeTooltipHtml[^}]*onclick/);
     });
 

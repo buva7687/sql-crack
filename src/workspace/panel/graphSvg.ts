@@ -16,6 +16,8 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         nodeMap.set(node.id, node);
     }
 
+    const nodeConnectionCounts = buildNodeConnectionCounts(graph);
+
     const edgesHtml = graph.edges.map(edge => {
         const source = nodeMap.get(edge.source);
         const target = nodeMap.get(edge.target);
@@ -68,7 +70,7 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         const refInfo = node.referenceCount ? `${node.referenceCount} reference${node.referenceCount !== 1 ? 's' : ''}` : '';
         const sublabel = [defInfo, refInfo].filter(Boolean).join(', ');
 
-        const tooltipContent = getNodeTooltipContent(node, graph, escapeHtml);
+        const tooltipContent = getNodeTooltipContent(node, graph, escapeHtml, nodeConnectionCounts);
 
         return `
                 <g class="node ${typeClass}"
@@ -113,12 +115,33 @@ export function renderWorkspaceGraphSvg(options: RenderWorkspaceGraphSvgOptions)
         `;
 }
 
-function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGraph, escapeHtml: (value: string) => string): string {
+function buildNodeConnectionCounts(graph: WorkspaceDependencyGraph): Map<string, { upstream: number; downstream: number }> {
+    const counts = new Map<string, { upstream: number; downstream: number }>();
+
+    for (const edge of graph.edges) {
+        const sourceCounts = counts.get(edge.source) || { upstream: 0, downstream: 0 };
+        sourceCounts.downstream += 1;
+        counts.set(edge.source, sourceCounts);
+
+        const targetCounts = counts.get(edge.target) || { upstream: 0, downstream: 0 };
+        targetCounts.upstream += 1;
+        counts.set(edge.target, targetCounts);
+    }
+
+    return counts;
+}
+
+function getNodeTooltipContent(
+    node: WorkspaceNode,
+    graph: WorkspaceDependencyGraph,
+    escapeHtml: (value: string) => string,
+    nodeConnectionCounts: Map<string, { upstream: number; downstream: number }>
+): string {
     let content = `<div class="tooltip-title">${escapeHtml(node.label)}</div>`;
 
-    // Connection counts
-    const upstreamCount = graph.edges.filter(e => e.target === node.id).length;
-    const downstreamCount = graph.edges.filter(e => e.source === node.id).length;
+    const connectionCounts = nodeConnectionCounts.get(node.id) || { upstream: 0, downstream: 0 };
+    const upstreamCount = connectionCounts.upstream;
+    const downstreamCount = connectionCounts.downstream;
     if (upstreamCount > 0 || downstreamCount > 0) {
         content += `<div class="tooltip-content">${upstreamCount} upstream &middot; ${downstreamCount} downstream</div>`;
     }
@@ -139,7 +162,7 @@ function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGr
     }
 
     if (node.references && node.references.length > 0) {
-        content += '<div class="tooltip-content" style="margin-top:8px;">References:</div><ul class="tooltip-list">';
+        content += '<div class="tooltip-content tooltip-section-spaced">References:</div><ul class="tooltip-list">';
 
         for (const ref of node.references.slice(0, 5)) {
             content += `<li><strong>${escapeHtml(ref.tableName)}</strong> (${ref.referenceType})`;
@@ -147,7 +170,7 @@ function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGr
             if (ref.columns && ref.columns.length > 0) {
                 const columnList = ref.columns.slice(0, 8).map(column => column.columnName).join(', ');
                 const moreCount = ref.columns.length - 8;
-                content += `<br><span style="font-size:9px;color:var(--text-muted);">Columns: ${escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
+                content += `<br><span class="tooltip-columns">Columns: ${escapeHtml(columnList)}${moreCount > 0 ? ` +${moreCount} more` : ''}</span>`;
             }
 
             content += '</li>';
@@ -161,13 +184,13 @@ function getNodeTooltipContent(node: WorkspaceNode, graph: WorkspaceDependencyGr
     }
 
     if (node.type === 'external') {
-        content += '<div class="tooltip-content" style="color:var(--warning-light);">Not defined in workspace</div>';
+        content += '<div class="tooltip-content tooltip-warning">Not defined in workspace</div>';
     }
 
     const dblClickHint = node.type === 'file'
         ? 'double-click to open'
         : 'double-click to trace lineage';
-    content += `<div class="tooltip-content" style="margin-top:8px;font-size:10px;">Click to select, ${dblClickHint}</div>`;
+    content += `<div class="tooltip-content tooltip-hint">Click to select, ${dblClickHint}</div>`;
 
     return content;
 }

@@ -24,6 +24,7 @@ type NodeSqlParserInstance = {
 type NodeSqlParserCtor = new () => NodeSqlParserInstance;
 
 let cachedSqlParserCtor: NodeSqlParserCtor | null | undefined;
+const MAX_PRELOAD_CONCURRENCY = 20;
 
 function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
     if (cachedSqlParserCtor !== undefined) {
@@ -165,22 +166,26 @@ export class LineageBuilder implements LineageGraph {
     }
 
     private async preloadFileSql(files: Map<string, FileAnalysis>): Promise<Map<string, string>> {
-        const entries = await Promise.all(
-            Array.from(files.keys()).map(async (filePath) => {
+        const fileSqlByPath = new Map<string, string>();
+        const filePaths = Array.from(files.keys());
+        let nextIndex = 0;
+
+        const workerCount = Math.min(MAX_PRELOAD_CONCURRENCY, filePaths.length);
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextIndex < filePaths.length) {
+                const filePath = filePaths[nextIndex];
+                nextIndex += 1;
+
                 try {
                     const sql = await fs.promises.readFile(filePath, 'utf8');
-                    return [filePath, sql] as const;
+                    fileSqlByPath.set(filePath, sql);
                 } catch {
-                    return null;
+                    continue;
                 }
-            })
-        );
+            }
+        });
 
-        const fileSqlByPath = new Map<string, string>();
-        for (const entry of entries) {
-            if (!entry) {continue;}
-            fileSqlByPath.set(entry[0], entry[1]);
-        }
+        await Promise.all(workers);
         return fileSqlByPath;
     }
 

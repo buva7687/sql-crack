@@ -605,6 +605,23 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('new TextDecoder().decode(Uint8Array.from(atob(base64), c => c.charCodeAt(0)))');
     });
 
+    it('sanitizes graph tooltips with a DOM allowlist and does not restore inline styles', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);");
+        expect(script).toContain("const allowedClassPattern = /^[a-z0-9_-]+$/i;");
+        expect(script).toContain("if (!allowedTags.has(element.tagName)) {");
+        expect(script).toContain("clean.setAttribute('class', safeClassName);");
+        expect(script).not.toContain('(?:class|style)');
+        expect(script).not.toContain("safe = safe.replace(/&lt;(div|ul|li|strong|span|br)");
+    });
+
     it('does not reference removed header focus button bindings', () => {
         const script = getWebviewScript({
             nonce: 'test',

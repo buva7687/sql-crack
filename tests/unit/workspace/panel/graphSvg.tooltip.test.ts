@@ -38,7 +38,9 @@ describe('graphSvg tooltip content generation', () => {
     it('shows upstream and downstream connection counts', () => {
         expect(source).toContain('upstream');
         expect(source).toContain('downstream');
-        expect(source).toMatch(/edges\.filter\(e\s*=>\s*e\.target\s*===\s*node\.id\)/);
+        expect(source).toContain('function buildNodeConnectionCounts');
+        expect(source).toContain('const connectionCounts = nodeConnectionCounts.get(node.id)');
+        expect(source).not.toMatch(/edges\.filter\(e\s*=>\s*e\.target\s*===\s*node\.id\)/);
     });
 
     it('escapes node label in tooltip title', () => {

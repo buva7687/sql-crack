@@ -491,10 +491,6 @@ export class MessageHandler {
 
     private handleSearch(filter: SearchFilter): void {
         this._context.setCurrentSearchFilter(filter);
-        const graph = this._context.getCurrentGraph();
-        if (graph) {
-            this.setPanelHtml(this._context.getWebviewHtml(graph, filter));
-        }
     }
 
     private handleClearSearch(): void {
@@ -505,10 +501,6 @@ export class MessageHandler {
             caseSensitive: false
         };
         this._context.setCurrentSearchFilter(clearFilter);
-        const graph = this._context.getCurrentGraph();
-        if (graph) {
-            this.setPanelHtml(this._context.getWebviewHtml(graph, clearFilter));
-        }
     }
 
     private handleTrackUxEvent(event: string, metadata?: WorkspaceUxMetricMetadata): void {
