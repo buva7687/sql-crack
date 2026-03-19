@@ -114,9 +114,6 @@ export class IndexManager {
             referenceMap: new Map()
         };
 
-        // Copy existing index for hash comparison if available
-        const oldHashes = this.index?.fileHashes || new Map<string, string>();
-
         // Process all files with fresh analysis
         // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
         // This ensures schema extractor improvements (like column extraction) take effect

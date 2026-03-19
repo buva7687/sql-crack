@@ -20,7 +20,10 @@ interface UpdateVisibleNodesFeatureOptions {
     isDarkTheme: boolean;
     renderNode: (node: FlowNode, parent: SVGGElement) => void;
     renderEdge: (edge: FlowEdge, parent: SVGGElement) => void;
-    onResultUpdated: (result: VirtualizationResult) => void;
+    nodeElementsById?: Map<string, SVGGElement>;
+    edgeElementsById?: Map<string, SVGPathElement>;
+    onNodeRemoved?: (nodeId: string) => void;
+    onEdgeRemoved?: (edgeId: string) => void;
 }
 
 interface SetVirtualizationEnabledFeatureOptions {
@@ -34,6 +37,8 @@ interface SetVirtualizationEnabledFeatureOptions {
     renderNode: (node: FlowNode, parent: SVGGElement) => void;
     renderEdge: (edge: FlowEdge, parent: SVGGElement) => void;
     onVirtualizedUpdate: () => void;
+    edgeElementsById?: Map<string, SVGPathElement>;
+    onEdgeRemoved?: (edgeId: string) => void;
 }
 
 interface VirtualizationUpdateResult {
@@ -132,7 +137,10 @@ export function updateVisibleNodesFeature(
         isDarkTheme,
         renderNode,
         renderEdge,
-        onResultUpdated,
+        nodeElementsById,
+        edgeElementsById,
+        onNodeRemoved,
+        onEdgeRemoved,
     } = options;
 
     if (!svg || !mainGroup || renderNodes.length === 0) {
@@ -142,7 +150,6 @@ export function updateVisibleNodesFeature(
     const rect = svg.getBoundingClientRect();
     const bounds = getViewportBounds(rect.width, rect.height, scale, offsetX, offsetY);
     const result = getVisibleElements(renderNodes, renderEdges, bounds);
-    onResultUpdated(result);
 
     const nodesGroup = mainGroup.querySelector('.nodes') as SVGGElement | null;
     const edgesGroup = mainGroup.querySelector('.edges') as SVGGElement | null;
@@ -154,7 +161,9 @@ export function updateVisibleNodesFeature(
     const nodeIdsToRemove = [...renderedNodeIds].filter(nodeId => !result.visibleNodeIds.has(nodeId));
 
     for (const nodeId of nodeIdsToRemove) {
-        nodesGroup.querySelector(`[data-id="${nodeId}"]`)?.remove();
+        const nodeElement = nodeElementsById?.get(nodeId) || nodesGroup.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
+        nodeElement?.remove();
+        onNodeRemoved?.(nodeId);
         renderedNodeIds.delete(nodeId);
     }
 
@@ -166,7 +175,9 @@ export function updateVisibleNodesFeature(
     const visibleEdgeIds = new Set(result.visibleEdges.map(edge => edge.id));
     const edgeIdsToRemove = [...renderedEdgeIds].filter(edgeId => !visibleEdgeIds.has(edgeId));
     for (const edgeId of edgeIdsToRemove) {
-        edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`)?.remove();
+        const edgeElement = edgeElementsById?.get(edgeId) || edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`) as SVGPathElement | null;
+        edgeElement?.remove();
+        onEdgeRemoved?.(edgeId);
         renderedEdgeIds.delete(edgeId);
     }
     for (const edge of result.visibleEdges) {
@@ -195,6 +206,8 @@ export function setVirtualizationEnabledFeature(
         renderNode,
         renderEdge,
         onVirtualizedUpdate,
+        edgeElementsById,
+        onEdgeRemoved,
     } = options;
 
     if (currentNodes.length === 0 || !mainGroup) {
@@ -220,7 +233,9 @@ export function setVirtualizationEnabledFeature(
             if (allEdgeIds.has(edgeId)) {
                 continue;
             }
-            edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`)?.remove();
+            const edgeElement = edgeElementsById?.get(edgeId) || edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`) as SVGPathElement | null;
+            edgeElement?.remove();
+            onEdgeRemoved?.(edgeId);
             renderedEdgeIds.delete(edgeId);
         }
         for (const edge of currentEdges) {
@@ -245,24 +260,31 @@ export function updateNodeEdgesFeature(options: {
     nodes: FlowNode[];
     layoutType: LayoutType;
     calculateEdgePath: (sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType) => string;
+    nodeMap?: Map<string, FlowNode>;
+    edgeElementsById?: Map<string, SVGPathElement>;
+    edgeIdsByNodeId?: Map<string, Set<string>>;
 }): void {
-    const { mainGroup, node, nodes, layoutType, calculateEdgePath } = options;
+    const { mainGroup, node, nodes, layoutType, calculateEdgePath, nodeMap: providedNodeMap, edgeElementsById, edgeIdsByNodeId } = options;
     if (!mainGroup) {
         return;
     }
     const nodeMap = new Map(nodes.map(candidate => [candidate.id, candidate]));
+    const resolvedNodeMap = providedNodeMap || nodeMap;
 
-    const edges = mainGroup.querySelectorAll(`.edge[data-source="${node.id}"], .edge[data-target="${node.id}"]`);
-    edges.forEach(edgeEl => {
-        const edgePath = edgeEl as SVGPathElement;
+    const cachedEdgeIds = edgeIdsByNodeId?.get(node.id);
+    const edgeElements = cachedEdgeIds
+        ? Array.from(cachedEdgeIds, (edgeId) => edgeElementsById?.get(edgeId)).filter((edgeEl): edgeEl is SVGPathElement => Boolean(edgeEl))
+        : Array.from(mainGroup.querySelectorAll(`.edge[data-source="${node.id}"], .edge[data-target="${node.id}"]`)) as SVGPathElement[];
+
+    edgeElements.forEach(edgePath => {
         const sourceId = edgePath.getAttribute('data-source');
         const targetId = edgePath.getAttribute('data-target');
         if (!sourceId || !targetId) {
             return;
         }
 
-        const sourceNode = nodeMap.get(sourceId);
-        const targetNode = nodeMap.get(targetId);
+        const sourceNode = resolvedNodeMap.get(sourceId);
+        const targetNode = resolvedNodeMap.get(targetId);
         if (!sourceNode || !targetNode) {
             return;
         }

@@ -125,34 +125,48 @@ export function highlightConnectedEdges(
     nodeId: string,
     highlight: boolean,
     mainGroup: SVGGElement | null,
-    isDark: boolean
+    isDark: boolean,
+    edgeElementsById?: Map<string, SVGPathElement>,
+    edgeIdsByNodeId?: Map<string, Set<string>>
 ): void {
     const theme = isDark ? EDGE_THEME.dark : EDGE_THEME.light;
-    const edges = mainGroup?.querySelectorAll('.edge');
-    edges?.forEach(edge => {
-        const source = edge.getAttribute('data-source');
-        const target = edge.getAttribute('data-target');
-        if (source === nodeId || target === nodeId) {
-            if (highlight) {
-                edge.setAttribute('stroke', EDGE_COLORS.highlight);
-                edge.setAttribute('stroke-width', '3');
-                edge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
-            } else {
-                edge.setAttribute('stroke', theme.default);
-                edge.setAttribute('stroke-width', String(theme.strokeWidth));
-                edge.setAttribute('marker-end', 'url(#arrowhead)');
-                // Restore original dash pattern (e.g., subquery_flow edges are dashed)
-                const clauseType = edge.getAttribute('data-clause-type') || undefined;
-                const dashPattern = clauseType === 'subquery_flow'
-                    ? EDGE_DASH_PATTERNS.subquery_flow
-                    : getEdgeDashPattern(clauseType);
-                if (dashPattern) {
-                    edge.setAttribute('stroke-dasharray', dashPattern);
-                } else {
-                    edge.removeAttribute('stroke-dasharray');
-                }
+    const applyDefaultState = (edge: Element): void => {
+        edge.setAttribute('stroke', theme.default);
+        edge.setAttribute('stroke-width', String(theme.strokeWidth));
+        edge.setAttribute('marker-end', 'url(#arrowhead)');
+        const clauseType = edge.getAttribute('data-clause-type') || undefined;
+        const dashPattern = clauseType === 'subquery_flow'
+            ? EDGE_DASH_PATTERNS.subquery_flow
+            : getEdgeDashPattern(clauseType);
+        if (dashPattern) {
+            edge.setAttribute('stroke-dasharray', dashPattern);
+        } else {
+            edge.removeAttribute('stroke-dasharray');
+        }
+    };
+
+    const cachedEdgeIds = edgeIdsByNodeId?.get(nodeId);
+    const edges = cachedEdgeIds
+        ? Array.from(cachedEdgeIds, (edgeId) => edgeElementsById?.get(edgeId)).filter((edge): edge is SVGPathElement => Boolean(edge))
+        : Array.from(mainGroup?.querySelectorAll('.edge') || []);
+
+    edges.forEach(edge => {
+        if (!cachedEdgeIds) {
+            const source = edge.getAttribute('data-source');
+            const target = edge.getAttribute('data-target');
+            if (source !== nodeId && target !== nodeId) {
+                return;
             }
         }
+
+        if (highlight) {
+            edge.setAttribute('stroke', EDGE_COLORS.highlight);
+            edge.setAttribute('stroke-width', '3');
+            edge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
+            return;
+        }
+
+        applyDefaultState(edge);
     });
 }
 

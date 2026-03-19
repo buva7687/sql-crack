@@ -26,7 +26,37 @@ export interface FlowResult {
  * Analyzes directional data flow through the lineage graph
  */
 export class FlowAnalyzer {
-    constructor(private graph: LineageGraph) {}
+    private readonly incomingEdgesByNodeId: Map<string, LineageEdge[]>;
+    private readonly outgoingEdgesByNodeId: Map<string, LineageEdge[]>;
+
+    constructor(private graph: LineageGraph) {
+        this.incomingEdgesByNodeId = this.buildEdgeIndex('targetId');
+        this.outgoingEdgesByNodeId = this.buildEdgeIndex('sourceId');
+    }
+
+    private buildEdgeIndex(direction: 'sourceId' | 'targetId'): Map<string, LineageEdge[]> {
+        const index = new Map<string, LineageEdge[]>();
+
+        for (const edge of this.graph.edges) {
+            const key = edge[direction];
+            const bucket = index.get(key);
+            if (bucket) {
+                bucket.push(edge);
+            } else {
+                index.set(key, [edge]);
+            }
+        }
+
+        return index;
+    }
+
+    private getIncomingEdges(nodeId: string): LineageEdge[] {
+        return this.incomingEdgesByNodeId.get(nodeId) || [];
+    }
+
+    private getOutgoingEdges(nodeId: string): LineageEdge[] {
+        return this.outgoingEdgesByNodeId.get(nodeId) || [];
+    }
 
     /**
      * Get all nodes upstream of a target (data sources)
@@ -48,10 +78,7 @@ export class FlowAnalyzer {
 
             visited.add(currentId);
 
-            // Find incoming edges
-            const incomingEdges = this.graph.edges.filter(e => e.targetId === currentId);
-
-            for (const edge of incomingEdges) {
+            for (const edge of this.getIncomingEdges(currentId)) {
                 const sourceNode = this.graph.nodes.get(edge.sourceId);
 
                 if (!sourceNode) {continue;}
@@ -96,10 +123,7 @@ export class FlowAnalyzer {
 
             visited.add(currentId);
 
-            // Find outgoing edges
-            const outgoingEdges = this.graph.edges.filter(e => e.sourceId === currentId);
-
-            for (const edge of outgoingEdges) {
+            for (const edge of this.getOutgoingEdges(currentId)) {
                 const targetNode = this.graph.nodes.get(edge.targetId);
 
                 if (!targetNode) {continue;}
@@ -143,9 +167,7 @@ export class FlowAnalyzer {
 
             visited.add(currentId);
 
-            const outgoingEdges = this.graph.edges.filter(e => e.sourceId === currentId);
-
-            for (const edge of outgoingEdges) {
+            for (const edge of this.getOutgoingEdges(currentId)) {
                 if (visited.has(edge.targetId)) {continue;}
 
                 const targetNode = this.graph.nodes.get(edge.targetId);
@@ -178,8 +200,7 @@ export class FlowAnalyzer {
         for (const [id, node] of this.graph.nodes) {
             if (node.type === 'external') {continue;}
 
-            const hasIncoming = this.graph.edges.some(e => e.targetId === id);
-            if (!hasIncoming) {
+            if (this.getIncomingEdges(id).length === 0) {
                 roots.push(node);
             }
         }
@@ -196,8 +217,7 @@ export class FlowAnalyzer {
         for (const [id, node] of this.graph.nodes) {
             if (node.type === 'external') {continue;}
 
-            const hasOutgoing = this.graph.edges.some(e => e.sourceId === id);
-            if (!hasOutgoing) {
+            if (this.getOutgoingEdges(id).length === 0) {
                 terminals.push(node);
             }
         }
@@ -217,9 +237,7 @@ export class FlowAnalyzer {
             visited.add(nodeId);
             recStack.add(nodeId);
 
-            const outgoingEdges = this.graph.edges.filter(e => e.sourceId === nodeId);
-
-            for (const edge of outgoingEdges) {
+            for (const edge of this.getOutgoingEdges(nodeId)) {
                 const targetNode = this.graph.nodes.get(edge.targetId);
                 if (!targetNode) {continue;}
 

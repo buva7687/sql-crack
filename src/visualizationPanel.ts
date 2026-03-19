@@ -3,7 +3,6 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
-import { WorkspacePanel } from './workspace';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
@@ -498,6 +497,8 @@ export class VisualizationPanel {
             vscode.window.showErrorMessage('Cannot trace in workspace: extension context not available');
             return;
         }
+
+        const { WorkspacePanel } = await import('./workspace');
 
         await WorkspacePanel.createOrShow(
             this._extensionUri,

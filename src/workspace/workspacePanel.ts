@@ -95,7 +95,6 @@ export class WorkspacePanel {
     public static readonly viewType = 'sqlCrackWorkspace';
 
     private readonly _panel: vscode.WebviewPanel;
-    private readonly _extensionUri: vscode.Uri;
     private readonly _extensionContext: vscode.ExtensionContext;
     private readonly _extensionVersion: string;
     private readonly _scopeUri: vscode.Uri | undefined;
@@ -273,7 +272,6 @@ export class WorkspacePanel {
         scopeUri?: vscode.Uri
     ) {
         this._panel = panel;
-        this._extensionUri = extensionUri;
         this._extensionContext = context;
         this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
         this._scopeUri = scopeUri;
@@ -451,12 +449,9 @@ export class WorkspacePanel {
                 });
 
                 const startTime = Date.now();
-                let lastFile = '';
                 logger.debug('[Workspace] Starting index build...');
 
                 await this._indexManager.buildIndex((current, total, fileName) => {
-                    lastFile = fileName;
-
                     // Calculate time estimate
                     const elapsed = Date.now() - startTime;
                     const avgTimePerFile = elapsed / current;

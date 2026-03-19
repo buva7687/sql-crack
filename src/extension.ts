@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { VisualizationPanel } from './visualizationPanel';
-import { WorkspacePanel } from './workspace';
 import { setCustomFunctions } from './dialects';
 import { logger } from './logger';
 import { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } from './webview/sqlParser';
@@ -120,6 +119,10 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
 function hasExecutableSql(sql: string): boolean {
     const { rewritten } = preprocessJinjaTemplates(sql);
     return stripSqlComments(rewritten).trim().length > 0;
+}
+
+async function loadWorkspacePanel() {
+    return import('./workspace');
 }
 
 export function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
@@ -336,6 +339,7 @@ export function activate(context: vscode.ExtensionContext) {
     let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async (uri?: vscode.Uri) => {
         const config = getConfig();
         const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
+        const { WorkspacePanel } = await loadWorkspacePanel();
 
         await WorkspacePanel.createOrShow(
             context.extensionUri,
@@ -346,6 +350,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let workspaceUxMetricsCommand = vscode.commands.registerCommand('sql-crack.showWorkspaceUxMetrics', async () => {
+        const { WorkspacePanel } = await loadWorkspacePanel();
         const panel = WorkspacePanel.currentPanel;
         if (!panel) {
             vscode.window.showInformationMessage('Open Workspace Dependencies first to capture Graph UX metrics.');

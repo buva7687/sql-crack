@@ -50,6 +50,9 @@ export class LineageBuilder implements LineageGraph {
     columnEdges: import('./types').ColumnLineageEdge[] = [];
     private edgeIds = new Set<string>();
     private columnEdgeIds = new Set<string>();
+    private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
+    private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
+    private nodeIdsByNormalizedName: Map<string, string[]> = new Map();
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -72,6 +75,11 @@ export class LineageBuilder implements LineageGraph {
         this.nodes.clear();
         this.edges = [];
         this.columnEdges = [];
+        this.edgeIds.clear();
+        this.columnEdgeIds.clear();
+        this.incomingEdgesByNodeId.clear();
+        this.outgoingEdgesByNodeId.clear();
+        this.nodeIdsByNormalizedName.clear();
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
@@ -141,6 +149,7 @@ export class LineageBuilder implements LineageGraph {
             };
             
             this.nodes.set(nodeId, cteNode);
+            this.registerNodeName(nodeId, cteNode.name);
         }
 
         // Add column nodes if enabled
@@ -246,6 +255,7 @@ export class LineageBuilder implements LineageGraph {
         };
 
         this.nodes.set(nodeId, node);
+        this.registerNodeName(nodeId, node.name);
         return node;
     }
 
@@ -291,9 +301,10 @@ export class LineageBuilder implements LineageGraph {
             };
 
             this.nodes.set(columnId, columnNode);
+            this.registerNodeName(columnId, columnNode.name);
 
             // Add edge from table to column
-            this.edges.push({
+            this.addEdge({
                 id: `${tableNode.id}->${columnId}`,
                 sourceId: tableNode.id,
                 targetId: columnId,
@@ -467,22 +478,18 @@ export class LineageBuilder implements LineageGraph {
                     if (sourceNode.id === targetNode.id) {continue;}
 
                     // Create edge from source to target
-                    const edgeId = `${sourceNode.id}->${targetNode.id}`;
-                    if (!this.edgeIds.has(edgeId)) {
-                        this.edgeIds.add(edgeId);
-                        this.edges.push({
-                            id: edgeId,
-                            sourceId: sourceNode.id,
-                            targetId: targetNode.id,
-                            type: 'direct',
-                            metadata: {
-                                filePath,
-                                statementIndex: stmtIndex,
-                                inputCount: inputs.size,
-                                outputCount: outputs.size
-                            }
-                        });
-                    }
+                    this.addEdge({
+                        id: `${sourceNode.id}->${targetNode.id}`,
+                        sourceId: sourceNode.id,
+                        targetId: targetNode.id,
+                        type: 'direct',
+                        metadata: {
+                            filePath,
+                            statementIndex: stmtIndex,
+                            inputCount: inputs.size,
+                            outputCount: outputs.size
+                        }
+                    });
                 }
             }
         }
@@ -580,9 +587,13 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // Try to find by node name (without prefix)
-        for (const [nodeId, node] of this.nodes) {
-            if (node.name.toLowerCase() === normalizedName) {
-                return nodeId;
+        const matchingNodeIds = this.nodeIdsByNormalizedName.get(normalizedName);
+        if (matchingNodeIds) {
+            for (const nodeId of matchingNodeIds) {
+                const node = this.nodes.get(nodeId);
+                if (node && node.name.toLowerCase() === normalizedName) {
+                    return nodeId;
+                }
             }
         }
 
@@ -742,23 +753,6 @@ export class LineageBuilder implements LineageGraph {
     }
 
     /**
-     * Map reference type to edge type
-     */
-    private mapReferenceTypeToEdgeType(refType: string): LineageEdge['type'] {
-        const typeMap: Record<string, LineageEdge['type']> = {
-            'select': 'direct',
-            'join': 'join',
-            'insert': 'direct',
-            'update': 'direct',
-            'delete': 'direct',
-            'subquery': 'direct',
-            'cte': 'direct'
-        };
-
-        return typeMap[refType] || 'direct';
-    }
-
-    /**
      * Resolve external references (tables not defined in workspace)
      */
     addExternalNode(tableKey: string): LineageNode {
@@ -776,7 +770,71 @@ export class LineageBuilder implements LineageGraph {
         };
 
         this.nodes.set(nodeId, node);
+        this.registerNodeName(nodeId, node.name);
         return node;
+    }
+
+    private registerNodeName(nodeId: string, nodeName: string): void {
+        const normalizedName = nodeName.toLowerCase();
+        const existing = this.nodeIdsByNormalizedName.get(normalizedName);
+        if (existing) {
+            if (!existing.includes(nodeId)) {
+                existing.push(nodeId);
+            }
+            return;
+        }
+
+        this.nodeIdsByNormalizedName.set(normalizedName, [nodeId]);
+    }
+
+    private addEdge(edge: LineageEdge): void {
+        if (this.edgeIds.has(edge.id)) {
+            return;
+        }
+
+        this.edgeIds.add(edge.id);
+        this.edges.push(edge);
+        this.addEdgeToIndex(edge);
+    }
+
+    private addEdgeToIndex(edge: LineageEdge): void {
+        const incomingBucket = this.incomingEdgesByNodeId.get(edge.targetId);
+        if (incomingBucket) {
+            incomingBucket.push(edge);
+        } else {
+            this.incomingEdgesByNodeId.set(edge.targetId, [edge]);
+        }
+
+        const outgoingBucket = this.outgoingEdgesByNodeId.get(edge.sourceId);
+        if (outgoingBucket) {
+            outgoingBucket.push(edge);
+        } else {
+            this.outgoingEdgesByNodeId.set(edge.sourceId, [edge]);
+        }
+    }
+
+    private getIncomingEdges(nodeId: string): LineageEdge[] {
+        return this.incomingEdgesByNodeId.get(nodeId) || [];
+    }
+
+    private getOutgoingEdges(nodeId: string): LineageEdge[] {
+        return this.outgoingEdgesByNodeId.get(nodeId) || [];
+    }
+
+    private collectIncomingEdges(nodeIds: Set<string>): LineageEdge[] {
+        const collected: LineageEdge[] = [];
+        for (const nodeId of nodeIds) {
+            collected.push(...this.getIncomingEdges(nodeId));
+        }
+        return collected;
+    }
+
+    private collectOutgoingEdges(nodeIds: Set<string>): LineageEdge[] {
+        const collected: LineageEdge[] = [];
+        for (const nodeId of nodeIds) {
+            collected.push(...this.getOutgoingEdges(nodeId));
+        }
+        return collected;
     }
 
     /**
@@ -792,10 +850,7 @@ export class LineageBuilder implements LineageGraph {
 
             visited.add(currentId);
 
-            // Find all edges pointing to current node (incoming edges)
-            const incomingEdges = this.edges.filter(e => e.targetId === currentId);
-
-            for (const edge of incomingEdges) {
+            for (const edge of this.getIncomingEdges(currentId)) {
                 const sourceNode = this.nodes.get(edge.sourceId);
                 if (sourceNode && !visited.has(sourceNode.id)) {
                     result.push(sourceNode);
@@ -821,10 +876,7 @@ export class LineageBuilder implements LineageGraph {
 
             visited.add(currentId);
 
-            // Find all edges from current node (outgoing edges)
-            const outgoingEdges = this.edges.filter(e => e.sourceId === currentId);
-
-            for (const edge of outgoingEdges) {
+            for (const edge of this.getOutgoingEdges(currentId)) {
                 const targetNode = this.nodes.get(edge.targetId);
                 if (targetNode && !visited.has(targetNode.id)) {
                     result.push(targetNode);
@@ -848,15 +900,13 @@ export class LineageBuilder implements LineageGraph {
 
         // Get upstream lineage
         const upstreamNodes = this.getUpstream(columnId, -1);
-        const upstreamEdges = this.edges.filter(e =>
-            upstreamNodes.some(n => n.id === e.targetId) || e.targetId === columnId
-        );
+        const upstreamNodeIds = new Set<string>([columnId, ...upstreamNodes.map(node => node.id)]);
+        const upstreamEdges = this.collectIncomingEdges(upstreamNodeIds);
 
         // Get downstream lineage
         const downstreamNodes = this.getDownstream(columnId, -1);
-        const downstreamEdges = this.edges.filter(e =>
-            downstreamNodes.some(n => n.id === e.sourceId) || e.sourceId === columnId
-        );
+        const downstreamNodeIds = new Set<string>([columnId, ...downstreamNodes.map(node => node.id)]);
+        const downstreamEdges = this.collectOutgoingEdges(downstreamNodeIds);
 
         return [
             {

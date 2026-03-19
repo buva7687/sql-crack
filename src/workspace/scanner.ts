@@ -20,6 +20,7 @@ export class WorkspaceScanner {
     private dialect: SqlDialect;
     private maxFileSize: number;
     private scopeUri: vscode.Uri | undefined;
+    private readonly maxConcurrentAnalyses = 4;
 
     constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024, scopeUri?: vscode.Uri) {
         this.schemaExtractor = new SchemaExtractor();
@@ -175,26 +176,43 @@ export class WorkspaceScanner {
         cancellationToken?: CancellationToken
     ): Promise<FileAnalysis[]> {
         const files = await this.findSqlFiles();
-        const results: FileAnalysis[] = [];
-
-        for (let i = 0; i < files.length; i++) {
-            // Check for cancellation
-            if (cancellationToken?.isCancellationRequested) {
-                break;
-            }
-
-            const file = files[i];
-            const fileName = path.basename(file.fsPath);
-
-            if (progressCallback) {
-                progressCallback(i + 1, files.length, fileName);
-            }
-
-            const analysis = await this.analyzeFile(file);
-            results.push(analysis);
+        if (files.length === 0) {
+            return [];
         }
 
-        return results;
+        const results: Array<FileAnalysis | undefined> = new Array(files.length);
+        const concurrency = Math.max(1, Math.min(this.maxConcurrentAnalyses, files.length));
+        let nextIndex = 0;
+
+        const runWorker = async (): Promise<void> => {
+            while (true) {
+                if (cancellationToken?.isCancellationRequested) {
+                    return;
+                }
+
+                const currentIndex = nextIndex;
+                nextIndex++;
+
+                if (currentIndex >= files.length) {
+                    return;
+                }
+
+                const file = files[currentIndex];
+                const fileName = path.basename(file.fsPath);
+
+                if (progressCallback) {
+                    progressCallback(currentIndex + 1, files.length, fileName);
+                }
+
+                const analysis = await this.analyzeFile(file);
+                results[currentIndex] = analysis;
+            }
+        };
+
+        const workers = Array.from({ length: concurrency }, () => runWorker());
+        await Promise.all(workers);
+
+        return results.filter((analysis): analysis is FileAnalysis => analysis !== undefined);
     }
 
     /**
