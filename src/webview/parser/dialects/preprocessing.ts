@@ -1225,12 +1225,21 @@ export function maskStringsAndComments(sql: string): string {
             chars[i] = ' ';
             chars[i + 1] = ' ';
             i += 2;
-            while (i < chars.length) {
+            let depth = 1;
+            while (i < chars.length && depth > 0) {
+                if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
+                    chars[i] = ' ';
+                    chars[i + 1] = ' ';
+                    depth++;
+                    i += 2;
+                    continue;
+                }
                 if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
                     chars[i] = ' ';
                     chars[i + 1] = ' ';
+                    depth--;
                     i += 2;
-                    break;
+                    continue;
                 }
                 chars[i] = ' ';
                 i++;
@@ -1249,6 +1258,19 @@ export function maskStringsAndComments(sql: string): string {
             const isIdentChar = /[a-zA-Z0-9_]/.test(next);
             if (!isIdentChar) {
                 while (i < chars.length && chars[i] !== '\n') {
+                    chars[i] = ' ';
+                    i++;
+                }
+                continue;
+            }
+        }
+        if (chars[i] === '$') {
+            const delimiterMatch = sql.slice(i).match(/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
+            if (delimiterMatch) {
+                const delimiter = delimiterMatch[0];
+                const closePos = sql.indexOf(delimiter, i + delimiter.length);
+                const end = closePos === -1 ? chars.length : closePos + delimiter.length;
+                while (i < end) {
                     chars[i] = ' ';
                     i++;
                 }

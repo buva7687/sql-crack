@@ -1,4 +1,4 @@
-import { createFocusModeSelector, createPinnedTabsButton } from '../../../src/webview/ui/toolbar/featureMenus';
+import { createFocusModeSelector, createPinnedTabsButton, createViewLocationButton } from '../../../src/webview/ui/toolbar/featureMenus';
 import { getComponentUiColors } from '../../../src/webview/constants';
 import type { FocusMode } from '../../../src/webview/types';
 
@@ -11,7 +11,17 @@ type FakeElement = {
     title: string;
     innerHTML: string;
     textContent: string;
-    style: { cssText: string; display: string; top: string; right: string; left: string; background: string; color: string };
+    style: {
+        cssText: string;
+        display: string;
+        top: string;
+        right: string;
+        left: string;
+        background: string;
+        color: string;
+        borderColor: string;
+        boxShadow: string;
+    };
     dataset: Record<string, string>;
     children: FakeElement[];
     parent: FakeElement | null;
@@ -26,6 +36,41 @@ type FakeElement = {
     emit: (type: string, event?: any) => void;
 };
 
+function toDatasetKey(dataKey: string): string {
+    return dataKey.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+}
+
+function matchesSelector(element: FakeElement, selector: string): boolean {
+    if (selector.startsWith('.')) {
+        const className = selector.slice(1);
+        return element.className.split(/\s+/).includes(className);
+    }
+    if (selector === 'kbd') {
+        return element.tagName.toLowerCase() === 'kbd';
+    }
+    const dataAttrMatch = selector.match(/^\[data-([a-z-]+)(?:="([^"]+)")?\]$/);
+    if (dataAttrMatch) {
+        const datasetKey = toDatasetKey(dataAttrMatch[1]);
+        const expectedValue = dataAttrMatch[2];
+        if (!Object.prototype.hasOwnProperty.call(element.dataset, datasetKey)) {
+            return false;
+        }
+        return expectedValue === undefined || element.dataset[datasetKey] === expectedValue;
+    }
+    return false;
+}
+
+function findAll(element: FakeElement, selector: string): FakeElement[] {
+    const results: FakeElement[] = [];
+    for (const child of element.children) {
+        if (matchesSelector(child, selector)) {
+            results.push(child);
+        }
+        results.push(...findAll(child, selector));
+    }
+    return results;
+}
+
 function createElement(tagName: string): FakeElement {
     const listeners = new Map<string, Listener>();
     const attributes = new Map<string, string>();
@@ -37,6 +82,8 @@ function createElement(tagName: string): FakeElement {
         left: '',
         background: '',
         color: '',
+        borderColor: '',
+        boxShadow: '',
     };
     const style = {} as FakeElement['style'];
     Object.defineProperty(style, 'cssText', {
@@ -105,6 +152,18 @@ function createElement(tagName: string): FakeElement {
             styleState.color = value;
         },
     });
+    Object.defineProperty(style, 'borderColor', {
+        get: () => styleState.borderColor,
+        set: (value: string) => {
+            styleState.borderColor = value;
+        },
+    });
+    Object.defineProperty(style, 'boxShadow', {
+        get: () => styleState.boxShadow,
+        set: (value: string) => {
+            styleState.boxShadow = value;
+        },
+    });
     const element: FakeElement = {
         tagName,
         id: '',
@@ -129,18 +188,8 @@ function createElement(tagName: string): FakeElement {
         }),
         getAttribute: jest.fn((name: string) => attributes.get(name) || null),
         getBoundingClientRect: jest.fn(() => ({ bottom: 40, right: 180 })),
-        querySelectorAll: jest.fn((selector: string) => {
-            if (selector === '[data-mode]') {
-                return element.children.filter((child) => Object.prototype.hasOwnProperty.call(child.dataset, 'mode'));
-            }
-            return [];
-        }),
-        querySelector: jest.fn((selector: string) => {
-            if (selector === '.sql-crack-check-icon') {
-                return element.children.find((child) => child.className === 'sql-crack-check-icon') || null;
-            }
-            return null;
-        }),
+        querySelectorAll: jest.fn((selector: string) => findAll(element, selector)),
+        querySelector: jest.fn((selector: string) => findAll(element, selector)[0] || null),
         remove: jest.fn(() => {
             if (!element.parent) {
                 return;
@@ -158,6 +207,33 @@ function createElement(tagName: string): FakeElement {
     return element;
 }
 
+function setupDomHarness() {
+    const body = createElement('body');
+    const documentListeners = new Map<string, Listener[]>();
+    global.document = {
+        createElement: jest.fn((tag: string) => createElement(tag)),
+        body: body as unknown as HTMLBodyElement,
+        addEventListener: jest.fn((type: string, handler: Listener) => {
+            const listeners = documentListeners.get(type) || [];
+            listeners.push(handler);
+            documentListeners.set(type, listeners);
+        }),
+    } as unknown as Document;
+    global.window = {
+        innerWidth: 500,
+        addEventListener: jest.fn(),
+    } as unknown as Window & typeof globalThis;
+
+    return {
+        body,
+        emitDocument(type: string, event: any = {}) {
+            for (const listener of documentListeners.get(type) || []) {
+                listener(event);
+            }
+        },
+    };
+}
+
 describe('featureMenus toolbar ui', () => {
     const originalDocument = global.document;
     const originalWindow = global.window;
@@ -168,17 +244,9 @@ describe('featureMenus toolbar ui', () => {
     });
 
     it('opens the focus mode dropdown and applies a mode selection callback', () => {
-        const body = createElement('body');
+        const { body } = setupDomHarness();
         const docListeners: Array<{ type: string; handler: EventListener }> = [];
-        global.document = {
-            createElement: jest.fn((tag: string) => createElement(tag)),
-            body: body as unknown as HTMLBodyElement,
-            addEventListener: jest.fn(),
-        } as unknown as Document;
-        global.window = {
-            innerWidth: 400,
-            addEventListener: jest.fn(),
-        } as unknown as Window & typeof globalThis;
+        global.window.innerWidth = 400;
 
         const onFocusModeChange = jest.fn();
         const element = createFocusModeSelector({
@@ -214,16 +282,7 @@ describe('featureMenus toolbar ui', () => {
     });
 
     it('opens pinned tabs, launches a pin, and removes a pin on delete', () => {
-        const body = createElement('body');
-        global.document = {
-            createElement: jest.fn((tag: string) => createElement(tag)),
-            body: body as unknown as HTMLBodyElement,
-            addEventListener: jest.fn(),
-        } as unknown as Document;
-        global.window = {
-            innerWidth: 500,
-            addEventListener: jest.fn(),
-        } as unknown as Window & typeof globalThis;
+        const { body } = setupDomHarness();
 
         const onOpenPinnedTab = jest.fn();
         const onUnpinTab = jest.fn();
@@ -263,16 +322,7 @@ describe('featureMenus toolbar ui', () => {
     });
 
     it('escapes pinned visualization labels before inserting menu markup', () => {
-        const body = createElement('body');
-        global.document = {
-            createElement: jest.fn((tag: string) => createElement(tag)),
-            body: body as unknown as HTMLBodyElement,
-            addEventListener: jest.fn(),
-        } as unknown as Document;
-        global.window = {
-            innerWidth: 500,
-            addEventListener: jest.fn(),
-        } as unknown as Window & typeof globalThis;
+        const { body } = setupDomHarness();
 
         createPinnedTabsButton({
             isDarkTheme: () => false,
@@ -296,16 +346,7 @@ describe('featureMenus toolbar ui', () => {
     });
 
     it('uses theme-aware muted text colors for light-theme pinned metadata', () => {
-        const body = createElement('body');
-        global.document = {
-            createElement: jest.fn((tag: string) => createElement(tag)),
-            body: body as unknown as HTMLBodyElement,
-            addEventListener: jest.fn(),
-        } as unknown as Document;
-        global.window = {
-            innerWidth: 500,
-            addEventListener: jest.fn(),
-        } as unknown as Window & typeof globalThis;
+        const { body } = setupDomHarness();
 
         createPinnedTabsButton({
             isDarkTheme: () => false,
@@ -330,5 +371,74 @@ describe('featureMenus toolbar ui', () => {
 
         const deleteBtn = pinItem?.children.find((child) => child.tagName === 'span' && child.innerHTML === '×');
         expect(deleteBtn?.style.cssText).toContain(`color: ${getComponentUiColors(false).textMuted}`);
+    });
+
+    it('updates the active view location selection after the user changes it', () => {
+        const { body } = setupDomHarness();
+        const onChangeViewLocation = jest.fn();
+
+        const button = createViewLocationButton({
+            isDarkTheme: () => false,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => 'all',
+            onChangeViewLocation,
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, 'tab', {
+            documentListeners: [],
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        }) as unknown as FakeElement;
+
+        const dropdown = body.children.find((child) => child.id === 'view-location-dropdown');
+        expect(dropdown).toBeDefined();
+
+        button.emit('click', { stopPropagation: jest.fn() });
+        expect(dropdown?.style.display).toBe('block');
+
+        const tabItem = dropdown?.children.find((child) => child.dataset.viewLocation === 'tab');
+        const besideItem = dropdown?.children.find((child) => child.dataset.viewLocation === 'beside');
+        expect(tabItem?.querySelector('.sql-crack-check-icon')).not.toBeNull();
+
+        besideItem?.emit('click', { stopPropagation: jest.fn() });
+
+        expect(onChangeViewLocation).toHaveBeenCalledWith('beside');
+        expect(dropdown?.style.display).toBe('none');
+        expect(besideItem?.querySelector('.sql-crack-check-icon')).not.toBeNull();
+        expect(tabItem?.querySelector('.sql-crack-check-icon')).toBeNull();
+    });
+
+    it('reapplies floating menu theme styles after a theme toggle', () => {
+        const { body, emitDocument } = setupDomHarness();
+
+        createPinnedTabsButton({
+            isDarkTheme: () => true,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => 'all',
+            onChangeViewLocation: jest.fn(),
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, [
+            { id: 'pin-1', name: 'Revenue Query', sql: 'select 1', dialect: 'PostgreSQL', timestamp: Date.UTC(2026, 1, 28, 12, 0, 0) },
+        ], {
+            documentListeners: [],
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        });
+
+        const dropdown = body.children.find((child) => child.id === 'pinned-tabs-dropdown');
+        const pinItem = dropdown?.children.find((child) => child.tagName === 'div' && child !== dropdown.children[0]);
+        const deleteBtn = pinItem?.children.find((child) => child.tagName === 'span' && child.innerHTML === '×');
+
+        emitDocument('theme-change', { detail: { dark: false } });
+
+        expect(dropdown?.style.background).toBe(getComponentUiColors(false).surfaceElevated);
+        expect(deleteBtn?.style.color).toBe(getComponentUiColors(false).textMuted);
+
+        deleteBtn?.emit('mouseenter');
+        expect(deleteBtn?.style.color).toBe('#ef4444');
+
+        deleteBtn?.emit('mouseleave');
+        expect(deleteBtn?.style.color).toBe(getComponentUiColors(false).textMuted);
     });
 });

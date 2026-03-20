@@ -51,6 +51,19 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('none');
     });
 
+    it('ignores Snowflake-like tokens inside PostgreSQL dollar-quoted bodies', () => {
+        const result = detectDialect(`
+            SELECT $body$
+                CREATE OR REPLACE TABLE analytics.public.t AS
+                SELECT *
+                FROM analytics.public.orders
+            $body$ AS ddl_text
+        `);
+        expect(result.scores.Snowflake || 0).toBe(0);
+        expect(result.dialect).toBe('PostgreSQL');
+        expect(result.confidence).toBe('high');
+    });
+
     it('detects BigQuery STRUCT + UNNEST with high confidence', () => {
         const result = detectDialect('SELECT item.x FROM UNNEST([STRUCT(1 AS x), STRUCT(2 AS x)]) AS item');
         expect(result.dialect).toBe('BigQuery');

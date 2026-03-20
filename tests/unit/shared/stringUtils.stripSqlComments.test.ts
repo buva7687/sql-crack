@@ -9,6 +9,10 @@ describe('stripSqlComments', () => {
         expect(stripSqlComments('SELECT /* comment */ 1')).toBe('SELECT   1');
     });
 
+    it('strips nested block comments', () => {
+        expect(stripSqlComments('SELECT /* outer /* inner */ still comment */ 1')).toBe('SELECT   1');
+    });
+
     it('strips hash comments (#)', () => {
         expect(stripSqlComments('SELECT 1 # comment')).toBe('SELECT 1  ');
     });

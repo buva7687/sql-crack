@@ -44,6 +44,7 @@ export function escapeHtml(value: string): string {
  * Strip SQL comments while preserving quoted content (strings and identifiers).
  * Handles single-quoted strings (with '' escape), double-quoted identifiers,
  * and backtick-quoted identifiers. Strips --, /* *​/, and # comments.
+ * Supports nested block comments used by PostgreSQL.
  */
 export function stripSqlComments(sql: string): string {
     const len = sql.length;
@@ -110,11 +111,24 @@ export function stripSqlComments(sql: string): string {
             continue;
         }
 
-        // Block comment: /* ... */
+        // Block comment: /* ... */ (supports nesting)
         if (ch === '/' && i + 1 < len && sql[i + 1] === '*') {
-            const end = sql.indexOf('*/', i + 2);
-            i = end === -1 ? len : end + 2;
+            let depth = 1;
+            i += 2;
             out += ' ';
+            while (i < len && depth > 0) {
+                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === '*' && i + 1 < len && sql[i + 1] === '/') {
+                    depth--;
+                    i += 2;
+                    continue;
+                }
+                i++;
+            }
             continue;
         }
 

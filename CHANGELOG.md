@@ -42,13 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Collapse-button drag guard**: CTE/subquery drag suppression now checks the actual rendered `.collapse-btn` class, preventing accidental node drags when the collapse control is clicked.
 - **Hover arrowhead theme mismatch**: The hover marker arrowhead now uses the active light/dark theme palette instead of a hardcoded dark-theme color.
 - **Column-lineage DFS path poisoning**: Column-lineage path tracing now uses per-source visited state with backtracking so failed branches do not suppress valid downstream paths.
+- **PostgreSQL dollar-quote dialect false positives**: Dialect detection now masks dollar-quoted bodies while still recognizing dollar-quoted literals as a PostgreSQL signal, preventing Snowflake scoring from tokens embedded inside `$$...$$` / `$tag$...$tag$` text.
+- **Nested block comment stripping**: Shared SQL comment stripping now tracks nested `/* ... */` depth, preventing commented SQL from leaking back into executable-SQL checks and workspace extractors.
+- **View-location dropdown stale state**: The toolbar `View Location` menu now updates its active row and checkmark immediately after the user changes the target location.
+- **Floating toolbar menu theme sync**: Focus, view-location, and pinned-tab floating menus now reapply their theme-aware chrome and text colors on runtime theme toggles.
 
 ### Tests
 
 - Added 296 new tests across 9 new debt-remediation files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion.
 - Expanded worker/runtime regression coverage in `parser.worker.test.ts`, `parserClient.test.ts`, `parserWorkerMigrationPrep.test.ts`, `parserWorkerWiringPrep.test.ts`, `compareModeWiring.test.ts`, `visualizationPanel.test.ts`, and `runtimeConfigContract.test.ts` so the off-main-thread parsing path and webview bootstrap contract are explicitly guarded.
 - Added regression coverage for CTE consumer wiring, projected render-graph search/navigation, search Enter/debounce behavior, semantic border restoration, collapse-button drag guarding, hover marker theme handling, and column-lineage path traversal.
-- Current branch validation: 251 suites, 3,412 tests passing with zero failures.
+- Added regression coverage for PostgreSQL dollar-quoted dialect detection, nested block comment stripping, live view-location menu state, and floating-menu theme updates.
+- Current branch validation: 254 suites, 3,426 tests passing with zero failures.
 
 ## [0.6.0] - 2026-03-15
 
