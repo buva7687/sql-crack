@@ -37,7 +37,9 @@ interface SetVirtualizationEnabledFeatureOptions {
     renderNode: (node: FlowNode, parent: SVGGElement) => void;
     renderEdge: (edge: FlowEdge, parent: SVGGElement) => void;
     onVirtualizedUpdate: () => void;
+    nodeElementsById?: Map<string, SVGGElement>;
     edgeElementsById?: Map<string, SVGPathElement>;
+    onNodeRemoved?: (nodeId: string) => void;
     onEdgeRemoved?: (edgeId: string) => void;
 }
 
@@ -206,7 +208,9 @@ export function setVirtualizationEnabledFeature(
         renderNode,
         renderEdge,
         onVirtualizedUpdate,
+        nodeElementsById,
         edgeElementsById,
+        onNodeRemoved,
         onEdgeRemoved,
     } = options;
 
@@ -221,6 +225,17 @@ export function setVirtualizationEnabledFeature(
     }
 
     if (!enabled) {
+        const allNodeIds = new Set(currentNodes.map(node => node.id));
+        for (const nodeId of [...renderedNodeIds]) {
+            if (allNodeIds.has(nodeId)) {
+                continue;
+            }
+            const nodeElement = nodeElementsById?.get(nodeId) || nodesGroup.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
+            nodeElement?.remove();
+            onNodeRemoved?.(nodeId);
+            renderedNodeIds.delete(nodeId);
+        }
+
         for (const node of currentNodes) {
             if (!renderedNodeIds.has(node.id)) {
                 renderNode(node, nodesGroup);

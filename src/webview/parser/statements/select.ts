@@ -105,7 +105,18 @@ function processSelect(
     cteNames: Set<string> = new Set()
 ): string {
     const ctx = runtime.context;
-    const nodeIds: string[] = [];
+    const cteNodeIdsByName = new Map<string, string>();
+    const cteReferenceIdsByName = new Map<string, string[]>();
+
+    const recordCteReference = (cteName: string, nodeId: string): void => {
+        const normalizedName = cteName.toLowerCase();
+        const existing = cteReferenceIdsByName.get(normalizedName);
+        if (existing) {
+            existing.push(nodeId);
+            return;
+        }
+        cteReferenceIdsByName.set(normalizedName, [nodeId]);
+    };
 
     // Collect CTE names first
     if (stmt.with && Array.isArray(stmt.with)) {
@@ -157,7 +168,7 @@ function processSelect(
                 depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
-            nodeIds.push(cteId);
+            cteNodeIdsByName.set(cteName.toLowerCase(), cteId);
         }
     }
 
@@ -167,7 +178,15 @@ function processSelect(
 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const tableId = processFromItem(runtime, fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
+            const tableId = processFromItem(
+                runtime,
+                fromItem,
+                nodes,
+                edges,
+                cteNames,
+                Boolean(fromItem.join),
+                recordCteReference
+            );
             if (tableId) {
                 tableIds.push(tableId);
                 joinTableMap.set(getFromItemLookupKey(fromItem, ctx.dialect), tableId);
@@ -256,13 +275,18 @@ function processSelect(
         }
     }
 
-    // Connect CTEs to first table
-    for (const cteId of nodeIds) {
-        if (tableIds[0]) {
+    // Connect each CTE node to the actual outer-flow nodes that reference it.
+    for (const [cteName, referenceIds] of cteReferenceIdsByName.entries()) {
+        const cteId = cteNodeIdsByName.get(cteName);
+        if (!cteId) {
+            continue;
+        }
+
+        for (const referenceId of referenceIds) {
             edges.push({
                 id: genId(runtime, 'e'),
                 source: cteId,
-                target: tableIds[0]
+                target: referenceId
             });
         }
     }
@@ -747,7 +771,8 @@ function processFromItem(
     nodes: FlowNode[],
     _edges: FlowEdge[],
     cteNames: Set<string> = new Set(),
-    asJoin: boolean = false
+    asJoin: boolean = false,
+    onCteReference?: (cteName: string, nodeId: string) => void
 ): string | null {
     const ctx = runtime.context;
     // Check for subquery
@@ -861,6 +886,10 @@ function processFromItem(
         tableCategory: isCteRef ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
     });
+
+    if (isCteRef && onCteReference) {
+        onCteReference(tableName.toLowerCase(), tableId);
+    }
 
     return tableId;
 }

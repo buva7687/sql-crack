@@ -146,6 +146,10 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
+        if (e.key === 'Enter' && document.activeElement === getSearchBox()) {
+            return;
+        }
+
         if (e.key === 'Escape') {
             if (callbacks.isZeroGravityModeActive()) {
                 e.preventDefault();
@@ -170,11 +174,6 @@ export function registerDocumentKeyboardListeners(
             requestAnimationFrame(() => {
                 callbacks.resetView();
             });
-            return;
-        }
-
-        if (e.key === 'Enter' && document.activeElement === getSearchBox()) {
-            callbacks.navigateSearch(1);
             return;
         }
 

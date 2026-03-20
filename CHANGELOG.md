@@ -19,12 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Message protocol tests**: Source-reading guards + runtime `MessageHandler.handleMessage()` dispatch tests validating state mutations, error resilience, and disposed-handler safety. Includes `messageMetadata` utility tests for requestId extraction/attachment and missing-data-reason inference.
 - **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, `normalizeAdvancedLimit()` clamping (NaN, Infinity, boundary, fractional), custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface. Runtime tests call `activate()` to verify config loading and config-change handler reload behavior.
 - **Web Worker parsing**: SQL parsing now runs off the main thread via a dedicated Web Worker (`parser.worker.ts`), keeping the UI responsive during large queries. Includes CSP unlock (`worker-src`), webpack worker bundle, `parserClient.ts` worker manager with timeout/respawn/cancellation, and URI injection via `visualizationPanel.ts`. Falls back to synchronous parsing when workers are unavailable.
+- **Shared node border-state helper**: Added `nodeBorderState.ts` so renderer interaction paths can capture and restore semantic node border styling after transient search, selection, pulse, and lineage highlights.
 
 ### Changed
 
 - **Edge renderer delegation**: `edgeRenderer.ts` now delegates `calculateEdgePath` and `contrastTextForBadge` to the pure `computations.ts` module instead of containing inline implementations.
 - **Query complexity delegation**: `queryComplexity.ts` now delegates `calculateQueryDepth` and `getQueryComplexityInfo` to `computations.ts`.
 - **Rendering barrel exports**: `rendering/index.ts` now re-exports pure computation functions for downstream consumers.
+- **Large-graph clustering threshold**: SQL Flow now waits until a graph reaches `100` nodes before auto-enabling clustering, reducing premature clustering on medium-sized queries.
+- **README large-graph note**: Documented the `100+` node clustering behavior and clarified that search and keyboard navigation follow the currently rendered graph when clusters are collapsed.
 
 ### Fixed
 
@@ -32,12 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Defensive AST null guard**: `parseSql` now filters null entries from the AST statements array before processing, preventing downstream errors if `node-sql-parser` emits `[null]`.
 - **Delete handler dedup**: Workspace file watcher delete handler now skips duplicate events for the same file path while a removal is already in flight, preventing counter drift under rapid deletions.
 - **Perf baseline threshold**: Bumped simple-query performance threshold from 50ms to 100ms to reduce false failures in slower CI environments.
+- **CTE consumer wiring**: CTE nodes in SQL Flow now connect to the actual outer-query table/join reference nodes that consume them instead of always wiring to the first `FROM` table.
+- **Projected graph search/navigation consistency**: Search result activation, keyboard navigation, focus traversal, and virtualization toggles now operate on the clustered/projected render graph instead of the raw pre-cluster graph, preventing hidden-node mismatches and cluster search failures.
+- **Search Enter debounce race**: Pressing Enter in the search box now clears any pending debounce timer and stops propagation, preventing double-advance behavior and later jumps back to the first result.
+- **Semantic border restoration**: Selection, keyboard focus blur, search cleanup, pulse cleanup, and column-lineage cleanup now restore each node's base border styling instead of dropping semantic stroke metadata.
+- **Collapse-button drag guard**: CTE/subquery drag suppression now checks the actual rendered `.collapse-btn` class, preventing accidental node drags when the collapse control is clicked.
+- **Hover arrowhead theme mismatch**: The hover marker arrowhead now uses the active light/dark theme palette instead of a hardcoded dark-theme color.
+- **Column-lineage DFS path poisoning**: Column-lineage path tracing now uses per-source visited state with backtracking so failed branches do not suppress valid downstream paths.
 
 ### Tests
 
 - Added 296 new tests across 9 new debt-remediation files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion.
 - Expanded worker/runtime regression coverage in `parser.worker.test.ts`, `parserClient.test.ts`, `parserWorkerMigrationPrep.test.ts`, `parserWorkerWiringPrep.test.ts`, `compareModeWiring.test.ts`, `visualizationPanel.test.ts`, and `runtimeConfigContract.test.ts` so the off-main-thread parsing path and webview bootstrap contract are explicitly guarded.
-- Current branch validation: 250 suites, 3,390 tests passing with zero failures.
+- Added regression coverage for CTE consumer wiring, projected render-graph search/navigation, search Enter/debounce behavior, semantic border restoration, collapse-button drag guarding, hover marker theme handling, and column-lineage path traversal.
+- Current branch validation: 251 suites, 3,412 tests passing with zero failures.
 
 ## [0.6.0] - 2026-03-15
 

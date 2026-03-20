@@ -16,6 +16,7 @@ export interface CanvasElements {
  */
 function buildDefsHTML(isDark: boolean, gridStyle: GridStyle): string {
     const edgeColor = isDark ? EDGE_THEME.dark.default : EDGE_THEME.light.default;
+    const hoverArrowFill = isDark ? EDGE_THEME.dark.hover : EDGE_THEME.light.hover;
 
     // Grid pattern markup
     let gridPatternHTML = '';
@@ -43,7 +44,7 @@ function buildDefsHTML(isDark: boolean, gridStyle: GridStyle): string {
             <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_COLORS.highlight}" />
         </marker>
         <marker id="arrowhead-hover" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="${EDGE_THEME.dark.hover}" />
+            <polygon points="0 0, 10 3.5, 0 7" fill="${hoverArrowFill}" />
         </marker>
         <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="${isDark ? '0.3' : '0.08'}"/>

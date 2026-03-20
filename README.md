@@ -44,6 +44,8 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
+> **Large graph behavior**: For SQL Flow graphs with `100+` nodes, SQL Crack automatically enables clustering to keep rendering responsive. Search and keyboard navigation follow the currently rendered graph, so collapsed clusters behave differently from a fully expanded graph.
+
 **Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • Select (Indigo) • Union/Set Op (Slate) • CTE (Purple) • Subquery (Violet) • Case (Orange) • Result (Green)
 
 **Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Teal) • CTE (Purple) • SQ (Violet) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet) • CTAS (Cyan)

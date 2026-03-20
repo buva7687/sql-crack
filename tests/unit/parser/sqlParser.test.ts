@@ -417,6 +417,39 @@ SELECT * FROM t3;`;
       expect(cteNodes.length).toBe(2);
     });
 
+    it('connects each CTE node to its actual outer query consumer', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT * FROM t1),
+          cte2 AS (SELECT * FROM t2)
+        SELECT *
+        FROM cte1
+        JOIN cte2 ON cte1.id = cte2.id
+      `;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeUndefined();
+
+      const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+      const cteNodes = result.nodes.filter((node) => node.type === 'cte');
+      const cte1Node = cteNodes.find((node) => node.label?.toLowerCase().includes('cte1'));
+      const cte2Node = cteNodes.find((node) => node.label?.toLowerCase().includes('cte2'));
+      const cte1Ref = result.nodes.find((node) => node.type === 'table' && node.label?.toLowerCase() === 'cte1');
+      const cte2Ref = result.nodes.find((node) => node.type === 'table' && node.label?.toLowerCase() === 'cte2');
+
+      expect(cte1Node).toBeDefined();
+      expect(cte2Node).toBeDefined();
+      expect(cte1Ref).toBeDefined();
+      expect(cte2Ref).toBeDefined();
+
+      const cte1Edge = result.edges.find((edge) => edge.source === cte1Node?.id);
+      const cte2Edge = result.edges.find((edge) => edge.source === cte2Node?.id);
+
+      expect(nodeById.get(cte1Edge?.target || '')?.label?.toLowerCase()).toBe('cte1');
+      expect(nodeById.get(cte2Edge?.target || '')?.label?.toLowerCase()).toBe('cte2');
+      expect(cte2Edge?.target).not.toBe(cte1Ref?.id);
+    });
+
     it('parses CTE with aggregation', () => {
       const sql = `
         WITH order_totals AS (

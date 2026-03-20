@@ -1,4 +1,5 @@
 import type { FlowNode, ViewState } from '../types';
+import { restoreNodeBorderState } from '../nodeBorderState';
 
 export interface SearchRuntimeState {
     searchDebounceTimer: ReturnType<typeof setTimeout> | null;
@@ -47,6 +48,11 @@ export function setSearchBoxFeature(
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
+            event.stopPropagation();
+            if (runtime.searchDebounceTimer) {
+                clearTimeout(runtime.searchDebounceTimer);
+                runtime.searchDebounceTimer = null;
+            }
             if (event.shiftKey) {
                 callbacks.onNavigateSearch(-1);
             } else {
@@ -68,6 +74,7 @@ export function setSearchBoxFeature(
     input.addEventListener('input', () => {
         if (runtime.searchDebounceTimer) {
             clearTimeout(runtime.searchDebounceTimer);
+            runtime.searchDebounceTimer = null;
         }
 
         if (!input.value) {
@@ -79,6 +86,7 @@ export function setSearchBoxFeature(
         callbacks.onUpdateSearchCountDisplay();
 
         runtime.searchDebounceTimer = setTimeout(() => {
+            runtime.searchDebounceTimer = null;
             callbacks.onNavigateToFirstResult();
         }, SEARCH_DEBOUNCE_DELAY);
     });
@@ -127,8 +135,7 @@ function clearExistingMatchHighlights(mainGroup: SVGGElement | null, selectedNod
         group.classList.remove('search-match');
         const rect = group.querySelector('.node-rect');
         if (rect && selectedNodeId !== group.getAttribute('data-id')) {
-            rect.removeAttribute('stroke');
-            rect.removeAttribute('stroke-width');
+            restoreNodeBorderState(rect as SVGRectElement);
         }
     });
 }

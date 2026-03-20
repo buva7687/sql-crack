@@ -69,7 +69,16 @@ function createFakeInput(): HTMLInputElement & { emit: (type: string, event?: an
 }
 
 function createFakeNodeGroup(id: string) {
+    const attrs = new Map<string, string>();
     const rect = {
+        getAttribute: jest.fn((name: string) => attrs.get(name) || null),
+        hasAttribute: jest.fn((name: string) => attrs.has(name)),
+        setAttribute: jest.fn((name: string, value: string) => {
+            attrs.set(name, value);
+            if (name === 'stroke' || name === 'stroke-width' || name === 'stroke-dasharray') {
+                attrs.set(`data-node-base-${name}`, value);
+            }
+        }),
         removeAttribute: jest.fn(),
     };
     return {
@@ -147,8 +156,8 @@ describe('search feature helpers', () => {
 
         setSearchBoxFeature(runtime, input, countIndicator, callbacks);
 
-        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault: jest.fn() });
-        input.emit('keydown', { key: 'Enter', shiftKey: true, preventDefault: jest.fn() });
+        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault: jest.fn(), stopPropagation: jest.fn() });
+        input.emit('keydown', { key: 'Enter', shiftKey: true, preventDefault: jest.fn(), stopPropagation: jest.fn() });
         expect(callbacks.onNavigateSearch).toHaveBeenNthCalledWith(1, 1);
         expect(callbacks.onNavigateSearch).toHaveBeenNthCalledWith(2, -1);
 
@@ -170,6 +179,41 @@ describe('search feature helpers', () => {
         expect(callbacks.onUpdateSearchCountDisplay).toHaveBeenCalled();
         jest.advanceTimersByTime(600);
         expect(callbacks.onNavigateToFirstResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the pending debounce and stops bubbling when Enter is pressed', () => {
+        jest.useFakeTimers();
+        const runtime = createSearchRuntimeState();
+        const input = createFakeInput();
+        const countIndicator = {} as HTMLSpanElement;
+        const callbacks = {
+            onNavigateSearch: jest.fn(),
+            onHighlightMatches: jest.fn(),
+            onUpdateSearchCountDisplay: jest.fn(),
+            onNavigateToFirstResult: jest.fn(),
+            onNodeMatchActivated: jest.fn(),
+            onAddBreadcrumbSegment: jest.fn(),
+            onRemoveBreadcrumbSegment: jest.fn(),
+            onClearSearch: jest.fn(),
+        };
+
+        setSearchBoxFeature(runtime, input, countIndicator, callbacks);
+
+        input.value = 'orders';
+        input.emit('input');
+        expect(runtime.searchDebounceTimer).not.toBeNull();
+
+        const preventDefault = jest.fn();
+        const stopPropagation = jest.fn();
+        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault, stopPropagation });
+
+        expect(preventDefault).toHaveBeenCalled();
+        expect(stopPropagation).toHaveBeenCalled();
+        expect(runtime.searchDebounceTimer).toBeNull();
+        expect(callbacks.onNavigateSearch).toHaveBeenCalledWith(1);
+
+        jest.advanceTimersByTime(600);
+        expect(callbacks.onNavigateToFirstResult).not.toHaveBeenCalled();
     });
 
     it('adds or removes breadcrumb state based on search results', () => {

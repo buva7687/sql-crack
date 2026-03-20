@@ -7,6 +7,7 @@ import type {
     ViewState,
 } from '../types';
 import { Z_INDEX } from '../../shared';
+import { restoreNodeBorderDasharray, restoreNodeBorderState } from '../nodeBorderState';
 
 export interface ColumnLineageRuntimeState {
     selectedColumnLineage: ColumnFlow | null;
@@ -571,8 +572,7 @@ export function clearLineageHighlightsFeature(options: ClearLineageHighlightsOpt
         if (!rect) {
             return;
         }
-        rect.removeAttribute('stroke');
-        rect.removeAttribute('stroke-width');
+        restoreNodeBorderState(rect as SVGRectElement);
     });
 
     mainGroup.querySelectorAll('.edge-path').forEach((edge) => {
@@ -656,7 +656,8 @@ function highlightPathToSelect(
 
     const pathNodeIds = new Set<string>(sourceNodeIds);
     for (const sourceId of sourceNodeIds) {
-        findPath(sourceId, selectNode.id, currentEdges, pathNodeIds);
+        const visited = new Set<string>([sourceId]);
+        findPath(sourceId, selectNode.id, currentEdges, visited, pathNodeIds);
     }
 
     mainGroup.querySelectorAll('.edge').forEach((edgeEl) => {
@@ -670,16 +671,25 @@ function highlightPathToSelect(
     });
 }
 
-function findPath(fromId: string, toId: string, edges: FlowEdge[], visited: Set<string>): boolean {
+function findPath(
+    fromId: string,
+    toId: string,
+    edges: FlowEdge[],
+    visited: Set<string>,
+    pathNodeIds: Set<string>
+): boolean {
     if (fromId === toId) {
+        pathNodeIds.add(fromId);
         return true;
     }
     for (const edge of edges) {
         if (edge.source === fromId && !visited.has(edge.target)) {
             visited.add(edge.target);
-            if (findPath(edge.target, toId, edges, visited)) {
+            if (findPath(edge.target, toId, edges, visited, pathNodeIds)) {
+                pathNodeIds.add(fromId);
                 return true;
             }
+            visited.delete(edge.target);
         }
     }
     return false;
@@ -696,8 +706,9 @@ function clearColumnHighlights(mainGroup: SVGGElement, state: ViewState, edgeCol
         }
         rect.removeAttribute('stroke-dasharray');
         if (state.selectedNodeId !== nodeEl.getAttribute('data-id')) {
-            rect.removeAttribute('stroke');
-            rect.removeAttribute('stroke-width');
+            restoreNodeBorderState(rect as SVGRectElement);
+        } else {
+            restoreNodeBorderDasharray(rect as SVGRectElement);
         }
     });
 

@@ -1378,15 +1378,19 @@ export function setVirtualizationEnabled(enabled: boolean): void {
     virtualizationEnabled = enabled;
     const { offscreenIndicator: nextIndicator } = setVirtualizationEnabledFeature({
         enabled,
-        currentNodes,
-        currentEdges,
+        currentNodes: renderNodes,
+        currentEdges: renderEdges,
         mainGroup,
         renderedNodeIds,
         renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         renderNode,
         renderEdge,
+        nodeElementsById: renderedNodeElementsById,
         edgeElementsById: renderedEdgeElementsById,
+        onNodeRemoved: (nodeId) => {
+            renderedNodeElementsById.delete(nodeId);
+        },
         onEdgeRemoved: (edgeId) => {
             unregisterRenderedEdgeElement(edgeId);
         },
@@ -1520,7 +1524,7 @@ function restorePreservedRenderState(snapshot: PreservedRenderState): void {
         }
     }
 
-    if (snapshot.selectedNodeId && currentNodes.some((node) => node.id === snapshot.selectedNodeId)) {
+    if (snapshot.selectedNodeId && renderNodes.some((node) => node.id === snapshot.selectedNodeId)) {
         selectNode(snapshot.selectedNodeId, { skipNavigation: true });
         if (snapshot.focusModeEnabled) {
             state.focusMode = snapshot.focusMode;
@@ -2196,8 +2200,8 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
  */
 function getKeyboardNavigationNodes(): FlowNode[] {
     return getKeyboardNavigationNodesFeature({
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
     });
 }
@@ -2218,13 +2222,13 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
     return navigateToConnectedNodeFeature({
         direction,
         fromNodeId,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         onMoveToNode: (node) => {
             const relationEdge = direction === 'upstream'
-                ? currentEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
-                : currentEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
+                ? renderEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
+                : renderEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
             const relationLabel = getEdgeAnnouncementLabel(relationEdge);
             pendingNavigationAnnouncement = `Moved ${direction} via ${relationLabel}`;
             moveKeyboardFocusToNode(node);
@@ -2240,8 +2244,8 @@ function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev
     navigateToAdjacentNodeFeature({
         currentNode,
         direction,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         onMoveToNode: (node) => {
             moveKeyboardFocusToNode(node);
@@ -2253,8 +2257,8 @@ function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'
     return navigateToSiblingNodeFeature({
         currentNode,
         direction,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         layoutType: state.layoutType || 'vertical',
         onMoveToNode: (node) => {
@@ -2438,8 +2442,8 @@ function zoomToNode(node: FlowNode): void {
         node,
         svg,
         mainGroup,
-        currentNodes,
-        currentEdges,
+        currentNodes: renderNodes,
+        currentEdges: renderEdges,
         cloudOffsets,
         state,
         fitViewScale,
@@ -2601,7 +2605,7 @@ export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanEl
 }
 
 function updateSearchCountDisplay(): void {
-    updateSearchCountDisplayFeature(searchRuntime, state, currentNodes.length);
+    updateSearchCountDisplayFeature(searchRuntime, state, renderNodes.length);
 }
 
 // Highlight matching nodes without navigating (immediate feedback)
@@ -2643,14 +2647,18 @@ function performSearch(term: string): void {
 }
 
 function navigateSearch(delta: number): void {
-    navigateSearchFeature(delta, state, currentNodes, {
+    navigateSearchFeature(delta, state, renderNodes, {
         onUpdateSearchCountDisplay: updateSearchCountDisplay,
         onNodeMatchActivated: (nodeId) => {
-            const node = currentNodes.find((candidate) => candidate.id === nodeId);
+            const node = renderNodes.find((candidate) => candidate.id === nodeId);
             if (!node) {
                 return;
             }
-            zoomToNode(node);
+            if (node.type === 'cluster') {
+                centerOnNode(node);
+            } else {
+                zoomToNode(node);
+            }
             selectNode(nodeId, { skipNavigation: true });
             pulseNode(nodeId);
         },
@@ -2658,6 +2666,10 @@ function navigateSearch(delta: number): void {
 }
 
 function clearSearch(): void {
+    if (searchRuntime.searchDebounceTimer) {
+        clearTimeout(searchRuntime.searchDebounceTimer);
+        searchRuntime.searchDebounceTimer = null;
+    }
     clearSearchFeature(state, mainGroup, state.selectedNodeId, {
         onUpdateSearchCountDisplay: updateSearchCountDisplay,
         onRemoveBreadcrumbSegment: () => {
@@ -3114,7 +3126,7 @@ export function getFocusMode(): FocusMode {
 }
 
 function getConnectedNodes(nodeId: string): Set<string> {
-    return getConnectedNodesFeature(nodeId, currentEdges, state.focusMode);
+    return getConnectedNodesFeature(nodeId, renderEdges, state.focusMode);
 }
 
 // ============================================================
