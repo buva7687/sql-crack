@@ -44,6 +44,11 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(rendererSource).toContain('if (!preserveInteractionState) {');
     });
 
+    it('clears the highlighted editor line state on a fresh render', () => {
+        expect(rendererSource).toContain('highlightedLineNodeId = null;');
+        expect(rendererSource).toContain('let highlightedLineNodeId: string | null = null;');
+    });
+
     it('preserves interaction state when theme changes trigger a rerender', () => {
         expect(rendererSource).toContain('capturePreservedRenderState()');
         expect(rendererSource).toContain('restorePreservedRenderState(preservedRenderState);');

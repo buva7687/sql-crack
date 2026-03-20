@@ -1,4 +1,5 @@
 import { FocusMode } from '../../types';
+import { getComponentUiColors } from '../../constants';
 import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { formatRelativeTime } from '../../../shared/time';
@@ -17,6 +18,10 @@ interface MenuListenerContext {
     documentListeners: Array<{ type: string; handler: EventListener }>;
     getListenerOptions: () => AddEventListenerOptions | undefined;
     getBtnStyle: (dark: boolean) => string;
+}
+
+function getMutedTextColor(dark: boolean): string {
+    return getComponentUiColors(dark).textMuted;
 }
 
 export function createFocusModeSelector(
@@ -67,7 +72,7 @@ export function createFocusModeSelector(
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
@@ -287,7 +292,7 @@ function createViewLocationDropdown(
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
@@ -310,7 +315,7 @@ function createViewLocationDropdown(
             <span style="font-size: 14px;">${location.icon}</span>
             <div>
                 <div style="font-size: 12px; font-weight: 500;">${location.label}</div>
-                <div style="font-size: 10px; color: #64748b;">${location.desc}</div>
+                <div style="font-size: 10px; color: ${getMutedTextColor(dark)};">${location.desc}</div>
             </div>
             ${isActive ? `<span style="margin-left: auto; color: #818cf8; display: inline-flex; width: 14px; height: 14px;">${ICONS.check}</span>` : ''}
         `;
@@ -434,7 +439,7 @@ function createPinnedTabsDropdown(
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
@@ -459,13 +464,13 @@ function createPinnedTabsDropdown(
             <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.pin}</span>
             <div style="flex: 1; overflow: hidden;">
                 <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(pin.name)}</div>
-                <div style="font-size: 10px; color: #64748b;">${escapeHtml(pin.dialect)} • <span title="${escapeHtml(absoluteTimeStr)}">${escapeHtml(relativeTimeStr)}</span></div>
+                <div style="font-size: 10px; color: ${getMutedTextColor(dark)};">${escapeHtml(pin.dialect)} • <span title="${escapeHtml(absoluteTimeStr)}">${escapeHtml(relativeTimeStr)}</span></div>
             </div>
         `;
 
         const deleteBtn = document.createElement('span');
         deleteBtn.innerHTML = '×';
-        deleteBtn.style.cssText = 'font-size: 16px; color: #64748b; padding: 0 4px; cursor: pointer;';
+        deleteBtn.style.cssText = `font-size: 16px; color: ${getMutedTextColor(dark)}; padding: 0 4px; cursor: pointer;`;
         deleteBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             callbacks.onUnpinTab(pin.id);
@@ -475,7 +480,7 @@ function createPinnedTabsDropdown(
             deleteBtn.style.color = '#ef4444';
         }, listenerOptions);
         deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.color = '#64748b';
+            deleteBtn.style.color = getMutedTextColor(dark);
         }, listenerOptions);
         item.appendChild(deleteBtn);
 

@@ -1584,6 +1584,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         }
         clearSearch();
         clearBreadcrumbBar();
+        highlightedLineNodeId = null;
     }
 
     currentNodes = result.nodes;

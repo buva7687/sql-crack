@@ -1,5 +1,6 @@
 import type { FlowNode, ViewState } from '../types';
 import { restoreNodeBorderState } from '../nodeBorderState';
+import { getComponentUiColors } from '../constants';
 
 export interface SearchRuntimeState {
     searchDebounceTimer: ReturnType<typeof setTimeout> | null;
@@ -116,17 +117,17 @@ export function updateSearchCountDisplayFeature(
     if (total === 0) {
         if (!hasNodes) {
             runtime.searchCountIndicator.textContent = 'No data';
-            runtime.searchCountIndicator.style.color = '#94a3b8';
+            runtime.searchCountIndicator.style.color = getComponentUiColors(state.isDarkTheme).textMuted;
         } else {
             runtime.searchCountIndicator.textContent = 'No matches';
-            runtime.searchCountIndicator.style.color = '#f87171';
+            runtime.searchCountIndicator.style.color = state.isDarkTheme ? '#f87171' : '#dc2626';
         }
         return;
     }
 
     const current = state.currentSearchIndex + 1;
     runtime.searchCountIndicator.textContent = `${current > 0 ? current : 1}/${total}`;
-    runtime.searchCountIndicator.style.color = '#64748b';
+    runtime.searchCountIndicator.style.color = getComponentUiColors(state.isDarkTheme).textMuted;
 }
 
 function clearExistingMatchHighlights(mainGroup: SVGGElement | null, selectedNodeId: string | null): void {
@@ -142,6 +143,7 @@ function clearExistingMatchHighlights(mainGroup: SVGGElement | null, selectedNod
 
 export function highlightMatchesFeature(options: SearchMatchOptions): void {
     const { term, state, mainGroup, selectedNodeId, highlightColor } = options;
+    const theme = getComponentUiColors(state.isDarkTheme);
     state.searchTerm = term.toLowerCase();
     state.searchResults = [];
     state.currentSearchIndex = -1;
@@ -160,7 +162,7 @@ export function highlightMatchesFeature(options: SearchMatchOptions): void {
             group.classList.add('search-match');
             const rect = group.querySelector('.node-rect');
             if (rect) {
-                rect.setAttribute('stroke', highlightColor);
+                rect.setAttribute('stroke', state.isDarkTheme ? highlightColor : theme.accent);
                 rect.setAttribute('stroke-width', '2');
             }
         }

@@ -12,6 +12,15 @@ export function getColumnLineageScriptFragment(): string {
             return typeof columnName === 'string' ? columnName.trim().toLowerCase() : '';
         }
 
+        function getLineageTableName(tableId) {
+            if (typeof tableId !== 'string' || tableId.length === 0) return '';
+            if (!tableId.includes(':')) return tableId;
+
+            const parts = tableId.split(':');
+            const tableName = parts[parts.length - 1];
+            return tableName ? tableName : tableId;
+        }
+
         function addColumnRef(columnRefsByNode, nodeId, columnName) {
             if (!nodeId || !columnName) return;
             const normalized = normalizeColumnName(columnName);
@@ -358,7 +367,7 @@ export function getColumnLineageScriptFragment(): string {
             const upstreamCount = upstream ? upstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
             const downstreamCount = downstream ? downstream.reduce((sum, p) => sum + (p.nodes?.length || 0), 0) : 0;
 
-            const tableName = tableId.includes(':') ? tableId.split(':')[1] : tableId;
+            const tableName = getLineageTableName(tableId);
             const flowSummary = buildColumnFlowSummary(tableName, columnName, upstream, downstream);
 
             infoPanel.innerHTML = '<div class="info-header">' +

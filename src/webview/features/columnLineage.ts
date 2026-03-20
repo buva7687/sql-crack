@@ -417,21 +417,14 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     if (!pathData) {
         return;
     }
-    const pathMatch = pathData.match(/M\s*([\d.-]+)\s*([\d.-]+).*?([\d.-]+)\s*([\d.-]+)\s*$/);
-    if (!pathMatch) {
+    const midpoint = parseEdgeBadgeMidpoint(pathData);
+    if (!midpoint) {
         return;
     }
 
-    const x1 = parseFloat(pathMatch[1]);
-    const y1 = parseFloat(pathMatch[2]);
-    const x2 = parseFloat(pathMatch[3]);
-    const y2 = parseFloat(pathMatch[4]);
-    const midX = (x1 + x2) / 2;
-    const midY = (y1 + y2) / 2;
-
     const badgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     badgeGroup.classList.add('lineage-edge-badge');
-    badgeGroup.setAttribute('transform', `translate(${midX}, ${midY})`);
+    badgeGroup.setAttribute('transform', `translate(${midpoint.x}, ${midpoint.y})`);
 
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     bg.setAttribute('r', '10');
@@ -452,6 +445,26 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     badgeGroup.appendChild(text);
 
     mainGroup.appendChild(badgeGroup);
+}
+
+function parseEdgeBadgeMidpoint(pathData: string): { x: number; y: number } | null {
+    const matches = pathData.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi);
+    if (!matches || matches.length < 4) {
+        return null;
+    }
+
+    const x1 = Number(matches[0]);
+    const y1 = Number(matches[1]);
+    const x2 = Number(matches[matches.length - 2]);
+    const y2 = Number(matches[matches.length - 1]);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) {
+        return null;
+    }
+
+    return {
+        x: (x1 + x2) / 2,
+        y: (y1 + y2) / 2,
+    };
 }
 
 function clearLineageBadges(mainGroup: SVGGElement | null): void {

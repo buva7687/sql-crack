@@ -1,4 +1,5 @@
 import { createFocusModeSelector, createPinnedTabsButton } from '../../../src/webview/ui/toolbar/featureMenus';
+import { getComponentUiColors } from '../../../src/webview/constants';
 import type { FocusMode } from '../../../src/webview/types';
 
 type Listener = (event: any) => void;
@@ -292,5 +293,42 @@ describe('featureMenus toolbar ui', () => {
         const pinItem = dropdown?.children.find((child) => child.tagName === 'div' && child !== dropdown.children[0]);
         expect(pinItem?.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
         expect(pinItem?.innerHTML).not.toContain('<img src=x onerror=alert(1)>');
+    });
+
+    it('uses theme-aware muted text colors for light-theme pinned metadata', () => {
+        const body = createElement('body');
+        global.document = {
+            createElement: jest.fn((tag: string) => createElement(tag)),
+            body: body as unknown as HTMLBodyElement,
+            addEventListener: jest.fn(),
+        } as unknown as Document;
+        global.window = {
+            innerWidth: 500,
+            addEventListener: jest.fn(),
+        } as unknown as Window & typeof globalThis;
+
+        createPinnedTabsButton({
+            isDarkTheme: () => false,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => 'all',
+            onChangeViewLocation: jest.fn(),
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, [
+            { id: 'pin-1', name: 'Revenue Query', sql: 'select 1', dialect: 'PostgreSQL', timestamp: Date.UTC(2026, 1, 28, 12, 0, 0) },
+        ], {
+            documentListeners: [],
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        });
+
+        const dropdown = body.children.find((child) => child.id === 'pinned-tabs-dropdown');
+        expect(dropdown?.children[0].style.cssText).toContain(`color: ${getComponentUiColors(false).textMuted}`);
+
+        const pinItem = dropdown?.children.find((child) => child.tagName === 'div' && child !== dropdown.children[0]);
+        expect(pinItem?.innerHTML).toContain(`color: ${getComponentUiColors(false).textMuted}`);
+
+        const deleteBtn = pinItem?.children.find((child) => child.tagName === 'span' && child.innerHTML === '×');
+        expect(deleteBtn?.style.cssText).toContain(`color: ${getComponentUiColors(false).textMuted}`);
     });
 });

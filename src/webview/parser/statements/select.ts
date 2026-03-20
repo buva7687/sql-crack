@@ -209,10 +209,11 @@ function processSelect(
     trackFunctionsFromExpressionSubqueries(runtime, stmt);
 
     // Process JOINs - create join nodes and connect tables properly
-    let lastOutputId = tableIds[0]; // Start with first table as base
+    const baseTableId = tableIds[0] ?? null;
+    let lastOutputId: string | null = baseTableId; // Start with first table as base when present
 
     if (stmt.from && Array.isArray(stmt.from)) {
-        let leftTableId = tableIds[0];
+        let leftTableId: string | null = baseTableId;
 
         for (let i = 0; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
@@ -292,8 +293,8 @@ function processSelect(
     }
 
     // Connect comma-separated FROM items (implicit cross joins) that aren't
-    // already wired by the explicit JOIN logic above. tableIds[0] is the base;
-    // any additional non-join item needs an edge into the flow.
+    // already wired by the explicit JOIN logic above. The first table, when
+    // present, is the base; additional non-join items need an edge into flow.
     if (stmt.from && Array.isArray(stmt.from)) {
         for (let i = 1; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
@@ -328,7 +329,7 @@ function processSelect(
     }
 
     // Process WHERE - connect from the last join output or first table
-    let previousId = lastOutputId || tableIds[0];
+    let previousId: string | null = lastOutputId ?? baseTableId;
     let savedWhereId: string | null = null;
     let savedHavingId: string | null = null;
     if (stmt.where) {

@@ -30,7 +30,7 @@ export function getWorkspaceCommandBarStyles(): string {
             align-items: flex-start;
             justify-content: center;
             padding: 12vh 20px 20px;
-            background: rgba(15, 23, 42, 0.42);
+            background: var(--overlay-scrim);
             backdrop-filter: blur(10px);
             z-index: 2000;
         }

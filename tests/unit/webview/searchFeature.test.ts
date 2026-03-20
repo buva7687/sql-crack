@@ -1,7 +1,9 @@
 import type { FlowNode, ViewState } from '../../../src/webview/types';
+import { getComponentUiColors } from '../../../src/webview/constants';
 import {
     clearSearchFeature,
     createSearchRuntimeState,
+    highlightMatchesFeature,
     navigateSearchFeature,
     performSearchFeature,
     setSearchBoxFeature,
@@ -83,6 +85,7 @@ function createFakeNodeGroup(id: string) {
     };
     return {
         classList: {
+            add: jest.fn(),
             remove: jest.fn(),
         },
         getAttribute: jest.fn((name: string) => {
@@ -125,7 +128,7 @@ describe('search feature helpers', () => {
         updateSearchCountDisplayFeature(runtime, state, 0);
         expect(runtime.searchCountIndicator.style.display).toBe('block');
         expect(runtime.searchCountIndicator.textContent).toBe('No data');
-        expect(runtime.searchCountIndicator.style.color).toBe('#94a3b8');
+        expect(runtime.searchCountIndicator.style.color).toBe(getComponentUiColors(true).textMuted);
 
         updateSearchCountDisplayFeature(runtime, state, 4);
         expect(runtime.searchCountIndicator.textContent).toBe('No matches');
@@ -135,7 +138,36 @@ describe('search feature helpers', () => {
         state.currentSearchIndex = 1;
         updateSearchCountDisplayFeature(runtime, state, 4);
         expect(runtime.searchCountIndicator.textContent).toBe('2/3');
-        expect(runtime.searchCountIndicator.style.color).toBe('#64748b');
+        expect(runtime.searchCountIndicator.style.color).toBe(getComponentUiColors(true).textMuted);
+    });
+
+    it('uses theme-aware highlight colors for matched search results', () => {
+        const darkState = createViewState({ isDarkTheme: true });
+        const lightState = createViewState({ isDarkTheme: false });
+        const darkNode = createFakeNodeGroup('orders');
+        const lightNode = createFakeNodeGroup('orders');
+
+        highlightMatchesFeature({
+            term: 'orders',
+            state: darkState,
+            mainGroup: {
+                querySelectorAll: jest.fn(() => [darkNode]),
+            } as unknown as SVGGElement,
+            selectedNodeId: null,
+            highlightColor: '#fbbf24',
+        });
+        expect(darkNode.rect.setAttribute).toHaveBeenCalledWith('stroke', '#fbbf24');
+
+        highlightMatchesFeature({
+            term: 'orders',
+            state: lightState,
+            mainGroup: {
+                querySelectorAll: jest.fn(() => [lightNode]),
+            } as unknown as SVGGElement,
+            selectedNodeId: null,
+            highlightColor: '#fbbf24',
+        });
+        expect(lightNode.rect.setAttribute).toHaveBeenCalledWith('stroke', getComponentUiColors(false).accent);
     });
 
     it('registers search input handlers for keyboard navigation and debounce', () => {
