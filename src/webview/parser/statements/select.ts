@@ -945,6 +945,17 @@ function parseCteOrSubqueryInternals(
     }
 
     let previousId: string | null = null;
+    const parseExpressionSubqueries = (expressions: any[]): void => {
+        for (const expr of expressions) {
+            const subqueries = findSubqueriesInExpression(expr);
+            ctx.stats.subqueries += subqueries.length;
+            for (const subquery of subqueries) {
+                // Expression subqueries are side branches, not part of the main
+                // FROM -> clause pipeline for the containing CTE/subquery.
+                parseCteOrSubqueryInternals(runtime, subquery, nodes, edges, parentId, depth + 1);
+            }
+        }
+    };
 
     // Extract tables from FROM clause
     if (stmt.from && Array.isArray(stmt.from)) {
@@ -1022,24 +1033,35 @@ function parseCteOrSubqueryInternals(
         }
     }
 
-    // Check for subqueries in WHERE clause
+    const expressionSubqueries: any[] = [];
     if (stmt.where) {
-        const whereSubqueries = findSubqueriesInExpression(stmt.where);
-        ctx.stats.subqueries += whereSubqueries.length;
+        expressionSubqueries.push(stmt.where);
     }
-
-    // Check for subqueries in SELECT clause (scalar subqueries)
-    // Note: Don't let scalar subqueries overwrite previousId — they are side branches,
-    // not part of the main FROM → WHERE → GROUP BY pipeline chain.
+    if (stmt.having) {
+        expressionSubqueries.push(stmt.having);
+    }
     if (stmt.columns && Array.isArray(stmt.columns)) {
         for (const col of stmt.columns) {
-            if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
-                ctx.stats.subqueries++; // Count scalar subqueries
-                // Recursively parse the nested subquery as a side branch (don't chain into main pipeline)
-                parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
+            if (col?.expr) {
+                expressionSubqueries.push(col.expr);
             }
         }
     }
+    if (Array.isArray(stmt.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (orderItem?.expr) {
+                expressionSubqueries.push(orderItem.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem?.on) {
+                expressionSubqueries.push(fromItem.on);
+            }
+        }
+    }
+    parseExpressionSubqueries(expressionSubqueries);
 
     // Add WHERE if present
     if (stmt.where) {

@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Delete handler dedup**: Workspace file watcher delete handler now skips duplicate events for the same file path while a removal is already in flight, preventing counter drift under rapid deletions.
 - **Perf baseline threshold**: Bumped simple-query performance threshold from 50ms to 100ms to reduce false failures in slower CI environments.
 - **CTE consumer wiring**: CTE nodes in SQL Flow now connect to the actual outer-query table/join reference nodes that consume them instead of always wiring to the first `FROM` table.
+- **Inter-CTE dependency promotion**: Collapsed CTE containers now promote internal CTE references to top-level edges across `FROM`, `JOIN`, and nested expression subqueries (`WHERE`, `HAVING`, `JOIN ... ON`, scalar subqueries, and `ORDER BY`). JOIN-based references are deduplicated so repeated use of the same CTE does not emit duplicate container edges. This restores expected top-level connectivity for chained examples such as `examples/complex-analytics-queries.sql`.
 - **Projected graph search/navigation consistency**: Search result activation, keyboard navigation, focus traversal, and virtualization toggles now operate on the clustered/projected render graph instead of the raw pre-cluster graph, preventing hidden-node mismatches and cluster search failures.
 - **Search Enter debounce race**: Pressing Enter in the search box now clears any pending debounce timer and stops propagation, preventing double-advance behavior and later jumps back to the first result.
 - **Semantic border restoration**: Selection, keyboard focus blur, search cleanup, pulse cleanup, and column-lineage cleanup now restore each node's base border styling instead of dropping semantic stroke metadata.
@@ -49,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added 296 new tests across 9 new debt-remediation files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion.
 - Expanded worker/runtime regression coverage in `parser.worker.test.ts`, `parserClient.test.ts`, `parserWorkerMigrationPrep.test.ts`, `parserWorkerWiringPrep.test.ts`, `compareModeWiring.test.ts`, `visualizationPanel.test.ts`, and `runtimeConfigContract.test.ts` so the off-main-thread parsing path and webview bootstrap contract are explicitly guarded.
 - Added regression coverage for CTE consumer wiring, projected render-graph search/navigation, search Enter/debounce behavior, semantic border restoration, collapse-button drag guarding, hover marker theme handling, and column-lineage path traversal.
+- Added parser regression coverage for inter-CTE promotion through direct internal references, JOIN references, and nested subqueries in `WHERE` and `JOIN ... ON` clauses.
 - Added regression coverage for PostgreSQL dollar-quoted dialect detection, nested block comment stripping, live view-location menu state, and floating-menu theme updates.
-- Current branch validation: 254 suites, 3,426 tests passing with zero failures.
+- Current branch validation: 254 suites, 3,431 tests passing with zero failures.
 
 ## [0.6.0] - 2026-03-15
 
