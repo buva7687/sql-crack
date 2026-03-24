@@ -448,6 +448,24 @@ SELECT * FROM t3;`;
       expect(cte3Outer).toBeDefined();
     });
 
+    it('creates inter-CTE edges when one CTE JOINs another internally', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT id, val FROM t1),
+          cte2 AS (SELECT * FROM t2 JOIN cte1 ON t2.id = cte1.id)
+        SELECT * FROM cte2
+      `;
+      const result = parseSql(sql, 'MySQL');
+      expect(result.error).toBeUndefined();
+
+      const cteNodes = result.nodes.filter(n => n.type === 'cte');
+      const cte1 = cteNodes.find(n => n.label?.toLowerCase().includes('cte1'));
+      const cte2 = cteNodes.find(n => n.label?.toLowerCase().includes('cte2'));
+
+      const cte1ToCte2 = result.edges.find(e => e.source === cte1?.id && e.target === cte2?.id);
+      expect(cte1ToCte2).toBeDefined();
+    });
+
     it('connects each CTE node to its actual outer query consumer', () => {
       const sql = `
         WITH

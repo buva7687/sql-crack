@@ -173,15 +173,25 @@ function processSelect(
     }
 
     // Connect inter-CTE dependencies: when a CTE's internal body references
-    // another CTE, create a top-level edge between the two CTE container nodes.
+    // another CTE (via FROM or JOIN), create a top-level edge between the
+    // two CTE container nodes.
     for (const [, cteId] of cteNodeIdsByName.entries()) {
         const cteNode = nodes.find(n => n.id === cteId);
         if (!cteNode?.children) { continue; }
+        const connected = new Set<string>();
         for (const child of cteNode.children) {
-            if (child.type !== 'table') { continue; }
-            const refName = child.label.toLowerCase();
+            let refName: string | undefined;
+            if (child.type === 'table') {
+                refName = child.label.toLowerCase();
+            } else if (child.type === 'join') {
+                // Join labels are "LEFT JOIN tableName" — extract the table name
+                const parts = child.label.split(/\s+/);
+                refName = parts[parts.length - 1]?.toLowerCase();
+            }
+            if (!refName) { continue; }
             const referencedCteId = cteNodeIdsByName.get(refName);
-            if (referencedCteId && referencedCteId !== cteId) {
+            if (referencedCteId && referencedCteId !== cteId && !connected.has(referencedCteId)) {
+                connected.add(referencedCteId);
                 edges.push({
                     id: genId(runtime, 'e'),
                     source: referencedCteId,
