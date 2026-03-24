@@ -48,6 +48,22 @@ export function getMessageHandlingScriptFragment(): string {
         window.addEventListener('message', event => {
             const message = event.data;
             switch (message.command) {
+                case 'showInGraphResult':
+                    if (typeof switchToView === 'function') {
+                        switchToView('graph', true);
+                    }
+                    if (searchInput) {
+                        searchInput.value = message.data?.query || '';
+                    }
+                    btnClearSearch?.classList.toggle('visible', Boolean(searchInput && searchInput.value.trim()));
+                    updateGraphEmptyState();
+                    refreshSearchNavigation(searchInput ? searchInput.value.trim() : '');
+                    applySearchHighlight();
+                    if (searchMatchNodeIds.length > 0 && searchMatchNodeIds.length <= 3) {
+                        jumpToSearchMatch(0, { autoZoom: true, track: false });
+                    }
+                    syncGraphContextUi();
+                    break;
                 case 'lineageResult':
                 case 'upstreamResult':
                 case 'downstreamResult':

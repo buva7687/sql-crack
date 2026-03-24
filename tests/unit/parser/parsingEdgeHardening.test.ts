@@ -14,6 +14,13 @@ describe('parsing edge hardening guards', () => {
         expect(source).toContain('if (visited.has(expr)) {');
     });
 
+    it('keeps SELECT flow anchoring null-safe when there is no base table', () => {
+        const source = readFileSync(join(__dirname, '../../../src/webview/parser/statements/select.ts'), 'utf8');
+        expect(source).toContain('const baseTableId = tableIds[0] ?? null;');
+        expect(source).toContain('let lastOutputId: string | null = baseTableId;');
+        expect(source).toContain('let previousId: string | null = lastOutputId ?? baseTableId;');
+    });
+
     it('keeps unicode-aware identifier matching in regex fallback parser', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/dialects/fallback.ts'), 'utf8');
         expect(source).toContain("const identifierPart = '#?[\\\\p{L}\\\\p{N}_$]+';");

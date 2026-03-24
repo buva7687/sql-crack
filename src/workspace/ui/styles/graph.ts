@@ -1934,6 +1934,10 @@ export function getGraphStyles(): string {
         }
         .tooltip-title { font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
         .tooltip-content { color: var(--text-muted); line-height: 1.4; }
+        .tooltip-section-spaced { margin-top: 8px; }
+        .tooltip-columns { font-size: 9px; color: var(--text-muted); }
+        .tooltip-warning { color: var(--warning-light); }
+        .tooltip-hint { margin-top: 8px; font-size: 10px; }
         .tooltip-list { margin-top: 8px; padding-left: 14px; }
         .tooltip-list li { margin: 3px 0; }
 

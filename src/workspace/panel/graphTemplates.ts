@@ -179,7 +179,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             <div class="graph-explain-body">
                 <div><strong>${filesActive ? 'Files' : 'Tables'} mode:</strong> ${filesActive ? 'showing which SQL files depend on each other' : 'showing which tables/views feed into which'}.</div>
                 ${totalIssues > 0 ? `<div>⚠ ${totalIssues} issue${totalIssues === 1 ? '' : 's'} detected — some relationships may be missing.</div>` : ''}
-                ${searchFilter && searchFilter.query ? `<div>🔍 Search filter active: "${escapeHtml(searchFilter.query)}" — only matching nodes shown.</div>` : ''}
+                ${searchFilter && searchFilter.query ? `<div>🔍 Search active: "${escapeHtml(searchFilter.query)}" — matching nodes are highlighted in the graph.</div>` : ''}
                 ${graph.stats.totalFiles === 0 ? '<div>No SQL files indexed yet. Try refreshing the index or checking workspace scope.</div>' : ''}
                 ${(graph.nodes || []).length === 0 && graph.stats.totalFiles > 0 ? `<div>No ${filesActive ? 'file dependencies' : 'table/view relationships'} found in ${graph.stats.totalFiles} indexed files.</div>` : ''}
                 ${indexStatus.level === 'old' ? '<div>Index is over an hour old — consider refreshing for current results.</div>' : ''}

@@ -98,16 +98,21 @@ describe('MessageHandler disposal guards', () => {
         expect(postMessage).toHaveBeenCalledTimes(1);
     });
 
-    it('stops writing webview HTML after handler is marked disposed', async () => {
-        const { context, setHtml } = createContext();
+    it('stops posting show-in-graph responses after handler is marked disposed', async () => {
+        const { context, postMessage, setHtml } = createContext();
         const handler = new MessageHandler(context);
 
         await handler.handleMessage({ command: 'showInGraph', query: 'orders' } as any);
-        expect(setHtml).toHaveBeenCalledTimes(1);
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'showInGraphResult',
+            data: { query: 'orders' }
+        });
+        expect(setHtml).not.toHaveBeenCalled();
 
         handler.markDisposed();
         await handler.handleMessage({ command: 'showInGraph', query: 'orders' } as any);
 
-        expect(setHtml).toHaveBeenCalledTimes(1);
+        expect(postMessage).toHaveBeenCalledTimes(1);
+        expect(setHtml).not.toHaveBeenCalled();
     });
 });

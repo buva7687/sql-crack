@@ -1,6 +1,7 @@
 import { EDGE_COLORS, UI_COLORS } from '../constants';
 import { FlowNode, ViewState } from '../types';
 import { escapeRegex } from '../../shared';
+import { restoreNodeBorderState } from '../nodeBorderState';
 
 /** Recursively search for a node by ID, including inside children of cloud/CTE nodes. */
 function findNodeById(nodes: FlowNode[], nodeId: string): FlowNode | undefined {
@@ -61,8 +62,7 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
             return;
         }
 
-        rect.removeAttribute('stroke');
-        rect.removeAttribute('stroke-width');
+        restoreNodeBorderState(rect as SVGRectElement);
         rect.setAttribute('filter', 'url(#shadow)');
     });
 

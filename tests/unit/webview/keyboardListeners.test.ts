@@ -303,4 +303,35 @@ describe('keyboardListeners', () => {
         });
         expect(callbacks.navigateToSiblingNode).toHaveBeenCalledWith(selectedNode, 'next');
     });
+
+    it('does not duplicate search navigation when Enter is handled by the search box', () => {
+        const svg = createKeyboardTarget();
+        const searchBox = { value: 'orders', focus: jest.fn() };
+        const state = createState();
+        const callbacks = createCallbacks();
+        const listeners = new Map<string, Listener>();
+
+        global.document = {
+            activeElement: searchBox,
+            addEventListener: jest.fn((type: string, handler: Listener) => {
+                listeners.set(type, handler);
+            }),
+        } as unknown as Document;
+
+        registerDocumentKeyboardListeners(createContext(state, svg, searchBox), callbacks);
+
+        const keydown = listeners.get('keydown');
+        expect(keydown).toBeDefined();
+
+        keydown!({
+            key: 'Enter',
+            ctrlKey: false,
+            metaKey: false,
+            altKey: false,
+            shiftKey: false,
+            preventDefault: jest.fn(),
+        });
+
+        expect(callbacks.navigateSearch).not.toHaveBeenCalled();
+    });
 });

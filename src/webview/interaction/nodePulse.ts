@@ -1,4 +1,5 @@
 import { UI_COLORS } from '../constants';
+import { restoreNodeBorderState } from '../nodeBorderState';
 import { prefersReducedMotion } from '../ui/motion';
 
 interface PulseRectOptions {
@@ -92,6 +93,10 @@ export function pulseNodeFeature(options: {
 
     const originalStroke = rect.getAttribute('stroke') || '';
     const originalStrokeWidth = rect.getAttribute('stroke-width') || '';
+    const hasCapturedBaseBorder =
+        rect.hasAttribute('data-node-base-stroke')
+        || rect.hasAttribute('data-node-base-stroke-width')
+        || rect.hasAttribute('data-node-base-stroke-dasharray');
 
     pulseRect({
         rect,
@@ -125,16 +130,20 @@ export function pulseNodeFeature(options: {
                 return;
             }
 
-            if (originalStroke) {
-                rect.setAttribute('stroke', originalStroke);
+            if (hasCapturedBaseBorder) {
+                restoreNodeBorderState(rect);
             } else {
-                rect.removeAttribute('stroke');
-            }
+                if (originalStroke) {
+                    rect.setAttribute('stroke', originalStroke);
+                } else {
+                    rect.removeAttribute('stroke');
+                }
 
-            if (originalStrokeWidth) {
-                rect.setAttribute('stroke-width', originalStrokeWidth);
-            } else {
-                rect.removeAttribute('stroke-width');
+                if (originalStrokeWidth) {
+                    rect.setAttribute('stroke-width', originalStrokeWidth);
+                } else {
+                    rect.removeAttribute('stroke-width');
+                }
             }
             rect.setAttribute('filter', 'url(#shadow)');
         },

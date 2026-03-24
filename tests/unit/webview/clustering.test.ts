@@ -22,7 +22,7 @@ describe('clustering', () => {
     // Reset config before each test
     beforeEach(() => {
         setClusteringConfig({
-            minNodesForClustering: 30,
+            minNodesForClustering: 100,
             enabled: true,
             defaultExpanded: false
         });
@@ -414,12 +414,12 @@ describe('clustering', () => {
     describe('shouldCluster', () => {
         it('should return false for small graphs', () => {
             expect(shouldCluster(20)).toBe(false);
-            expect(shouldCluster(29)).toBe(false);
+            expect(shouldCluster(99)).toBe(false);
         });
 
         it('should return true for large graphs', () => {
-            expect(shouldCluster(30)).toBe(true);
             expect(shouldCluster(100)).toBe(true);
+            expect(shouldCluster(101)).toBe(true);
         });
 
         it('should respect config threshold', () => {
@@ -506,7 +506,7 @@ describe('clustering', () => {
         it('should get default config', () => {
             const config = getClusteringConfig();
 
-            expect(config.minNodesForClustering).toBe(30);
+            expect(config.minNodesForClustering).toBe(100);
             expect(config.enabled).toBe(true);
             expect(config.defaultExpanded).toBe(false);
         });
@@ -524,7 +524,7 @@ describe('clustering', () => {
             config1.minNodesForClustering = 999;
             const config2 = getClusteringConfig();
 
-            expect(config2.minNodesForClustering).toBe(30); // Original value
+            expect(config2.minNodesForClustering).toBe(100); // Original value
         });
     });
 });

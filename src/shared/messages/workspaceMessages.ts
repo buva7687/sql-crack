@@ -97,6 +97,7 @@ export type WorkspaceHostMessage =
     // Theme & settings
     | { command: 'themeChanged'; css: string; isDark: boolean }
     | { command: 'workspaceLineageDepthUpdated'; depth: number }
+    | { command: 'showInGraphResult'; data: { query: string } }
     // Lineage results
     | { command: 'lineageOverviewResult'; data: { html: string; requestId?: WorkspaceRequestId } }
     | { command: 'lineageResult'; data: { nodeId: string; direction: string; result: { nodes: LineageNodeResult[]; depth: number; pathCount: number } | null; requestId?: WorkspaceRequestId } }

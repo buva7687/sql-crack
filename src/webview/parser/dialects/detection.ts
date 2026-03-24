@@ -14,6 +14,74 @@ export function rankDialectScores(scores: Partial<Record<SqlDialect, number>>): 
         .sort((a, b) => b.score - a.score);
 }
 
+function hasPostgresDollarQuoteLiteral(sql: string): boolean {
+    let i = 0;
+    while (i < sql.length) {
+        if (sql[i] === '-' && sql[i + 1] === '-') {
+            i += 2;
+            while (i < sql.length && sql[i] !== '\n') { i++; }
+            continue;
+        }
+        if (sql[i] === '/' && sql[i + 1] === '*') {
+            i += 2;
+            let depth = 1;
+            while (i < sql.length && depth > 0) {
+                if (sql[i] === '/' && sql[i + 1] === '*') {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === '*' && sql[i + 1] === '/') {
+                    depth--;
+                    i += 2;
+                    continue;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (sql[i] === '\'') {
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === '\'' && sql[i + 1] === '\'') {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === '\'') {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (sql[i] === '"' || sql[i] === '`') {
+            const quote = sql[i];
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === quote) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (sql[i] === '$') {
+            const delimiterMatch = sql.slice(i).match(/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
+            if (delimiterMatch) {
+                const delimiter = delimiterMatch[0];
+                const closePos = sql.indexOf(delimiter, i + delimiter.length);
+                if (closePos !== -1) {
+                    return true;
+                }
+            }
+        }
+        i++;
+    }
+    return false;
+}
+
 export function detectDialectSyntaxPatterns(sql: string): {
     hasSnowflakePathOperator: boolean;
     hasSnowflakeNamedArgs: boolean;
@@ -101,7 +169,7 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasPostgresInterval: /INTERVAL\s+'[^']+'/i.test(sql),
         hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
         hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
-        hasPostgresDollarQuotes: /\$\$/.test(maskedSql),
+        hasPostgresDollarQuotes: hasPostgresDollarQuoteLiteral(sql),
         hasPostgresArrayAccess: /\w+\[\d+\]/.test(maskedSql),
         hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
         hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),

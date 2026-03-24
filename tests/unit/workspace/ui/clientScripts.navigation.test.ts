@@ -522,6 +522,21 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('command: \'getLineageGraph\'');
     });
 
+    it('handles lightweight showInGraphResult messages without forcing a full webview rebuild', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("case 'showInGraphResult':");
+        expect(script).toContain("switchToView('graph', true);");
+        expect(script).toContain("searchInput.value = message.data?.query || '';");
+        expect(script).toContain("jumpToSearchMatch(0, { autoZoom: true, track: false });");
+    });
+
     it('registers wheel handlers as non-passive where preventDefault is used', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -603,6 +618,23 @@ describe('workspace clientScripts navigation context', () => {
 
         expect(script).toContain('JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64Value), c => c.charCodeAt(0))))');
         expect(script).toContain('new TextDecoder().decode(Uint8Array.from(atob(base64), c => c.charCodeAt(0)))');
+    });
+
+    it('sanitizes graph tooltips with a DOM allowlist and does not restore inline styles', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain("const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);");
+        expect(script).toContain("const allowedClassPattern = /^[a-z0-9_-]+$/i;");
+        expect(script).toContain("if (!allowedTags.has(element.tagName)) {");
+        expect(script).toContain("clean.setAttribute('class', safeClassName);");
+        expect(script).not.toContain('(?:class|style)');
+        expect(script).not.toContain("safe = safe.replace(/&lt;(div|ul|li|strong|span|br)");
     });
 
     it('does not reference removed header focus button bindings', () => {

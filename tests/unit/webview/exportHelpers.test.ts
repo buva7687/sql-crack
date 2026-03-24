@@ -35,6 +35,16 @@ describe('export helpers', () => {
         expect(exportFeatureSource).toContain("from './export/index';");
     });
 
+    it('preserves SVG presentation attributes instead of overriding with computed styles', () => {
+        // Regression: embedInlineStyles used to override per-element SVG fill/stroke
+        // attributes with computed styles from the first class-matched element,
+        // causing all nodes to share one fill color instead of their individual colors.
+        expect(svgPreparationSource).toContain('SVG_PRESENTATION_ATTRIBUTES');
+        expect(svgPreparationSource).toContain("element.getAttribute(property)");
+        // The guard must check fill, stroke, stroke-width, opacity
+        expect(svgPreparationSource).toMatch(/new Set\(\[.*'fill'.*'stroke'.*\]\)/);
+    });
+
     it('applies dark-background contrast overrides and export metadata chips in artifact builders', () => {
         expect(artifactsSource).toContain('applyExportContrastAdjustments(svgClone, options.background)');
         expect(artifactsSource).toContain("querySelectorAll('#arrowhead polygon, #arrowhead-hover polygon')");

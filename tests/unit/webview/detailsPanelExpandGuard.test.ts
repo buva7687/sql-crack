@@ -36,4 +36,10 @@ describe('details panel expand guard on content display', () => {
         expect(expandCallIdx).toBeGreaterThan(updateDetailIdx);
         expect(expandCallIdx).toBeLessThan(transformIdx);
     });
+
+    it('ignores malformed edge path data before placing lineage badges', () => {
+        expect(columnLineageSource).toContain('function parseEdgeBadgeMidpoint(pathData: string)');
+        expect(columnLineageSource).toContain('if (!matches || matches.length < 4) {');
+        expect(columnLineageSource).toContain('Number.isFinite');
+    });
 });

@@ -105,7 +105,18 @@ function processSelect(
     cteNames: Set<string> = new Set()
 ): string {
     const ctx = runtime.context;
-    const nodeIds: string[] = [];
+    const cteNodeIdsByName = new Map<string, string>();
+    const cteReferenceIdsByName = new Map<string, string[]>();
+
+    const recordCteReference = (cteName: string, nodeId: string): void => {
+        const normalizedName = cteName.toLowerCase();
+        const existing = cteReferenceIdsByName.get(normalizedName);
+        if (existing) {
+            existing.push(nodeId);
+            return;
+        }
+        cteReferenceIdsByName.set(normalizedName, [nodeId]);
+    };
 
     // Collect CTE names first
     if (stmt.with && Array.isArray(stmt.with)) {
@@ -157,7 +168,36 @@ function processSelect(
                 depth: 0, // Root level CTE - used for breadcrumb navigation
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
-            nodeIds.push(cteId);
+            cteNodeIdsByName.set(cteName.toLowerCase(), cteId);
+        }
+    }
+
+    // Connect inter-CTE dependencies: when a CTE's internal body references
+    // another CTE (via FROM or JOIN), create a top-level edge between the
+    // two CTE container nodes.
+    for (const [, cteId] of cteNodeIdsByName.entries()) {
+        const cteNode = nodes.find(n => n.id === cteId);
+        if (!cteNode?.children) { continue; }
+        const connected = new Set<string>();
+        for (const child of cteNode.children) {
+            let refName: string | undefined;
+            if (child.type === 'table') {
+                refName = child.label.toLowerCase();
+            } else if (child.type === 'join') {
+                // Join labels are "LEFT JOIN tableName" — extract the table name
+                const parts = child.label.split(/\s+/);
+                refName = parts[parts.length - 1]?.toLowerCase();
+            }
+            if (!refName) { continue; }
+            const referencedCteId = cteNodeIdsByName.get(refName);
+            if (referencedCteId && referencedCteId !== cteId && !connected.has(referencedCteId)) {
+                connected.add(referencedCteId);
+                edges.push({
+                    id: genId(runtime, 'e'),
+                    source: referencedCteId,
+                    target: cteId
+                });
+            }
         }
     }
 
@@ -167,7 +207,15 @@ function processSelect(
 
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const tableId = processFromItem(runtime, fromItem, nodes, edges, cteNames, Boolean(fromItem.join));
+            const tableId = processFromItem(
+                runtime,
+                fromItem,
+                nodes,
+                edges,
+                cteNames,
+                Boolean(fromItem.join),
+                recordCteReference
+            );
             if (tableId) {
                 tableIds.push(tableId);
                 joinTableMap.set(getFromItemLookupKey(fromItem, ctx.dialect), tableId);
@@ -190,10 +238,11 @@ function processSelect(
     trackFunctionsFromExpressionSubqueries(runtime, stmt);
 
     // Process JOINs - create join nodes and connect tables properly
-    let lastOutputId = tableIds[0]; // Start with first table as base
+    const baseTableId = tableIds[0] ?? null;
+    let lastOutputId: string | null = baseTableId; // Start with first table as base when present
 
     if (stmt.from && Array.isArray(stmt.from)) {
-        let leftTableId = tableIds[0];
+        let leftTableId: string | null = baseTableId;
 
         for (let i = 0; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
@@ -256,20 +305,25 @@ function processSelect(
         }
     }
 
-    // Connect CTEs to first table
-    for (const cteId of nodeIds) {
-        if (tableIds[0]) {
+    // Connect each CTE node to the actual outer-flow nodes that reference it.
+    for (const [cteName, referenceIds] of cteReferenceIdsByName.entries()) {
+        const cteId = cteNodeIdsByName.get(cteName);
+        if (!cteId) {
+            continue;
+        }
+
+        for (const referenceId of referenceIds) {
             edges.push({
                 id: genId(runtime, 'e'),
                 source: cteId,
-                target: tableIds[0]
+                target: referenceId
             });
         }
     }
 
     // Connect comma-separated FROM items (implicit cross joins) that aren't
-    // already wired by the explicit JOIN logic above. tableIds[0] is the base;
-    // any additional non-join item needs an edge into the flow.
+    // already wired by the explicit JOIN logic above. The first table, when
+    // present, is the base; additional non-join items need an edge into flow.
     if (stmt.from && Array.isArray(stmt.from)) {
         for (let i = 1; i < stmt.from.length; i++) {
             const fromItem = stmt.from[i];
@@ -304,7 +358,7 @@ function processSelect(
     }
 
     // Process WHERE - connect from the last join output or first table
-    let previousId = lastOutputId || tableIds[0];
+    let previousId: string | null = lastOutputId ?? baseTableId;
     let savedWhereId: string | null = null;
     let savedHavingId: string | null = null;
     if (stmt.where) {
@@ -747,7 +801,8 @@ function processFromItem(
     nodes: FlowNode[],
     _edges: FlowEdge[],
     cteNames: Set<string> = new Set(),
-    asJoin: boolean = false
+    asJoin: boolean = false,
+    onCteReference?: (cteName: string, nodeId: string) => void
 ): string | null {
     const ctx = runtime.context;
     // Check for subquery
@@ -862,6 +917,10 @@ function processFromItem(
         x: 0, y: 0, width: 140, height: 60
     });
 
+    if (isCteRef && onCteReference) {
+        onCteReference(tableName.toLowerCase(), tableId);
+    }
+
     return tableId;
 }
 
@@ -886,6 +945,17 @@ function parseCteOrSubqueryInternals(
     }
 
     let previousId: string | null = null;
+    const parseExpressionSubqueries = (expressions: any[]): void => {
+        for (const expr of expressions) {
+            const subqueries = findSubqueriesInExpression(expr);
+            ctx.stats.subqueries += subqueries.length;
+            for (const subquery of subqueries) {
+                // Expression subqueries are side branches, not part of the main
+                // FROM -> clause pipeline for the containing CTE/subquery.
+                parseCteOrSubqueryInternals(runtime, subquery, nodes, edges, parentId, depth + 1);
+            }
+        }
+    };
 
     // Extract tables from FROM clause
     if (stmt.from && Array.isArray(stmt.from)) {
@@ -963,24 +1033,35 @@ function parseCteOrSubqueryInternals(
         }
     }
 
-    // Check for subqueries in WHERE clause
+    const expressionSubqueries: any[] = [];
     if (stmt.where) {
-        const whereSubqueries = findSubqueriesInExpression(stmt.where);
-        ctx.stats.subqueries += whereSubqueries.length;
+        expressionSubqueries.push(stmt.where);
     }
-
-    // Check for subqueries in SELECT clause (scalar subqueries)
-    // Note: Don't let scalar subqueries overwrite previousId — they are side branches,
-    // not part of the main FROM → WHERE → GROUP BY pipeline chain.
+    if (stmt.having) {
+        expressionSubqueries.push(stmt.having);
+    }
     if (stmt.columns && Array.isArray(stmt.columns)) {
         for (const col of stmt.columns) {
-            if (col.expr && col.expr.ast && (col.expr.type === 'select' || col.expr.ast.type === 'select')) {
-                ctx.stats.subqueries++; // Count scalar subqueries
-                // Recursively parse the nested subquery as a side branch (don't chain into main pipeline)
-                parseCteOrSubqueryInternals(runtime, col.expr.ast, nodes, edges, parentId, depth + 1);
+            if (col?.expr) {
+                expressionSubqueries.push(col.expr);
             }
         }
     }
+    if (Array.isArray(stmt.orderby)) {
+        for (const orderItem of stmt.orderby) {
+            if (orderItem?.expr) {
+                expressionSubqueries.push(orderItem.expr);
+            }
+        }
+    }
+    if (Array.isArray(stmt.from)) {
+        for (const fromItem of stmt.from) {
+            if (fromItem?.on) {
+                expressionSubqueries.push(fromItem.on);
+            }
+        }
+    }
+    parseExpressionSubqueries(expressionSubqueries);
 
     // Add WHERE if present
     if (stmt.where) {

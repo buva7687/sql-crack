@@ -5,6 +5,8 @@ import { EDGE_COLORS, UI_COLORS } from '../../../src/webview/constants';
 type FakeRect = {
     setAttribute: jest.Mock<void, [string, string]>;
     removeAttribute: jest.Mock<void, [string]>;
+    getAttribute: jest.Mock<string | null, [string]>;
+    hasAttribute: jest.Mock<boolean, [string]>;
 };
 
 type FakeNodeGroup = {
@@ -57,9 +59,19 @@ function createState(overrides: Partial<ViewState> = {}): ViewState {
 }
 
 function createRect(): FakeRect {
+    const attrs = new Map<string, string>();
     return {
-        setAttribute: jest.fn(),
-        removeAttribute: jest.fn(),
+        setAttribute: jest.fn((name: string, value: string) => {
+            attrs.set(name, value);
+            if (name === 'stroke' || name === 'stroke-width' || name === 'stroke-dasharray') {
+                attrs.set(`data-node-base-${name}`, value);
+            }
+        }),
+        removeAttribute: jest.fn((name: string) => {
+            attrs.delete(name);
+        }),
+        getAttribute: jest.fn((name: string) => attrs.get(name) || null),
+        hasAttribute: jest.fn((name: string) => attrs.has(name)),
     };
 }
 
@@ -84,6 +96,10 @@ describe('nodeSelection', () => {
     it('highlights the selected node, clears non-selected styling, and updates panels', () => {
         const selectedRect = createRect();
         const otherRect = createRect();
+        selectedRect.setAttribute('stroke', '#123456');
+        selectedRect.setAttribute('stroke-width', '2');
+        otherRect.setAttribute('stroke', '#abcdef');
+        otherRect.setAttribute('stroke-width', '1.5');
         const selectedGroup = createNodeGroup('n1', selectedRect);
         const otherGroup = createNodeGroup('n2', otherRect);
         const mainGroup = {
@@ -121,8 +137,8 @@ describe('nodeSelection', () => {
         expect(selectedRect.setAttribute).toHaveBeenCalledWith('stroke-width', '3');
         expect(selectedRect.setAttribute).toHaveBeenCalledWith('filter', 'url(#glow)');
         expect(highlightConnectedEdges).toHaveBeenCalledWith('n1', true);
-        expect(otherRect.removeAttribute).toHaveBeenCalledWith('stroke');
-        expect(otherRect.removeAttribute).toHaveBeenCalledWith('stroke-width');
+        expect(otherRect.setAttribute).toHaveBeenCalledWith('stroke', '#abcdef');
+        expect(otherRect.setAttribute).toHaveBeenCalledWith('stroke-width', '1.5');
         expect(otherRect.setAttribute).toHaveBeenCalledWith('filter', 'url(#shadow)');
         expect(onUpdateDetailsPanel).toHaveBeenCalledWith('n1');
         expect(onUpdateBreadcrumb).toHaveBeenCalledWith('n1');

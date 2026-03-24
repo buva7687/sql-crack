@@ -110,10 +110,12 @@ import { getScrollbarColors, getComponentUiColors } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
+import { EDGE_THEME } from '../shared/themeTokens';
 import {
+    getViewportBounds,
+    getVisibleElements,
     shouldVirtualize,
     throttle,
-    VirtualizationResult
 } from './virtualization';
 import {
     setVirtualizationEnabledFeature,
@@ -266,8 +268,12 @@ const layoutHistory = createLayoutHistory();
 let virtualizationEnabled = true;
 let renderedNodeIds: Set<string> = new Set();
 let renderedEdgeIds: Set<string> = new Set();
-let lastVirtualizationResult: VirtualizationResult | null = null;
 let offscreenIndicator: SVGGElement | null = null;
+let renderedNodeElementsById: Map<string, SVGGElement> = new Map();
+let renderedEdgeElementsById: Map<string, SVGPathElement> = new Map();
+let renderedEdgeIdsByNodeId: Map<string, Set<string>> = new Map();
+let activeEdgeSelectionId: string | null = null;
+let activeConnectedHighlightEdgeIds: Set<string> = new Set();
 // Store references to cloud and arrow elements for dynamic updates
 let cloudElements: Map<string, CloudRenderElements> = new Map();
 // Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
@@ -358,6 +364,74 @@ function ensureCloudOffset(nodeId: string, cloudWidth: number, cloudHeight: numb
     const fallback = getDefaultCloudOffset(cloudWidth, cloudHeight, nodeHeight, cloudGap);
     cloudOffsets.set(nodeId, fallback);
     return fallback;
+}
+
+function getRenderedEdgeIdsForNode(nodeId: string): Set<string> {
+    const existing = renderedEdgeIdsByNodeId.get(nodeId);
+    if (existing) {
+        return existing;
+    }
+    const created = new Set<string>();
+    renderedEdgeIdsByNodeId.set(nodeId, created);
+    return created;
+}
+
+function registerRenderedEdgeConnection(edge: FlowEdge): void {
+    getRenderedEdgeIdsForNode(edge.source).add(edge.id);
+    getRenderedEdgeIdsForNode(edge.target).add(edge.id);
+}
+
+function unregisterRenderedEdgeElement(edgeId: string): void {
+    const edgeElement = renderedEdgeElementsById.get(edgeId);
+    if (edgeElement) {
+        const sourceId = edgeElement.getAttribute('data-source');
+        const targetId = edgeElement.getAttribute('data-target');
+        if (sourceId) {
+            const sourceEdges = renderedEdgeIdsByNodeId.get(sourceId);
+            sourceEdges?.delete(edgeId);
+            if (sourceEdges && sourceEdges.size === 0) {
+                renderedEdgeIdsByNodeId.delete(sourceId);
+            }
+        }
+        if (targetId) {
+            const targetEdges = renderedEdgeIdsByNodeId.get(targetId);
+            targetEdges?.delete(edgeId);
+            if (targetEdges && targetEdges.size === 0) {
+                renderedEdgeIdsByNodeId.delete(targetId);
+            }
+        }
+    }
+    renderedEdgeElementsById.delete(edgeId);
+    activeConnectedHighlightEdgeIds.delete(edgeId);
+    if (activeEdgeSelectionId === edgeId) {
+        activeEdgeSelectionId = null;
+    }
+}
+
+function applyDefaultEdgeState(edgeElement: SVGPathElement): void {
+    const theme = state.isDarkTheme ? EDGE_THEME.dark : EDGE_THEME.light;
+    edgeElement.setAttribute('stroke', theme.default);
+    edgeElement.setAttribute('stroke-width', String(theme.strokeWidth));
+    edgeElement.setAttribute('marker-end', 'url(#arrowhead)');
+    const clauseType = edgeElement.getAttribute('data-clause-type') || undefined;
+    const dashPattern = getEdgeDashPattern(clauseType);
+    if (dashPattern) {
+        edgeElement.setAttribute('stroke-dasharray', dashPattern);
+    } else {
+        edgeElement.removeAttribute('stroke-dasharray');
+    }
+}
+
+function applyConnectedEdgeState(edgeElement: SVGPathElement): void {
+    edgeElement.setAttribute('stroke', EDGE_COLORS.highlight);
+    edgeElement.setAttribute('stroke-width', '2.5');
+    edgeElement.setAttribute('marker-end', 'url(#arrowhead-highlight)');
+}
+
+function applySelectedEdgeState(edgeElement: SVGPathElement): void {
+    edgeElement.setAttribute('stroke', EDGE_COLORS.selected);
+    edgeElement.setAttribute('stroke-width', '4');
+    edgeElement.setAttribute('marker-end', 'url(#arrowhead-highlight)');
 }
 
 function ensureCloudViewState(nodeId: string): CloudViewState {
@@ -1236,6 +1310,11 @@ export function cleanupRenderer(): void {
     nodeFocusLiveRegion = null;
     panelResizerCleanup.forEach(cleanup => cleanup());
     panelResizerCleanup = [];
+    renderedNodeElementsById.clear();
+    renderedEdgeElementsById.clear();
+    renderedEdgeIdsByNodeId.clear();
+    activeConnectedHighlightEdgeIds.clear();
+    activeEdgeSelectionId = null;
 }
 
 function updateTransform(): void {
@@ -1280,8 +1359,13 @@ function updateVisibleNodes(): void {
         isDarkTheme: state.isDarkTheme,
         renderNode,
         renderEdge,
-        onResultUpdated: (result) => {
-            lastVirtualizationResult = result;
+        nodeElementsById: renderedNodeElementsById,
+        edgeElementsById: renderedEdgeElementsById,
+        onNodeRemoved: (nodeId) => {
+            renderedNodeElementsById.delete(nodeId);
+        },
+        onEdgeRemoved: (edgeId) => {
+            unregisterRenderedEdgeElement(edgeId);
         },
     });
     offscreenIndicator = nextIndicator;
@@ -1294,14 +1378,22 @@ export function setVirtualizationEnabled(enabled: boolean): void {
     virtualizationEnabled = enabled;
     const { offscreenIndicator: nextIndicator } = setVirtualizationEnabledFeature({
         enabled,
-        currentNodes,
-        currentEdges,
+        currentNodes: renderNodes,
+        currentEdges: renderEdges,
         mainGroup,
         renderedNodeIds,
         renderedEdgeIds,
         currentOffscreenIndicator: offscreenIndicator,
         renderNode,
         renderEdge,
+        nodeElementsById: renderedNodeElementsById,
+        edgeElementsById: renderedEdgeElementsById,
+        onNodeRemoved: (nodeId) => {
+            renderedNodeElementsById.delete(nodeId);
+        },
+        onEdgeRemoved: (edgeId) => {
+            unregisterRenderedEdgeElement(edgeId);
+        },
         onVirtualizedUpdate: () => {
             updateVisibleNodes();
         },
@@ -1342,6 +1434,9 @@ function updateNodeEdges(node: FlowNode): void {
         nodes: currentNodes,
         layoutType: state.layoutType || 'vertical',
         calculateEdgePath,
+        nodeMap: renderNodeMap,
+        edgeElementsById: renderedEdgeElementsById,
+        edgeIdsByNodeId: renderedEdgeIdsByNodeId,
     });
 }
 
@@ -1355,6 +1450,11 @@ function clearMainGroupContent(): void {
     if (!mainGroup) {
         return;
     }
+    renderedNodeElementsById.clear();
+    renderedEdgeElementsById.clear();
+    renderedEdgeIdsByNodeId.clear();
+    activeEdgeSelectionId = null;
+    activeConnectedHighlightEdgeIds.clear();
     while (mainGroup.firstChild) {
         mainGroup.removeChild(mainGroup.firstChild);
     }
@@ -1424,7 +1524,7 @@ function restorePreservedRenderState(snapshot: PreservedRenderState): void {
         }
     }
 
-    if (snapshot.selectedNodeId && currentNodes.some((node) => node.id === snapshot.selectedNodeId)) {
+    if (snapshot.selectedNodeId && renderNodes.some((node) => node.id === snapshot.selectedNodeId)) {
         selectNode(snapshot.selectedNodeId, { skipNavigation: true });
         if (snapshot.focusModeEnabled) {
             state.focusMode = snapshot.focusMode;
@@ -1484,6 +1584,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         }
         clearSearch();
         clearBreadcrumbBar();
+        highlightedLineNodeId = null;
     }
 
     currentNodes = result.nodes;
@@ -1511,7 +1612,6 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // Reset virtualization state
     renderedNodeIds.clear();
     renderedEdgeIds.clear();
-    lastVirtualizationResult = null;
     if (offscreenIndicator) {
         offscreenIndicator.remove();
         offscreenIndicator = null;
@@ -1572,16 +1672,19 @@ export function render(result: ParseResult, options?: RenderOptions): void {
 
     // Determine if we should use virtualization
     const useVirtualization = virtualizationEnabled && shouldVirtualize(renderNodes.length);
+    const canVirtualizeOnFirstPaint = useVirtualization && (state.layoutType || 'vertical') === 'vertical';
 
     // Get nodes and edges to render (all or visible subset)
     let nodesToRender = renderNodes;
     let edgesToRender = renderEdges;
 
-    if (useVirtualization && svg) {
-        // For initial render with virtualization, render all nodes first
-        // then fitView will adjust viewport, and subsequent pan/zoom will virtualize
-        // This ensures proper layout calculation
-        // We'll enable virtualization after fitView completes
+    if (canVirtualizeOnFirstPaint && svg) {
+        fitView();
+        const rect = svg.getBoundingClientRect();
+        const initialBounds = getViewportBounds(rect.width, rect.height, state.scale, state.offsetX, state.offsetY);
+        const initialVirtualizationResult = getVisibleElements(renderNodes, renderEdges, initialBounds);
+        nodesToRender = initialVirtualizationResult.visibleNodes;
+        edgesToRender = initialVirtualizationResult.visibleEdges;
     }
 
     // Render edges first (behind nodes)
@@ -1617,7 +1720,9 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     }
 
     // Fit view
-    fitView();
+    if (!canVirtualizeOnFirstPaint) {
+        fitView();
+    }
 
     // Apply non-default layout if configured (parser positions are always vertical)
     if (state.layoutType && state.layoutType !== 'vertical') {
@@ -1630,10 +1735,13 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // After fitView, trigger virtualization update if enabled
     // This will remove nodes outside viewport and show indicators
     if (useVirtualization) {
-        // Use requestAnimationFrame to ensure layout is complete
-        requestAnimationFrame(() => {
+        if (canVirtualizeOnFirstPaint) {
             updateVisibleNodes();
-        });
+        } else {
+            requestAnimationFrame(() => {
+                updateVisibleNodes();
+            });
+        }
     }
 
     if (!layoutHistory.getCurrent()) {
@@ -1712,6 +1820,10 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         showContextMenu,
         onToggleNodeCollapse: toggleNodeCollapse,
     });
+    const renderedGroup = parent.lastElementChild as SVGGElement | null;
+    if (renderedGroup) {
+        renderedNodeElementsById.set(node.id, renderedGroup);
+    }
 }
 
 function getNodeVisualRendererDeps(): NodeVisualRendererDeps {
@@ -1895,36 +2007,57 @@ function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
         layoutType: state.layoutType || 'vertical',
         onEdgeClick: handleEdgeClick,
     });
+    const renderedEdge = parent.lastElementChild as SVGPathElement | null;
+    if (renderedEdge) {
+        renderedEdgeElementsById.set(edge.id, renderedEdge);
+        registerRenderedEdgeConnection(edge);
+    }
 }
 
 function handleEdgeClick(edge: FlowEdge): void {
-    const isDark = state.isDarkTheme;
-    const defaultStroke = isDark ? '#333333' : '#CBD5E1';
-    // Clear previous edge highlights
-    const edges = mainGroup?.querySelectorAll('.edge');
-    edges?.forEach(e => {
-        e.removeAttribute('data-highlighted');
-        const source = e.getAttribute('data-source');
-        const target = e.getAttribute('data-target');
-        const isConnected = state.selectedNodeId && (source === state.selectedNodeId || target === state.selectedNodeId);
+    const nextConnectedEdgeIds = state.selectedNodeId
+        ? new Set(renderedEdgeIdsByNodeId.get(state.selectedNodeId) || [])
+        : new Set<string>();
 
-        if (isConnected) {
-            e.setAttribute('stroke', EDGE_COLORS.highlight);
-            e.setAttribute('stroke-width', '2.5');
-        } else {
-            e.setAttribute('stroke', defaultStroke);
-            e.setAttribute('stroke-width', '1.5');
+    for (const edgeId of activeConnectedHighlightEdgeIds) {
+        if (nextConnectedEdgeIds.has(edgeId)) {
+            continue;
         }
-    });
+        const edgeElement = renderedEdgeElementsById.get(edgeId);
+        if (edgeElement) {
+            applyDefaultEdgeState(edgeElement);
+        }
+    }
 
-    // Highlight clicked edge
-    const clickedEdge = mainGroup?.querySelector(`[data-edge-id="${edge.id}"]`);
+    for (const edgeId of nextConnectedEdgeIds) {
+        if (edgeId === activeEdgeSelectionId) {
+            continue;
+        }
+        const edgeElement = renderedEdgeElementsById.get(edgeId);
+        if (edgeElement) {
+            applyConnectedEdgeState(edgeElement);
+        }
+    }
+
+    if (activeEdgeSelectionId && activeEdgeSelectionId !== edge.id) {
+        const previousSelectedEdge = renderedEdgeElementsById.get(activeEdgeSelectionId);
+        if (previousSelectedEdge) {
+            previousSelectedEdge.removeAttribute('data-highlighted');
+            if (nextConnectedEdgeIds.has(activeEdgeSelectionId)) {
+                applyConnectedEdgeState(previousSelectedEdge);
+            } else {
+                applyDefaultEdgeState(previousSelectedEdge);
+            }
+        }
+    }
+
+    const clickedEdge = renderedEdgeElementsById.get(edge.id);
     if (clickedEdge) {
         clickedEdge.setAttribute('data-highlighted', 'true');
-        clickedEdge.setAttribute('stroke', EDGE_COLORS.selected);
-        clickedEdge.setAttribute('stroke-width', '4');
-        clickedEdge.setAttribute('marker-end', 'url(#arrowhead-highlight)');
+        applySelectedEdgeState(clickedEdge);
     }
+    activeConnectedHighlightEdgeIds = nextConnectedEdgeIds;
+    activeEdgeSelectionId = edge.id;
 
     // Show SQL clause information
     if (edge.sqlClause) {
@@ -1996,7 +2129,14 @@ function renderBreadcrumb(): void {
 }
 
 function highlightConnectedEdges(nodeId: string, highlight: boolean): void {
-    highlightConnectedEdgesFeature(nodeId, highlight, mainGroup, state.isDarkTheme);
+    highlightConnectedEdgesFeature(
+        nodeId,
+        highlight,
+        mainGroup,
+        state.isDarkTheme,
+        renderedEdgeElementsById,
+        renderedEdgeIdsByNodeId
+    );
 }
 
 /**
@@ -2061,8 +2201,8 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
  */
 function getKeyboardNavigationNodes(): FlowNode[] {
     return getKeyboardNavigationNodesFeature({
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
     });
 }
@@ -2083,13 +2223,13 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
     return navigateToConnectedNodeFeature({
         direction,
         fromNodeId,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         onMoveToNode: (node) => {
             const relationEdge = direction === 'upstream'
-                ? currentEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
-                : currentEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
+                ? renderEdges.find((edge) => edge.source === node.id && edge.target === sourceNodeId)
+                : renderEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
             const relationLabel = getEdgeAnnouncementLabel(relationEdge);
             pendingNavigationAnnouncement = `Moved ${direction} via ${relationLabel}`;
             moveKeyboardFocusToNode(node);
@@ -2105,8 +2245,8 @@ function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev
     navigateToAdjacentNodeFeature({
         currentNode,
         direction,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         onMoveToNode: (node) => {
             moveKeyboardFocusToNode(node);
@@ -2118,8 +2258,8 @@ function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'
     return navigateToSiblingNodeFeature({
         currentNode,
         direction,
-        nodes: currentNodes,
-        edges: currentEdges,
+        nodes: renderNodes,
+        edges: renderEdges,
         state,
         layoutType: state.layoutType || 'vertical',
         onMoveToNode: (node) => {
@@ -2303,8 +2443,8 @@ function zoomToNode(node: FlowNode): void {
         node,
         svg,
         mainGroup,
-        currentNodes,
-        currentEdges,
+        currentNodes: renderNodes,
+        currentEdges: renderEdges,
         cloudOffsets,
         state,
         fitViewScale,
@@ -2466,7 +2606,7 @@ export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanEl
 }
 
 function updateSearchCountDisplay(): void {
-    updateSearchCountDisplayFeature(searchRuntime, state, currentNodes.length);
+    updateSearchCountDisplayFeature(searchRuntime, state, renderNodes.length);
 }
 
 // Highlight matching nodes without navigating (immediate feedback)
@@ -2508,14 +2648,18 @@ function performSearch(term: string): void {
 }
 
 function navigateSearch(delta: number): void {
-    navigateSearchFeature(delta, state, currentNodes, {
+    navigateSearchFeature(delta, state, renderNodes, {
         onUpdateSearchCountDisplay: updateSearchCountDisplay,
         onNodeMatchActivated: (nodeId) => {
-            const node = currentNodes.find((candidate) => candidate.id === nodeId);
+            const node = renderNodes.find((candidate) => candidate.id === nodeId);
             if (!node) {
                 return;
             }
-            zoomToNode(node);
+            if (node.type === 'cluster') {
+                centerOnNode(node);
+            } else {
+                zoomToNode(node);
+            }
             selectNode(nodeId, { skipNavigation: true });
             pulseNode(nodeId);
         },
@@ -2523,6 +2667,10 @@ function navigateSearch(delta: number): void {
 }
 
 function clearSearch(): void {
+    if (searchRuntime.searchDebounceTimer) {
+        clearTimeout(searchRuntime.searchDebounceTimer);
+        searchRuntime.searchDebounceTimer = null;
+    }
     clearSearchFeature(state, mainGroup, state.selectedNodeId, {
         onUpdateSearchCountDisplay: updateSearchCountDisplay,
         onRemoveBreadcrumbSegment: () => {
@@ -2840,9 +2988,11 @@ export function switchLayout(layoutType: LayoutType): void {
                     break;
             }
 
+            const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
+
             // Update node positions in DOM
             currentNodes.forEach(node => {
-                const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+                const nodeGroup = renderedNodeElementsById.get(node.id);
                 if (nodeGroup) {
                     const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
                     if (rect) {
@@ -2867,8 +3017,8 @@ export function switchLayout(layoutType: LayoutType): void {
                 const sourceId = edgeEl.getAttribute('data-source');
                 const targetId = edgeEl.getAttribute('data-target');
                 if (sourceId && targetId) {
-                    const sourceNode = currentNodes.find(n => n.id === sourceId);
-                    const targetNode = currentNodes.find(n => n.id === targetId);
+                    const sourceNode = currentNodeMap.get(sourceId);
+                    const targetNode = currentNodeMap.get(targetId);
                     if (sourceNode && targetNode) {
                         const path = calculateEdgePath(sourceNode, targetNode, layoutType);
                         edgeEl.setAttribute('d', path);
@@ -2979,7 +3129,7 @@ export function getFocusMode(): FocusMode {
 }
 
 function getConnectedNodes(nodeId: string): Set<string> {
-    return getConnectedNodesFeature(nodeId, currentEdges, state.focusMode);
+    return getConnectedNodesFeature(nodeId, renderEdges, state.focusMode);
 }
 
 // ============================================================

@@ -178,6 +178,8 @@ describe('workspace sharedStyles accessibility rules', () => {
         const css = getWebviewStyles(true);
 
         expect(css).toContain('.workspace-command-overlay');
+        expect(css).toContain('background: var(--overlay-scrim);');
+        expect(css).not.toContain('background: rgba(15, 23, 42, 0.42);');
         expect(css).toContain('z-index: 2000;');
         expect(css).toContain('.lineage-panel {\n            position: absolute;');
         expect(css).toContain('z-index: 50;');

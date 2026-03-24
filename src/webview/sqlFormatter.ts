@@ -25,6 +25,14 @@ export interface FormatOptions {
     lineWidth: number;
 }
 
+interface HighlightPalette {
+    keyword: string;
+    function: string;
+    string: string;
+    number: string;
+    comment: string;
+}
+
 const DEFAULT_OPTIONS: FormatOptions = {
     indent: '    ',
     uppercase: true,
@@ -277,8 +285,9 @@ function splitByComma(text: string): string[] {
  * Generate syntax-highlighted HTML for SQL
  * Uses a token-based approach to avoid HTML escaping issues
  */
-export function highlightSql(sql: string): string {
+export function highlightSql(sql: string, isDarkTheme = true): string {
     if (!sql) {return '';}
+    const palette = getHighlightPalette(isDarkTheme);
 
     const tokens: Array<{ type: string; value: string }> = [];
     let i = 0;
@@ -359,19 +368,39 @@ export function highlightSql(sql: string): string {
         const escaped = escapeHtmlSimple(token.value);
         switch (token.type) {
             case 'keyword':
-                return `<span style="color: #c792ea; font-weight: 600;">${escaped}</span>`;
+                return `<span style="color: ${palette.keyword}; font-weight: 600;">${escaped}</span>`;
             case 'function':
-                return `<span style="color: #82aaff;">${escaped}</span>`;
+                return `<span style="color: ${palette.function};">${escaped}</span>`;
             case 'string':
-                return `<span style="color: #c3e88d;">${escaped}</span>`;
+                return `<span style="color: ${palette.string};">${escaped}</span>`;
             case 'number':
-                return `<span style="color: #f78c6c;">${escaped}</span>`;
+                return `<span style="color: ${palette.number};">${escaped}</span>`;
             case 'comment':
-                return `<span style="color: #546e7a; font-style: italic;">${escaped}</span>`;
+                return `<span style="color: ${palette.comment}; font-style: italic;">${escaped}</span>`;
             default:
                 return escaped;
         }
     }).join('');
+}
+
+function getHighlightPalette(isDarkTheme: boolean): HighlightPalette {
+    if (isDarkTheme) {
+        return {
+            keyword: '#c792ea',
+            function: '#82aaff',
+            string: '#c3e88d',
+            number: '#f78c6c',
+            comment: '#546e7a',
+        };
+    }
+
+    return {
+        keyword: '#7c3aed',
+        function: '#2563eb',
+        string: '#047857',
+        number: '#c2410c',
+        comment: '#475569',
+    };
 }
 
 function escapeHtmlSimple(text: string): string {
@@ -380,5 +409,4 @@ function escapeHtmlSimple(text: string): string {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
 }
-
 

@@ -1,4 +1,5 @@
 import { createSearchBox } from '../../../src/webview/ui/toolbar/searchBox';
+import { getComponentUiColors } from '../../../src/webview/constants';
 
 type Listener = (event: any) => void;
 
@@ -64,9 +65,11 @@ describe('searchBox toolbar ui', () => {
         const ready = jest.fn();
         const onPrevSearchResult = jest.fn();
         const onNextSearchResult = jest.fn();
+        const themeChangeListener = jest.fn();
 
         global.document = {
             createElement: jest.fn((tag: string) => createElement(tag)),
+            addEventListener: themeChangeListener,
         } as unknown as Document;
 
         const root = createSearchBox({
@@ -78,6 +81,7 @@ describe('searchBox toolbar ui', () => {
 
         expect(root.id).toBe('search-container');
         expect(root.style.cssText).toContain('display: flex');
+        expect((root as any).style.background).toBe(getComponentUiColors(true).surface);
 
         const searchInput = root.children.find((child) => child.id === 'search-input');
         const searchCount = root.children.find((child) => child.id === 'search-count');
@@ -87,17 +91,44 @@ describe('searchBox toolbar ui', () => {
         expect(searchInput?.placeholder).toBe('Search nodes... (Ctrl+F)');
         expect(searchInput?.getAttribute('aria-label')).toBe('Search nodes');
         expect(searchCount?.getAttribute('aria-live')).toBe('polite');
+        expect((searchInput as any)?.style.color).toBe(getComponentUiColors(true).text);
+        expect((searchCount as any)?.style.color).toBe(getComponentUiColors(true).textMuted);
         expect(ready).toHaveBeenCalledWith(searchInput, searchCount);
 
         const prevBtn = navContainer?.children[0];
         const nextBtn = navContainer?.children[1];
         expect(prevBtn?.getAttribute('aria-label')).toBe('Previous match');
         expect(nextBtn?.getAttribute('aria-label')).toBe('Next match');
+        expect((prevBtn as any)?.style.color).toBe(getComponentUiColors(true).textMuted);
+        expect((nextBtn as any)?.style.color).toBe(getComponentUiColors(true).textMuted);
 
         prevBtn?.emit('click');
         nextBtn?.emit('click');
 
         expect(onPrevSearchResult).toHaveBeenCalled();
         expect(onNextSearchResult).toHaveBeenCalled();
+        expect(themeChangeListener).toHaveBeenCalled();
+    });
+
+    it('applies light theme colors to muted search chrome', () => {
+        const ready = jest.fn();
+        global.document = {
+            createElement: jest.fn((tag: string) => createElement(tag)),
+            addEventListener: jest.fn(),
+        } as unknown as Document;
+
+        const root = createSearchBox({
+            isDarkTheme: () => false,
+            onPrevSearchResult: jest.fn(),
+            onNextSearchResult: jest.fn(),
+            onSearchBoxReady: ready,
+        }, () => undefined) as unknown as FakeElement;
+
+        const searchInput = root.children.find((child) => child.id === 'search-input');
+        const searchCount = root.children.find((child) => child.id === 'search-count');
+        expect((root as any).style.background).toBe(getComponentUiColors(false).surface);
+        expect((root as any).style.borderColor).toBe(getComponentUiColors(false).border);
+        expect((searchInput as any)?.style.color).toBe(getComponentUiColors(false).text);
+        expect((searchCount as any)?.style.color).toBe(getComponentUiColors(false).textMuted);
     });
 });

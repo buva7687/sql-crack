@@ -2,6 +2,11 @@ import { pulseNodeFeature, pulseNodeInCloudFeature } from '../../../src/webview/
 
 function createRect(initial: Record<string, string> = {}) {
     const attrs = new Map<string, string>(Object.entries(initial));
+    for (const [name, value] of Object.entries(initial)) {
+        if (name === 'stroke' || name === 'stroke-width' || name === 'stroke-dasharray') {
+            attrs.set(`data-node-base-${name}`, value);
+        }
+    }
     return {
         style: {
             animation: '',
@@ -11,6 +16,7 @@ function createRect(initial: Record<string, string> = {}) {
             attrs.set(name, value);
         }),
         getAttribute: jest.fn((name: string) => attrs.get(name) || null),
+        hasAttribute: jest.fn((name: string) => attrs.has(name)),
         removeAttribute: jest.fn((name: string) => {
             attrs.delete(name);
         }),

@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-23
+
+### Added
+
+- **Pure rendering computations module**: Extracted `calculateEdgePath`, `contrastTextForBadge`, `computeCloudArrowPath`, `calculateQueryDepth`, `getQueryComplexityInfo`, and `calculateStackedCloudOffsets` from DOM-dependent rendering modules into a standalone `computations.ts` — zero DOM imports, directly testable in Jest.
+- **Shared fake DOM test helper**: Added `tests/helpers/fakeDom.ts` providing lightweight `FakeElement` / `FakeDocument` objects that track `setAttribute`, children, style mutations, and event listeners without requiring jsdom. Enables direct-import testing of `nodeRenderer.ts`, `edgeRenderer.ts`, and `cloudRenderer.ts`.
+- **Workspace pipeline integration test**: Test exercising SQL strings → SchemaExtractor + ReferenceExtractor → WorkspaceIndex → LineageBuilder → `buildDependencyGraph` → `GraphBuilder` with assertions on nodes, edges, upstream/downstream relationships, graph conversion, filtering, focus, and path highlighting.
+- **Extension activation guards**: Validates `normalizeDialect()`, command declarations, keybindings, configuration schema, activation events, and message protocol type coverage via source-reading assertions. Runtime tests call real `activate()` with mock context and verify command registrations, event listeners, diagnostic collection, logger initialization, and VisualizationPanel wiring.
+- **Message protocol tests**: Source-reading guards + runtime `MessageHandler.handleMessage()` dispatch tests validating state mutations, error resilience, and disposed-handler safety. Includes `messageMetadata` utility tests for requestId extraction/attachment and missing-data-reason inference.
+- **Settings propagation tests**: Validates `normalizeDialect()` runtime behavior, `normalizeAdvancedLimit()` clamping (NaN, Infinity, boundary, fractional), custom function injection into `functionRegistry`, package.json declaration completeness, `SqlFlowRuntimeConfig` field coverage, and source-reading guards on `VisualizationPanel` and webview `Window` interface. Runtime tests call `activate()` to verify config loading and config-change handler reload behavior.
+- **Web Worker parsing**: SQL parsing now runs off the main thread via a dedicated Web Worker (`parser.worker.ts`), keeping the UI responsive during large queries. Includes CSP unlock (`worker-src`), webpack worker bundle, `parserClient.ts` worker manager with timeout/respawn/cancellation, and URI injection via `visualizationPanel.ts`. Falls back to synchronous parsing when workers are unavailable.
+- **Shared node border-state helper**: Added `nodeBorderState.ts` so renderer interaction paths can capture and restore semantic node border styling after transient search, selection, pulse, and lineage highlights.
+
+### Changed
+
+- **Edge renderer delegation**: `edgeRenderer.ts` now delegates `calculateEdgePath` and `contrastTextForBadge` to the pure `computations.ts` module instead of containing inline implementations.
+- **Query complexity delegation**: `queryComplexity.ts` now delegates `calculateQueryDepth` and `getQueryComplexityInfo` to `computations.ts`.
+- **Rendering barrel exports**: `rendering/index.ts` now re-exports pure computation functions for downstream consumers.
+- **Large-graph clustering threshold**: SQL Flow now waits until a graph reaches `100` nodes before auto-enabling clustering, reducing premature clustering on medium-sized queries.
+- **README large-graph note**: Documented the `100+` node clustering behavior and clarified that search and keyboard navigation follow the currently rendered graph when clusters are collapsed.
+
+### Fixed
+
+- **Query depth reconverging DAG bug**: `calculateQueryDepth()` used a single global `visited` set that prevented revisiting a shared ancestor through a longer path, undercounting depth for diamond-shaped DAGs. Replaced with per-node best-depth tracking and an `onStack` cycle guard so reconverging graphs report the true longest path.
+- **Defensive AST null guard**: `parseSql` now filters null entries from the AST statements array before processing, preventing downstream errors if `node-sql-parser` emits `[null]`.
+- **Delete handler dedup**: Workspace file watcher delete handler now skips duplicate events for the same file path while a removal is already in flight, preventing counter drift under rapid deletions.
+- **Perf baseline threshold**: Bumped simple-query performance threshold from 50ms to 100ms to reduce false failures in slower CI environments.
+- **CTE consumer wiring**: CTE nodes in SQL Flow now connect to the actual outer-query table/join reference nodes that consume them instead of always wiring to the first `FROM` table.
+- **Inter-CTE dependency promotion**: Collapsed CTE containers now promote internal CTE references to top-level edges across `FROM`, `JOIN`, and nested expression subqueries (`WHERE`, `HAVING`, `JOIN ... ON`, scalar subqueries, and `ORDER BY`). JOIN-based references are deduplicated so repeated use of the same CTE does not emit duplicate container edges. This restores expected top-level connectivity for chained examples such as `examples/complex-analytics-queries.sql`.
+- **Projected graph search/navigation consistency**: Search result activation, keyboard navigation, focus traversal, and virtualization toggles now operate on the clustered/projected render graph instead of the raw pre-cluster graph, preventing hidden-node mismatches and cluster search failures.
+- **Search Enter debounce race**: Pressing Enter in the search box now clears any pending debounce timer and stops propagation, preventing double-advance behavior and later jumps back to the first result.
+- **Semantic border restoration**: Selection, keyboard focus blur, search cleanup, pulse cleanup, and column-lineage cleanup now restore each node's base border styling instead of dropping semantic stroke metadata.
+- **Collapse-button drag guard**: CTE/subquery drag suppression now checks the actual rendered `.collapse-btn` class, preventing accidental node drags when the collapse control is clicked.
+- **Hover arrowhead theme mismatch**: The hover marker arrowhead now uses the active light/dark theme palette instead of a hardcoded dark-theme color.
+- **Column-lineage DFS path poisoning**: Column-lineage path tracing now uses per-source visited state with backtracking so failed branches do not suppress valid downstream paths.
+- **PostgreSQL dollar-quote dialect false positives**: Dialect detection now masks dollar-quoted bodies while still recognizing dollar-quoted literals as a PostgreSQL signal, preventing Snowflake scoring from tokens embedded inside `$$...$$` / `$tag$...$tag$` text.
+- **Nested block comment stripping**: Shared SQL comment stripping now tracks nested `/* ... */` depth, preventing commented SQL from leaking back into executable-SQL checks and workspace extractors.
+- **View-location dropdown stale state**: The toolbar `View Location` menu now updates its active row and checkmark immediately after the user changes the target location.
+- **Floating toolbar menu theme sync**: Focus, view-location, and pinned-tab floating menus now reapply their theme-aware chrome and text colors on runtime theme toggles.
+
+### Tests
+
+- Added 296 new tests across 9 new debt-remediation files: `computations.test.ts` (53), `virtualization.test.ts` (29), `nodeRenderer.test.ts` (12), `edgeRenderer.test.ts` (19), `cloudRenderer.test.ts` (30), `workspacePipeline.test.ts` (32), `extensionActivation.test.ts` (28), `messageProtocol.test.ts` (42), `settingsPropagation.test.ts` (51). Includes reconverging DAG depth tests, layout function tests, stacked cloud offset computation, runtime activation wiring, normalizeAdvancedLimit clamping, config-change handler reload, runtime handler dispatch, and full pipeline graph conversion.
+- Expanded worker/runtime regression coverage in `parser.worker.test.ts`, `parserClient.test.ts`, `parserWorkerMigrationPrep.test.ts`, `parserWorkerWiringPrep.test.ts`, `compareModeWiring.test.ts`, `visualizationPanel.test.ts`, and `runtimeConfigContract.test.ts` so the off-main-thread parsing path and webview bootstrap contract are explicitly guarded.
+- Added regression coverage for CTE consumer wiring, projected render-graph search/navigation, search Enter/debounce behavior, semantic border restoration, collapse-button drag guarding, hover marker theme handling, and column-lineage path traversal.
+- Added parser regression coverage for inter-CTE promotion through direct internal references, JOIN references, and nested subqueries in `WHERE` and `JOIN ... ON` clauses.
+- Added regression coverage for PostgreSQL dollar-quoted dialect detection, nested block comment stripping, live view-location menu state, and floating-menu theme updates.
+- Current branch validation: 254 suites, 3,431 tests passing with zero failures.
+
 ## [0.6.0] - 2026-03-15
 
 ### Added
@@ -689,7 +738,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQL Server dialect in settings** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Users can now select "SQL Server" directly in the `sqlCrack.defaultDialect` setting. Previously only "TransactSQL" was available, which was confusing since the toolbar shows "SQL Server".
 - **Default layout not applying on first open** ([#46](https://github.com/buva7687/sql-crack/issues/46)): The `sqlCrack.defaultLayout` setting (e.g., `"horizontal"`) now takes effect immediately when opening the visualization. Previously the parser's vertical positions were used regardless of the setting.
 - **Node drag disconnects edges** ([#46](https://github.com/buva7687/sql-crack/issues/46)): Dragging nodes in horizontal, force, or radial layouts no longer detaches edges. Edge recalculation now uses the layout-aware `calculateEdgePath()` instead of hardcoded vertical-only math.
-- **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as `[object Object](...)`. Function names are now unwrapped from nested AST identifier objects before expression formatting.
+- **PostgreSQL column-lineage expression rendering regression**: Calculated expressions such as `round(... / nullif(...), 4)` no longer render as broken `[object Object]` placeholders. Function names are now unwrapped from nested AST identifier objects before expression formatting.
 - **Parse error context clarity**: Parse errors now include the offending SQL source line in both the error badge tooltip and the canvas error overlay, making line/column diagnostics actionable when comments/whitespace shift line numbers. The stored SQL context for parse errors was increased from 200 to 500 characters to improve source-line extraction reliability.
 - **Cross-dialect fallback parsing reliability**: Reduced false positives in dialect detection where time literals like `00:00:00` could be misclassified as dialect-specific path syntax. Also ensured dialect auto-retry applies compatibility preprocessing when needed (`AT TIME ZONE`, type-prefixed literals), reducing unnecessary regex fallback on valid SQL.
 - **False "Unused CTE" hints for chained CTEs**: CTE-to-CTE references (e.g., `high_value_customers` referencing `customer_totals` via JOIN) were not detected, causing valid CTEs to be flagged as unused. The detection now recursively checks CTE children including join nodes, and correctly strips `WITH RECURSIVE` prefixes.

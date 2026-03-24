@@ -2,12 +2,51 @@
  * Parser Client for async SQL parsing
  *
  * Provides async parsing API that wraps the synchronous parser.
- * Uses regular imports (not dynamic) to avoid CSP issues with webpack chunks.
- * Web Worker implementation is deferred to future work due to bundling complexity.
+ * Uses a dedicated parser worker when the webview bootstrap provides a worker URI,
+ * while preserving the existing macrotask yield and stale-request cancellation.
  */
 
 import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationError, ValidationLimits } from './types';
 import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
+
+type WorkerBackedResponse = ParseResult | BatchParseResult;
+
+type ParserWorkerRequest =
+    | {
+        type: 'parse';
+        requestId: number;
+        payload: {
+            sql: string;
+            dialect: SqlDialect;
+            options: ParseOptions;
+        };
+    }
+    | {
+        type: 'parseBatch';
+        requestId: number;
+        payload: {
+            sql: string;
+            dialect: SqlDialect;
+            limits: ValidationLimits;
+            options: BatchParseOptions;
+        };
+    };
+
+type ParserWorkerResponse =
+    | { type: 'parse'; requestId: number; result: ParseResult }
+    | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
+    | { type: 'validate'; requestId: number; result: ValidationError | null }
+    | { type: 'error'; requestId: number; error: string };
+
+interface PendingWorkerRequest {
+    kind: 'parse' | 'parseBatch';
+    sql: string;
+    resolve: (value: WorkerBackedResponse) => void;
+    reject: (error: Error) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+}
+
+const PARSER_WORKER_TIMEOUT_MS = 5000;
 
 function yieldToMainLoop(): Promise<void> {
     return new Promise(resolve => {
@@ -19,6 +58,15 @@ let nextParseRequestId = 0;
 let latestParseRequestId = 0;
 let cancelledParseRequestId = 0;
 let pendingParseRequests = 0;
+let parserWorker: Worker | null = null;
+const pendingWorkerRequests = new Map<number, PendingWorkerRequest>();
+
+type ParserWorkerWindow = Window & typeof globalThis & {
+    parserWorkerUri?: string;
+    sqlCrackConfig?: {
+        parserWorkerUri?: string;
+    };
+};
 
 function createEmptyStats(): QueryStats {
     return {
@@ -58,10 +106,137 @@ function createCancelledBatchParseResult(sql: string): BatchParseResult {
     };
 }
 
+function getParserWorkerUri(): string | null {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    const workerWindow = window as ParserWorkerWindow;
+    return workerWindow.sqlCrackConfig?.parserWorkerUri || workerWindow.parserWorkerUri || null;
+}
+
+function clearWorkerRequestTimeout(timeoutId: ReturnType<typeof setTimeout>): void {
+    clearTimeout(timeoutId);
+}
+
+function resolveCancelledWorkerRequest(requestId: number, request: PendingWorkerRequest): void {
+    clearWorkerRequestTimeout(request.timeoutId);
+    pendingWorkerRequests.delete(requestId);
+    request.resolve(request.kind === 'parse'
+        ? createCancelledParseResult(request.sql)
+        : createCancelledBatchParseResult(request.sql));
+}
+
+function cancelSupersededWorkerRequests(requestId: number): void {
+    for (const [pendingRequestId, pendingRequest] of pendingWorkerRequests) {
+        if (pendingRequestId < requestId) {
+            resolveCancelledWorkerRequest(pendingRequestId, pendingRequest);
+        }
+    }
+}
+
+function detachWorkerListeners(worker: Worker): void {
+    worker.removeEventListener('message', handleWorkerMessage as EventListener);
+    worker.removeEventListener('error', handleWorkerError as EventListener);
+}
+
+function destroyWorker(): void {
+    if (!parserWorker) {
+        return;
+    }
+
+    detachWorkerListeners(parserWorker);
+    parserWorker.terminate();
+    parserWorker = null;
+}
+
+function rejectPendingWorkerRequests(error: Error): void {
+    for (const [requestId, pendingRequest] of pendingWorkerRequests) {
+        clearWorkerRequestTimeout(pendingRequest.timeoutId);
+        pendingWorkerRequests.delete(requestId);
+        pendingRequest.reject(error);
+    }
+}
+
+function handleWorkerMessage(event: MessageEvent<ParserWorkerResponse>): void {
+    const response = event.data;
+    const pendingRequest = pendingWorkerRequests.get(response.requestId);
+    if (!pendingRequest) {
+        return;
+    }
+
+    clearWorkerRequestTimeout(pendingRequest.timeoutId);
+    pendingWorkerRequests.delete(response.requestId);
+
+    if (response.type === 'error') {
+        pendingRequest.reject(new Error(response.error));
+        return;
+    }
+
+    if (response.type === 'parse' || response.type === 'parseBatch') {
+        pendingRequest.resolve(response.result);
+    }
+}
+
+function handleWorkerError(event: ErrorEvent): void {
+    const message = event.message || 'Parser worker error';
+    destroyWorker();
+    rejectPendingWorkerRequests(new Error(message));
+}
+
+function getOrCreateWorker(): Worker {
+    if (parserWorker) {
+        return parserWorker;
+    }
+
+    const workerUri = getParserWorkerUri();
+    if (!workerUri || typeof Worker === 'undefined') {
+        throw new Error('Parser worker is not available in the current environment');
+    }
+
+    parserWorker = new Worker(workerUri);
+    parserWorker.addEventListener('message', handleWorkerMessage as EventListener);
+    parserWorker.addEventListener('error', handleWorkerError as EventListener);
+    return parserWorker;
+}
+
+function queueWorkerRequest<T extends WorkerBackedResponse>(
+    requestId: number,
+    kind: PendingWorkerRequest['kind'],
+    sql: string,
+    request: ParserWorkerRequest
+): Promise<T> {
+    const worker = getOrCreateWorker();
+
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            const pendingRequest = pendingWorkerRequests.get(requestId);
+            if (!pendingRequest) {
+                return;
+            }
+
+            pendingWorkerRequests.delete(requestId);
+            destroyWorker();
+            reject(new Error('Parser worker timed out'));
+        }, PARSER_WORKER_TIMEOUT_MS);
+
+        pendingWorkerRequests.set(requestId, {
+            kind,
+            sql,
+            resolve: (value) => resolve(value as T),
+            reject,
+            timeoutId,
+        });
+
+        worker.postMessage(request);
+    });
+}
+
 function beginParseRequest(): number {
     const requestId = ++nextParseRequestId;
     latestParseRequestId = requestId;
     pendingParseRequests++;
+    cancelSupersededWorkerRequests(requestId);
     return requestId;
 }
 
@@ -91,6 +266,22 @@ export async function parseAsync(
         if (isParseRequestStale(requestId)) {
             return createCancelledParseResult(sql);
         }
+
+        if (isWorkerSupported()) {
+            try {
+                return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
+                    type: 'parse',
+                    requestId,
+                    payload: { sql, dialect, options },
+                });
+            } catch {
+                destroyWorker();
+                if (isParseRequestStale(requestId)) {
+                    return createCancelledParseResult(sql);
+                }
+            }
+        }
+
         return parseSql(sql, dialect, options);
     } finally {
         finishParseRequest();
@@ -117,6 +308,22 @@ export async function parseBatchAsync(
         if (isParseRequestStale(requestId)) {
             return createCancelledBatchParseResult(sql);
         }
+
+        if (isWorkerSupported()) {
+            try {
+                return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
+                    type: 'parseBatch',
+                    requestId,
+                    payload: { sql, dialect, limits: appliedLimits, options },
+                });
+            } catch {
+                destroyWorker();
+                if (isParseRequestStale(requestId)) {
+                    return createCancelledBatchParseResult(sql);
+                }
+            }
+        }
+
         return parseSqlBatch(sql, dialect, appliedLimits, options);
     } finally {
         finishParseRequest();
@@ -147,22 +354,20 @@ export async function validateAsync(
 
 /**
  * Check if web workers are supported in current environment
- *
- * Note: Worker implementation is deferred. This always returns false currently.
  */
 export function isWorkerSupported(): boolean {
-    // Worker implementation deferred to future work
-    return false;
+    return typeof window !== 'undefined'
+        && typeof Worker !== 'undefined'
+        && typeof getParserWorkerUri() === 'string'
+        && Boolean(getParserWorkerUri());
 }
 
 /**
  * Terminate the worker and cleanup resources
- *
- * Note: Worker implementation is deferred. This is a no-op currently.
  */
 export function terminateWorker(): void {
-    // Worker implementation deferred - no-op for now
     cancelPendingParse();
+    destroyWorker();
 }
 
 /**
@@ -170,7 +375,7 @@ export function terminateWorker(): void {
  *
  * @param sql - SQL string to parse
  * @param dialect - SQL dialect to use
- * @param useWorker - Whether to attempt using worker (ignored for now)
+ * @param useWorker - Whether to attempt using the parser worker when supported
  * @returns Promise resolving to parse result
  */
 export async function parseWithFallback(
@@ -179,34 +384,45 @@ export async function parseWithFallback(
     useWorker: boolean = true,
     options: ParseOptions = {}
 ): Promise<ParseResult> {
-    // Worker implementation deferred, always use async import
+    if (!useWorker) {
+        const requestId = beginParseRequest();
+        try {
+            await yieldToMainLoop();
+            if (isParseRequestStale(requestId)) {
+                return createCancelledParseResult(sql);
+            }
+            return parseSql(sql, dialect, options);
+        } finally {
+            finishParseRequest();
+        }
+    }
+
     return parseAsync(sql, dialect, options);
 }
 
 /**
  * Cancel any pending parse operations
- *
- * Note: Worker implementation is deferred. This is a no-op currently.
  */
 export function cancelPendingParse(): void {
     cancelledParseRequestId = latestParseRequestId;
+    for (const [requestId, pendingRequest] of pendingWorkerRequests) {
+        resolveCancelledWorkerRequest(requestId, pendingRequest);
+    }
 }
 
 /**
  * Get worker status for debugging
- *
- * Note: Worker implementation is deferred.
  */
 export function getWorkerStatus(): {
     supported: boolean;
     active: boolean;
     pendingRequests: number;
-    implementation: 'deferred';
+    implementation: 'deferred' | 'worker';
 } {
     return {
-        supported: false,
-        active: false,
+        supported: isWorkerSupported(),
+        active: parserWorker !== null,
         pendingRequests: pendingParseRequests,
-        implementation: 'deferred'
+        implementation: isWorkerSupported() ? 'worker' : 'deferred'
     };
 }

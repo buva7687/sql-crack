@@ -201,4 +201,12 @@ describe('highlightSql', () => {
         // COUNT should still be detected as function
         expect(result).toContain('COUNT');
     });
+
+    it('supports a separate light-theme token palette', () => {
+        const result = highlightSql("SELECT total, 'paid' -- comment", false);
+        expect(result).toContain('color: #7c3aed');
+        expect(result).toContain('color: #047857');
+        expect(result).toContain('color: #475569');
+        expect(result).not.toContain('color: #c792ea');
+    });
 });

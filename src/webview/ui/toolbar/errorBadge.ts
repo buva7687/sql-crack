@@ -1,10 +1,51 @@
 import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
+import { getComponentUiColors } from '../../constants';
 import { repositionBreadcrumbBar } from '../breadcrumbBar';
 
 let errorBadgeClickCallback: ((queryIndex: number) => void) | null = null;
 let errorCycleIndex = 0;
 let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number; sourceLine?: string }> = [];
+let currentBadgeIsDark = typeof window !== 'undefined' ? window.vscodeTheme !== 'light' : true;
+
+function applyErrorBadgeTheme(badge: HTMLElement, isDark: boolean): void {
+    const theme = getComponentUiColors(isDark);
+    const background = theme.errorBg;
+    const hoverBackground = theme.errorBgHover;
+    const borderColor = isDark ? 'rgba(239, 68, 68, 0.35)' : 'rgba(220, 38, 38, 0.3)';
+    const textColor = isDark ? '#fecaca' : '#991b1b';
+
+    badge.dataset.theme = isDark ? 'dark' : 'light';
+    badge.style.background = background;
+    badge.style.borderColor = borderColor;
+    badge.style.color = textColor;
+
+    const icon = badge.querySelector('[data-role="error-badge-icon"]') as HTMLElement | null;
+    const label = badge.querySelector('[data-role="error-badge-label"]') as HTMLElement | null;
+    if (icon) {
+        icon.style.color = textColor;
+    }
+    if (label) {
+        label.style.color = textColor;
+    }
+
+    badge.onmouseenter = () => {
+        badge.style.background = hoverBackground;
+    };
+    badge.onmouseleave = () => {
+        badge.style.background = background;
+    };
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('theme-change', ((event: CustomEvent<{ dark: boolean }>) => {
+        currentBadgeIsDark = Boolean(event.detail?.dark);
+        const badge = document.getElementById('sql-crack-error-badge');
+        if (badge) {
+            applyErrorBadgeTheme(badge, currentBadgeIsDark);
+        }
+    }) as EventListener);
+}
 
 /**
  * Register a callback for when the error badge is clicked.
@@ -44,20 +85,12 @@ export function updateErrorBadge(
             display: flex;
             align-items: center;
             gap: 6px;
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
             padding: 6px 12px;
             z-index: ${Z_INDEX.badge};
             cursor: pointer;
             transition: background 0.2s;
         `;
-        badge.addEventListener('mouseenter', () => {
-            badge!.style.background = 'rgba(239, 68, 68, 0.25)';
-        });
-        badge.addEventListener('mouseleave', () => {
-            badge!.style.background = 'rgba(239, 68, 68, 0.15)';
-        });
         badge.addEventListener('click', () => {
             if (currentBadgeErrors.length > 0 && errorBadgeClickCallback) {
                 errorBadgeClickCallback(currentBadgeErrors[errorCycleIndex % currentBadgeErrors.length].queryIndex);
@@ -82,11 +115,12 @@ export function updateErrorBadge(
         || `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 
     badge.innerHTML = `
-        <span style="color: #f87171; font-size: 14px; display: inline-flex; width: 14px; height: 14px;">${ICONS.warning}</span>
-        <span style="color: #fca5a5; font-size: 12px; font-weight: 500;">
+        <span data-role="error-badge-icon" style="font-size: 14px; display: inline-flex; width: 14px; height: 14px;">${ICONS.warning}</span>
+        <span data-role="error-badge-label" style="font-size: 12px; font-weight: 500;">
             ${errorCount} parse error${errorCount > 1 ? 's' : ''}
         </span>
     `;
+    applyErrorBadgeTheme(badge, currentBadgeIsDark);
     badge.title = tooltipText;
     requestAnimationFrame(() => repositionBreadcrumbBar());
 }

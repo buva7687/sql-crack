@@ -5,6 +5,7 @@ import process from 'process/browser';
 import { parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
+import { getComponentUiColors } from './constants';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
@@ -103,6 +104,7 @@ interface SqlCrackWebviewBootstrapConfig {
     pinId: string | null;
     viewLocation: string;
     defaultLayout: string;
+    parserWorkerUri: string;
     persistedPinnedTabs: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number; sourceDocumentUri?: string }>;
     initialUiState: unknown;
     showDeadColumnHints: boolean;
@@ -134,6 +136,7 @@ declare global {
         pinId?: string | null;
         viewLocation?: string;
         defaultLayout?: string;
+        parserWorkerUri?: string;
         flowDirection?: string;
         showDeadColumnHints?: boolean;
         combineDdlStatements?: boolean;
@@ -459,6 +462,17 @@ function clearDialectSwitchSuggestion(): void {
     cleanupDialectSuggestion = null;
 }
 
+function applyDialectSwitchSuggestionTheme(card: HTMLElement, button: HTMLButtonElement, dark: boolean): void {
+    const theme = getComponentUiColors(dark);
+    card.style.background = theme.surfaceElevated;
+    card.style.borderColor = theme.border;
+    card.style.color = theme.textBright;
+    card.style.boxShadow = theme.shadow;
+    button.style.background = theme.accentBg;
+    button.style.borderColor = theme.accent;
+    button.style.color = theme.textBright;
+}
+
 function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
     clearDialectSwitchSuggestion();
     const root = document.getElementById('root');
@@ -478,11 +492,8 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
         gap: 8px;
         padding: 8px 10px;
         border-radius: 8px;
-        border: 1px solid rgba(99, 102, 241, 0.35);
-        background: rgba(15, 23, 42, 0.92);
-        color: #e2e8f0;
         font-size: 12px;
-        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+        border: 1px solid transparent;
     `;
 
     const message = document.createElement('span');
@@ -493,10 +504,8 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
     button.type = 'button';
     button.textContent = `Switch to ${dialect}`;
     button.style.cssText = `
-        border: 1px solid rgba(129, 140, 248, 0.7);
+        border: 1px solid transparent;
         border-radius: 6px;
-        background: rgba(99, 102, 241, 0.25);
-        color: #eef2ff;
         padding: 4px 8px;
         cursor: pointer;
         font-size: 11px;
@@ -504,15 +513,40 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
     `;
     card.appendChild(button);
 
+    const updateTheme = (dark: boolean): void => {
+        applyDialectSwitchSuggestionTheme(card, button, dark);
+    };
+    updateTheme(isDarkTheme());
+
     const onClick = (): void => {
         clearDialectSwitchSuggestion();
         setDialectAndVisualize(dialect);
     };
     button.addEventListener('click', onClick);
+
+    const onMouseEnter = (): void => {
+        const theme = getComponentUiColors(isDarkTheme());
+        button.style.background = theme.accentBgStrong;
+    };
+    const onMouseLeave = (): void => {
+        const theme = getComponentUiColors(isDarkTheme());
+        button.style.background = theme.accentBg;
+    };
+    button.addEventListener('mouseenter', onMouseEnter);
+    button.addEventListener('mouseleave', onMouseLeave);
+
+    const themeChangeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        updateTheme(Boolean(event.detail?.dark));
+    }) as EventListener;
+    document.addEventListener('theme-change', themeChangeHandler);
+
     root.appendChild(card);
 
     cleanupDialectSuggestion = () => {
         button.removeEventListener('click', onClick);
+        button.removeEventListener('mouseenter', onMouseEnter);
+        button.removeEventListener('mouseleave', onMouseLeave);
+        document.removeEventListener('theme-change', themeChangeHandler);
         card.remove();
     };
 }
@@ -1137,9 +1171,14 @@ async function toggleCompareMode(): Promise<void> {
         return;
     }
 
+    const compareToken = parseRequestId;
+    const compareQueryIndex = currentQueryIndex;
     const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
         allowDialectFallback: isDialectAutoDetectionEnabled(),
     });
+    if (!batchResult || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
+        return;
+    }
     const currentTitle = batchResult.queries.length > 1
         ? `Current • Q${currentQueryIndex + 1}`
         : (window.fileName || 'Current query');

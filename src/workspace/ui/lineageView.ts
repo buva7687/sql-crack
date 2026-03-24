@@ -7,22 +7,9 @@ import { LineageGraphRenderer } from './lineageGraphRenderer';
 import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 
 /**
- * Recent selection for history tracking
- */
-interface RecentSelection {
-    nodeId: string;
-    name: string;
-    type: string;
-    timestamp: number;
-}
-
-/**
  * Generates HTML for lineage visualization
  */
 export class LineageView {
-    private recentSelections: RecentSelection[] = [];
-    private maxRecentItems = 5;
-
     /**
      * Generate the main lineage view with search interface and graph container
      * This is the new default view that replaces the overview
@@ -30,12 +17,10 @@ export class LineageView {
     generateLineageSearchView(
         graph: LineageGraph,
         options: {
-            selectedNodeId?: string;
-            recentSelections?: RecentSelection[];
             depth?: number;
         } = {}
     ): string {
-        const { selectedNodeId, recentSelections = [], depth = 5 } = options;
+        const { depth = 5 } = options;
 
         // Get all searchable nodes
         const renderer = new LineageGraphRenderer(graph);

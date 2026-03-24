@@ -42,6 +42,7 @@ export class IndexManager {
     private _changesSinceIndex: number = 0;
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
+    private _pendingDeletes: Set<string> = new Set();
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -112,9 +113,6 @@ export class IndexManager {
             definitionMap: new Map(),
             referenceMap: new Map()
         };
-
-        // Copy existing index for hash comparison if available
-        const oldHashes = this.index?.fileHashes || new Map<string, string>();
 
         // Process all files with fresh analysis
         // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
@@ -644,9 +642,12 @@ export class IndexManager {
         this.fileWatcher.onDidChange(uri => queueUpdate(uri));
         this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
         this.fileWatcher.onDidDelete(uri => {
-            if (this.shouldIndexFile(uri)) {
+            const key = uri.toString();
+            if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
+                this._pendingDeletes.add(key);
                 this._changesSinceIndex++;
                 void this.removeFile(uri).finally(() => {
+                    this._pendingDeletes.delete(key);
                     this.markChangeProcessed();
                 });
             }
@@ -662,9 +663,12 @@ export class IndexManager {
                 this.fileWatcher.onDidChange(uri => queueUpdate(uri));
                 this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
                 this.fileWatcher.onDidDelete(uri => {
-                    if (this.shouldIndexFile(uri)) {
+                    const key = uri.toString();
+                    if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
+                        this._pendingDeletes.add(key);
                         this._changesSinceIndex++;
                         void this.removeFile(uri).finally(() => {
+                            this._pendingDeletes.delete(key);
                             this.markChangeProcessed();
                         });
                     }

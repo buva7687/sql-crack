@@ -1327,7 +1327,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
                 severity: 'medium',
             });
         }
-        const statements = Array.isArray(ast) ? ast : [ast];
+        const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean);
 
         for (const stmt of statements) {
             processStatement(context, stmt, nodes, edges);

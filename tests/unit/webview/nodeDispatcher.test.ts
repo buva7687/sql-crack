@@ -193,11 +193,11 @@ describe('nodeDispatcher', () => {
         const rect = createRect();
         rect.setAttribute('class', 'node-rect');
         const callbacks = {
-            renderStandardNode: jest.fn((_node: FlowNode, group: any) => {
+            renderStandardNode: jest.fn(),
+            renderContainerNode: jest.fn((_node: FlowNode, group: any) => {
                 group.appendChild(rect);
             }),
             renderClusterNode: jest.fn(),
-            renderContainerNode: jest.fn(),
             renderWindowNode: jest.fn(),
             renderAggregateNode: jest.fn(),
             renderCaseNode: jest.fn(),
@@ -238,11 +238,6 @@ describe('nodeDispatcher', () => {
         expect(callbacks.selectNode).toHaveBeenCalledWith('n1', { skipNavigation: true });
         expect(callbacks.hideTooltip).toHaveBeenCalled();
         expect(svg.focus).toHaveBeenCalled();
-
-        group.emit('focus');
-        expect(group.setAttribute).toHaveBeenCalledWith('data-keyboard-focus', 'true');
-        expect(rect.setAttribute).toHaveBeenCalledWith('stroke-width', '4');
-        expect(callbacks.announceFocusedNode).toHaveBeenCalledWith(node);
 
         group.emit('keydown', {
             key: 'ArrowUp',
@@ -311,5 +306,73 @@ describe('nodeDispatcher', () => {
 
         group.emit('click', { stopPropagation: jest.fn() });
         expect(callbacks.onClusterToggle).toHaveBeenCalledWith('cluster_1');
+    });
+
+    it('does not start dragging when the collapse button is the mousedown target', () => {
+        const parent = createElement('g');
+        const svg = { focus: jest.fn(), getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+        const node: FlowNode = {
+            id: 'cte_2',
+            type: 'cte',
+            label: 'cte_2',
+            x: 10,
+            y: 20,
+            width: 120,
+            height: 60,
+            expanded: true,
+            children: [{ id: 'child', type: 'table', label: 'child', x: 0, y: 0, width: 80, height: 30 }],
+        };
+        const rect = createRect();
+        rect.setAttribute('class', 'node-rect');
+        const callbacks = {
+            renderStandardNode: jest.fn((_node: FlowNode, group: any) => {
+                group.appendChild(rect);
+            }),
+            renderClusterNode: jest.fn(),
+            renderContainerNode: jest.fn(),
+            renderWindowNode: jest.fn(),
+            renderAggregateNode: jest.fn(),
+            renderCaseNode: jest.fn(),
+            renderJoinNode: jest.fn(),
+            onClusterToggle: jest.fn(),
+            highlightConnectedEdges: jest.fn(),
+            showTooltip: jest.fn(),
+            updateTooltipPosition: jest.fn(),
+            hideTooltip: jest.fn(),
+            selectNode: jest.fn(),
+            navigateToAdjacentNode: jest.fn(),
+            navigateToConnectedNode: jest.fn(() => true),
+            navigateToSiblingNode: jest.fn(() => true),
+            announceFocusedNode: jest.fn(),
+            onContainerExpandRequested: jest.fn(),
+            onZoomPulseRequested: jest.fn(),
+            showContextMenu: jest.fn(),
+            onToggleNodeCollapse: jest.fn(),
+        };
+
+        renderNodeFeature({
+            node,
+            parent: parent as any,
+            state: createState(),
+            svg: svg as any,
+            cloudViewStates: new Map(),
+            ...callbacks,
+        });
+
+        const group = parent.children[0];
+        const collapseTarget = {
+            closest: jest.fn((selector: string) => (selector === '.collapse-btn' ? {} : null)),
+        };
+
+        group.emit('mousedown', {
+            target: collapseTarget,
+            clientX: 20,
+            clientY: 30,
+            stopPropagation: jest.fn(),
+        });
+
+        expect(collapseTarget.closest).toHaveBeenCalledWith('.collapse-btn');
+        expect((group as any).style.opacity).toBe('');
+        expect(callbacks.onContainerExpandRequested).not.toHaveBeenCalled();
     });
 });

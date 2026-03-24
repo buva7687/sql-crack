@@ -60,14 +60,18 @@ function createIndex(files: FileAnalysis[]): WorkspaceIndex {
         fileHashes.set(file.filePath, file.contentHash);
 
         for (const definition of file.definitions) {
-            const key = definition.name.toLowerCase();
+            const key = definition.schema
+                ? `${definition.schema.toLowerCase()}.${definition.name.toLowerCase()}`
+                : definition.name.toLowerCase();
             const defs = definitionMap.get(key) || [];
             defs.push(definition);
             definitionMap.set(key, defs);
         }
 
         for (const reference of file.references) {
-            const key = reference.tableName.toLowerCase();
+            const key = reference.schema
+                ? `${reference.schema.toLowerCase()}.${reference.tableName.toLowerCase()}`
+                : reference.tableName.toLowerCase();
             const refs = referenceMap.get(key) || [];
             refs.push(reference);
             referenceMap.set(key, refs);
@@ -172,5 +176,43 @@ describe('workspace dependency graph layout and cycle detection', () => {
 
         expect(edgesBySourceLabel.get('view_a')).toEqual(['source_a']);
         expect(edgesBySourceLabel.get('view_b')).toEqual(['source_b']);
+    });
+
+    it('resolves unqualified references through normalized definition-name fallback', () => {
+        const producerFile = '/repo/source.sql';
+        const consumerFile = '/repo/consumer.sql';
+
+        const index = createIndex([
+            createFileAnalysis(
+                producerFile,
+                createDefinition(producerFile, 'orders', { schema: 'sales' }),
+                []
+            ),
+            createFileAnalysis(
+                consumerFile,
+                createDefinition(consumerFile, 'orders_report', { type: 'view' }),
+                [createReference(consumerFile, 'orders')]
+            ),
+        ]);
+
+        const graph = buildDependencyGraph(index, 'files');
+        const labelById = new Map(graph.nodes.map(node => [node.id, node.label]));
+        const resolvedEdge = graph.edges.find((edge) =>
+            labelById.get(edge.source) === 'consumer.sql' && labelById.get(edge.target) === 'source.sql'
+        );
+
+        expect(resolvedEdge).toBeDefined();
+    });
+
+    it('uses a prebuilt normalized definition-name index for fallback lookups', () => {
+        const source = require('fs').readFileSync(
+            path.join(__dirname, '../../../src/workspace/dependencyGraph.ts'),
+            'utf-8'
+        );
+
+        expect(source).toContain('function buildDefinitionNameIndex(index: WorkspaceIndex): DefinitionNameIndex');
+        expect(source).toContain('const definitionNameIndex = buildDefinitionNameIndex(index);');
+        expect(source).toContain('const byName = normalizedName ? (definitionNameIndex.get(normalizedName) || []) : [];');
+        expect(source).not.toContain('function findDefinitionsByName');
     });
 });

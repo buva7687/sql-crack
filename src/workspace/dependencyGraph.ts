@@ -14,6 +14,8 @@ import {
 } from './types';
 import { getDisplayName, getQualifiedKey, normalizeIdentifier, parseQualifiedKey } from './identifiers';
 
+type DefinitionNameIndex = Map<string, SchemaDefinition[]>;
+
 /**
  * Build a dependency graph from the workspace index
  */
@@ -24,12 +26,13 @@ export function buildDependencyGraph(
     const nodes: WorkspaceNode[] = [];
     const edges: WorkspaceEdge[] = [];
     const nodeIdMap = new Map<string, string>();
+    const definitionNameIndex = buildDefinitionNameIndex(index);
 
     // Build graph based on mode
     if (mode === 'files') {
-        buildFileGraph(index, nodes, edges, nodeIdMap);
+        buildFileGraph(index, nodes, edges, nodeIdMap, definitionNameIndex);
     } else {
-        buildTableGraph(index, nodes, edges, nodeIdMap);
+        buildTableGraph(index, nodes, edges, nodeIdMap, definitionNameIndex);
     }
 
     // Calculate statistics
@@ -41,29 +44,31 @@ export function buildDependencyGraph(
     return { nodes, edges, stats };
 }
 
-function findDefinitionsByName(index: WorkspaceIndex, tableName: string): SchemaDefinition[] {
-    const normalized = normalizeIdentifier(tableName);
-    if (!normalized) {return [];}
-
-    const matches: SchemaDefinition[] = [];
+function buildDefinitionNameIndex(index: WorkspaceIndex): DefinitionNameIndex {
+    const byName: DefinitionNameIndex = new Map();
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
-            if (normalizeIdentifier(def.name) === normalized) {
-                matches.push(def);
+            const normalizedName = normalizeIdentifier(def.name);
+            if (!normalizedName) {
+                continue;
             }
+            const bucket = byName.get(normalizedName) || [];
+            bucket.push(def);
+            byName.set(normalizedName, bucket);
         }
     }
-    return matches;
+    return byName;
 }
 
-function getDefinitionCandidates(index: WorkspaceIndex, ref: TableReference): SchemaDefinition[] {
+function getDefinitionCandidates(index: WorkspaceIndex, definitionNameIndex: DefinitionNameIndex, ref: TableReference): SchemaDefinition[] {
     const key = getQualifiedKey(ref.tableName, ref.schema);
     const direct = index.definitionMap.get(key);
     if (direct && direct.length > 0) {
         return direct;
     }
 
-    const byName = findDefinitionsByName(index, ref.tableName);
+    const normalizedName = normalizeIdentifier(ref.tableName);
+    const byName = normalizedName ? (definitionNameIndex.get(normalizedName) || []) : [];
     if (ref.schema) {
         const unqualified = byName.filter(def => !def.schema);
         return unqualified;
@@ -79,7 +84,8 @@ function buildFileGraph(
     index: WorkspaceIndex,
     nodes: WorkspaceNode[],
     edges: WorkspaceEdge[],
-    nodeIdMap: Map<string, string>
+    nodeIdMap: Map<string, string>,
+    definitionNameIndex: DefinitionNameIndex
 ): void {
     // Create file nodes
     for (const [filePath, analysis] of index.files.entries()) {
@@ -110,7 +116,7 @@ function buildFileGraph(
         if (!sourceId) {continue;}
 
         for (const ref of analysis.references) {
-            const defs = getDefinitionCandidates(index, ref);
+            const defs = getDefinitionCandidates(index, definitionNameIndex, ref);
             // Fix false-positive edges: If a reference is satisfied by a definition in the same file,
             // don't create edges to other files that define the same name (name collision).
             // This prevents incorrect edges when multiple files define views/tables with the same name.
@@ -158,7 +164,8 @@ function buildTableGraph(
     index: WorkspaceIndex,
     nodes: WorkspaceNode[],
     edges: WorkspaceEdge[],
-    nodeIdMap: Map<string, string>
+    nodeIdMap: Map<string, string>,
+    definitionNameIndex: DefinitionNameIndex
 ): void {
     // Create nodes for defined tables/views
     const definedKeys = new Set(index.definitionMap.keys());
@@ -281,7 +288,7 @@ function buildTableGraph(
                     continue;
                 }
 
-                const targets = getDefinitionCandidates(index, ref);
+                const targets = getDefinitionCandidates(index, definitionNameIndex, ref);
                 if (targets.length > 0) {
                     for (const targetDef of targets) {
                         const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
@@ -322,6 +329,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     let totalReferences = 0;
     const orphanedDefinitions: string[] = [];
     const missingDefinitions: string[] = [];
+    const definitionNameIndex = buildDefinitionNameIndex(index);
 
     const definitionsByName = new Map<string, SchemaDefinition[]>();
     for (const defs of index.definitionMap.values()) {
@@ -413,7 +421,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const [filePath, analysis] of index.files.entries()) {
         const deps = new Set<string>();
         for (const ref of analysis.references) {
-            const defs = getDefinitionCandidates(index, ref);
+            const defs = getDefinitionCandidates(index, definitionNameIndex, ref);
             for (const def of defs) {
                 if (def.filePath !== filePath) {
                     deps.add(def.filePath);

@@ -7,6 +7,7 @@ import type {
     ViewState,
 } from '../types';
 import { Z_INDEX } from '../../shared';
+import { restoreNodeBorderDasharray, restoreNodeBorderState } from '../nodeBorderState';
 
 export interface ColumnLineageRuntimeState {
     selectedColumnLineage: ColumnFlow | null;
@@ -416,21 +417,14 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     if (!pathData) {
         return;
     }
-    const pathMatch = pathData.match(/M\s*([\d.-]+)\s*([\d.-]+).*?([\d.-]+)\s*([\d.-]+)\s*$/);
-    if (!pathMatch) {
+    const midpoint = parseEdgeBadgeMidpoint(pathData);
+    if (!midpoint) {
         return;
     }
 
-    const x1 = parseFloat(pathMatch[1]);
-    const y1 = parseFloat(pathMatch[2]);
-    const x2 = parseFloat(pathMatch[3]);
-    const y2 = parseFloat(pathMatch[4]);
-    const midX = (x1 + x2) / 2;
-    const midY = (y1 + y2) / 2;
-
     const badgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     badgeGroup.classList.add('lineage-edge-badge');
-    badgeGroup.setAttribute('transform', `translate(${midX}, ${midY})`);
+    badgeGroup.setAttribute('transform', `translate(${midpoint.x}, ${midpoint.y})`);
 
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     bg.setAttribute('r', '10');
@@ -451,6 +445,26 @@ function addEdgeTransformationBadge(mainGroup: SVGGElement | null, edge: SVGElem
     badgeGroup.appendChild(text);
 
     mainGroup.appendChild(badgeGroup);
+}
+
+function parseEdgeBadgeMidpoint(pathData: string): { x: number; y: number } | null {
+    const matches = pathData.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi);
+    if (!matches || matches.length < 4) {
+        return null;
+    }
+
+    const x1 = Number(matches[0]);
+    const y1 = Number(matches[1]);
+    const x2 = Number(matches[matches.length - 2]);
+    const y2 = Number(matches[matches.length - 1]);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) {
+        return null;
+    }
+
+    return {
+        x: (x1 + x2) / 2,
+        y: (y1 + y2) / 2,
+    };
 }
 
 function clearLineageBadges(mainGroup: SVGGElement | null): void {
@@ -571,8 +585,7 @@ export function clearLineageHighlightsFeature(options: ClearLineageHighlightsOpt
         if (!rect) {
             return;
         }
-        rect.removeAttribute('stroke');
-        rect.removeAttribute('stroke-width');
+        restoreNodeBorderState(rect as SVGRectElement);
     });
 
     mainGroup.querySelectorAll('.edge-path').forEach((edge) => {
@@ -656,7 +669,8 @@ function highlightPathToSelect(
 
     const pathNodeIds = new Set<string>(sourceNodeIds);
     for (const sourceId of sourceNodeIds) {
-        findPath(sourceId, selectNode.id, currentEdges, pathNodeIds);
+        const visited = new Set<string>([sourceId]);
+        findPath(sourceId, selectNode.id, currentEdges, visited, pathNodeIds);
     }
 
     mainGroup.querySelectorAll('.edge').forEach((edgeEl) => {
@@ -670,16 +684,25 @@ function highlightPathToSelect(
     });
 }
 
-function findPath(fromId: string, toId: string, edges: FlowEdge[], visited: Set<string>): boolean {
+function findPath(
+    fromId: string,
+    toId: string,
+    edges: FlowEdge[],
+    visited: Set<string>,
+    pathNodeIds: Set<string>
+): boolean {
     if (fromId === toId) {
+        pathNodeIds.add(fromId);
         return true;
     }
     for (const edge of edges) {
         if (edge.source === fromId && !visited.has(edge.target)) {
             visited.add(edge.target);
-            if (findPath(edge.target, toId, edges, visited)) {
+            if (findPath(edge.target, toId, edges, visited, pathNodeIds)) {
+                pathNodeIds.add(fromId);
                 return true;
             }
+            visited.delete(edge.target);
         }
     }
     return false;
@@ -696,8 +719,9 @@ function clearColumnHighlights(mainGroup: SVGGElement, state: ViewState, edgeCol
         }
         rect.removeAttribute('stroke-dasharray');
         if (state.selectedNodeId !== nodeEl.getAttribute('data-id')) {
-            rect.removeAttribute('stroke');
-            rect.removeAttribute('stroke-width');
+            restoreNodeBorderState(rect as SVGRectElement);
+        } else {
+            restoreNodeBorderDasharray(rect as SVGRectElement);
         }
     });
 
