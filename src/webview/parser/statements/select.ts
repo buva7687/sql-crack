@@ -172,6 +172,25 @@ function processSelect(
         }
     }
 
+    // Connect inter-CTE dependencies: when a CTE's internal body references
+    // another CTE, create a top-level edge between the two CTE container nodes.
+    for (const [, cteId] of cteNodeIdsByName.entries()) {
+        const cteNode = nodes.find(n => n.id === cteId);
+        if (!cteNode?.children) { continue; }
+        for (const child of cteNode.children) {
+            if (child.type !== 'table') { continue; }
+            const refName = child.label.toLowerCase();
+            const referencedCteId = cteNodeIdsByName.get(refName);
+            if (referencedCteId && referencedCteId !== cteId) {
+                edges.push({
+                    id: genId(runtime, 'e'),
+                    source: referencedCteId,
+                    target: cteId
+                });
+            }
+        }
+    }
+
     // Process FROM tables (data sources) - first pass: create all table nodes
     const tableIds: string[] = [];
     const joinTableMap: Map<string, string> = new Map(); // Maps table name to its node id
