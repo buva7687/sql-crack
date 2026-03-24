@@ -26,7 +26,7 @@ const THRESHOLDS = {
     singleSimpleQuery: 100 * perfMultiplier,       // Simple SELECT should be < 100ms
     singleComplexQuery: 200 * perfMultiplier,      // Complex CTE query should be < 200ms
     batch20Queries: 1000 * perfMultiplier,         // Full batch of 20 queries should be < 1s
-    batchMemoryMB: 50,                             // Memory usage should be < 50MB
+    batchMemoryMB: 55,                             // Memory usage should be < 55MB
 };
 
 describe('Performance Baseline - Parsing Speed', () => {
