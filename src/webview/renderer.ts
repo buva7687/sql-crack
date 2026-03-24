@@ -2988,9 +2988,11 @@ export function switchLayout(layoutType: LayoutType): void {
                     break;
             }
 
+            const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
+
             // Update node positions in DOM
             currentNodes.forEach(node => {
-                const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+                const nodeGroup = renderedNodeElementsById.get(node.id);
                 if (nodeGroup) {
                     const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
                     if (rect) {
@@ -3015,8 +3017,8 @@ export function switchLayout(layoutType: LayoutType): void {
                 const sourceId = edgeEl.getAttribute('data-source');
                 const targetId = edgeEl.getAttribute('data-target');
                 if (sourceId && targetId) {
-                    const sourceNode = currentNodes.find(n => n.id === sourceId);
-                    const targetNode = currentNodes.find(n => n.id === targetId);
+                    const sourceNode = currentNodeMap.get(sourceId);
+                    const targetNode = currentNodeMap.get(targetId);
                     if (sourceNode && targetNode) {
                         const path = calculateEdgePath(sourceNode, targetNode, layoutType);
                         edgeEl.setAttribute('d', path);
