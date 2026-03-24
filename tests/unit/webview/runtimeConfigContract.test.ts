@@ -20,6 +20,8 @@ describe('webview runtime config contract', () => {
         expect(indexSource).toContain("from '../shared/messages/sqlFlowRuntimeConfig'");
         expect(runtimeSource).toContain('export interface SqlFlowRuntimeConfig');
         expect(indexSource).toContain('sqlCrackConfig?: Partial<SqlCrackWebviewBootstrapConfig>');
+        expect(indexSource).toContain('parserWorkerUri: string;');
+        expect(indexSource).toContain('parserWorkerUri?: string;');
         expect(indexSource).toContain('window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB');
         expect(indexSource).toContain('window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold');
         expect(indexSource).toContain('window.sqlCrackConfig?.defaultDialect');

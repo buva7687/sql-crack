@@ -44,6 +44,8 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
 | **Query Statistics** | Complexity score, CTE depth, fan-out analysis, and performance score (0-100) |
 
+> **Large graph behavior**: For SQL Flow graphs with `100+` nodes, SQL Crack automatically enables clustering to keep rendering responsive. Search and keyboard navigation follow the currently rendered graph, so collapsed clusters behave differently from a fully expanded graph.
+
 **Node Types**: Table (Blue) • Filter (Purple) • Join (Pink) • Aggregate (Amber) • Window (Fuchsia) • Sort (Green) • Limit (Cyan) • Select (Indigo) • Union/Set Op (Slate) • CTE (Purple) • Subquery (Violet) • Case (Orange) • Result (Green)
 
 **Operation Badges**: READ (Blue) • WRITE (Red) • DERIVED (Teal) • CTE (Purple) • SQ (Violet) • INSERT (Green) • UPDATE (Amber) • DELETE (Dark Red) • MERGE (Violet) • CTAS (Cyan)
@@ -98,6 +100,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 | **PostgreSQL Syntax Preprocessing** | Automatically rewrites `AT TIME ZONE`, `timestamptz '...'`, and other type-prefixed literals for full AST parsing, including during dialect auto-retry |
 | **Safer Dialect Detection** | Reduces false positives in dialect pattern matching (for example time literals like `00:00:00`) so valid queries are less likely to fall back unnecessarily |
 | **Large File Handling** | Parses within configurable file/statement limits and clearly reports truncation instead of failing hard |
+| **Web Worker Parsing** | SQL parsing runs off the main thread via a dedicated Web Worker, keeping the UI responsive during large queries. Falls back to synchronous parsing when workers are unavailable. |
 | **Timeout Protection** | Configurable parse timeout prevents UI hangs on pathological queries |
 | **MERGE / UPSERT Coverage** | Supports MERGE-style visualization and dialect-native upsert patterns (`ON CONFLICT`, `ON DUPLICATE KEY`) |
 | **TVF Awareness** | Recognizes common table-valued functions across PostgreSQL, Snowflake, BigQuery, and SQL Server |
@@ -420,11 +423,11 @@ src/
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
+- ✅ **Phase 7** — Export preview with PDF support
 
-Refactoring milestone: large-file decomposition completed across core surfaces with full regression validation (`tsc`, lint, and test suite all green).
+`0.7.0` branch status: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are implemented on `0.7.0_release` but not released yet.
 
 **Planned**:
-- Export preview dialog with PDF support
 - Diff-aware visualization for PR reviews
 - dbt integration — deep: cross-file `ref()` resolution, manifest.json, macro following (basic Jinja preprocessing shipped in 0.5.2)
 - Performance regression detection

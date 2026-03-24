@@ -20,6 +20,7 @@ export class WorkspaceScanner {
     private dialect: SqlDialect;
     private maxFileSize: number;
     private scopeUri: vscode.Uri | undefined;
+    private readonly maxConcurrentAnalyses = 4;
 
     constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024, scopeUri?: vscode.Uri) {
         this.schemaExtractor = new SchemaExtractor();
@@ -89,6 +90,30 @@ export class WorkspaceScanner {
         return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
     }
 
+    private decodeSqlContent(bytes: Uint8Array): string {
+        let text = new TextDecoder('utf-8').decode(bytes);
+        if (text.charCodeAt(0) === 0xFEFF) {
+            text = text.slice(1);
+        }
+        return text;
+    }
+
+    private async readSqlText(uri: vscode.Uri, expectedSize: number): Promise<string> {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (bytes.length === 0 && expectedSize > 0) {
+            const document = await vscode.workspace.openTextDocument(uri);
+            return document.getText();
+        }
+
+        const decoded = this.decodeSqlContent(bytes);
+        if (decoded.includes('\uFFFD')) {
+            const document = await vscode.workspace.openTextDocument(uri);
+            return document.getText();
+        }
+
+        return decoded;
+    }
+
     /**
      * Analyze a single SQL file
      */
@@ -111,9 +136,8 @@ export class WorkspaceScanner {
                 };
             }
 
-            // Read file content
-            const document = await vscode.workspace.openTextDocument(uri);
-            const sql = document.getText();
+            // Read file content without creating a TextDocument model unless decoding needs a fallback.
+            const sql = await this.readSqlText(uri, stat.size);
 
             // Generate content hash for change detection
             const contentHash = this.generateContentHash(sql);
@@ -152,26 +176,43 @@ export class WorkspaceScanner {
         cancellationToken?: CancellationToken
     ): Promise<FileAnalysis[]> {
         const files = await this.findSqlFiles();
-        const results: FileAnalysis[] = [];
-
-        for (let i = 0; i < files.length; i++) {
-            // Check for cancellation
-            if (cancellationToken?.isCancellationRequested) {
-                break;
-            }
-
-            const file = files[i];
-            const fileName = path.basename(file.fsPath);
-
-            if (progressCallback) {
-                progressCallback(i + 1, files.length, fileName);
-            }
-
-            const analysis = await this.analyzeFile(file);
-            results.push(analysis);
+        if (files.length === 0) {
+            return [];
         }
 
-        return results;
+        const results: Array<FileAnalysis | undefined> = new Array(files.length);
+        const concurrency = Math.max(1, Math.min(this.maxConcurrentAnalyses, files.length));
+        let nextIndex = 0;
+
+        const runWorker = async (): Promise<void> => {
+            while (true) {
+                if (cancellationToken?.isCancellationRequested) {
+                    return;
+                }
+
+                const currentIndex = nextIndex;
+                nextIndex++;
+
+                if (currentIndex >= files.length) {
+                    return;
+                }
+
+                const file = files[currentIndex];
+                const fileName = path.basename(file.fsPath);
+
+                if (progressCallback) {
+                    progressCallback(currentIndex + 1, files.length, fileName);
+                }
+
+                const analysis = await this.analyzeFile(file);
+                results[currentIndex] = analysis;
+            }
+        };
+
+        const workers = Array.from({ length: concurrency }, () => runWorker());
+        await Promise.all(workers);
+
+        return results.filter((analysis): analysis is FileAnalysis => analysis !== undefined);
     }
 
     /**

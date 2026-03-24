@@ -64,6 +64,14 @@ function stripForeignObjects(svgClone: SVGSVGElement): void {
     foreignObjects.forEach((foreignObject) => foreignObject.remove());
 }
 
+/** SVG presentation attributes that the renderer sets directly on elements.
+ *  When the clone already carries one of these from cloneNode(true),
+ *  we must NOT override it with a computed style — the attribute value
+ *  is the per-element ground truth (e.g. per-node fill colors, per-accent
+ *  colors) whereas getComputedStyle may return a value from the wrong
+ *  element due to class-based querySelector matching only the first hit. */
+const SVG_PRESENTATION_ATTRIBUTES = new Set(['fill', 'stroke', 'stroke-width', 'opacity']);
+
 function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement): void {
     let originalElement: Element | null = null;
     const dataId = element.getAttribute('data-id');
@@ -89,6 +97,11 @@ function embedInlineStyles(element: Element, originalSvgElement: SVGSVGElement):
     if (originalElement) {
         const originalStyle = window.getComputedStyle(originalElement);
         EXPORT_INLINE_STYLE_PROPERTIES.forEach((property) => {
+            // Preserve SVG attributes already on the clone — they are per-element
+            // ground truth set by the renderer (node fills, accent colors, strokes).
+            if (SVG_PRESENTATION_ATTRIBUTES.has(property) && element.getAttribute(property)) {
+                return;
+            }
             const value = originalStyle.getPropertyValue(property);
             if (value && value !== 'none' && value !== '') {
                 (element as HTMLElement).style.setProperty(property, value);

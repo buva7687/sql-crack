@@ -417,6 +417,128 @@ SELECT * FROM t3;`;
       expect(cteNodes.length).toBe(2);
     });
 
+    it('creates inter-CTE edges when one CTE references another internally', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT id, val FROM t1),
+          cte2 AS (SELECT * FROM cte1 WHERE val > 0),
+          cte3 AS (SELECT * FROM cte2 JOIN t2 ON cte2.id = t2.id)
+        SELECT * FROM cte3
+      `;
+      const result = parseSql(sql, 'MySQL');
+      expect(result.error).toBeUndefined();
+
+      const cteNodes = result.nodes.filter(n => n.type === 'cte');
+      expect(cteNodes.length).toBe(3);
+
+      const cte1 = cteNodes.find(n => n.label?.toLowerCase().includes('cte1'));
+      const cte2 = cteNodes.find(n => n.label?.toLowerCase().includes('cte2'));
+      const cte3 = cteNodes.find(n => n.label?.toLowerCase().includes('cte3'));
+
+      // cte1 -> cte2 (cte2 references cte1 internally)
+      const cte1ToCte2 = result.edges.find(e => e.source === cte1?.id && e.target === cte2?.id);
+      expect(cte1ToCte2).toBeDefined();
+
+      // cte2 -> cte3 (cte3 references cte2 internally)
+      const cte2ToCte3 = result.edges.find(e => e.source === cte2?.id && e.target === cte3?.id);
+      expect(cte2ToCte3).toBeDefined();
+
+      // cte3 -> outer query (cte3 referenced in outer FROM)
+      const cte3Outer = result.edges.find(e => e.source === cte3?.id && e.target !== cte2?.id);
+      expect(cte3Outer).toBeDefined();
+    });
+
+    it('creates inter-CTE edges when one CTE JOINs another internally', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT id, val FROM t1),
+          cte2 AS (SELECT * FROM t2 JOIN cte1 ON t2.id = cte1.id)
+        SELECT * FROM cte2
+      `;
+      const result = parseSql(sql, 'MySQL');
+      expect(result.error).toBeUndefined();
+
+      const cteNodes = result.nodes.filter(n => n.type === 'cte');
+      const cte1 = cteNodes.find(n => n.label?.toLowerCase().includes('cte1'));
+      const cte2 = cteNodes.find(n => n.label?.toLowerCase().includes('cte2'));
+
+      const cte1ToCte2 = result.edges.find(e => e.source === cte1?.id && e.target === cte2?.id);
+      expect(cte1ToCte2).toBeDefined();
+    });
+
+    it('creates inter-CTE edges when one CTE references another in a WHERE subquery', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT id FROM t1),
+          cte2 AS (SELECT 1 AS flag WHERE EXISTS (SELECT 1 FROM cte1))
+        SELECT * FROM cte2
+      `;
+      const result = parseSql(sql, 'MySQL');
+      expect(result.error).toBeUndefined();
+
+      const cteNodes = result.nodes.filter(n => n.type === 'cte');
+      const cte1 = cteNodes.find(n => n.label?.toLowerCase().includes('cte1'));
+      const cte2 = cteNodes.find(n => n.label?.toLowerCase().includes('cte2'));
+
+      const cte1ToCte2 = result.edges.find(e => e.source === cte1?.id && e.target === cte2?.id);
+      expect(cte1ToCte2).toBeDefined();
+    });
+
+    it('creates inter-CTE edges when one CTE references another in a JOIN ON subquery', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT id FROM t1),
+          cte2 AS (
+            SELECT *
+            FROM t2
+            JOIN t3 ON EXISTS (SELECT 1 FROM cte1 WHERE cte1.id = t3.id)
+          )
+        SELECT * FROM cte2
+      `;
+      const result = parseSql(sql, 'MySQL');
+      expect(result.error).toBeUndefined();
+
+      const cteNodes = result.nodes.filter(n => n.type === 'cte');
+      const cte1 = cteNodes.find(n => n.label?.toLowerCase().includes('cte1'));
+      const cte2 = cteNodes.find(n => n.label?.toLowerCase().includes('cte2'));
+
+      const cte1ToCte2 = result.edges.find(e => e.source === cte1?.id && e.target === cte2?.id);
+      expect(cte1ToCte2).toBeDefined();
+    });
+
+    it('connects each CTE node to its actual outer query consumer', () => {
+      const sql = `
+        WITH
+          cte1 AS (SELECT * FROM t1),
+          cte2 AS (SELECT * FROM t2)
+        SELECT *
+        FROM cte1
+        JOIN cte2 ON cte1.id = cte2.id
+      `;
+      const result = parseSql(sql, 'MySQL');
+
+      expect(result.error).toBeUndefined();
+
+      const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+      const cteNodes = result.nodes.filter((node) => node.type === 'cte');
+      const cte1Node = cteNodes.find((node) => node.label?.toLowerCase().includes('cte1'));
+      const cte2Node = cteNodes.find((node) => node.label?.toLowerCase().includes('cte2'));
+      const cte1Ref = result.nodes.find((node) => node.type === 'table' && node.label?.toLowerCase() === 'cte1');
+      const cte2Ref = result.nodes.find((node) => node.type === 'table' && node.label?.toLowerCase() === 'cte2');
+
+      expect(cte1Node).toBeDefined();
+      expect(cte2Node).toBeDefined();
+      expect(cte1Ref).toBeDefined();
+      expect(cte2Ref).toBeDefined();
+
+      const cte1Edge = result.edges.find((edge) => edge.source === cte1Node?.id);
+      const cte2Edge = result.edges.find((edge) => edge.source === cte2Node?.id);
+
+      expect(nodeById.get(cte1Edge?.target || '')?.label?.toLowerCase()).toBe('cte1');
+      expect(nodeById.get(cte2Edge?.target || '')?.label?.toLowerCase()).toBe('cte2');
+      expect(cte2Edge?.target).not.toBe(cte1Ref?.id);
+    });
+
     it('parses CTE with aggregation', () => {
       const sql = `
         WITH order_totals AS (

@@ -38,7 +38,7 @@ export interface ClusteringConfig {
 }
 
 const DEFAULT_CONFIG: ClusteringConfig = {
-    minNodesForClustering: 30,
+    minNodesForClustering: 100,
     enabled: true,
     defaultExpanded: false
 };

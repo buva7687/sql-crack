@@ -56,6 +56,16 @@ export function getExportMessageCasesScript(): string {
 export function getExportToPngScript(): string {
     return `
         // ========== PNG Export Function ==========
+        const MAX_RASTER_DIMENSION = 16384;
+        function getRasterScale(width, height, preferredScale = 2) {
+            const safeWidth = Math.max(1, Number(width) || 1);
+            const safeHeight = Math.max(1, Number(height) || 1);
+            const widthLimitScale = MAX_RASTER_DIMENSION / safeWidth;
+            const heightLimitScale = MAX_RASTER_DIMENSION / safeHeight;
+            const effectiveScale = Math.min(preferredScale, widthLimitScale, heightLimitScale);
+            return Number.isFinite(effectiveScale) && effectiveScale > 0 ? effectiveScale : 1;
+        }
+
         function exportToPng(copyToClipboard = false) {
             const svgElement = document.getElementById('graph-svg');
             if (!svgElement) {
@@ -106,9 +116,9 @@ export function getExportToPngScript(): string {
                     vscode.postMessage({ command: 'exportPngError', error: 'Canvas 2D context unavailable' });
                     return;
                 }
-                const scale = 2; // 2x for retina quality
-                canvas.width = width * scale;
-                canvas.height = height * scale;
+                const scale = getRasterScale(width, height, 2);
+                canvas.width = Math.max(1, Math.min(MAX_RASTER_DIMENSION, Math.floor(width * scale)));
+                canvas.height = Math.max(1, Math.min(MAX_RASTER_DIMENSION, Math.floor(height * scale)));
                 ctx.scale(scale, scale);
 
                 const img = new Image();

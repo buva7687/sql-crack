@@ -6,6 +6,14 @@ import {
     EXPANDABLE_NODE_HEIGHT,
     EXPANDABLE_NODE_WIDTH,
 } from './expandableNodeConstants';
+import {
+    calculateStackedCloudOffsets,
+    type CloudOffsetInfo,
+    type CalculateStackedCloudOffsetsOptions,
+} from './computations';
+
+// Re-export from computations for backwards compatibility
+export { calculateStackedCloudOffsets, type CloudOffsetInfo, type CalculateStackedCloudOffsetsOptions };
 
 export interface CloudRenderElements {
     group: SVGGElement;
@@ -28,12 +36,6 @@ interface UpdateCloudAndArrowFeatureOptions {
         cloudGap: number
     ) => { offsetX: number; offsetY: number };
     layoutSubflowNodesVertical: (children: FlowNode[], edges: FlowEdge[]) => { width: number; height: number };
-}
-
-interface CloudOffsetInfo {
-    nodeId: string;
-    offsetX: number;
-    offsetY: number;
 }
 
 interface CalculateStackedCloudOffsetsFeatureOptions {
@@ -119,54 +121,10 @@ export function updateCloudAndArrowFeature(options: UpdateCloudAndArrowFeatureOp
 
 /**
  * Calculate stacked cloud offsets to prevent overlap when expanding all.
+ * Delegates to the pure computation in computations.ts.
  */
 export function calculateStackedCloudOffsetsFeature(
     options: CalculateStackedCloudOffsetsFeatureOptions
 ): CloudOffsetInfo[] {
-    const { expandableNodes, currentEdges, layoutSubflowNodesVertical } = options;
-    const cloudPadding = EXPANDABLE_CLOUD_PADDING;
-    const verticalGap = 80;
-    const horizontalGap = EXPANDABLE_CLOUD_GAP;
-
-    interface CloudInfo {
-        node: FlowNode;
-        width: number;
-        height: number;
-        x: number;
-    }
-
-    const cloudInfos: CloudInfo[] = [];
-    for (const node of expandableNodes) {
-        const childEdges = node.childEdges || [];
-        const layoutSize = layoutSubflowNodesVertical(node.children || [], childEdges);
-        const width = layoutSize.width + cloudPadding * 2;
-        const height = layoutSize.height + cloudPadding * 2 + EXPANDABLE_CLOUD_HEADER_HEIGHT;
-        const cloudCenterX = node.x + node.width / 2;
-        const x = cloudCenterX - width / 2;
-        cloudInfos.push({ node, width, height, x });
-    }
-
-    cloudInfos.sort((a, b) => a.x - b.x);
-
-    for (let i = 1; i < cloudInfos.length; i++) {
-        const previous = cloudInfos[i - 1];
-        const current = cloudInfos[i];
-        const previousRight = previous.x + previous.width;
-        const minX = previousRight + horizontalGap;
-        if (current.x < minX) {
-            current.x = minX;
-        }
-    }
-
-    const minNodeY = Math.min(...expandableNodes.map(node => node.y));
-    const cloudBottomY = minNodeY - verticalGap;
-
-    return cloudInfos.map(cloud => {
-        const cloudY = cloudBottomY - cloud.height;
-        return {
-            nodeId: cloud.node.id,
-            offsetX: cloud.x - cloud.node.x,
-            offsetY: cloudY - cloud.node.y,
-        };
-    });
+    return calculateStackedCloudOffsets(options);
 }

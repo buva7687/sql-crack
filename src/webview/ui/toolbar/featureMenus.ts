@@ -1,7 +1,9 @@
 import { FocusMode } from '../../types';
+import { getComponentUiColors } from '../../constants';
 import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { formatRelativeTime } from '../../../shared/time';
+import { escapeHtml } from '../../../shared/stringUtils';
 
 interface ToolbarMenuCallbacks {
     isDarkTheme: () => boolean;
@@ -18,15 +20,117 @@ interface MenuListenerContext {
     getBtnStyle: (dark: boolean) => string;
 }
 
+function getMutedTextColor(dark: boolean): string {
+    return getComponentUiColors(dark).textMuted;
+}
+
+function getMenuBorderColor(dark: boolean): string {
+    return dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+}
+
+function getMenuShadow(dark: boolean): string {
+    return dark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(15, 23, 42, 0.15)';
+}
+
+function applyMenuChrome(dropdown: HTMLElement, dark: boolean): void {
+    const theme = getComponentUiColors(dark);
+    dropdown.style.background = theme.surfaceElevated;
+    dropdown.style.borderColor = getMenuBorderColor(dark);
+    dropdown.style.boxShadow = getMenuShadow(dark);
+}
+
+function ensureCheckIcon(item: HTMLElement): void {
+    if (item.querySelector('.sql-crack-check-icon')) {
+        return;
+    }
+    const check = document.createElement('span');
+    check.className = 'sql-crack-check-icon';
+    check.style.color = '#818cf8';
+    check.style.display = 'inline-flex';
+    check.style.width = '14px';
+    check.style.height = '14px';
+    check.style.marginLeft = 'auto';
+    check.innerHTML = ICONS.check;
+    item.appendChild(check);
+}
+
+function applyFocusModeDropdownTheme(dropdown: HTMLElement, activeMode: FocusMode, dark: boolean): void {
+    applyMenuChrome(dropdown, dark);
+    const header = dropdown.querySelector('[data-role="menu-header"]') as HTMLElement | null;
+    if (header) {
+        header.style.color = getMutedTextColor(dark);
+    }
+
+    dropdown.querySelectorAll<HTMLElement>('[data-mode]').forEach(item => {
+        const isActive = item.dataset.mode === activeMode;
+        item.style.color = isActive ? '#818cf8' : (dark ? '#e2e8f0' : '#1e293b');
+        item.style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+        const shortcut = item.querySelector('kbd') as HTMLElement | null;
+        if (shortcut) {
+            shortcut.style.background = 'rgba(99, 102, 241, 0.2)';
+            shortcut.style.color = '#a5b4fc';
+        }
+
+        const checkIcon = item.querySelector('.sql-crack-check-icon');
+        if (isActive) {
+            ensureCheckIcon(item);
+        } else {
+            checkIcon?.remove();
+        }
+    });
+}
+
+function applyViewLocationDropdownState(dropdown: HTMLElement, currentLocation: string, dark: boolean): void {
+    applyMenuChrome(dropdown, dark);
+    const header = dropdown.querySelector('[data-role="menu-header"]') as HTMLElement | null;
+    if (header) {
+        header.style.color = getMutedTextColor(dark);
+    }
+
+    dropdown.querySelectorAll<HTMLElement>('[data-view-location]').forEach(item => {
+        const isActive = item.dataset.viewLocation === currentLocation;
+        item.style.color = isActive ? '#818cf8' : (dark ? '#e2e8f0' : '#1e293b');
+        item.style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+        const desc = item.querySelector('[data-role="location-desc"]') as HTMLElement | null;
+        if (desc) {
+            desc.style.color = getMutedTextColor(dark);
+        }
+        const checkIcon = item.querySelector('.sql-crack-check-icon');
+        if (isActive) {
+            ensureCheckIcon(item);
+        } else {
+            checkIcon?.remove();
+        }
+    });
+}
+
+function applyPinnedTabsDropdownTheme(dropdown: HTMLElement, dark: boolean): void {
+    applyMenuChrome(dropdown, dark);
+    const header = dropdown.querySelector('[data-role="menu-header"]') as HTMLElement | null;
+    if (header) {
+        header.style.color = getMutedTextColor(dark);
+    }
+
+    dropdown.querySelectorAll<HTMLElement>('[data-role="pin-item"]').forEach(item => {
+        item.style.color = dark ? '#e2e8f0' : '#1e293b';
+        const metadata = item.querySelector('[data-role="pin-meta"]') as HTMLElement | null;
+        if (metadata) {
+            metadata.style.color = getMutedTextColor(dark);
+        }
+    });
+
+    dropdown.querySelectorAll<HTMLElement>('[data-role="pin-delete"]').forEach(deleteBtn => {
+        deleteBtn.style.color = getMutedTextColor(dark);
+    });
+}
+
 export function createFocusModeSelector(
     callbacks: ToolbarMenuCallbacks,
     context: MenuListenerContext
 ): HTMLElement {
     const listenerOptions = context.getListenerOptions();
     const dark = callbacks.isDarkTheme();
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-    const dropdownBg = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-    const dropdownShadow = dark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(15, 23, 42, 0.15)';
+    const borderColor = getMenuBorderColor(dark);
 
     const container = document.createElement('div');
     container.id = 'focus-mode-selector';
@@ -45,13 +149,13 @@ export function createFocusModeSelector(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: ${dropdownBg};
+        background: transparent;
         border: 1px solid ${borderColor};
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
         z-index: ${Z_INDEX.dropdownTop};
-        box-shadow: ${dropdownShadow};
+        box-shadow: none;
     `;
 
     const modes: Array<{ id: FocusMode; label: string; icon: string; shortcut: string }> = [
@@ -61,12 +165,13 @@ export function createFocusModeSelector(
     ];
 
     const header = document.createElement('div');
+    header.dataset.role = 'menu-header';
     header.textContent = 'Focus Direction';
     header.style.cssText = `
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
@@ -106,7 +211,7 @@ export function createFocusModeSelector(
             callbacks.onFocusModeChange(mode.id);
             dropdown.style.display = 'none';
             btn.innerHTML = mode.icon;
-            updateFocusModeDropdown(dropdown, mode.id, callbacks.isDarkTheme());
+            applyFocusModeDropdownTheme(dropdown, mode.id, callbacks.isDarkTheme());
         }, listenerOptions);
 
         item.addEventListener('mouseenter', () => {
@@ -162,30 +267,18 @@ export function createFocusModeSelector(
     window.addEventListener('resize', focusModeResizeHandler, listenerOptions);
     context.documentListeners.push({ type: 'resize', handler: focusModeResizeHandler as EventListener });
 
+    const focusThemeChangeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        const isDark = Boolean(event.detail?.dark);
+        btn.style.cssText = context.getBtnStyle(isDark) + `border-left: 1px solid ${getMenuBorderColor(isDark)};`;
+        applyFocusModeDropdownTheme(dropdown, callbacks.getFocusMode(), isDark);
+    }) as EventListener;
+    document.addEventListener('theme-change', focusThemeChangeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: focusThemeChangeHandler });
+
+    applyFocusModeDropdownTheme(dropdown, callbacks.getFocusMode(), dark);
     container.appendChild(btn);
     document.body.appendChild(dropdown);
     return container;
-}
-
-function updateFocusModeDropdown(dropdown: HTMLElement, activeMode: FocusMode, isDark: boolean): void {
-    dropdown.querySelectorAll('[data-mode]').forEach(item => {
-        const mode = item.getAttribute('data-mode') as FocusMode;
-        const isActive = mode === activeMode;
-        (item as HTMLElement).style.color = isActive ? '#818cf8' : (isDark ? '#e2e8f0' : '#1e293b');
-        (item as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
-
-        item.querySelector('.sql-crack-check-icon')?.remove();
-        if (isActive) {
-            const check = document.createElement('span');
-            check.className = 'sql-crack-check-icon';
-            check.style.color = '#818cf8';
-            check.style.display = 'inline-flex';
-            check.style.width = '14px';
-            check.style.height = '14px';
-            check.innerHTML = ICONS.check;
-            item.appendChild(check);
-        }
-    });
 }
 
 export function createViewLocationButton(
@@ -194,8 +287,9 @@ export function createViewLocationButton(
     context: MenuListenerContext
 ): HTMLElement {
     const listenerOptions = context.getListenerOptions();
-    const dark = callbacks.isDarkTheme();
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+    let dark = callbacks.isDarkTheme();
+    let currentLocationState = currentLocation;
+    const borderColor = getMenuBorderColor(dark);
 
     const viewLocBtn = document.createElement('button');
     viewLocBtn.id = 'view-location-btn';
@@ -204,7 +298,7 @@ export function createViewLocationButton(
     viewLocBtn.title = 'Change view location';
     viewLocBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${borderColor};`;
 
-    const dropdown = createViewLocationDropdown(callbacks, currentLocation, context);
+    const dropdown = createViewLocationDropdown(callbacks, currentLocationState, context);
     document.body.appendChild(dropdown);
 
     viewLocBtn.addEventListener('click', (event) => {
@@ -237,6 +331,14 @@ export function createViewLocationButton(
     window.addEventListener('resize', viewLocResizeHandler, listenerOptions);
     context.documentListeners.push({ type: 'resize', handler: viewLocResizeHandler as EventListener });
 
+    const viewLocationThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        dark = Boolean(event.detail?.dark);
+        viewLocBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${getMenuBorderColor(dark)};`;
+        applyViewLocationDropdownState(dropdown, currentLocationState, dark);
+    }) as EventListener;
+    document.addEventListener('theme-change', viewLocationThemeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: viewLocationThemeHandler });
+
     viewLocBtn.addEventListener('mouseenter', () => {
         viewLocBtn.style.background = 'rgba(148, 163, 184, 0.1)';
     }, listenerOptions);
@@ -246,6 +348,28 @@ export function createViewLocationButton(
         }
     }, listenerOptions);
 
+    applyViewLocationDropdownState(dropdown, currentLocationState, dark);
+    dropdown.querySelectorAll<HTMLElement>('[data-view-location]').forEach(item => {
+        const locationId = item.dataset.viewLocation || '';
+        item.addEventListener('mouseenter', () => {
+            if (currentLocationState !== locationId) {
+                item.style.background = 'rgba(148, 163, 184, 0.1)';
+            }
+        }, listenerOptions);
+        item.addEventListener('mouseleave', () => {
+            if (currentLocationState !== locationId) {
+                item.style.background = 'transparent';
+            }
+        }, listenerOptions);
+        item.addEventListener('click', (event) => {
+            event.stopPropagation();
+            currentLocationState = locationId;
+            applyViewLocationDropdownState(dropdown, currentLocationState, dark);
+            callbacks.onChangeViewLocation(locationId);
+            dropdown.style.display = 'none';
+        }, listenerOptions);
+    });
+
     return viewLocBtn;
 }
 
@@ -254,11 +378,8 @@ function createViewLocationDropdown(
     currentLocation: string,
     context: MenuListenerContext
 ): HTMLElement {
-    const listenerOptions = context.getListenerOptions();
     const dark = callbacks.isDarkTheme();
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-    const dropdownBg = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-    const dropdownShadow = dark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(15, 23, 42, 0.15)';
+    const borderColor = getMenuBorderColor(dark);
 
     const dropdown = document.createElement('div');
     dropdown.id = 'view-location-dropdown';
@@ -266,13 +387,13 @@ function createViewLocationDropdown(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: ${dropdownBg};
+        background: transparent;
         border: 1px solid ${borderColor};
         border-radius: 8px;
         padding: 8px 0;
         min-width: 180px;
         z-index: ${Z_INDEX.dropdownTop};
-        box-shadow: ${dropdownShadow};
+        box-shadow: none;
     `;
 
     const locations = [
@@ -281,27 +402,28 @@ function createViewLocationDropdown(
     ];
 
     const header = document.createElement('div');
+    header.dataset.role = 'menu-header';
     header.textContent = 'View Location';
     header.style.cssText = `
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
 
     locations.forEach(location => {
         const item = document.createElement('div');
-        const isActive = currentLocation === location.id;
+        item.dataset.viewLocation = location.id;
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 8px;
-            color: ${isActive ? '#818cf8' : (dark ? '#e2e8f0' : '#1e293b')};
-            background: ${isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent'};
+            color: ${dark ? '#e2e8f0' : '#1e293b'};
+            background: transparent;
             transition: background 0.15s;
         `;
 
@@ -309,27 +431,9 @@ function createViewLocationDropdown(
             <span style="font-size: 14px;">${location.icon}</span>
             <div>
                 <div style="font-size: 12px; font-weight: 500;">${location.label}</div>
-                <div style="font-size: 10px; color: #64748b;">${location.desc}</div>
+                <div data-role="location-desc" style="font-size: 10px; color: ${getMutedTextColor(dark)};">${location.desc}</div>
             </div>
-            ${isActive ? `<span style="margin-left: auto; color: #818cf8; display: inline-flex; width: 14px; height: 14px;">${ICONS.check}</span>` : ''}
         `;
-
-        item.addEventListener('mouseenter', () => {
-            if (!isActive) {
-                item.style.background = 'rgba(148, 163, 184, 0.1)';
-            }
-        }, listenerOptions);
-        item.addEventListener('mouseleave', () => {
-            if (!isActive) {
-                item.style.background = 'transparent';
-            }
-        }, listenerOptions);
-
-        item.addEventListener('click', (event) => {
-            event.stopPropagation();
-            callbacks.onChangeViewLocation(location.id);
-            dropdown.style.display = 'none';
-        }, listenerOptions);
 
         dropdown.appendChild(item);
     });
@@ -343,8 +447,8 @@ export function createPinnedTabsButton(
     context: MenuListenerContext
 ): HTMLElement {
     const listenerOptions = context.getListenerOptions();
-    const dark = callbacks.isDarkTheme();
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
+    let dark = callbacks.isDarkTheme();
+    const borderColor = getMenuBorderColor(dark);
 
     const pinsBtn = document.createElement('button');
     pinsBtn.id = 'pinned-tabs-btn';
@@ -387,6 +491,14 @@ export function createPinnedTabsButton(
     window.addEventListener('resize', pinnedTabsResizeHandler, listenerOptions);
     context.documentListeners.push({ type: 'resize', handler: pinnedTabsResizeHandler as EventListener });
 
+    const pinnedTabsThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        dark = Boolean(event.detail?.dark);
+        pinsBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${getMenuBorderColor(dark)};`;
+        applyPinnedTabsDropdownTheme(dropdown, dark);
+    }) as EventListener;
+    document.addEventListener('theme-change', pinnedTabsThemeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsThemeHandler });
+
     pinsBtn.addEventListener('mouseenter', () => {
         pinsBtn.style.background = 'rgba(148, 163, 184, 0.1)';
     }, listenerOptions);
@@ -396,6 +508,7 @@ export function createPinnedTabsButton(
         }
     }, listenerOptions);
 
+    applyPinnedTabsDropdownTheme(dropdown, dark);
     return pinsBtn;
 }
 
@@ -405,10 +518,8 @@ function createPinnedTabsDropdown(
     context: MenuListenerContext
 ): HTMLElement {
     const listenerOptions = context.getListenerOptions();
-    const dark = callbacks.isDarkTheme();
-    const borderColor = dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-    const dropdownBg = dark ? 'rgba(17, 17, 17, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-    const dropdownShadow = dark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(15, 23, 42, 0.15)';
+    let dark = callbacks.isDarkTheme();
+    const borderColor = getMenuBorderColor(dark);
 
     const dropdown = document.createElement('div');
     dropdown.id = 'pinned-tabs-dropdown';
@@ -416,7 +527,7 @@ function createPinnedTabsDropdown(
     dropdown.style.cssText = `
         display: none;
         position: fixed;
-        background: ${dropdownBg};
+        background: transparent;
         border: 1px solid ${borderColor};
         border-radius: 8px;
         padding: 8px 0;
@@ -424,22 +535,24 @@ function createPinnedTabsDropdown(
         max-height: 300px;
         overflow-y: auto;
         z-index: ${Z_INDEX.dropdownTop};
-        box-shadow: ${dropdownShadow};
+        box-shadow: none;
     `;
 
     const header = document.createElement('div');
+    header.dataset.role = 'menu-header';
     header.textContent = 'Pinned Visualizations';
     header.style.cssText = `
         padding: 4px 12px 8px;
         font-size: 10px;
         text-transform: uppercase;
-        color: #64748b;
+        color: ${getMutedTextColor(dark)};
         letter-spacing: 0.5px;
     `;
     dropdown.appendChild(header);
 
     pins.forEach(pin => {
         const item = document.createElement('div');
+        item.dataset.role = 'pin-item';
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;
@@ -457,14 +570,15 @@ function createPinnedTabsDropdown(
         item.innerHTML = `
             <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.pin}</span>
             <div style="flex: 1; overflow: hidden;">
-                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pin.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${pin.dialect} • <span title="${absoluteTimeStr}">${relativeTimeStr}</span></div>
+                <div style="font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(pin.name)}</div>
+                <div data-role="pin-meta" style="font-size: 10px; color: ${getMutedTextColor(dark)};">${escapeHtml(pin.dialect)} • <span title="${escapeHtml(absoluteTimeStr)}">${escapeHtml(relativeTimeStr)}</span></div>
             </div>
         `;
 
         const deleteBtn = document.createElement('span');
+        deleteBtn.dataset.role = 'pin-delete';
         deleteBtn.innerHTML = '×';
-        deleteBtn.style.cssText = 'font-size: 16px; color: #64748b; padding: 0 4px; cursor: pointer;';
+        deleteBtn.style.cssText = `font-size: 16px; color: ${getMutedTextColor(dark)}; padding: 0 4px; cursor: pointer;`;
         deleteBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             callbacks.onUnpinTab(pin.id);
@@ -474,7 +588,7 @@ function createPinnedTabsDropdown(
             deleteBtn.style.color = '#ef4444';
         }, listenerOptions);
         deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.color = '#64748b';
+            deleteBtn.style.color = getMutedTextColor(dark);
         }, listenerOptions);
         item.appendChild(deleteBtn);
 
@@ -493,6 +607,12 @@ function createPinnedTabsDropdown(
 
         dropdown.appendChild(item);
     });
+
+    const pinnedTabsDropdownThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        dark = Boolean(event.detail?.dark);
+    }) as EventListener;
+    document.addEventListener('theme-change', pinnedTabsDropdownThemeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsDropdownThemeHandler });
 
     return dropdown;
 }

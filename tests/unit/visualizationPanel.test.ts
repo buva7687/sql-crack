@@ -325,6 +325,10 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain("style-src ${webview.cspSource} 'unsafe-inline'");
         });
 
+        it('allows parser workers from the webview origin and blob URLs', () => {
+            expect(source).toContain("worker-src ${webview.cspSource} blob:;");
+        });
+
         it('allows data and blob images for export', () => {
             expect(source).toContain('img-src data: blob:');
         });
@@ -358,6 +362,7 @@ describe('visualizationPanel.ts', () => {
                 'pinId',
                 'viewLocation',
                 'defaultLayout',
+                'parserWorkerUri',
                 'persistedPinnedTabs',
                 'initialUiState',
                 'showDeadColumnHints',

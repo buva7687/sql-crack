@@ -1,6 +1,7 @@
 import type { CloudViewState, FlowNode, ViewState } from '../types';
 import { UI_COLORS } from '../constants';
 import { NODE_SURFACE } from '../constants/colors';
+import { captureNodeBorderState, ensureNodeBorderStateObserver, restoreNodeBorderState } from '../nodeBorderState';
 
 type NodeSiblingDirection = 'next' | 'prev';
 type ConnectedDirection = 'upstream' | 'downstream';
@@ -129,6 +130,11 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
 
     if (node.type === 'cluster') {
         renderClusterNode(node, group);
+        const rect = group.querySelector('.node-rect') as SVGRectElement | null;
+        if (rect) {
+            captureNodeBorderState(rect);
+            ensureNodeBorderStateObserver(rect);
+        }
         group.addEventListener('click', (event) => {
             event.stopPropagation();
             onClusterToggle(node.id);
@@ -165,6 +171,8 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
 
     const rect = group.querySelector('.node-rect') as SVGRectElement | null;
     if (rect) {
+        captureNodeBorderState(rect);
+        ensureNodeBorderStateObserver(rect);
         const surface = state.isDarkTheme ? NODE_SURFACE.dark : NODE_SURFACE.light;
         const hoverFill = state.isDarkTheme ? '#222222' : '#F1F5F9';
 
@@ -191,7 +199,7 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
         group.style.cursor = 'move';
         group.addEventListener('mousedown', (event) => {
             const target = event.target as Element;
-            if (target.closest('.collapse-button') || target.closest('.cloud-container')) {
+            if (target.closest('.collapse-btn') || target.closest('.cloud-container')) {
                 return;
             }
             if (!svg) {
@@ -326,8 +334,7 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
             rectEl.setAttribute('filter', 'url(#glow)');
             return;
         }
-        rectEl.removeAttribute('stroke');
-        rectEl.removeAttribute('stroke-width');
+        restoreNodeBorderState(rectEl);
         rectEl.setAttribute('filter', 'url(#shadow)');
     });
 

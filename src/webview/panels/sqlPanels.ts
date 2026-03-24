@@ -6,7 +6,7 @@ export interface SqlPreviewPanelOptions {
     currentSql: string;
     isDarkTheme: boolean;
     formatSql: (sql: string) => string;
-    highlightSql: (sql: string) => string;
+    highlightSql: (sql: string, isDarkTheme?: boolean) => string;
     onToggleVisible: (show: boolean) => void;
 }
 
@@ -38,7 +38,7 @@ export function updateSqlPreviewPanelContent(options: SqlPreviewPanelOptions): v
     }
 
     const formattedSql = formatSql(currentSql);
-    const highlightedSql = highlightSql(formattedSql);
+    const highlightedSql = highlightSql(formattedSql, isDarkTheme);
     const sqlHeaderColor = isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;
     const sqlBodyColor = isDarkTheme ? UI_COLORS.textBright : UI_COLORS.textLight;
     const sqlCopyButtonBg = isDarkTheme ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.12)';

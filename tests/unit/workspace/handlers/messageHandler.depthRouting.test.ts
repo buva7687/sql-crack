@@ -317,6 +317,38 @@ describe('MessageHandler depth and column lineage routing', () => {
         expect(flowAnalyzer.getDownstream).toHaveBeenCalledWith('table:orders', { maxDepth: 4, excludeExternal: true });
     });
 
+    it('threads request ids through getLineage results for stale-response protection', async () => {
+        const flowAnalyzer = {
+            getUpstream: jest.fn(() => ({
+                nodes: [{ id: 'table:orders', name: 'orders', type: 'table', filePath: '/repo/orders.sql', lineNumber: 3 }],
+                edges: [],
+                paths: [],
+                depth: 1,
+            })),
+            getDownstream: jest.fn(() => ({ nodes: [], edges: [], paths: [], depth: 0 })),
+        };
+        const { context, postMessage } = createContext({
+            getFlowAnalyzer: jest.fn(() => flowAnalyzer),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'getLineage',
+            nodeId: 'table:orders',
+            direction: 'upstream',
+            requestId: 23,
+        } as any);
+
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'lineageResult',
+            data: expect.objectContaining({
+                requestId: 23,
+                nodeId: 'table:orders',
+                direction: 'upstream',
+            }),
+        }));
+    });
+
     it('sends a warning when selecting a column for a table missing from lineage index', async () => {
         const columnLineageTracker = {
             getFullColumnLineage: jest.fn(() => ({ upstream: [], downstream: [] })),

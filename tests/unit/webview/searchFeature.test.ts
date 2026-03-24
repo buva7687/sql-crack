@@ -1,7 +1,9 @@
 import type { FlowNode, ViewState } from '../../../src/webview/types';
+import { getComponentUiColors } from '../../../src/webview/constants';
 import {
     clearSearchFeature,
     createSearchRuntimeState,
+    highlightMatchesFeature,
     navigateSearchFeature,
     performSearchFeature,
     setSearchBoxFeature,
@@ -69,11 +71,21 @@ function createFakeInput(): HTMLInputElement & { emit: (type: string, event?: an
 }
 
 function createFakeNodeGroup(id: string) {
+    const attrs = new Map<string, string>();
     const rect = {
+        getAttribute: jest.fn((name: string) => attrs.get(name) || null),
+        hasAttribute: jest.fn((name: string) => attrs.has(name)),
+        setAttribute: jest.fn((name: string, value: string) => {
+            attrs.set(name, value);
+            if (name === 'stroke' || name === 'stroke-width' || name === 'stroke-dasharray') {
+                attrs.set(`data-node-base-${name}`, value);
+            }
+        }),
         removeAttribute: jest.fn(),
     };
     return {
         classList: {
+            add: jest.fn(),
             remove: jest.fn(),
         },
         getAttribute: jest.fn((name: string) => {
@@ -116,7 +128,7 @@ describe('search feature helpers', () => {
         updateSearchCountDisplayFeature(runtime, state, 0);
         expect(runtime.searchCountIndicator.style.display).toBe('block');
         expect(runtime.searchCountIndicator.textContent).toBe('No data');
-        expect(runtime.searchCountIndicator.style.color).toBe('#94a3b8');
+        expect(runtime.searchCountIndicator.style.color).toBe(getComponentUiColors(true).textMuted);
 
         updateSearchCountDisplayFeature(runtime, state, 4);
         expect(runtime.searchCountIndicator.textContent).toBe('No matches');
@@ -126,7 +138,36 @@ describe('search feature helpers', () => {
         state.currentSearchIndex = 1;
         updateSearchCountDisplayFeature(runtime, state, 4);
         expect(runtime.searchCountIndicator.textContent).toBe('2/3');
-        expect(runtime.searchCountIndicator.style.color).toBe('#64748b');
+        expect(runtime.searchCountIndicator.style.color).toBe(getComponentUiColors(true).textMuted);
+    });
+
+    it('uses theme-aware highlight colors for matched search results', () => {
+        const darkState = createViewState({ isDarkTheme: true });
+        const lightState = createViewState({ isDarkTheme: false });
+        const darkNode = createFakeNodeGroup('orders');
+        const lightNode = createFakeNodeGroup('orders');
+
+        highlightMatchesFeature({
+            term: 'orders',
+            state: darkState,
+            mainGroup: {
+                querySelectorAll: jest.fn(() => [darkNode]),
+            } as unknown as SVGGElement,
+            selectedNodeId: null,
+            highlightColor: '#fbbf24',
+        });
+        expect(darkNode.rect.setAttribute).toHaveBeenCalledWith('stroke', '#fbbf24');
+
+        highlightMatchesFeature({
+            term: 'orders',
+            state: lightState,
+            mainGroup: {
+                querySelectorAll: jest.fn(() => [lightNode]),
+            } as unknown as SVGGElement,
+            selectedNodeId: null,
+            highlightColor: '#fbbf24',
+        });
+        expect(lightNode.rect.setAttribute).toHaveBeenCalledWith('stroke', getComponentUiColors(false).accent);
     });
 
     it('registers search input handlers for keyboard navigation and debounce', () => {
@@ -147,8 +188,8 @@ describe('search feature helpers', () => {
 
         setSearchBoxFeature(runtime, input, countIndicator, callbacks);
 
-        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault: jest.fn() });
-        input.emit('keydown', { key: 'Enter', shiftKey: true, preventDefault: jest.fn() });
+        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault: jest.fn(), stopPropagation: jest.fn() });
+        input.emit('keydown', { key: 'Enter', shiftKey: true, preventDefault: jest.fn(), stopPropagation: jest.fn() });
         expect(callbacks.onNavigateSearch).toHaveBeenNthCalledWith(1, 1);
         expect(callbacks.onNavigateSearch).toHaveBeenNthCalledWith(2, -1);
 
@@ -170,6 +211,41 @@ describe('search feature helpers', () => {
         expect(callbacks.onUpdateSearchCountDisplay).toHaveBeenCalled();
         jest.advanceTimersByTime(600);
         expect(callbacks.onNavigateToFirstResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the pending debounce and stops bubbling when Enter is pressed', () => {
+        jest.useFakeTimers();
+        const runtime = createSearchRuntimeState();
+        const input = createFakeInput();
+        const countIndicator = {} as HTMLSpanElement;
+        const callbacks = {
+            onNavigateSearch: jest.fn(),
+            onHighlightMatches: jest.fn(),
+            onUpdateSearchCountDisplay: jest.fn(),
+            onNavigateToFirstResult: jest.fn(),
+            onNodeMatchActivated: jest.fn(),
+            onAddBreadcrumbSegment: jest.fn(),
+            onRemoveBreadcrumbSegment: jest.fn(),
+            onClearSearch: jest.fn(),
+        };
+
+        setSearchBoxFeature(runtime, input, countIndicator, callbacks);
+
+        input.value = 'orders';
+        input.emit('input');
+        expect(runtime.searchDebounceTimer).not.toBeNull();
+
+        const preventDefault = jest.fn();
+        const stopPropagation = jest.fn();
+        input.emit('keydown', { key: 'Enter', shiftKey: false, preventDefault, stopPropagation });
+
+        expect(preventDefault).toHaveBeenCalled();
+        expect(stopPropagation).toHaveBeenCalled();
+        expect(runtime.searchDebounceTimer).toBeNull();
+        expect(callbacks.onNavigateSearch).toHaveBeenCalledWith(1);
+
+        jest.advanceTimersByTime(600);
+        expect(callbacks.onNavigateToFirstResult).not.toHaveBeenCalled();
     });
 
     it('adds or removes breadcrumb state based on search results', () => {

@@ -278,6 +278,25 @@ describe('WorkspaceScanner', () => {
             expect(result1.contentHash).toBe(result2.contentHash);
             expect(result1.contentHash).toHaveLength(64); // SHA-256 hex = 64 chars
         });
+
+        it('prefers workspace.fs.readFile over openTextDocument when bytes decode cleanly', async () => {
+            const sqlContent = 'SELECT * FROM users;';
+
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                mtime: Date.now(),
+                size: sqlContent.length
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(
+                new TextEncoder().encode(sqlContent)
+            );
+
+            const result = await scanner.analyzeFile(testUri);
+
+            expect(vscode.workspace.fs.readFile).toHaveBeenCalledWith(testUri);
+            expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+            expect(result.contentHash).toHaveLength(64);
+        });
     });
 
     // =========================================================================
@@ -436,6 +455,7 @@ describe('WorkspaceScanner', () => {
                 mtime: Date.now(),
                 size: 0
             });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(new Uint8Array());
 
             (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue({
                 getText: () => '',
@@ -450,15 +470,19 @@ describe('WorkspaceScanner', () => {
 
         it('should handle SQL with only comments', async () => {
             const testUri = vscode.Uri.file('/workspace/comments.sql');
+            const sqlContent = '-- This is a comment\n/* Block comment */';
 
             (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
                 type: 1,
                 mtime: Date.now(),
                 size: 50
             });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(
+                new TextEncoder().encode(sqlContent)
+            );
 
             (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue({
-                getText: () => '-- This is a comment\n/* Block comment */',
+                getText: () => sqlContent,
                 uri: testUri
             });
 

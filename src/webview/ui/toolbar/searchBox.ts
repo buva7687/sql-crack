@@ -1,4 +1,5 @@
 import { ICONS } from '../../../shared/icons';
+import { getComponentUiColors } from '../../constants';
 
 export interface SearchBoxCallbacks {
     isDarkTheme: () => boolean;
@@ -16,8 +17,8 @@ export function createSearchBox(
     const searchContainer = document.createElement('div');
     searchContainer.id = 'search-container';
     searchContainer.style.cssText = `
-        background: ${dark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
-        border: 1px solid ${dark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'};
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 8px;
         padding: 4px 12px;
         display: flex;
@@ -38,7 +39,6 @@ export function createSearchBox(
     searchInput.style.cssText = `
         background: transparent;
         border: none;
-        color: ${dark ? '#f1f5f9' : '#1e293b'};
         font-size: 12px;
         width: 140px;
         outline: none;
@@ -51,7 +51,6 @@ export function createSearchBox(
     searchCount.setAttribute('aria-live', 'polite');
     searchCount.setAttribute('aria-atomic', 'true');
     searchCount.style.cssText = `
-        color: #64748b;
         font-size: 11px;
         min-width: 32px;
         text-align: center;
@@ -69,7 +68,6 @@ export function createSearchBox(
     prevBtn.style.cssText = `
         background: transparent;
         border: none;
-        color: #94a3b8;
         cursor: pointer;
         width: 44px;
         height: 44px;
@@ -93,6 +91,29 @@ export function createSearchBox(
     searchNav.appendChild(nextBtn);
 
     searchContainer.appendChild(searchNav);
+    const applyTheme = (isDark: boolean): void => {
+        const theme = getComponentUiColors(isDark);
+        searchContainer.style.background = theme.surface;
+        searchContainer.style.borderColor = theme.border;
+        searchInput.style.color = theme.text;
+        searchInput.style.caretColor = theme.accent;
+        searchIcon.style.color = theme.textMuted;
+        prevBtn.style.color = theme.textMuted;
+        nextBtn.style.color = theme.textMuted;
+
+        if (searchCount.textContent === 'No matches') {
+            searchCount.style.color = isDark ? '#f87171' : '#dc2626';
+        } else {
+            searchCount.style.color = theme.textMuted;
+        }
+    };
+    applyTheme(dark);
+
+    const themeChangeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        applyTheme(Boolean(event.detail?.dark));
+    }) as EventListener;
+    document.addEventListener('theme-change', themeChangeHandler, listenerOptions);
+
     callbacks.onSearchBoxReady(searchInput, searchCount);
 
     return searchContainer;

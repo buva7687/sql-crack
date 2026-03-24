@@ -315,7 +315,8 @@ export class MessageHandler {
                     await this.handleGetLineage(
                         message.nodeId,
                         message.direction,
-                        this.resolveRequestedDepth(message.depth)
+                        this.resolveRequestedDepth(message.depth),
+                        getWorkspaceRequestId(message)
                     );
                     break;
 
@@ -441,6 +442,7 @@ export class MessageHandler {
 
     private handleShowInGraph(query: string, nodeType?: 'table' | 'view' | 'external' | 'file'): void {
         const trimmedQuery = (query || '').trim();
+        const previousView = this._context.getCurrentView();
         const filter: SearchFilter = {
             query: trimmedQuery,
             nodeTypes: undefined,
@@ -456,8 +458,11 @@ export class MessageHandler {
         });
 
         const graph = this._context.getCurrentGraph();
-        if (graph) {
-            this.setPanelHtml(this._context.getWebviewHtml(graph, filter));
+        if (graph && previousView !== 'issues') {
+            this.postMessage({
+                command: 'showInGraphResult',
+                data: { query: trimmedQuery }
+            });
             return;
         }
         this._context.renderCurrentView();
@@ -491,10 +496,6 @@ export class MessageHandler {
 
     private handleSearch(filter: SearchFilter): void {
         this._context.setCurrentSearchFilter(filter);
-        const graph = this._context.getCurrentGraph();
-        if (graph) {
-            this.setPanelHtml(this._context.getWebviewHtml(graph, filter));
-        }
     }
 
     private handleClearSearch(): void {
@@ -505,10 +506,6 @@ export class MessageHandler {
             caseSensitive: false
         };
         this._context.setCurrentSearchFilter(clearFilter);
-        const graph = this._context.getCurrentGraph();
-        if (graph) {
-            this.setPanelHtml(this._context.getWebviewHtml(graph, clearFilter));
-        }
     }
 
     private handleTrackUxEvent(event: string, metadata?: WorkspaceUxMetricMetadata): void {
@@ -646,7 +643,8 @@ export class MessageHandler {
     private async handleGetLineage(
         nodeId: string,
         direction: 'upstream' | 'downstream' | 'both',
-        depth: number
+        depth: number,
+        requestId?: number
     ): Promise<void> {
         await this._context.buildLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
@@ -674,7 +672,7 @@ export class MessageHandler {
         this._context.setCurrentFlowResult(result);
 
         // Send result to webview
-        this.postMessage({
+        this.postRequestMessage({
             command: 'lineageResult',
             data: {
                 nodeId,
@@ -691,7 +689,7 @@ export class MessageHandler {
                     pathCount: result.paths.length
                 } : null
             }
-        });
+        }, requestId);
     }
 
     private async handleAnalyzeImpact(

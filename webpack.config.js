@@ -44,10 +44,15 @@ const extensionConfig = {
 const webviewConfig = {
   target: 'web',
   mode: isProduction ? 'production' : 'none',
-  entry: './src/webview/index.ts',
+  entry: {
+    webview: './src/webview/index.ts',
+    parser_worker: './src/webview/parser.worker.ts'
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: 'webview.js'
+    filename: (pathData) => pathData.chunk?.name === 'parser_worker'
+      ? 'parser.worker.js'
+      : 'webview.js'
   },
   resolve: {
     extensions: ['.ts', '.js'],

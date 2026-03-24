@@ -190,6 +190,11 @@ export class LayoutEngine {
 
         const nodeCount = nodes.length;
         const edgeCount = edges.length;
+
+        if (nodeCount === 0) {
+            return 'hierarchical';
+        }
+
         const density = edgeCount / (nodeCount * nodeCount);
 
         // Choose layout based on graph characteristics

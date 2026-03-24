@@ -9,6 +9,17 @@ export function registerDragListeners(
     if (!svg) {
         return;
     }
+    let activeDraggedCloudNode: ReturnType<EventListenerContext['getCurrentNodes']>[number] | null = null;
+    let activeDraggedNode: ReturnType<EventListenerContext['getCurrentNodes']>[number] | null = null;
+    let activeDraggedNodeGroup: SVGGElement | null = null;
+    let activeDraggedNodeRectOrigin: { x: number; y: number } | null = null;
+
+    const clearDragCaches = (): void => {
+        activeDraggedCloudNode = null;
+        activeDraggedNode = null;
+        activeDraggedNodeGroup = null;
+        activeDraggedNodeRectOrigin = null;
+    };
 
     const canStartCanvasDrag = (target: Element): boolean => {
         const cloudGroup = target.closest('.cloud-container');
@@ -32,7 +43,10 @@ export function registerDragListeners(
 
     svg.addEventListener('mousemove', (e) => {
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
-            const node = getCurrentNodes().find(n => n.id === state.draggingCloudNodeId);
+            if (!activeDraggedCloudNode || activeDraggedCloudNode.id !== state.draggingCloudNodeId) {
+                activeDraggedCloudNode = getCurrentNodes().find(n => n.id === state.draggingCloudNodeId) || null;
+            }
+            const node = activeDraggedCloudNode;
             if (node) {
                 const lastClientX = state.dragPointerLastClientX ?? e.clientX;
                 const lastClientY = state.dragPointerLastClientY ?? e.clientY;
@@ -60,18 +74,28 @@ export function registerDragListeners(
             const deltaX = mouseX - state.dragMouseStartX;
             const deltaY = mouseY - state.dragMouseStartY;
 
-            const node = getCurrentNodes().find(n => n.id === state.draggingNodeId);
+            if (!activeDraggedNode || activeDraggedNode.id !== state.draggingNodeId) {
+                activeDraggedNode = getCurrentNodes().find(n => n.id === state.draggingNodeId) || null;
+            }
+            const node = activeDraggedNode;
             if (node) {
                 node.x = state.dragNodeStartX + deltaX;
                 node.y = state.dragNodeStartY + deltaY;
 
-                const nodeGroup = getMainGroup()?.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement;
+                if (!activeDraggedNodeGroup || activeDraggedNodeGroup.getAttribute('data-id') !== node.id) {
+                    activeDraggedNodeGroup = getMainGroup()?.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement | null;
+                    const nodeRect = activeDraggedNodeGroup?.querySelector('.node-rect') as SVGRectElement | null;
+                    activeDraggedNodeRectOrigin = nodeRect
+                        ? {
+                            x: parseFloat(nodeRect.getAttribute('x') || '0'),
+                            y: parseFloat(nodeRect.getAttribute('y') || '0'),
+                        }
+                        : null;
+                }
+                const nodeGroup = activeDraggedNodeGroup;
                 if (nodeGroup) {
-                    const nodeRect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-                    if (nodeRect) {
-                        const origX = parseFloat(nodeRect.getAttribute('x') || '0');
-                        const origY = parseFloat(nodeRect.getAttribute('y') || '0');
-                        nodeGroup.setAttribute('transform', `translate(${node.x - origX}, ${node.y - origY})`);
+                    if (activeDraggedNodeRectOrigin) {
+                        nodeGroup.setAttribute('transform', `translate(${node.x - activeDraggedNodeRectOrigin.x}, ${node.y - activeDraggedNodeRectOrigin.y})`);
                     }
                 }
 
@@ -111,6 +135,7 @@ export function registerDragListeners(
         state.draggingCloudNodeId = null;
         state.dragPointerLastClientX = null;
         state.dragPointerLastClientY = null;
+        clearDragCaches();
         svg.style.cursor = 'grab';
 
         if (shouldRecordHistory) {

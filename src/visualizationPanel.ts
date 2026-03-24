@@ -3,7 +3,6 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
-import { WorkspacePanel } from './workspace';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
@@ -499,6 +498,8 @@ export class VisualizationPanel {
             return;
         }
 
+        const { WorkspacePanel } = await import('./workspace');
+
         await WorkspacePanel.createOrShow(
             this._extensionUri,
             VisualizationPanel._context,
@@ -689,6 +690,9 @@ export class VisualizationPanel {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview.js')
         );
+        const parserWorkerUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'parser.worker.js')
+        );
 
         const nonce = getNonce();
         const runtimeConfig = this._readRuntimeConfig(options);
@@ -706,7 +710,7 @@ export class VisualizationPanel {
 <head>
     <meta charset="UTF-8">
     <!-- CSP: Allow img-src for data: and blob: URLs to enable PNG export and clipboard copy -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data: blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; worker-src ${webview.cspSource} blob:; img-src data: blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Visualization</title>
     <style>
@@ -741,6 +745,7 @@ export class VisualizationPanel {
             pinId: ${this._escapeForInlineScript(this._pinId || null)},
             viewLocation: ${this._escapeForInlineScript(runtimeConfig.viewLocation)},
             defaultLayout: ${this._escapeForInlineScript(runtimeConfig.defaultLayout)},
+            parserWorkerUri: ${this._escapeForInlineScript(parserWorkerUri.toString())},
             flowDirection: ${this._escapeForInlineScript('top-down')},
             persistedPinnedTabs: ${this._escapeForInlineScript(pinnedTabs)},
             initialUiState: ${this._escapeForInlineScript(initialUiState)},
@@ -768,6 +773,7 @@ export class VisualizationPanel {
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
         window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};
         window.defaultLayout = ${this._escapeForInlineScript(runtimeConfig.defaultLayout)};
+        window.parserWorkerUri = ${this._escapeForInlineScript(parserWorkerUri.toString())};
         window.flowDirection = ${this._escapeForInlineScript('top-down')};
         window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
         window.initialUiState = ${this._escapeForInlineScript(initialUiState)};

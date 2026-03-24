@@ -66,6 +66,22 @@ describe('default layout initialization', () => {
         const edgesIdx = dragBody.indexOf('updateNodeEdges');
         expect(transformIdx).toBeLessThan(edgesIdx);
     });
+
+    it('switchLayout uses cached node maps instead of repeated DOM and array scans', () => {
+        const switchLayoutMatch = rendererSource.match(
+            /export function switchLayout\(layoutType: LayoutType\): void \{[\s\S]*?\n}\n\nexport function getCurrentLayout/
+        );
+        expect(switchLayoutMatch).not.toBeNull();
+        const switchLayoutBody = switchLayoutMatch![0];
+
+        expect(switchLayoutBody).toContain('const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));');
+        expect(switchLayoutBody).toContain('const nodeGroup = renderedNodeElementsById.get(node.id);');
+        expect(switchLayoutBody).toContain('const sourceNode = currentNodeMap.get(sourceId);');
+        expect(switchLayoutBody).toContain('const targetNode = currentNodeMap.get(targetId);');
+        expect(switchLayoutBody).not.toContain('mainGroup!.querySelector(`.node[data-id="${node.id}"]`)');
+        expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === sourceId)");
+        expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === targetId)");
+    });
 });
 
 describe('SQL Server dialect in package.json', () => {

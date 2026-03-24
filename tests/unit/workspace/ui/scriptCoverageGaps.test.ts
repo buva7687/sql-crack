@@ -53,6 +53,16 @@ describe('workspace ui script coverage gaps', () => {
         expect(source).toContain('expandedNodes: lineageExpandedNodes ? Array.from(lineageExpandedNodes) : []');
     });
 
+    it('parses lineage table names without producing undefined for malformed table ids', () => {
+        const source = readWorkspaceScript('columnLineage.ts');
+
+        expect(source).toContain('function getLineageTableName(tableId)');
+        expect(source).toContain("const tableName = parts[parts.length - 1];");
+        expect(source).toContain('return tableName ? tableName : tableId;');
+        expect(source).toContain('const tableName = getLineageTableName(tableId);');
+        expect(source).not.toContain("tableId.split(':')[1]");
+    });
+
     it('uses data-action context menu routing instead of inline handlers', () => {
         const source = readWorkspaceScript('contextMenu.ts');
 

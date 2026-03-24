@@ -20,7 +20,10 @@ describe('compare mode wiring', () => {
 
     it('toggles compare mode from webview bootstrap with parsed baseline query', () => {
         expect(indexSource).toContain('async function toggleCompareMode(): Promise<void>');
+        expect(indexSource).toContain('const compareToken = parseRequestId;');
+        expect(indexSource).toContain('const compareQueryIndex = currentQueryIndex;');
         expect(indexSource).toContain('const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {');
+        expect(indexSource).toContain('compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex');
         expect(indexSource).toContain('allowDialectFallback: isDialectAutoDetectionEnabled(),');
         expect(indexSource).toContain('showCompareView({');
         expect(indexSource).toContain('hideCompareView();');

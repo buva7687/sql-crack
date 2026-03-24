@@ -10,9 +10,13 @@ describe('calculateEdgePath layout support', () => {
         join(__dirname, '../../../src/webview/rendering/edgeRenderer.ts'),
         'utf8'
     );
+    const computationsSource = readFileSync(
+        join(__dirname, '../../../src/webview/rendering/computations.ts'),
+        'utf8'
+    );
 
-    // Extract the calculateEdgePath function body
-    const fnMatch = edgeRendererSource.match(
+    // The pure logic now lives in computations.ts
+    const fnMatch = computationsSource.match(
         /function calculateEdgePath\(sourceNode: FlowNode, targetNode: FlowNode, layoutType: LayoutType\): string \{([\s\S]*?)\n\}/
     );
     const fnBody = fnMatch ? fnMatch[1] : '';
@@ -23,8 +27,13 @@ describe('calculateEdgePath layout support', () => {
         expect(rendererSource).toContain('return calculateEdgePathFeature(sourceNode, targetNode, layoutType);');
     });
 
+    it('edgeRenderer delegates to computations module', () => {
+        expect(edgeRendererSource).toContain("import {");
+        expect(edgeRendererSource).toContain("from './computations'");
+        expect(edgeRendererSource).toContain('return calculateEdgePathPure(sourceNode, targetNode, layoutType);');
+    });
+
     it('handles horizontal layout with right/left connections', () => {
-        // Horizontal should use sourceNode.x + sourceNode.width (right edge) and targetNode.x (left edge)
         expect(fnBody).toContain("layoutType === 'horizontal'");
         expect(fnBody).toContain('sourceNode.x + sourceNode.width');
         expect(fnBody).toContain('targetNode.y + targetNode.height / 2');
@@ -32,29 +41,24 @@ describe('calculateEdgePath layout support', () => {
 
     it('handles force and radial layouts with smart edge routing', () => {
         expect(fnBody).toContain("layoutType === 'force' || layoutType === 'radial'");
-        // Uses angle-based routing
         expect(fnBody).toContain('Math.atan2');
     });
 
     it('handles vertical/compact layouts with top/bottom connections', () => {
-        // Default branch handles vertical and compact
         expect(fnBody).toContain('sourceNode.y + sourceNode.height');
         expect(fnBody).toContain('targetNode.x + targetNode.width / 2');
     });
 
     it('all five layout types are handled (no missing branches)', () => {
-        // horizontal, force, radial have explicit branches; vertical and compact fall to else
         expect(fnBody).toContain("'horizontal'");
         expect(fnBody).toContain("'force'");
         expect(fnBody).toContain("'radial'");
-        // The else branch covers vertical and compact — verify the comment
         expect(fnBody).toContain('Vertical/compact');
     });
 
     it('guards dist against zero to prevent NaN in SVG path', () => {
-        // The force/radial branch computes perpX = -dy / dist, perpY = dx / dist.
-        // When dist === 0 (overlapping nodes), division by zero produces NaN without a guard.
-        expect(edgeRendererSource).toContain('Math.sqrt(dx * dx + dy * dy) || 1');
+        // The guard now lives in computations.ts
+        expect(computationsSource).toContain('Math.sqrt(dx * dx + dy * dy) || 1');
     });
 
     it('renderEdge uses calculateEdgePath with the active layout type', () => {

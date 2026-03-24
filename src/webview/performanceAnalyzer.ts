@@ -9,16 +9,9 @@ export interface IndexSuggestion {
     suggestion: string;
 }
 
-export interface RefactoringHint extends OptimizationHint {
-    refactoringType: 'subquery-to-join' | 'self-join-to-window' | 'cte-extraction';
-    originalPattern: string;
-    suggestedPattern: string;
-}
-
 export interface PerformanceAnalysisResult {
     hints: OptimizationHint[];
     indexSuggestions: IndexSuggestion[];
-    refactoringOpportunities: RefactoringHint[];
 }
 
 function normalizeColumnReference(columnRef: any): string | null {
@@ -813,7 +806,6 @@ export function analyzePerformance(
 ): PerformanceAnalysisResult {
     const hints: OptimizationHint[] = [];
     const indexSuggestions: IndexSuggestion[] = [];
-    const refactoringOpportunities: RefactoringHint[] = [];
 
     // Run all analyzers
     detectFilterPushdownOpportunities(ast, nodes, edges, hints);
@@ -825,5 +817,5 @@ export function analyzePerformance(
     detectNonSargableExpressions(ast, hints);
     analyzeAggregatePerformance(ast, hints);
 
-    return { hints, indexSuggestions, refactoringOpportunities };
+    return { hints, indexSuggestions };
 }
