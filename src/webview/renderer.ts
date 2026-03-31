@@ -131,7 +131,12 @@ import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGrap
 import { layoutGraph } from './parser/layout';
 import { ICONS, Z_INDEX } from '../shared';
 import { getWarningIndicatorState } from './warningIndicator';
-import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
+import {
+    COLUMN_LINEAGE_BANNER_TEXT,
+    COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+    shouldEnableColumnLineage,
+    shouldShowTraceColumnsAction,
+} from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
 import {
@@ -1535,8 +1540,13 @@ function restorePreservedRenderState(snapshot: PreservedRenderState): void {
     }
 
     if (snapshot.showColumnFlows) {
-        state.showColumnFlows = true;
-        if (!columnLineageRuntime.columnLineagePanel && shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+        state.showColumnFlows = shouldEnableColumnLineage(currentColumnFlows?.length || 0);
+        if (!state.showColumnFlows) {
+            setColumnLineageBannerVisible(true, {
+                text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+                mode: 'warning',
+            });
+        } else if (!columnLineageRuntime.columnLineagePanel) {
             showColumnLineagePanel();
         }
         if (columnLineageRuntime.columnLineagePanel && snapshot.selectedColumnLineageId) {
@@ -3588,12 +3598,21 @@ const columnLineageRuntime: ColumnLineageRuntimeState = {
     columnLineagePanel: null,
 };
 
-function updateColumnLineageBannerStyle(): void {
+function updateColumnLineageBannerStyle(mode: 'active' | 'warning' = 'active'): void {
     if (!columnLineageBanner) { return; }
-    const background = state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)';
-    const border = state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)';
-    const textColor = state.isDarkTheme ? '#c7d2fe' : '#4338ca';
-    const buttonColor = state.isDarkTheme ? '#a5b4fc' : '#4f46e5';
+    const warningMode = mode === 'warning';
+    const background = warningMode
+        ? (state.isDarkTheme ? 'rgba(245, 158, 11, 0.14)' : 'rgba(245, 158, 11, 0.1)')
+        : (state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)');
+    const border = warningMode
+        ? (state.isDarkTheme ? 'rgba(245, 158, 11, 0.4)' : 'rgba(217, 119, 6, 0.35)')
+        : (state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)');
+    const textColor = warningMode
+        ? (state.isDarkTheme ? '#fde68a' : '#92400e')
+        : (state.isDarkTheme ? '#c7d2fe' : '#4338ca');
+    const buttonColor = warningMode
+        ? (state.isDarkTheme ? '#fbbf24' : '#b45309')
+        : (state.isDarkTheme ? '#a5b4fc' : '#4f46e5');
     columnLineageBanner.style.background = background;
     columnLineageBanner.style.border = `1px solid ${border}`;
     columnLineageBanner.style.color = textColor;
@@ -3603,9 +3622,16 @@ function updateColumnLineageBannerStyle(): void {
     }
 }
 
-function setColumnLineageBannerVisible(visible: boolean): void {
+function setColumnLineageBannerVisible(
+    visible: boolean,
+    options?: { text?: string; mode?: 'active' | 'warning' }
+): void {
     if (!columnLineageBanner) { return; }
-    updateColumnLineageBannerStyle();
+    const bannerText = columnLineageBanner.querySelector('#column-lineage-banner-text');
+    if (bannerText) {
+        bannerText.textContent = options?.text || COLUMN_LINEAGE_BANNER_TEXT;
+    }
+    updateColumnLineageBannerStyle(options?.mode || 'active');
     columnLineageBanner.style.display = visible ? 'flex' : 'none';
 }
 
@@ -3695,7 +3721,10 @@ export function toggleColumnFlows(show?: boolean): void {
     if (state.showColumnFlows) {
         if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
             state.showColumnFlows = false;
-            setColumnLineageBannerVisible(false);
+            setColumnLineageBannerVisible(true, {
+                text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+                mode: 'warning',
+            });
             return;
         }
         showColumnLineagePanel();

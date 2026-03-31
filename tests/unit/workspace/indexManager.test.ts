@@ -1061,12 +1061,55 @@ describe('IndexManager', () => {
             );
         });
 
-        it('should rebuild index when additional extensions configuration changes', async () => {
+        it('should rebuild index when additional extensions configuration changes and dispose old watcher listeners', async () => {
             indexManager.dispose();
             jest.clearAllMocks();
 
             type ConfigChangeHandler = (event: { affectsConfiguration: (key: string) => boolean }) => void;
             let configChangeHandler: ConfigChangeHandler | undefined;
+            class ControlledWatcher {
+                private changeHandler: ((uri: vscode.Uri) => void) | null = null;
+                private createHandler: ((uri: vscode.Uri) => void) | null = null;
+                private deleteHandler: ((uri: vscode.Uri) => void) | null = null;
+                readonly changeDisposable = { dispose: jest.fn(() => { this.changeHandler = null; }) };
+                readonly createDisposable = { dispose: jest.fn(() => { this.createHandler = null; }) };
+                readonly deleteDisposable = { dispose: jest.fn(() => { this.deleteHandler = null; }) };
+                readonly dispose = jest.fn();
+
+                readonly onDidChange = jest.fn((handler: (uri: vscode.Uri) => void) => {
+                    this.changeHandler = handler;
+                    return this.changeDisposable;
+                });
+
+                readonly onDidCreate = jest.fn((handler: (uri: vscode.Uri) => void) => {
+                    this.createHandler = handler;
+                    return this.createDisposable;
+                });
+
+                readonly onDidDelete = jest.fn((handler: (uri: vscode.Uri) => void) => {
+                    this.deleteHandler = handler;
+                    return this.deleteDisposable;
+                });
+
+                triggerChange(uri: vscode.Uri): void {
+                    this.changeHandler?.(uri);
+                }
+
+                triggerCreate(uri: vscode.Uri): void {
+                    this.createHandler?.(uri);
+                }
+
+                triggerDelete(uri: vscode.Uri): void {
+                    this.deleteHandler?.(uri);
+                }
+            }
+
+            const watchers: ControlledWatcher[] = [];
+            (vscode.workspace.createFileSystemWatcher as jest.Mock).mockImplementation(() => {
+                const watcher = new ControlledWatcher();
+                watchers.push(watcher);
+                return watcher;
+            });
             (vscode.workspace.onDidChangeConfiguration as jest.Mock).mockImplementation((handler: ConfigChangeHandler) => {
                 configChangeHandler = handler;
                 return { dispose: jest.fn() };
@@ -1074,10 +1117,14 @@ describe('IndexManager', () => {
 
             mockScanner.getFileCount.mockResolvedValue(100); // avoid auto-index on initialize
             mockScanner.analyzeWorkspace.mockResolvedValue([]);
+            mockScanner.analyzeFile.mockResolvedValue(
+                createMockAnalysis('/fresh.sql', [{ name: 'fresh_table' }])
+            );
             indexManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
             await indexManager.initialize();
 
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(watchers).toHaveLength(1);
 
             __setMockConfig('sqlCrack', { additionalFileExtensions: ['hql'] });
             if (!configChangeHandler) {
@@ -1090,8 +1137,20 @@ describe('IndexManager', () => {
             jest.advanceTimersByTime(0);
             await flushMicrotasks();
 
+            expect(watchers).toHaveLength(2);
+            expect(watchers[0].dispose).toHaveBeenCalled();
+            expect(watchers[0].changeDisposable.dispose).toHaveBeenCalled();
+            expect(watchers[0].createDisposable.dispose).toHaveBeenCalled();
+            expect(watchers[0].deleteDisposable.dispose).toHaveBeenCalled();
+
+            watchers[0].triggerChange(vscode.Uri.file('/stale.sql'));
+            watchers[1].triggerChange(vscode.Uri.file('/fresh.sql'));
+            await flushWatcherDebounce();
+
             expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeFile).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/fresh.sql' }));
         });
     });
 
@@ -1139,6 +1198,53 @@ describe('IndexManager', () => {
             expect(buildSpy).toHaveBeenCalled();
             expect(indexManager.findDefinition('users')).toBeUndefined();
             expect(indexManager.findDefinition('orders')).toBeDefined();
+        });
+
+        it('coalesces rapid dialect changes into one rebuild for the latest dialect', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/snowflake.sql', [{ name: 'snow_orders' }]),
+            ]);
+
+            indexManager.setDialect('PostgreSQL');
+            indexManager.setDialect('Snowflake');
+
+            await flushPromises();
+            await flushPromises();
+
+            expect(mockScanner.setDialect).toHaveBeenNthCalledWith(1, 'PostgreSQL');
+            expect(mockScanner.setDialect).toHaveBeenNthCalledWith(2, 'Snowflake');
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(indexManager.findDefinition('snow_orders')).toBeDefined();
+        });
+
+        it('runs at most one follow-up rebuild after an in-flight build when dialect changes rapidly', async () => {
+            let resolveInitialBuild!: (analyses: FileAnalysis[]) => void;
+            const initialBuildPromise = new Promise<FileAnalysis[]>((resolve) => {
+                resolveInitialBuild = resolve;
+            });
+
+            mockScanner.analyzeWorkspace
+                .mockImplementationOnce(() => initialBuildPromise)
+                .mockResolvedValueOnce([
+                    createMockAnalysis('/snowflake.sql', [{ name: 'snow_orders' }]),
+                ]);
+
+            const firstBuild = indexManager.buildIndex();
+
+            indexManager.setDialect('PostgreSQL');
+            indexManager.setDialect('Snowflake');
+
+            resolveInitialBuild([
+                createMockAnalysis('/users.sql', [{ name: 'users' }]),
+            ]);
+
+            await firstBuild;
+            await flushPromises();
+            await flushPromises();
+
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(2);
+            expect(indexManager.findDefinition('users')).toBeUndefined();
+            expect(indexManager.findDefinition('snow_orders')).toBeDefined();
         });
     });
 

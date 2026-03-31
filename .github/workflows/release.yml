@@ -64,6 +64,9 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      - name: Run performance gate
+        run: npm run test:perf
+
       - name: Build extension
         run: npm run package
 

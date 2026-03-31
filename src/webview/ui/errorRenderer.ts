@@ -1,10 +1,57 @@
 import { STATUS_COLORS, UI_COLORS } from '../constants';
 
+const PARSE_TIMEOUT_SETTING_LABEL = 'SQL Crack › Advanced: Parse Timeout Seconds';
+
 export interface ErrorRenderOptions {
     mainGroup: SVGGElement | null;
     isDarkTheme: boolean;
     message: string;
     sourceLine?: string;
+}
+
+export function getErrorGuidanceLines(message: string): string[] {
+    const normalizedMessage = message.toLowerCase();
+
+    if (message.includes('Try ') && message.includes(' dialect')) {
+        const parts = message.split('. ');
+        const suggestion = parts.slice(1).join('. ').trim();
+        return suggestion
+            ? [
+                `Tip: ${suggestion}`,
+                'Change dialect using the dropdown in the top-left toolbar',
+            ]
+            : [];
+    }
+
+    if (normalizedMessage.includes('timed out') || normalizedMessage.includes('timeout')) {
+        return [
+            'Try visualizing one statement at a time or narrowing the query slice.',
+            `If this query is expected, increase ${PARSE_TIMEOUT_SETTING_LABEL}.`,
+        ];
+    }
+
+    if (
+        normalizedMessage.includes('failed to recover query visualization')
+        || normalizedMessage.includes('failed to hydrate deferred query')
+        || normalizedMessage.includes('no visualization data')
+    ) {
+        return [
+            'Try switching to the failing statement tab or refresh after narrowing the SQL.',
+            'If the SQL uses dialect-specific syntax, try the dialect dropdown in the toolbar.',
+        ];
+    }
+
+    if (
+        normalizedMessage.includes('no executable sql found')
+        || normalizedMessage.includes('no sql statements could be parsed')
+    ) {
+        return [
+            'Add at least one executable SQL statement to render a graph.',
+            'Comments and whitespace alone will not produce a visualization.',
+        ];
+    }
+
+    return [];
 }
 
 export function renderErrorFeature(options: ErrorRenderOptions): void {
@@ -13,17 +60,17 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
         return;
     }
 
-    const hasSuggestion = message.includes('Try ') && message.includes(' dialect');
     const hasSourceLine = Boolean(sourceLine);
-    const parts = hasSuggestion ? message.split('. ') : [message];
+    const guidanceLines = getErrorGuidanceLines(message);
 
-    const extraLines = (hasSourceLine ? 1 : 0) + (hasSuggestion ? 2 : 0);
+    const extraLines = (hasSourceLine ? 1 : 0) + guidanceLines.length;
     const baseOffset = extraLines > 0 ? -3 * extraLines : 0;
 
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('transform', 'translate(0, -20)');
 
-    const iconY = hasSuggestion ? '45%' : hasSourceLine ? '46%' : '48%';
+    const hasGuidance = guidanceLines.length > 0;
+    const iconY = hasGuidance ? '45%' : hasSourceLine ? '46%' : '48%';
     const iconCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     iconCircle.setAttribute('cx', '50%');
     iconCircle.setAttribute('cy', `${parseFloat(iconY) + baseOffset}%`);
@@ -43,7 +90,7 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
     iconMark.textContent = '!';
     g.appendChild(iconMark);
 
-    const errorMsgY = hasSuggestion ? 52 : hasSourceLine ? 53 : 55;
+    const errorMsgY = hasGuidance ? 52 : hasSourceLine ? 53 : 55;
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', '50%');
     text.setAttribute('y', `${errorMsgY + baseOffset}%`);
@@ -51,7 +98,7 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
     text.setAttribute('fill', STATUS_COLORS.error);
     text.setAttribute('font-size', '14');
     text.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-    text.textContent = hasSuggestion ? parts[0] : `Error: ${message}`;
+    text.textContent = `Error: ${message}`;
     g.appendChild(text);
 
     let nextY = errorMsgY + baseOffset + 6;
@@ -68,27 +115,18 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
         nextY += 6;
     }
 
-    if (hasSuggestion && parts[1]) {
-        const suggestion = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        suggestion.setAttribute('x', '50%');
-        suggestion.setAttribute('y', `${nextY}%`);
-        suggestion.setAttribute('text-anchor', 'middle');
-        suggestion.setAttribute('fill', UI_COLORS.textMuted);
-        suggestion.setAttribute('font-size', '12');
-        suggestion.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        suggestion.textContent = `Tip: ${parts[1]}`;
-        g.appendChild(suggestion);
-
-        const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        hint.setAttribute('x', '50%');
-        hint.setAttribute('y', `${nextY + 6}%`);
-        hint.setAttribute('text-anchor', 'middle');
-        hint.setAttribute('fill', UI_COLORS.textDim);
-        hint.setAttribute('font-size', '11');
-        hint.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-        hint.textContent = 'Change dialect using the dropdown in the top-left toolbar';
-        g.appendChild(hint);
-    }
+    guidanceLines.forEach((line, index) => {
+        const guidanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        guidanceText.setAttribute('x', '50%');
+        guidanceText.setAttribute('y', `${nextY}%`);
+        guidanceText.setAttribute('text-anchor', 'middle');
+        guidanceText.setAttribute('fill', index === 0 ? UI_COLORS.textMuted : UI_COLORS.textDim);
+        guidanceText.setAttribute('font-size', index === 0 ? '12' : '11');
+        guidanceText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
+        guidanceText.textContent = line;
+        g.appendChild(guidanceText);
+        nextY += 6;
+    });
 
     mainGroup.appendChild(g);
 }

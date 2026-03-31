@@ -4,8 +4,12 @@ export function getTooltipScriptFragment(): string {
         function sanitizeTooltipHtml(html) {
             const template = document.createElement('template');
             template.innerHTML = typeof html === 'string' ? html : '';
+            template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form').forEach((el) => {
+                el.remove();
+            });
 
             const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);
+            const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM']);
             const allowedClassPattern = /^[a-z0-9_-]+$/i;
 
             function sanitizeNode(node) {
@@ -18,6 +22,9 @@ export function getTooltipScriptFragment(): string {
                 }
 
                 const element = node;
+                if (blockedTags.has(element.tagName)) {
+                    return document.createDocumentFragment();
+                }
                 if (!allowedTags.has(element.tagName)) {
                     const fragment = document.createDocumentFragment();
                     Array.from(element.childNodes).forEach((child) => {

@@ -92,7 +92,7 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
     columnLineageBanner.innerHTML = `
         <span style="pointer-events: none; display: inline-flex; align-items: center; gap: 6px;">
             <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.link}</span>
-            <span>${COLUMN_LINEAGE_BANNER_TEXT}</span>
+            <span id="column-lineage-banner-text">${COLUMN_LINEAGE_BANNER_TEXT}</span>
         </span>
         <button id="column-lineage-banner-close" style="
             border: none;

@@ -87,6 +87,13 @@ describe('webview renderer filter breadcrumb state reset', () => {
         expect(columnLineageSource).toContain('scrollbar-color:');
     });
 
+    it('surfaces an actionable banner when column lineage has no traceable flows', () => {
+        expect(rendererSource).toContain('COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT');
+        expect(rendererSource).toContain("mode: 'warning'");
+        expect(rendererSource).toContain('setColumnLineageBannerVisible(true, {');
+        expect(bootstrapSource).toContain('column-lineage-banner-text');
+    });
+
     it('applies theme-aware scrollbar styling for performance hints in light and dark modes', () => {
         expect(rendererSource).toContain('ensureHintsPanelScrollbarStyles');
         expect(rendererSource).toContain('getScrollbarColors(state.isDarkTheme)');

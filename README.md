@@ -270,12 +270,12 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 | `sqlCrack.defaultDialect` | `MySQL` | SQL dialect for parsing |
 | `sqlCrack.autoDetectDialect` | `true` | Auto-detect dialect from query content. Disable for single-dialect repos where auto-detection produces false positives. |
 | `sqlCrack.viewLocation` | `tab` | Panel location: `beside`, `tab` |
-| `sqlCrack.defaultLayout` | `vertical` | Graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial` |
+| `sqlCrack.defaultLayout` | `vertical` | Initial SQL Flow graph layout: `vertical`, `horizontal`, `compact`, `force`, `radial`. Layout only; it does not change SQL execution semantics or lineage direction. |
 | `sqlCrack.autoRefresh` | `true` | Auto-refresh on SQL changes |
 | `sqlCrack.autoRefreshDelay` | `500` | Debounce delay in ms (100-5000) |
-| `sqlCrack.gridStyle` | `lines` | Canvas background style: `dots`, `lines`, `none` |
-| `sqlCrack.nodeAccentPosition` | `left` | Node accent strip position: `left`, `bottom` |
-| `sqlCrack.showMinimap` | `auto` | Minimap visibility: `auto`, `always`, `never` |
+| `sqlCrack.gridStyle` | `lines` | Visual canvas background style: `dots`, `lines`, `none` |
+| `sqlCrack.nodeAccentPosition` | `left` | Visual-only node accent strip position: `left`, `bottom` |
+| `sqlCrack.showMinimap` | `auto` | Minimap visibility: `auto`, `always`, `never`. `auto` shows it only for multi-node graphs. |
 | `sqlCrack.colorblindMode` | `off` | Color accessibility mode: `off`, `deuteranopia`, `protanopia`, `tritanopia` |
 
 ### Workspace Settings
@@ -290,7 +290,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). Include the leading dot; with or without dot is accepted and normalized. |
+| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). With or without the leading dot is accepted and normalized. |
 
 Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes. Workspace indexing intentionally skips dependency/build folders (`node_modules`, `.git`, `dist`, `build`).
 
@@ -314,7 +314,8 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | `sqlCrack.advanced.deferredQueryThreshold` | `50` | Query count threshold before SQL Flow compacts non-active query graphs and hydrates them on demand (1-500) |
 | `sqlCrack.advanced.parseTimeoutSeconds` | `5` | Parser timeout in seconds (1-60) |
 | `sqlCrack.advanced.debugLogging` | `false` | Enable verbose SQL Crack output-channel logs |
-| `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours (0 = disable, max 168) |
+| `sqlCrack.advanced.workspaceUxInstrumentation` | `false` | Enable local-only Workspace Graph UX metrics in the SQL Crack output channel; no external telemetry is sent |
+| `sqlCrack.advanced.cacheTTLHours` | `24` | Workspace index cache duration in hours. `0` skips cached restore and forces a rebuild when opening Workspace Dependencies (max 168) |
 
 ---
 
@@ -425,12 +426,7 @@ src/
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
 
-`0.7.0` branch status: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are implemented on `0.7.0_release` but not released yet.
-
-**Planned**:
-- Diff-aware visualization for PR reviews
-- dbt integration — deep: cross-file `ref()` resolution, manifest.json, macro following (basic Jinja preprocessing shipped in 0.5.2)
-- Performance regression detection
+`0.7.0` shipped on `2026-03-23`: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are now part of the released baseline.
 
 ---
 
