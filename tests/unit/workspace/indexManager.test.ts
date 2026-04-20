@@ -25,6 +25,7 @@ import {
     __setMockConfig,
     __resetMockConfig,
     __getFileSystemWatcher,
+    __resetFileSystemWatcherMock,
     ExtensionContext
 } from '../../__mocks__/vscode';
 
@@ -72,6 +73,7 @@ describe('IndexManager', () => {
         jest.clearAllMocks();
         __resetStorage();
         __resetMockConfig();
+        __resetFileSystemWatcherMock();
 
         // Create fresh mock context (simulates extension activation)
         mockContext = createMockExtensionContext();
