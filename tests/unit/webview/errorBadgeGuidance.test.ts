@@ -17,5 +17,7 @@ describe('error badge guidance wiring', () => {
     it('explains badge click behavior in the tooltip when parse errors are present', () => {
         expect(source).toContain('Click the badge to jump through failed queries.');
         expect(source).toContain('badge.title = buildErrorBadgeTooltipText(errorCount, errors);');
+        expect(source).toContain('return errors?.length');
+        expect(source).not.toContain('return currentBadgeErrors.length > 0');
     });
 });

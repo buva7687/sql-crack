@@ -27,7 +27,7 @@ function buildErrorBadgeTooltipText(
     }).join('\n\n')
         || `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
 
-    return currentBadgeErrors.length > 0
+    return errors?.length
         ? `${tooltipText}\n\nClick the badge to jump through failed queries.`
         : tooltipText;
 }

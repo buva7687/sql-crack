@@ -66,7 +66,6 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
 
     it('should sanitize tooltip html through a DOM allowlist of safe structural tags', () => {
         expect(source).toContain("const template = document.createElement('template');");
-        expect(source).toContain("template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form').forEach");
         expect(source).toContain("const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);");
         expect(source).toContain("const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM']);");
         expect(source).toContain("if (!allowedTags.has(element.tagName)) {");

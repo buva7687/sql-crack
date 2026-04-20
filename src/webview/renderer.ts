@@ -106,7 +106,7 @@ import {
     applyClusteringFeature,
     preCalculateExpandableDimensionsFeature,
 } from './rendering/clusterProjection';
-import { getScrollbarColors, getComponentUiColors } from './constants/colors';
+import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
@@ -3600,25 +3600,14 @@ const columnLineageRuntime: ColumnLineageRuntimeState = {
 
 function updateColumnLineageBannerStyle(mode: 'active' | 'warning' = 'active'): void {
     if (!columnLineageBanner) { return; }
-    const warningMode = mode === 'warning';
-    const background = warningMode
-        ? (state.isDarkTheme ? 'rgba(245, 158, 11, 0.14)' : 'rgba(245, 158, 11, 0.1)')
-        : (state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)');
-    const border = warningMode
-        ? (state.isDarkTheme ? 'rgba(245, 158, 11, 0.4)' : 'rgba(217, 119, 6, 0.35)')
-        : (state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)');
-    const textColor = warningMode
-        ? (state.isDarkTheme ? '#fde68a' : '#92400e')
-        : (state.isDarkTheme ? '#c7d2fe' : '#4338ca');
-    const buttonColor = warningMode
-        ? (state.isDarkTheme ? '#fbbf24' : '#b45309')
-        : (state.isDarkTheme ? '#a5b4fc' : '#4f46e5');
-    columnLineageBanner.style.background = background;
-    columnLineageBanner.style.border = `1px solid ${border}`;
-    columnLineageBanner.style.color = textColor;
+    const palette = COLUMN_LINEAGE_BANNER_THEME[mode];
+    const tokens = state.isDarkTheme ? palette.dark : palette.light;
+    columnLineageBanner.style.background = tokens.background;
+    columnLineageBanner.style.border = `1px solid ${tokens.border}`;
+    columnLineageBanner.style.color = tokens.text;
     const closeBtn = columnLineageBanner.querySelector('#column-lineage-banner-close') as HTMLButtonElement | null;
     if (closeBtn) {
-        closeBtn.style.color = buttonColor;
+        closeBtn.style.color = tokens.button;
     }
 }
 

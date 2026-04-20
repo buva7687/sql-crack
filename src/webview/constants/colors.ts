@@ -37,14 +37,14 @@ export const UI_COLORS = {
     // Text colors - Dark theme
     text: UI_SURFACE.dark.text,
     textMuted: UI_SURFACE.dark.textMuted,
-    textDim: '#93a4bd',
+    textDim: UI_SURFACE.dark.textDim,
     textSubtle: '#cbd5e1',
     textBright: '#e2e8f0',
 
     // Text colors - Light theme
     textLight: UI_SURFACE.light.text,
     textLightMuted: UI_SURFACE.light.textMuted,
-    textLightDim: '#475569',
+    textLightDim: UI_SURFACE.light.textDim,
     textLightSubtle: '#334155',
 
     // Focus/Selection
@@ -226,7 +226,7 @@ export const COMPONENT_UI_COLORS = {
         text: UI_SURFACE.dark.text,
         textBright: '#e2e8f0',
         textMuted: UI_SURFACE.dark.textMuted,
-        textDim: '#93a4bd',
+        textDim: UI_SURFACE.dark.textDim,
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
         accent: '#818cf8',
@@ -254,7 +254,7 @@ export const COMPONENT_UI_COLORS = {
         text: UI_SURFACE.light.text,
         textBright: UI_SURFACE.light.text,
         textMuted: UI_SURFACE.light.textMuted,
-        textDim: '#475569',
+        textDim: UI_SURFACE.light.textDim,
         hover: 'rgba(0, 0, 0, 0.04)',
         hoverStrong: 'rgba(15, 23, 42, 0.06)',
         accent: '#6366f1',
@@ -403,6 +403,41 @@ export function getTransformationColor(type: string): string {
 // Re-export accent colors from shared tokens for convenience
 export { NODE_ACCENT_COLORS, getNodeAccentColor } from '../../shared/themeTokens';
 export const NODE_SURFACE = SHARED_NODE_SURFACE;
+
+// ============================================================
+// Column Lineage Banner Theme
+// ============================================================
+
+export const COLUMN_LINEAGE_BANNER_THEME = {
+    active: {
+        dark: {
+            background: 'rgba(129, 140, 248, 0.1)',
+            border: 'rgba(129, 140, 248, 0.35)',
+            text: '#c7d2fe',
+            button: '#a5b4fc',
+        },
+        light: {
+            background: 'rgba(99, 102, 241, 0.08)',
+            border: 'rgba(99, 102, 241, 0.3)',
+            text: '#4338ca',
+            button: '#4f46e5',
+        },
+    },
+    warning: {
+        dark: {
+            background: 'rgba(245, 158, 11, 0.14)',
+            border: 'rgba(245, 158, 11, 0.4)',
+            text: '#fde68a',
+            button: '#fbbf24',
+        },
+        light: {
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: 'rgba(217, 119, 6, 0.35)',
+            text: '#92400e',
+            button: '#b45309',
+        },
+    },
+} as const;
 
 let activeColorblindMode: ColorblindMode = 'off';
 

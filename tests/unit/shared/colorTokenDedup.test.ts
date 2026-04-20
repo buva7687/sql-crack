@@ -23,8 +23,10 @@ describe('shared color token dedup', () => {
         expect(colorsSource).toContain("import { NODE_SURFACE as SHARED_NODE_SURFACE, UI_SURFACE } from '../../shared/themeTokens';");
         expect(colorsSource).toContain('background: UI_SURFACE.dark.background,');
         expect(colorsSource).toContain('textMuted: UI_SURFACE.dark.textMuted,');
+        expect(colorsSource).toContain('textDim: UI_SURFACE.dark.textDim,');
         expect(colorsSource).toContain('backgroundLight: UI_SURFACE.light.background,');
         expect(colorsSource).toContain('textLightMuted: UI_SURFACE.light.textMuted,');
+        expect(colorsSource).toContain('textLightDim: UI_SURFACE.light.textDim,');
         expect(colorsSource).toContain("export { NODE_ACCENT_COLORS, getNodeAccentColor } from '../../shared/themeTokens';");
         expect(colorsSource).toContain('export const NODE_SURFACE = SHARED_NODE_SURFACE;');
         expect(colorsSource).not.toContain("export const NODE_SURFACE = {");

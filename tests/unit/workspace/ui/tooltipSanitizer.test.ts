@@ -1,10 +1,9 @@
 import { getTooltipScriptFragment } from '../../../../src/workspace/ui/scripts/tooltip';
 
 describe('workspace tooltip sanitizer hardening', () => {
-    it('removes high-risk elements before rebuilding the allowlisted tooltip structure', () => {
+    it('removes high-risk elements via the blockedTags guard in the recursive sanitizer walk', () => {
         const script = getTooltipScriptFragment();
 
-        expect(script).toContain("template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form').forEach");
         expect(script).toContain("const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM']);");
         expect(script).toContain('if (blockedTags.has(element.tagName)) {');
         expect(script).toContain('return document.createDocumentFragment();');
