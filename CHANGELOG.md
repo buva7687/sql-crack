@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-23
+
+### Added
+
+- **Actionable SQL Flow error guidance**: Parse timeouts, empty/non-executable SQL, deferred-query recovery failures, and column-lineage no-flow states now render next-step copy (narrow the slice, raise the `Parse Timeout Seconds` setting, switch dialect, switch to the failing tab) instead of a bare error string. Guidance is wired through `getErrorGuidanceLines()` in `src/webview/ui/errorRenderer.ts` so the SVG error view and the toolbar parse-error badge tooltip share the same copy.
+- **Toolbar parse-error badge tooltip**: The toolbar error badge now exposes the same actionable guidance plus an explanation of its click-to-cycle behavior across multiple parse errors.
+- **CI parse-performance gate**: Added `tests/benchmark/ciParsePerformance.test.ts` plus representative fixtures (`tests/fixtures/performance/small-query.sql`, `medium-query.sql`, `large-query.sql`, `dbt-model.sql`) and a `npm run test:perf` script wired into `.github/workflows/test.yml` and `.github/workflows/release.yml`. Runs assert wall-clock thresholds so parse regressions fail CI.
+- **Shared `COLUMN_LINEAGE_BANNER_THEME` token**: Extracted the column-lineage banner colors from inline ternaries in `renderer.ts` into a single themed constant so future theme work touches one place.
+
+### Changed
+
+- **Dialect-switch rebuild coalescing**: `IndexManager.setDialect()` now bumps `_pendingDialectRebuildVersion` and schedules a single rebuild via `scheduleDialectRebuild()` / `runPendingDialectRebuilds()`, so rapid dialect toggles no longer queue redundant full rebuilds on top of an in-flight build.
+- **File watcher subscription lifecycle**: Watcher recreation in `indexManager.ts` tracks `onDidChange` / `onDidCreate` / `onDidDelete` subscriptions in a disposables array and disposes the entire group on rebuild, preventing stale-closure event handlers on rapid `additionalFileExtensions` changes.
+- **Update-queue preservation across full rebuilds**: File watcher events that land while a full index rebuild is in progress are now preserved (not dropped by `updateQueue.clear()`) so nothing is lost in the window between clear and loop exit.
+- **Lineage rebuild retry cap**: `WorkspacePanel` now caps `_lineageBuildVersion` invalidation retries at `MAX_LINEAGE_BUILD_INVALIDATION_RETRIES = 3` and logs a warning on abort, replacing the unbounded spin loop that could freeze the UI under rapid invalidations.
+- **Workspace tooltip sanitizer hardening**: `workspace/ui/scripts/tooltip.ts` now drops high-risk elements (script, style, iframe, object, embed, form, meta, link, svg with handlers) before rebuilding allowlisted markup, rather than relying solely on an allowlist regex over the rendered HTML.
+- **Shared theme/color token dedup**: Duplicate color constants between `src/shared/theme.ts` and `src/webview/constants/colors.ts` are now wired through shared theme tokens (`UI_SURFACE` tokens including `textDim`). Follow-up cleanup in the banner/errorBadge paths continues the migration.
+- **Settings contract and docs**: Tightened `package.json` descriptions for `sqlCrack.defaultLayout` (clarifies it sets initial node arrangement only, not execution/lineage direction), `sqlCrack.gridStyle` and `sqlCrack.nodeAccentPosition` (explicit "visual-only" language), `sqlCrack.advanced.cacheTTLHours` (documents `0` behavior), `sqlCrack.autoDetectDialect` (documents fallback when disabled), `sqlCrack.workspaceGraphDefaultMode`, and other settings. README settings section updated to match. Dialect aliases normalize through `normalizeDialect()` in `extension.ts` at every read site.
+- **Workspace UX instrumentation setting**: Added `sqlCrack.advanced.workspaceUxInstrumentation` for local-only Workspace Graph interaction metrics (no external telemetry).
+
+### Fixed
+
+- **Error badge tooltip stale-closure**: `buildErrorBadgeTooltipText()` used the module-level `currentBadgeErrors` instead of its own `errors` parameter, so the tooltip could render stale badge content after rapid state updates. Now reads from the parameter.
+- **Redundant tooltip sanitizer pre-pass**: Removed the redundant `querySelectorAll` pre-pass in the tooltip sanitizer — the `blockedTags` guard in `sanitizeNode()` already handles every blocked element, and the pre-pass was dead weight.
+
+### Tests
+
+- Added targeted coverage for the stabilization batch: `errorRenderer.test.ts`, `errorBadgeGuidance.test.ts`, `errorBadgeTheme.test.ts`, `errorSourceLineWiring.test.ts`, `columnLineageUx.test.ts`, `rendererBreadcrumbState.test.ts`, `performanceCiWiring.test.ts`, `indexManager.queueRace.test.ts`, `workspacePanel.lineageGuards.test.ts`, `tooltipSanitizer.test.ts`, `colorTokenDedup.test.ts`, `settingsDocsAudit.test.ts`, `review3-phase1-security.test.ts`, `review3-phase2-visual.test.ts`.
+- Expanded `indexManager.test.ts` with `setDialect` coalescing and `additionalFileExtensions` configuration-change cases. Added `__resetFileSystemWatcherMock()` helper in `tests/__mocks__/vscode.ts` and invoked it in `beforeEach` so one test's `ControlledWatcher` factory no longer leaks into subsequent `createFileSystemWatcher` assertions (`jest.clearAllMocks()` only clears call history, not `mockImplementation`).
+- Current branch validation: 262 suites, 3,456 tests passing with zero failures. `npx tsc --noEmit` clean. `npm run test:perf` gate passing.
+
 ## [0.7.0] - 2026-03-23
 
 ### Added
@@ -1317,6 +1348,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.8.0]: https://github.com/buva7687/sql-crack/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/buva7687/sql-crack/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/buva7687/sql-crack/compare/v0.5.6...v0.6.0
 [0.5.6]: https://github.com/buva7687/sql-crack/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/buva7687/sql-crack/compare/v0.5.4...v0.5.5
