@@ -929,8 +929,9 @@ function setupVSCodeMessageListener(): void {
 
 function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
     window.initialSqlCode = sql;
-    currentDialect = options.dialect as SqlDialect;
-    userExplicitlySetDialect = false;
+    if (!userExplicitlySetDialect) {
+        currentDialect = options.dialect as SqlDialect;
+    }
     updateAutoDetectIndicator(null);
 
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement;

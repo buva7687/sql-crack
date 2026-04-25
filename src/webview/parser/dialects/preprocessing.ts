@@ -1,6 +1,72 @@
 import type { SqlDialect } from '../../types';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
+function stripAtTimeZoneClauses(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    let result = sql;
+
+    const atTimeZoneRegex = /\bAT\s+TIME\s+ZONE\b/gi;
+    let match: RegExpExecArray | null;
+    const attzMatches: Array<{ start: number; end: number }> = [];
+    while ((match = atTimeZoneRegex.exec(masked)) !== null) {
+        let end = match.index + match[0].length;
+        while (end < result.length && /\s/.test(result[end])) {
+            end++;
+        }
+        if (result[end] === '\'') {
+            end++;
+            while (end < result.length) {
+                if (result[end] === '\'' && end + 1 < result.length && result[end + 1] === '\'') {
+                    end += 2;
+                    continue;
+                }
+                if (result[end] === '\'') {
+                    end++;
+                    break;
+                }
+                end++;
+            }
+        } else if (result[end] === '"') {
+            end++;
+            while (end < result.length) {
+                if (result[end] === '"' && end + 1 < result.length && result[end + 1] === '"') {
+                    end += 2;
+                    continue;
+                }
+                if (result[end] === '"') {
+                    end++;
+                    break;
+                }
+                end++;
+            }
+        } else if (result[end] === '[') {
+            end++;
+            while (end < result.length && result[end] !== ']') {
+                end++;
+            }
+            if (end < result.length) {
+                end++;
+            }
+        } else {
+            while (end < result.length && /[\w.$]/.test(result[end])) {
+                end++;
+            }
+        }
+        attzMatches.push({ start: match.index, end });
+    }
+
+    if (attzMatches.length === 0) {
+        return null;
+    }
+
+    for (let i = attzMatches.length - 1; i >= 0; i--) {
+        const m = attzMatches[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+    }
+
+    return result;
+}
+
 /**
  * Preprocess PostgreSQL-style syntax that node-sql-parser doesn't support.
  *
@@ -15,48 +81,20 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
         return null;
     }
 
-    const masked = maskStringsAndComments(sql);
     let result = sql;
     let changed = false;
 
-    const atTimeZoneRegex = /\bAT\s+TIME\s+ZONE\b/gi;
-    let match;
-    const attzMatches: { start: number; end: number }[] = [];
-    while ((match = atTimeZoneRegex.exec(masked)) !== null) {
-        let end = match.index + match[0].length;
-        while (end < result.length && /\s/.test(result[end])) {
-            end++;
-        }
-        if (result[end] === '\'') {
-            end = end + 1;
-            while (end < result.length) {
-                if (result[end] === '\'' && end + 1 < result.length && result[end + 1] === '\'') {
-                    end += 2;
-                    continue;
-                }
-                if (result[end] === '\'') {
-                    end++;
-                    break;
-                }
-                end++;
-            }
-        } else {
-            while (end < result.length && /\w/.test(result[end])) {
-                end++;
-            }
-        }
-        attzMatches.push({ start: match.index, end });
-    }
-    for (let i = attzMatches.length - 1; i >= 0; i--) {
-        const m = attzMatches[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
+    const strippedAtTimeZoneSql = stripAtTimeZoneClauses(result);
+    if (strippedAtTimeZoneSql !== null) {
+        result = strippedAtTimeZoneSql;
         changed = true;
     }
 
-    const masked2 = changed ? maskStringsAndComments(result) : masked;
+    const masked = maskStringsAndComments(result);
+    let match: RegExpExecArray | null;
     const typePrefixRegex = /\b(timestamptz|timestamp|date|time|interval)\b/gi;
     const typePrefixMatches: { start: number; end: number }[] = [];
-    while ((match = typePrefixRegex.exec(masked2)) !== null) {
+    while ((match = typePrefixRegex.exec(masked)) !== null) {
         let pos = match.index + match[0].length;
         if (pos < result.length && /\s/.test(result[pos])) {
             while (pos < result.length && /\s/.test(result[pos])) {
@@ -70,6 +108,46 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
     for (let i = typePrefixMatches.length - 1; i >= 0; i--) {
         const m = typePrefixMatches[i];
         result = result.substring(0, m.start) + result.substring(m.end);
+        changed = true;
+    }
+
+    return changed ? result : null;
+}
+
+/**
+ * Preprocess SQL Server-specific syntax that node-sql-parser doesn't support.
+ *
+ * Rewrites:
+ * 1. `AT TIME ZONE 'tz'` - removed (timezone projection doesn't affect structure)
+ * 2. `TRY_CAST(expr AS type)` → `CAST(expr AS type)` for structural parsing
+ *
+ * Returns the transformed SQL or `null` if no rewriting was needed.
+ */
+export function preprocessTransactSqlSyntax(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'TransactSQL') {
+        return null;
+    }
+
+    let result = sql;
+    let changed = false;
+
+    const strippedAtTimeZoneSql = stripAtTimeZoneClauses(result);
+    if (strippedAtTimeZoneSql !== null) {
+        result = strippedAtTimeZoneSql;
+        changed = true;
+    }
+
+    const masked = maskStringsAndComments(result);
+    const tryCastRegex = /(^|[\s,(=+\-*/<>])TRY_CAST(?=\s*\()/gim;
+    const tryCastRewrites: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+    while ((match = tryCastRegex.exec(masked)) !== null) {
+        const start = match.index + match[1].length;
+        tryCastRewrites.push({ start, end: start + 'TRY_CAST'.length });
+    }
+    for (let i = tryCastRewrites.length - 1; i >= 0; i--) {
+        const m = tryCastRewrites[i];
+        result = result.substring(0, m.start) + 'CAST' + result.substring(m.end);
         changed = true;
     }
 
@@ -507,7 +585,8 @@ export function stripFilterClauses(sql: string): string | null {
  * 3. `CONNECT BY` / `START WITH` clauses — stripped (hierarchical queries unsupported)
  * 4. Oracle physical DDL table options after `CREATE TABLE (...)` — stripped
  *    (TABLESPACE, PCTFREE, INITRANS, STORAGE, SEGMENT CREATION, LOGGING, COMPRESS, PARALLEL, LOB STORE AS, etc.)
- * 5. Oracle DDL data types rewritten for PostgreSQL proxy compatibility
+ * 5. `CAST(expr AS type, fmt [, nlsparam])` — stripped to standard two-argument CAST form
+ * 6. Oracle DDL data types rewritten for PostgreSQL proxy compatibility
  *    (`NUMBER`→`NUMERIC`, `VARCHAR2`/`NVARCHAR2`→`VARCHAR`, `CLOB`/`NCLOB`→`TEXT`, `BLOB`/`RAW`→`BYTEA`)
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
@@ -641,7 +720,14 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         changed = true;
     }
 
-    // 8. Strip Oracle physical/storage options trailing CREATE TABLE column definitions.
+    // 8. Strip Oracle CAST(... AS type, fmt [, nlsparam]) trailing format arguments.
+    const castFormatStrippedSql = stripOracleCastFormatArguments(result);
+    if (castFormatStrippedSql !== null) {
+        result = castFormatStrippedSql;
+        changed = true;
+    }
+
+    // 9. Strip Oracle physical/storage options trailing CREATE TABLE column definitions.
     //    Examples:
     //    - CREATE TABLE t (...) TABLESPACE users PCTFREE 10 INITRANS 2 STORAGE (...)
     //    - CREATE TABLE t (...) SEGMENT CREATION IMMEDIATE LOGGING NOCOMPRESS PARALLEL 4
@@ -700,7 +786,7 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         }
     }
 
-    // 9. Rewrite Oracle-specific DDL data types to PostgreSQL-compatible ones
+    // 10. Rewrite Oracle-specific DDL data types to PostgreSQL-compatible ones
     //    so CREATE/ALTER TABLE statements parse via the PostgreSQL proxy.
     masked3 = changed ? maskStringsAndComments(result) : masked3;
     const isOracleTableDdl = /^\s*(CREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE|ALTER\s+TABLE)\b/i.test(masked3);
@@ -746,6 +832,59 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     }
 
     return changed ? result : null;
+}
+
+function stripOracleCastFormatArguments(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const castRegex = /\bCAST\s*\(/gi;
+    const castRewrites: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = castRegex.exec(masked)) !== null) {
+        const openParenPos = match.index + match[0].length - 1;
+        const closePos = findMatchingParen(sql, openParenPos);
+        if (closePos === -1) {
+            continue;
+        }
+
+        const innerStart = openParenPos + 1;
+        const innerMasked = maskStringsAndComments(sql.substring(innerStart, closePos));
+        const asPosRel = findKeywordAtDepth0(innerMasked, 'AS', 0);
+        if (asPosRel === -1) {
+            continue;
+        }
+
+        let depth = 0;
+        for (let i = asPosRel + 'AS'.length; i < innerMasked.length; i++) {
+            const ch = innerMasked[i];
+            if (ch === '(') {
+                depth++;
+                continue;
+            }
+            if (ch === ')') {
+                if (depth > 0) {
+                    depth--;
+                }
+                continue;
+            }
+            if (depth === 0 && ch === ',') {
+                castRewrites.push({ start: innerStart + i, end: closePos });
+                break;
+            }
+        }
+    }
+
+    if (castRewrites.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = castRewrites.length - 1; i >= 0; i--) {
+        const m = castRewrites[i];
+        result = result.substring(0, m.start) + result.substring(m.end);
+    }
+
+    return result;
 }
 
 /**
@@ -1806,10 +1945,11 @@ function stripDoubleColonCasts(sql: string): string | null {
  * Order mirrors `applyParserCompatibilityPreprocessing()` in sqlParser.ts:
  * 1. CTE hoisting (all dialects)
  * 2. PostgreSQL syntax (AT TIME ZONE, type-prefixed literals)
- * 3. Redshift syntax (SELECT INTO, late-binding views, CTAS physical options)
- * 4. GROUPING SETS rewrite (all dialects)
- * 5. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
- * 6. Snowflake deep path collapse
+ * 3. TransactSQL syntax (AT TIME ZONE, TRY_CAST)
+ * 4. Redshift syntax (SELECT INTO, late-binding views, CTAS physical options)
+ * 5. GROUPING SETS rewrite (all dialects)
+ * 6. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
+ * 7. Snowflake deep path collapse
  */
 /**
  * Preprocess Teradata-specific syntax that node-sql-parser doesn't support.
@@ -2427,6 +2567,9 @@ export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: s
 
     const postgres = preprocessPostgresSyntax(result, dialect);
     if (postgres !== null) { result = postgres; }
+
+    const transactSql = preprocessTransactSqlSyntax(result, dialect);
+    if (transactSql !== null) { result = transactSql; }
 
     const redshift = preprocessRedshiftSyntax(result, dialect);
     if (redshift !== null) { result = redshift; }

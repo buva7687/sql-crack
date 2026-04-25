@@ -76,6 +76,30 @@ jobs:
         run: |
           npx @vscode/vsce package --out "sql-crack-${TAG_NAME}.vsix"
 
+      - name: Publish to VS Code Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          npx @vscode/vsce publish --packagePath "sql-crack-${TAG_NAME}.vsix"
+
+      - name: Skip VS Code Marketplace publish
+        if: ${{ secrets.VSCE_PAT == '' }}
+        run: echo "VSCE_PAT not configured; skipping VS Code Marketplace publish."
+
+      - name: Publish to Open VSX
+        if: ${{ secrets.OVSX_PAT != '' }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          npx ovsx publish "sql-crack-${TAG_NAME}.vsix"
+
+      - name: Skip Open VSX publish
+        if: ${{ secrets.OVSX_PAT == '' }}
+        run: echo "OVSX_PAT not configured; skipping Open VSX publish."
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:

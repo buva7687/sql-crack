@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-04-25
+
+### Changed
+
+- **Release workflow publishing**: Tagged releases now publish the packaged VSIX to the VS Code Marketplace when `VSCE_PAT` is configured and to Open VSX when `OVSX_PAT` is configured, while still creating the GitHub release artifact even when one or both publish tokens are absent.
+
+### Fixed
+
+- **SQL Server `AT TIME ZONE` compatibility** ([#76](https://github.com/buva7687/sql-crack/issues/76)): TransactSQL preprocessing now strips `AT TIME ZONE` projections before AST parsing, preventing parser failures on valid SQL Server timezone expressions.
+- **SQL Server `TRY_CAST` compatibility** ([#77](https://github.com/buva7687/sql-crack/issues/77)): TransactSQL preprocessing now rewrites `TRY_CAST(...)` to parser-compatible `CAST(...)` during visualization so valid SQL Server casts no longer fail at the `AS` token.
+- **Manual dialect override persistence** ([#78](https://github.com/buva7687/sql-crack/issues/78)): SQL Flow refreshes no longer clear an explicit toolbar dialect selection, so manual per-panel overrides persist across edit-triggered reparses instead of snapping back to the configured default.
+- **Oracle extended `CAST` compatibility** ([#79](https://github.com/buva7687/sql-crack/issues/79)): Oracle preprocessing now strips optional format-model and `NLS` arguments from `CAST(expr AS type, fmt [, nlsparam])` before proxy parsing, preventing parser errors on valid Oracle numeric/date formatting casts.
+
+### Tests
+
+- Added regression coverage for the `preprocessTransactSqlSyntax()` compatibility path, Oracle extended `CAST` preprocessing, and refresh-time manual dialect persistence.
+- Current branch validation: 263 suites, 3,466 tests passing with zero failures. `npm run typecheck` clean. `npm run test:perf` gate passing.
+
 ## [0.8.0] - 2026-04-23
 
 ### Added
@@ -1348,6 +1366,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.8.1]: https://github.com/buva7687/sql-crack/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/buva7687/sql-crack/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/buva7687/sql-crack/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/buva7687/sql-crack/compare/v0.5.6...v0.6.0
