@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for the `preprocessTransactSqlSyntax()` compatibility path, Oracle extended `CAST` preprocessing, and refresh-time manual dialect persistence.
 - Current branch validation: 263 suites, 3,466 tests passing with zero failures. `npm run typecheck` clean. `npm run test:perf` gate passing.
 
-## [0.8.0] - 2026-04-23
+## [0.8.0] - Unpublished internal release branch snapshot
 
 ### Added
 
