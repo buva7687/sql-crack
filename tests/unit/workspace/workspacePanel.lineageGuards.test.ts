@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { WorkspacePanel } from '../../../src/workspace/workspacePanel';
 import { LineageBuilder } from '../../../src/workspace/lineage/lineageBuilder';
 import { resolveAutoIndexThresholdFromConfig } from '../../../src/workspace/panel/settings';
+import { logger } from '../../../src/logger';
 
 describe('WorkspacePanel lineage guards and config defaults', () => {
     beforeEach(() => {
@@ -87,6 +88,45 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(buildSpy).toHaveBeenCalledTimes(1);
         expect(context._lineageGraph).toBe(mockGraph);
         expect(context._lineageBuildPromise).toBeNull();
+    });
+
+    it('caps repeated lineage invalidation retries so buildLineageGraph cannot spin forever', async () => {
+        const mockGraph = {
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        } as any;
+
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+        const context: any = {
+            _lineageGraph: null,
+            _lineageBuilder: null,
+            _flowAnalyzer: null,
+            _impactAnalyzer: null,
+            _columnLineageTracker: null,
+            _lineageBuildPromise: null,
+            _lineageBuildVersion: 0,
+            _indexManager: {
+                getIndex: jest.fn(() => ({ files: [] })),
+            },
+        };
+
+        const buildSpy = jest
+            .spyOn(LineageBuilder.prototype, 'buildFromIndexAsync')
+            .mockImplementation(async () => {
+                context._lineageBuildVersion += 1;
+                return mockGraph;
+            });
+
+        await (WorkspacePanel.prototype as any).buildLineageGraph.call(context);
+
+        expect(buildSpy).toHaveBeenCalledTimes(3);
+        expect(context._lineageGraph).toBeNull();
+        expect(context._lineageBuildPromise).toBeNull();
+        expect(warnSpy).toHaveBeenCalledWith('[WorkspacePanel] Aborting lineage rebuild after 3 invalidation retries');
     });
 
     it('reads auto-index threshold from configuration with bounds', () => {

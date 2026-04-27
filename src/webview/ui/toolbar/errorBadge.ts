@@ -2,11 +2,35 @@ import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { getComponentUiColors } from '../../constants';
 import { repositionBreadcrumbBar } from '../breadcrumbBar';
+import { getErrorGuidanceLines } from '../errorRenderer';
 
 let errorBadgeClickCallback: ((queryIndex: number) => void) | null = null;
 let errorCycleIndex = 0;
 let currentBadgeErrors: Array<{ queryIndex: number; message: string; line?: number; sourceLine?: string }> = [];
 let currentBadgeIsDark = typeof window !== 'undefined' ? window.vscodeTheme !== 'light' : true;
+
+function buildErrorBadgeTooltipText(
+    errorCount: number,
+    errors?: Array<{ queryIndex: number; message: string; line?: number; sourceLine?: string }>
+): string {
+    const tooltipText = errors?.map((e) => {
+        const prefix = e.line ? `Q${e.queryIndex + 1} (line ${e.line})` : `Q${e.queryIndex + 1}`;
+        let text = `${prefix}: ${e.message}`;
+        if (e.sourceLine) {
+            text += `\n→ ${e.sourceLine}`;
+        }
+        const guidance = getErrorGuidanceLines(e.message);
+        if (guidance[0]) {
+            text += `\n${guidance[0]}`;
+        }
+        return text;
+    }).join('\n\n')
+        || `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
+
+    return errors?.length
+        ? `${tooltipText}\n\nClick the badge to jump through failed queries.`
+        : tooltipText;
+}
 
 function applyErrorBadgeTheme(badge: HTMLElement, isDark: boolean): void {
     const theme = getComponentUiColors(isDark);
@@ -104,16 +128,6 @@ export function updateErrorBadge(
         }
     }
 
-    const tooltipText = errors?.map(e => {
-        const prefix = e.line ? `Q${e.queryIndex + 1} (line ${e.line})` : `Q${e.queryIndex + 1}`;
-        let text = `${prefix}: ${e.message}`;
-        if (e.sourceLine) {
-            text += `\n→ ${e.sourceLine}`;
-        }
-        return text;
-    }).join('\n')
-        || `${errorCount} query${errorCount > 1 ? 'ies' : ''} failed to parse`;
-
     badge.innerHTML = `
         <span data-role="error-badge-icon" style="font-size: 14px; display: inline-flex; width: 14px; height: 14px;">${ICONS.warning}</span>
         <span data-role="error-badge-label" style="font-size: 12px; font-weight: 500;">
@@ -121,7 +135,7 @@ export function updateErrorBadge(
         </span>
     `;
     applyErrorBadgeTheme(badge, currentBadgeIsDark);
-    badge.title = tooltipText;
+    badge.title = buildErrorBadgeTooltipText(errorCount, errors);
     requestAnimationFrame(() => repositionBreadcrumbBar());
 }
 

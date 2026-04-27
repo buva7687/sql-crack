@@ -619,6 +619,28 @@ describe('Dialect Support', () => {
       // Document behavior
     });
 
+    it('parses AT TIME ZONE expressions after compatibility preprocessing', () => {
+      const result = parseSql(
+        "SELECT t.date_col AT TIME ZONE 'UTC' AS utc_date FROM test_table t",
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.some(n => n.label === 'test_table')).toBe(true);
+    });
+
+    it('parses TRY_CAST() after compatibility preprocessing', () => {
+      const result = parseSql(
+        'SELECT TRY_CAST(t.date_col AS VARCHAR(30)) AS cast_date FROM test_table t',
+        dialect
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.some(n => n.label === 'test_table')).toBe(true);
+    });
+
     it('parses OFFSET FETCH', () => {
       const result = parseSql('SELECT * FROM users ORDER BY id OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY', dialect);
       expect(result.error).toBeUndefined();
@@ -875,6 +897,17 @@ describe('Dialect Support', () => {
         FROM employees
       `, dialect);
       expect(result.error).toBeUndefined();
+    });
+
+    it('parses CAST with format model and NLS params after preprocessing', () => {
+      const result = parseSql(`
+        SELECT CAST(t.col_value AS decimal, '999999D999999', 'NLS_NUMERIC_CHARACTERS='',.''')
+        FROM test_table t
+      `, dialect);
+
+      expect(result.error).toBeUndefined();
+      expect(result.partial).not.toBe(true);
+      expect(result.nodes.some(n => n.label === 'test_table')).toBe(true);
     });
 
     it('strips (+) outer join operator via preprocessing', () => {

@@ -77,6 +77,7 @@ import type { WorkspaceWebviewMessage, WorkspaceHostMessage } from '../shared/me
 
 const VALID_GRAPH_MODES: GraphMode[] = ['files', 'tables'];
 const LINEAGE_LEGEND_VISIBILITY_STATE_KEY = 'sqlCrack.workspace.lineageLegendVisible';
+const MAX_LINEAGE_BUILD_INVALIDATION_RETRIES = 3;
 
 /**
  * Get graph mode from VS Code settings with validation.
@@ -621,6 +622,7 @@ export class WorkspacePanel {
             return;
         }
         if (this._lineageGraph) {return;} // Already built
+        let invalidationRetries = 0;
 
         while (!this._lineageGraph) {
             const index = this._indexManager.getIndex();
@@ -675,6 +677,12 @@ export class WorkspacePanel {
                 return;
             }
             if (buildVersion === this._lineageBuildVersion) {
+                return;
+            }
+
+            invalidationRetries += 1;
+            if (invalidationRetries >= MAX_LINEAGE_BUILD_INVALIDATION_RETRIES) {
+                logger.warn(`[WorkspacePanel] Aborting lineage rebuild after ${invalidationRetries} invalidation retries`);
                 return;
             }
         }

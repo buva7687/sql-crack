@@ -1,4 +1,4 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessTransactSqlSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
 
 describe('parser preprocessing transforms', () => {
     describe('rewriteGroupingSets', () => {
@@ -169,6 +169,50 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
             expect(rewritten).toContain('WITH h AS');
             expect(rewritten).toContain('SELECT * FROM h');
+        });
+
+        it('strips Oracle CAST format and NLS arguments while preserving the standard CAST shape', () => {
+            const sql = `SELECT CAST(t.col_value AS decimal(10,2), '999999D99', 'NLS_NUMERIC_CHARACTERS='',.''') FROM test_table t`;
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toContain('CAST(t.col_value AS decimal(10,2))');
+            expect(rewritten).not.toContain("'999999D99'");
+            expect(rewritten).not.toContain('NLS_NUMERIC_CHARACTERS');
+        });
+    });
+
+    describe('preprocessTransactSqlSyntax', () => {
+        it('returns null for non-TransactSQL dialect', () => {
+            const sql = "SELECT created_at AT TIME ZONE 'UTC' FROM events";
+            expect(preprocessTransactSqlSyntax(sql, 'PostgreSQL')).toBeNull();
+        });
+
+        it('strips AT TIME ZONE projections for parser compatibility', () => {
+            const sql = "SELECT created_at AT TIME ZONE 'UTC', updated_at AT TIME ZONE tz_column FROM events";
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toContain('AT TIME ZONE');
+            expect(rewritten).not.toContain("'UTC'");
+            expect(rewritten).not.toContain('tz_column');
+            expect(rewritten).toContain('created_at');
+            expect(rewritten).toContain('updated_at');
+        });
+
+        it('rewrites TRY_CAST to CAST for parser compatibility', () => {
+            const sql = 'SELECT TRY_CAST(amount AS DECIMAL(10,2)) AS amount_value FROM orders';
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toContain('CAST(amount AS DECIMAL(10,2))');
+            expect(rewritten).not.toContain('TRY_CAST');
+        });
+
+        it('does not rewrite TRY_CAST inside comments, strings, or qualified function names', () => {
+            expect(preprocessTransactSqlSyntax("SELECT 'TRY_CAST(amount AS INT)' AS note FROM t", 'TransactSQL')).toBeNull();
+            expect(preprocessTransactSqlSyntax('-- TRY_CAST(amount AS INT)\nSELECT amount FROM t', 'TransactSQL')).toBeNull();
+            expect(preprocessTransactSqlSyntax('SELECT dbo.TRY_CAST(amount) FROM t', 'TransactSQL')).toBeNull();
         });
     });
 

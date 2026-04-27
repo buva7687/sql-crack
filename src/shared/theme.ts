@@ -2,6 +2,8 @@
 // Single source of truth for all color definitions across the extension
 // Used by both webview (browser) and extension (Node.js) code
 
+import { UI_SURFACE, WORKSPACE_ACCENT_COLORS } from './themeTokens';
+
 // ============================================================
 // Reference Type Colors - Used in dependency graphs
 // ============================================================
@@ -30,20 +32,14 @@ export const REFERENCE_TYPE_COLORS: Record<string, string> = {
  * Colors for different node types in workspace dependency graphs
  */
 export const WORKSPACE_NODE_COLORS: Record<string, string> = {
-    file: '#3b82f6',     // Blue - SQL files
-    table: '#10b981',    // Emerald - tables
-    view: '#8b5cf6',     // Purple - views
-    external: '#64748b', // Slate - external references
-    default: '#64748b',  // Slate - fallback
+    ...WORKSPACE_ACCENT_COLORS.light,
+    default: WORKSPACE_ACCENT_COLORS.light.external,
 } as const;
 
 /** Dark theme accent variants (400-level, brighter) */
 export const WORKSPACE_NODE_COLORS_DARK: Record<string, string> = {
-    file: '#60a5fa',     // Blue-400
-    table: '#34d399',    // Emerald-400
-    view: '#a78bfa',     // Violet-400
-    external: '#94a3b8', // Slate-400
-    default: '#94a3b8',  // Slate-400
+    ...WORKSPACE_ACCENT_COLORS.dark,
+    default: WORKSPACE_ACCENT_COLORS.dark.external,
 } as const;
 
 /**
@@ -81,23 +77,23 @@ export const COLORBLIND_WORKSPACE_NODE_COLORS: Record<Exclude<ColorblindMode, 'o
 export const UI_THEME = {
     // Dark theme
     dark: {
-        background: '#111111',
-        backgroundSecondary: '#1a1a1a',
-        backgroundPanel: 'rgba(17, 17, 17, 0.95)',
-        text: '#f1f5f9',
-        textMuted: '#71717a',
+        background: UI_SURFACE.dark.background,
+        backgroundSecondary: UI_SURFACE.dark.backgroundSecondary,
+        backgroundPanel: UI_SURFACE.dark.backgroundPanel,
+        text: UI_SURFACE.dark.text,
+        textMuted: UI_SURFACE.dark.textMuted,
         textDim: '#64748b',
-        border: 'rgba(255, 255, 255, 0.08)',
+        border: UI_SURFACE.dark.border,
     },
     // Light theme
     light: {
-        background: '#fafafa',
-        backgroundSecondary: '#ffffff',
-        backgroundPanel: 'rgba(255, 255, 255, 0.95)',
-        text: '#1e293b',
-        textMuted: '#64748b',
+        background: UI_SURFACE.light.background,
+        backgroundSecondary: UI_SURFACE.light.backgroundSecondary,
+        backgroundPanel: UI_SURFACE.light.backgroundPanel,
+        text: UI_SURFACE.light.text,
+        textMuted: UI_SURFACE.light.textMuted,
         textDim: '#94a3b8',
-        border: 'rgba(0, 0, 0, 0.08)',
+        border: UI_SURFACE.light.border,
     },
 } as const;
 

@@ -5,6 +5,7 @@ import { NodeType, Severity } from '../types';
 import type { ColorblindMode } from '../../shared/theme';
 import { COMPLEXITY_COLORS as SHARED_COMPLEXITY_COLORS, COMPLEXITY_TEXT_COLORS as SHARED_COMPLEXITY_TEXT_COLORS } from '../../shared/theme';
 import { ICONS } from '../../shared/icons';
+import { NODE_SURFACE as SHARED_NODE_SURFACE, UI_SURFACE } from '../../shared/themeTokens';
 
 // ============================================================
 // UI Colors - General interface elements
@@ -12,38 +13,38 @@ import { ICONS } from '../../shared/icons';
 
 export const UI_COLORS = {
     // Backgrounds - Dark theme
-    background: '#111111',
-    backgroundDark: '#1a1a1a',       // Neutral dark for clouds/subflows
-    backgroundPanel: 'rgba(17, 17, 17, 0.95)',
+    background: UI_SURFACE.dark.background,
+    backgroundDark: UI_SURFACE.dark.backgroundSecondary,       // Neutral dark for clouds/subflows
+    backgroundPanel: UI_SURFACE.dark.backgroundPanel,
     backgroundPanelSolid: 'rgba(17, 17, 17, 0.98)',
     backgroundSubtle: 'rgba(26, 26, 26, 0.5)',
     backgroundSubtleDark: 'rgba(26, 26, 26, 0.6)',
     backgroundOverlay: 'rgba(0, 0, 0, 0.2)',
 
     // Backgrounds - Light theme
-    backgroundLight: '#fafafa',
-    backgroundLightGray: '#ffffff',
-    backgroundPanelLight: 'rgba(255, 255, 255, 0.95)',
+    backgroundLight: UI_SURFACE.light.background,
+    backgroundLightGray: UI_SURFACE.light.backgroundSecondary,
+    backgroundPanelLight: UI_SURFACE.light.backgroundPanel,
     backgroundPanelLightSolid: 'rgba(255, 255, 255, 0.98)',
 
     // Borders
-    border: 'rgba(255, 255, 255, 0.08)',
-    borderMedium: 'rgba(255, 255, 255, 0.12)',
+    border: UI_SURFACE.dark.border,
+    borderMedium: UI_SURFACE.dark.borderMedium,
     borderLight: 'rgba(255, 255, 255, 0.05)',
     borderWhite: 'rgba(255, 255, 255, 0.3)',
     borderWhiteLight: 'rgba(255, 255, 255, 0.2)',
 
     // Text colors - Dark theme
-    text: '#f1f5f9',
-    textMuted: '#71717a',
-    textDim: '#93a4bd',
+    text: UI_SURFACE.dark.text,
+    textMuted: UI_SURFACE.dark.textMuted,
+    textDim: UI_SURFACE.dark.textDim,
     textSubtle: '#cbd5e1',
     textBright: '#e2e8f0',
 
     // Text colors - Light theme
-    textLight: '#1e293b',
-    textLightMuted: '#64748b',
-    textLightDim: '#475569',
+    textLight: UI_SURFACE.light.text,
+    textLightMuted: UI_SURFACE.light.textMuted,
+    textLightDim: UI_SURFACE.light.textDim,
     textLightSubtle: '#334155',
 
     // Focus/Selection
@@ -219,13 +220,13 @@ export const SCROLLBAR_COLORS = {
 
 export const COMPONENT_UI_COLORS = {
     dark: {
-        surface: 'rgba(17, 17, 17, 0.95)',
+        surface: UI_SURFACE.dark.backgroundPanel,
         surfaceElevated: 'rgba(17, 17, 17, 0.98)',
         border: 'rgba(148, 163, 184, 0.2)',
-        text: '#f1f5f9',
+        text: UI_SURFACE.dark.text,
         textBright: '#e2e8f0',
-        textMuted: '#71717a',
-        textDim: '#93a4bd',
+        textMuted: UI_SURFACE.dark.textMuted,
+        textDim: UI_SURFACE.dark.textDim,
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
         accent: '#818cf8',
@@ -247,13 +248,13 @@ export const COMPONENT_UI_COLORS = {
         warningBg: 'rgba(234, 179, 8, 0.3)',
     },
     light: {
-        surface: 'rgba(255, 255, 255, 0.95)',
+        surface: UI_SURFACE.light.backgroundPanel,
         surfaceElevated: 'rgba(255, 255, 255, 0.98)',
         border: 'rgba(148, 163, 184, 0.3)',
-        text: '#1e293b',
-        textBright: '#1e293b',
-        textMuted: '#64748b',
-        textDim: '#475569',
+        text: UI_SURFACE.light.text,
+        textBright: UI_SURFACE.light.text,
+        textMuted: UI_SURFACE.light.textMuted,
+        textDim: UI_SURFACE.light.textDim,
         hover: 'rgba(0, 0, 0, 0.04)',
         hoverStrong: 'rgba(15, 23, 42, 0.06)',
         accent: '#6366f1',
@@ -401,20 +402,40 @@ export function getTransformationColor(type: string): string {
 
 // Re-export accent colors from shared tokens for convenience
 export { NODE_ACCENT_COLORS, getNodeAccentColor } from '../../shared/themeTokens';
+export const NODE_SURFACE = SHARED_NODE_SURFACE;
 
-/** Node surface colors — neutral fill for accent-strip design */
-export const NODE_SURFACE = {
-    light: {
-        fill: '#FFFFFF',
-        border: '#94A3B8',
-        text: '#1E293B',
-        textMuted: '#64748B',
+// ============================================================
+// Column Lineage Banner Theme
+// ============================================================
+
+export const COLUMN_LINEAGE_BANNER_THEME = {
+    active: {
+        dark: {
+            background: 'rgba(129, 140, 248, 0.1)',
+            border: 'rgba(129, 140, 248, 0.35)',
+            text: '#c7d2fe',
+            button: '#a5b4fc',
+        },
+        light: {
+            background: 'rgba(99, 102, 241, 0.08)',
+            border: 'rgba(99, 102, 241, 0.3)',
+            text: '#4338ca',
+            button: '#4f46e5',
+        },
     },
-    dark: {
-        fill: '#1A1A1A',
-        border: '#475569',
-        text: '#F1F5F9',
-        textMuted: '#71717A',
+    warning: {
+        dark: {
+            background: 'rgba(245, 158, 11, 0.14)',
+            border: 'rgba(245, 158, 11, 0.4)',
+            text: '#fde68a',
+            button: '#fbbf24',
+        },
+        light: {
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: 'rgba(217, 119, 6, 0.35)',
+            text: '#92400e',
+            button: '#b45309',
+        },
     },
 } as const;
 
