@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG_NAME: ${{ github.ref_name }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
     steps:
       - name: Checkout code
@@ -22,8 +26,6 @@ jobs:
           cache: "npm"
 
       - name: Validate release tag and package version
-        env:
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           TAG_VERSION="${TAG_NAME#v}"
@@ -71,33 +73,25 @@ jobs:
         run: npm run package
 
       - name: Package VSIX
-        env:
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           npx @vscode/vsce package --out "sql-crack-${TAG_NAME}.vsix"
 
       - name: Publish to VS Code Marketplace
-        if: ${{ secrets.VSCE_PAT != '' }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          TAG_NAME: ${{ github.ref_name }}
+        if: ${{ env.VSCE_PAT != '' }}
         run: |
           npx @vscode/vsce publish --packagePath "sql-crack-${TAG_NAME}.vsix"
 
       - name: Skip VS Code Marketplace publish
-        if: ${{ secrets.VSCE_PAT == '' }}
+        if: ${{ env.VSCE_PAT == '' }}
         run: echo "VSCE_PAT not configured; skipping VS Code Marketplace publish."
 
       - name: Publish to Open VSX
-        if: ${{ secrets.OVSX_PAT != '' }}
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-          TAG_NAME: ${{ github.ref_name }}
+        if: ${{ env.OVSX_PAT != '' }}
         run: |
           npx ovsx publish "sql-crack-${TAG_NAME}.vsix"
 
       - name: Skip Open VSX publish
-        if: ${{ secrets.OVSX_PAT == '' }}
+        if: ${{ env.OVSX_PAT == '' }}
         run: echo "OVSX_PAT not configured; skipping Open VSX publish."
 
       - name: Create GitHub release
