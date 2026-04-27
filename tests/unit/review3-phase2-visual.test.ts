@@ -52,8 +52,10 @@ describe('phase 2.2 dark muted text values', () => {
     it('uses #71717A/#71717a for dark muted text tokens', () => {
         expect(themeTokens).toContain("textMuted: '#71717A'");
         expect(themeTokens).not.toContain("textMuted: '#94A3B8'");
-        expect(theme).toContain("textMuted: '#71717a'");
-        expect(colors).toContain("textMuted: '#71717a'");
+        expect(theme).toContain("import { UI_SURFACE, WORKSPACE_ACCENT_COLORS } from './themeTokens';");
+        expect(theme).toContain('textMuted: UI_SURFACE.dark.textMuted,');
+        expect(colors).toContain("import { NODE_SURFACE as SHARED_NODE_SURFACE, UI_SURFACE } from '../../shared/themeTokens';");
+        expect(colors).toContain('textMuted: UI_SURFACE.dark.textMuted,');
         // CSS variables are now in the extracted variables module
         expect(variablesStyles).toContain('--text-muted: #71717a;');
     });

@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.7.0",
+  "version": "0.8.1",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -191,7 +191,7 @@
             "Force-directed layout (physics-based positioning)",
             "Radial layout (root at center, levels as rings)"
           ],
-          "description": "Default graph layout direction"
+          "description": "Default SQL Flow graph layout. Controls the initial arrangement of nodes only; it does not change SQL execution order or lineage direction."
         },
         "sqlCrack.autoRefresh": {
           "type": "boolean",
@@ -237,7 +237,7 @@
           "default": 24,
           "minimum": 0,
           "maximum": 168,
-          "description": "Cache time-to-live in hours. Set to 0 to disable caching. Index will be rebuilt after this time. (Advanced)"
+          "description": "Workspace index cache time-to-live in hours. Set to 0 to skip cached restore and force a rebuild when opening Workspace Dependencies. (Advanced)"
         },
         "sqlCrack.gridStyle": {
           "type": "string",
@@ -252,7 +252,7 @@
             "Line grid pattern (default, subtle grid lines)",
             "No grid pattern (plain background)"
           ],
-          "description": "Background grid pattern style for visualizations"
+          "description": "Visual canvas background style for SQL Flow. Aesthetic only; does not affect parsing or graph structure."
         },
         "sqlCrack.nodeAccentPosition": {
           "type": "string",
@@ -265,7 +265,7 @@
             "Color accent strip on the left edge of nodes (default)",
             "Color accent strip on the bottom edge of nodes"
           ],
-          "description": "Position of the color accent strip on visualization nodes"
+          "description": "Visual-only position of the node accent strip in SQL Flow."
         },
         "sqlCrack.showMinimap": {
           "type": "string",
@@ -280,7 +280,7 @@
             "Always show the minimap",
             "Never show the minimap"
           ],
-          "description": "Controls when the minimap overview is displayed"
+          "description": "Controls when the SQL Flow minimap overview is displayed. 'auto' shows it only for multi-node graphs."
         },
         "sqlCrack.colorblindMode": {
           "type": "string",
@@ -389,7 +389,7 @@
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Additional file extensions to treat as SQL files (e.g., `[\".tpt\", \".dbsql\", \".hql\", \".bteq\"]`). Extensions should include the leading dot. These files will show the SQL Crack icon in the editor title bar and can be visualized."
+          "markdownDescription": "Additional file extensions to treat as SQL files (e.g., `[\".tpt\", \".dbsql\", \".hql\", \".bteq\"]`). With or without the leading dot is accepted and normalized. These files show the SQL Crack icon in the editor title bar, can be visualized, and are included in workspace indexing/watcher refreshes."
         }
       }
     },
@@ -432,10 +432,11 @@
     "typecheck:src": "tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests",
-    "test": "node scripts/runJest.js",
-    "test:watch": "node scripts/runJest.js --watch",
-    "test:coverage": "node scripts/runJest.js --coverage",
-    "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit",
+    "test": "node scripts/runJest.js --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
+    "test:watch": "node scripts/runJest.js --watch --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
+    "test:coverage": "node scripts/runJest.js --coverage --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
+    "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
+    "test:perf": "node scripts/runJest.js --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
     "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"

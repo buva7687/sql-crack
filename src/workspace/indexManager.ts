@@ -43,6 +43,10 @@ export class IndexManager {
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
     private _pendingDeletes: Set<string> = new Set();
+    private _fileWatcherDisposables: vscode.Disposable[] = [];
+    private _pendingDialectRebuildVersion: number = 0;
+    private _completedDialectRebuildVersion: number = 0;
+    private _dialectRebuildPromise: Promise<void> | null = null;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -417,22 +421,55 @@ export class IndexManager {
         }
         this.dialect = dialect;
         this.scanner.setDialect(dialect);
+        this._pendingDialectRebuildVersion += 1;
+        this.scheduleDialectRebuild();
+    }
 
-        const rebuildForDialect = async () => {
-            await this.clearCache();
-            await this.buildIndex();
-        };
-
-        if (this._buildPromise) {
-            void this._buildPromise
-                .finally(() => rebuildForDialect())
-                .catch(error => logger.warn(`[IndexManager] Failed to rebuild index after dialect change: ${error instanceof Error ? error.message : String(error)}`));
+    private scheduleDialectRebuild(): void {
+        if (this._dialectRebuildPromise) {
             return;
         }
 
-        void rebuildForDialect().catch(error =>
-            logger.warn(`[IndexManager] Failed to rebuild index after dialect change: ${error instanceof Error ? error.message : String(error)}`)
-        );
+        this._dialectRebuildPromise = this.runPendingDialectRebuilds()
+            .catch((error) => {
+                logger.warn(`[IndexManager] Failed to rebuild index after dialect change: ${error instanceof Error ? error.message : String(error)}`);
+            })
+            .finally(() => {
+                this._dialectRebuildPromise = null;
+                if (this._completedDialectRebuildVersion !== this._pendingDialectRebuildVersion) {
+                    this.scheduleDialectRebuild();
+                }
+            });
+    }
+
+    private async runPendingDialectRebuilds(): Promise<void> {
+        while (this._completedDialectRebuildVersion !== this._pendingDialectRebuildVersion) {
+            const requestedVersion = this._pendingDialectRebuildVersion;
+
+            if (this._buildPromise) {
+                try {
+                    await this._buildPromise;
+                } catch (error) {
+                    logger.warn(`[IndexManager] Existing build failed before dialect-triggered rebuild: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+
+            if (requestedVersion !== this._pendingDialectRebuildVersion) {
+                continue;
+            }
+
+            await this.clearCache();
+
+            if (requestedVersion !== this._pendingDialectRebuildVersion) {
+                continue;
+            }
+
+            try {
+                await this.buildIndex();
+            } finally {
+                this._completedDialectRebuildVersion = requestedVersion;
+            }
+        }
     }
 
     /**
@@ -453,17 +490,10 @@ export class IndexManager {
      * Dispose resources
      */
     dispose(): void {
-        if (this.fileWatcher) {
-            this.fileWatcher.dispose();
-            this.fileWatcher = null;
-        }
+        this.disposeFileWatcherResources();
         if (this._configDisposable) {
             this._configDisposable.dispose();
             this._configDisposable = null;
-        }
-        if (this.updateTimer) {
-            clearTimeout(this.updateTimer);
-            this.updateTimer = null;
         }
         if (this._persistTimer) {
             clearTimeout(this._persistTimer);
@@ -639,43 +669,58 @@ export class IndexManager {
             }, this.updateDebounceMs);
         };
 
-        this.fileWatcher.onDidChange(uri => queueUpdate(uri));
-        this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
-        this.fileWatcher.onDidDelete(uri => {
-            const key = uri.toString();
-            if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
-                this._pendingDeletes.add(key);
-                this._changesSinceIndex++;
-                void this.removeFile(uri).finally(() => {
-                    this._pendingDeletes.delete(key);
-                    this.markChangeProcessed();
-                });
-            }
-        });
+        this.attachFileWatcherListeners(queueUpdate);
 
         // Recreate watcher when settings change
         this._configDisposable = vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('sqlCrack.additionalFileExtensions')) {
-                if (this.fileWatcher) {
-                    this.fileWatcher.dispose();
-                }
+                this.disposeFileWatcherResources();
                 this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
-                this.fileWatcher.onDidChange(uri => queueUpdate(uri));
-                this.fileWatcher.onDidCreate(uri => queueUpdate(uri));
-                this.fileWatcher.onDidDelete(uri => {
-                    const key = uri.toString();
-                    if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
-                        this._pendingDeletes.add(key);
-                        this._changesSinceIndex++;
-                        void this.removeFile(uri).finally(() => {
-                            this._pendingDeletes.delete(key);
-                            this.markChangeProcessed();
-                        });
-                    }
-                });
+                this.attachFileWatcherListeners(queueUpdate);
                 this.queueFullReindex('additionalFileExtensions change');
             }
         });
+    }
+
+    private attachFileWatcherListeners(queueUpdate: (uri: vscode.Uri) => void): void {
+        if (!this.fileWatcher) {
+            return;
+        }
+
+        this._fileWatcherDisposables.push(
+            this.fileWatcher.onDidChange(uri => queueUpdate(uri)),
+            this.fileWatcher.onDidCreate(uri => queueUpdate(uri)),
+            this.fileWatcher.onDidDelete(uri => {
+                const key = uri.toString();
+                if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
+                    this._pendingDeletes.add(key);
+                    this._changesSinceIndex++;
+                    void this.removeFile(uri).finally(() => {
+                        this._pendingDeletes.delete(key);
+                        this.markChangeProcessed();
+                    });
+                }
+            })
+        );
+    }
+
+    private clearUpdateTimer(): void {
+        if (this.updateTimer) {
+            clearTimeout(this.updateTimer);
+            this.updateTimer = null;
+        }
+    }
+
+    private disposeFileWatcherResources(): void {
+        this.clearUpdateTimer();
+        for (const disposable of this._fileWatcherDisposables) {
+            disposable.dispose();
+        }
+        this._fileWatcherDisposables = [];
+        if (this.fileWatcher) {
+            this.fileWatcher.dispose();
+            this.fileWatcher = null;
+        }
     }
 
     /**
@@ -696,9 +741,13 @@ export class IndexManager {
                 }
 
                 const files = [...this.updateQueue];
-                this.updateQueue.clear();
 
                 for (const filePath of files) {
+                    // Claim each queued path individually so files re-queued during processing
+                    // remain in the set for a follow-up pass instead of being wiped up front.
+                    if (!this.updateQueue.delete(filePath)) {
+                        continue;
+                    }
                     const uri = vscode.Uri.file(filePath);
                     if (!this.shouldIndexFile(uri)) {
                         this.markChangeProcessed();

@@ -6,6 +6,7 @@ export function getTooltipScriptFragment(): string {
             template.innerHTML = typeof html === 'string' ? html : '';
 
             const allowedTags = new Set(['DIV', 'UL', 'LI', 'STRONG', 'SPAN', 'BR']);
+            const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM']);
             const allowedClassPattern = /^[a-z0-9_-]+$/i;
 
             function sanitizeNode(node) {
@@ -18,6 +19,9 @@ export function getTooltipScriptFragment(): string {
                 }
 
                 const element = node;
+                if (blockedTags.has(element.tagName)) {
+                    return document.createDocumentFragment();
+                }
                 if (!allowedTags.has(element.tagName)) {
                     const fragment = document.createDocumentFragment();
                     Array.from(element.childNodes).forEach((child) => {

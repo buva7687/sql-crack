@@ -16,6 +16,7 @@ import {
     preprocessPostgresSyntax,
     preprocessRedshiftSyntax,
     preprocessRedshiftTypes,
+    preprocessTransactSqlSyntax,
     rewriteUnsupportedPostgresWindowFunctionsForCompatibility,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
@@ -120,7 +121,7 @@ export type {
 // Re-export getNodeColor for backward compatibility
 export { getNodeColor };
 export { DEFAULT_VALIDATION_LIMITS, splitSqlStatements, validateSql };
-export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessRedshiftSyntax, preprocessRedshiftTypes, preprocessPostgresSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
+export { detectDialect, hoistNestedCtes, preprocessHashTempTableIdentifiers, preprocessRedshiftSyntax, preprocessRedshiftTypes, preprocessPostgresSyntax, preprocessTransactSqlSyntax, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessForParsing, rewriteGroupingSets, collapseSnowflakePaths, stripFilterClauses };
 export type { DialectDetectionResult };
 
 // Track table usage
@@ -1041,6 +1042,18 @@ function applyParserCompatibilityPreprocessing(
         });
     }
 
+    const transactSqlPreprocessedSql = preprocessTransactSqlSyntax(transformedSql, dialect);
+    if (transactSqlPreprocessedSql !== null) {
+        transformedSql = transactSqlPreprocessedSql;
+        pushHintOnce(context, {
+            type: 'info',
+            message: 'Rewrote SQL Server-specific syntax (AT TIME ZONE, TRY_CAST) for parser compatibility',
+            suggestion: 'SQL Server constructs like AT TIME ZONE and TRY_CAST are valid in TransactSQL but unsupported by the parser. They were automatically simplified for visualization.',
+            category: 'best-practice',
+            severity: 'low',
+        });
+    }
+
     const redshiftPreprocessedSql = preprocessRedshiftSyntax(transformedSql, dialect);
     if (redshiftPreprocessedSql !== null) {
         transformedSql = redshiftPreprocessedSql;
@@ -1094,8 +1107,8 @@ function applyParserCompatibilityPreprocessing(
         transformedSql = oraclePreprocessedSql;
         pushHintOnce(context, {
             type: 'info',
-            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, CREATE TABLE storage/type options) for parser compatibility',
-            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY), PIVOT/UNPIVOT, flashback queries, MODEL clauses, and CREATE TABLE physical/type syntax are rewritten for parser compatibility.',
+            message: 'Rewrote Oracle-specific syntax ((+) joins, MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, extended CAST, CREATE TABLE storage/type options) for parser compatibility',
+            suggestion: 'Oracle-specific constructs were automatically simplified for visualization. Hierarchical queries (CONNECT BY), PIVOT/UNPIVOT, flashback queries, MODEL clauses, extended CAST format arguments, and CREATE TABLE physical/type syntax are rewritten for parser compatibility.',
             category: 'best-practice',
             severity: 'low',
         });

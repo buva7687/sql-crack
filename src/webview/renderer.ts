@@ -106,7 +106,7 @@ import {
     applyClusteringFeature,
     preCalculateExpandableDimensionsFeature,
 } from './rendering/clusterProjection';
-import { getScrollbarColors, getComponentUiColors } from './constants/colors';
+import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
@@ -131,7 +131,12 @@ import { layoutGraphHorizontal, layoutGraphCompact, layoutGraphForce, layoutGrap
 import { layoutGraph } from './parser/layout';
 import { ICONS, Z_INDEX } from '../shared';
 import { getWarningIndicatorState } from './warningIndicator';
-import { COLUMN_LINEAGE_BANNER_TEXT, shouldEnableColumnLineage, shouldShowTraceColumnsAction } from './columnLineageUx';
+import {
+    COLUMN_LINEAGE_BANNER_TEXT,
+    COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+    shouldEnableColumnLineage,
+    shouldShowTraceColumnsAction,
+} from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
 import {
@@ -1535,8 +1540,13 @@ function restorePreservedRenderState(snapshot: PreservedRenderState): void {
     }
 
     if (snapshot.showColumnFlows) {
-        state.showColumnFlows = true;
-        if (!columnLineageRuntime.columnLineagePanel && shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+        state.showColumnFlows = shouldEnableColumnLineage(currentColumnFlows?.length || 0);
+        if (!state.showColumnFlows) {
+            setColumnLineageBannerVisible(true, {
+                text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+                mode: 'warning',
+            });
+        } else if (!columnLineageRuntime.columnLineagePanel) {
             showColumnLineagePanel();
         }
         if (columnLineageRuntime.columnLineagePanel && snapshot.selectedColumnLineageId) {
@@ -3588,24 +3598,29 @@ const columnLineageRuntime: ColumnLineageRuntimeState = {
     columnLineagePanel: null,
 };
 
-function updateColumnLineageBannerStyle(): void {
+function updateColumnLineageBannerStyle(mode: 'active' | 'warning' = 'active'): void {
     if (!columnLineageBanner) { return; }
-    const background = state.isDarkTheme ? 'rgba(129, 140, 248, 0.1)' : 'rgba(99, 102, 241, 0.08)';
-    const border = state.isDarkTheme ? 'rgba(129, 140, 248, 0.35)' : 'rgba(99, 102, 241, 0.3)';
-    const textColor = state.isDarkTheme ? '#c7d2fe' : '#4338ca';
-    const buttonColor = state.isDarkTheme ? '#a5b4fc' : '#4f46e5';
-    columnLineageBanner.style.background = background;
-    columnLineageBanner.style.border = `1px solid ${border}`;
-    columnLineageBanner.style.color = textColor;
+    const palette = COLUMN_LINEAGE_BANNER_THEME[mode];
+    const tokens = state.isDarkTheme ? palette.dark : palette.light;
+    columnLineageBanner.style.background = tokens.background;
+    columnLineageBanner.style.border = `1px solid ${tokens.border}`;
+    columnLineageBanner.style.color = tokens.text;
     const closeBtn = columnLineageBanner.querySelector('#column-lineage-banner-close') as HTMLButtonElement | null;
     if (closeBtn) {
-        closeBtn.style.color = buttonColor;
+        closeBtn.style.color = tokens.button;
     }
 }
 
-function setColumnLineageBannerVisible(visible: boolean): void {
+function setColumnLineageBannerVisible(
+    visible: boolean,
+    options?: { text?: string; mode?: 'active' | 'warning' }
+): void {
     if (!columnLineageBanner) { return; }
-    updateColumnLineageBannerStyle();
+    const bannerText = columnLineageBanner.querySelector('#column-lineage-banner-text');
+    if (bannerText) {
+        bannerText.textContent = options?.text || COLUMN_LINEAGE_BANNER_TEXT;
+    }
+    updateColumnLineageBannerStyle(options?.mode || 'active');
     columnLineageBanner.style.display = visible ? 'flex' : 'none';
 }
 
@@ -3695,7 +3710,10 @@ export function toggleColumnFlows(show?: boolean): void {
     if (state.showColumnFlows) {
         if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
             state.showColumnFlows = false;
-            setColumnLineageBannerVisible(false);
+            setColumnLineageBannerVisible(true, {
+                text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
+                mode: 'warning',
+            });
             return;
         }
         showColumnLineagePanel();

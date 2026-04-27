@@ -155,6 +155,14 @@ export function __getFileSystemWatcher(): MockFileSystemWatcher | null {
     return mockFileSystemWatcher;
 }
 
+export function __resetFileSystemWatcherMock(): void {
+    mockFileSystemWatcher = null;
+    (workspace.createFileSystemWatcher as jest.Mock).mockImplementation(() => {
+        mockFileSystemWatcher = new MockFileSystemWatcher();
+        return mockFileSystemWatcher;
+    });
+}
+
 export const workspace = {
     // Find files matching a glob pattern
     findFiles: jest.fn().mockResolvedValue([]),
