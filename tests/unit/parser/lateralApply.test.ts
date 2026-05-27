@@ -82,6 +82,33 @@ describe('Item #5: LATERAL, CROSS APPLY, and OUTER APPLY Edge Cases', () => {
             expect(ordersTable).toBeDefined();
         });
 
+        it('should parse CROSS APPLY with OPENJSON WITH schema clause (issue #82)', () => {
+            const sql = `
+                SELECT SalesOrderID, OrderDate, value AS Reason
+                FROM Sales.SalesOrderHeader
+                     CROSS APPLY OPENJSON (SalesReasons) WITH (value NVARCHAR(100) '$')
+            `;
+            const result = parseSql(sql, 'TransactSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.nodes.length).toBeGreaterThan(0);
+        });
+
+        it('should parse OPENJSON WITH multiple typed columns', () => {
+            const sql = `
+                SELECT o.order_id, item.sku, item.qty
+                FROM dbo.Orders o
+                CROSS APPLY OPENJSON(o.payload) WITH (
+                    sku NVARCHAR(50) '$.sku',
+                    qty INT          '$.qty'
+                ) AS item
+            `;
+            const result = parseSql(sql, 'TransactSQL' as SqlDialect);
+
+            expect(result.error).toBeUndefined();
+            expect(result.nodes.length).toBeGreaterThan(0);
+        });
+
         it('should parse CROSS APPLY with table-valued function', () => {
             const sql = `
                 SELECT *

@@ -36,3 +36,16 @@ SELECT
 FROM orders o
 CROSS APPLY OPENJSON(o.tags) AS t
 ORDER BY o.order_id, t.[key];
+
+-- Q4: OPENJSON with explicit schema (WITH clause) — issue #82
+SELECT SalesOrderID, OrderDate, value AS Reason
+FROM Sales.SalesOrderHeader
+     CROSS APPLY OPENJSON(SalesReasons) WITH (value NVARCHAR(100) '$');
+
+-- Q5: OPENJSON WITH clause with multiple typed columns
+SELECT o.order_id, item.sku, item.qty
+FROM dbo.Orders o
+CROSS APPLY OPENJSON(o.payload) WITH (
+    sku NVARCHAR(50) '$.sku',
+    qty INT          '$.qty'
+) AS item;
