@@ -92,6 +92,10 @@ describe('Item #5: LATERAL, CROSS APPLY, and OUTER APPLY Edge Cases', () => {
 
             expect(result.error).toBeUndefined();
             expect(result.nodes.length).toBeGreaterThan(0);
+            expect(result.hints.some(hint =>
+                hint.message.includes('OPENJSON WITH')
+                || hint.suggestion?.includes('OPENJSON WITH')
+            )).toBe(true);
         });
 
         it('should parse OPENJSON WITH multiple typed columns', () => {

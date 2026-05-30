@@ -2010,7 +2010,7 @@ function stripDoubleColonCasts(sql: string): string | null {
  * Order mirrors `applyParserCompatibilityPreprocessing()` in sqlParser.ts:
  * 1. CTE hoisting (all dialects)
  * 2. PostgreSQL syntax (AT TIME ZONE, type-prefixed literals)
- * 3. TransactSQL syntax (AT TIME ZONE, TRY_CAST)
+ * 3. TransactSQL syntax (AT TIME ZONE, TRY_CAST, OPENJSON WITH)
  * 4. Redshift syntax (SELECT INTO, late-binding views, CTAS physical options)
  * 5. GROUPING SETS rewrite (all dialects)
  * 6. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
