@@ -214,6 +214,54 @@ describe('parser preprocessing transforms', () => {
             expect(preprocessTransactSqlSyntax('-- TRY_CAST(amount AS INT)\nSELECT amount FROM t', 'TransactSQL')).toBeNull();
             expect(preprocessTransactSqlSyntax('SELECT dbo.TRY_CAST(amount) FROM t', 'TransactSQL')).toBeNull();
         });
+
+        it('strips OPENJSON WITH schema clause', () => {
+            const sql = `SELECT SalesOrderID, OrderDate, value AS Reason
+FROM Sales.SalesOrderHeader
+     CROSS APPLY OPENJSON(SalesReasons) WITH (value NVARCHAR(100) '$')`;
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bWITH\s*\(/i);
+            expect(rewritten).toContain('OPENJSON(SalesReasons)');
+            expect(rewritten).toContain('CROSS APPLY');
+        });
+
+        it('strips OPENJSON WITH clause with multiple columns', () => {
+            const sql = `SELECT id, name, qty
+FROM dbo.Orders o
+CROSS APPLY OPENJSON(o.payload) WITH (
+    id   INT          '$.id',
+    name NVARCHAR(50) '$.name',
+    qty  INT          '$.qty'
+) AS item`;
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bWITH\s*\(/i);
+            expect(rewritten).toContain('OPENJSON(o.payload)');
+        });
+
+        it('strips multiple OPENJSON WITH clauses in one query', () => {
+            const sql = `SELECT a.v, b.v
+FROM t
+CROSS APPLY OPENJSON(t.col1) WITH (v NVARCHAR(10) '$') AS a
+CROSS APPLY OPENJSON(t.col2) WITH (v INT '$') AS b`;
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).not.toMatch(/\bWITH\s*\(/i);
+            expect(rewritten).toContain('OPENJSON(t.col1)');
+            expect(rewritten).toContain('OPENJSON(t.col2)');
+        });
+
+        it('does not strip WITH from OPENJSON without a schema clause', () => {
+            const sql = `WITH cte AS (SELECT 1 AS val)
+SELECT * FROM OPENJSON((SELECT val FROM cte FOR JSON PATH)) AS j`;
+            const rewritten = preprocessTransactSqlSyntax(sql, 'TransactSQL');
+            // CTE WITH must be preserved; only OPENJSON(...) WITH (...) is stripped
+            expect(rewritten === null || (rewritten.includes('WITH cte AS'))).toBe(true);
+        });
     });
 
     describe('preprocessOracleSyntax — PIVOT/UNPIVOT', () => {

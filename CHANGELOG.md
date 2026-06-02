@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-05-31
+
+### Fixed
+
+- **SQL Server `OPENJSON WITH` compatibility** ([#82](https://github.com/buva7687/sql-crack/issues/82)): TransactSQL preprocessing now strips `OPENJSON(...) WITH (...)` schema clauses before AST parsing while preserving the `OPENJSON` table-valued function node for visualization.
+
+### Tests
+
+- Added regression coverage for `OPENJSON WITH` schema clauses in SQL Server `CROSS APPLY` queries, including multiple typed output columns and compatibility-hint coverage.
+
 ## [0.8.1] - 2026-04-25
 
 ### Changed

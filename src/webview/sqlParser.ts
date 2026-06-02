@@ -1047,8 +1047,8 @@ function applyParserCompatibilityPreprocessing(
         transformedSql = transactSqlPreprocessedSql;
         pushHintOnce(context, {
             type: 'info',
-            message: 'Rewrote SQL Server-specific syntax (AT TIME ZONE, TRY_CAST) for parser compatibility',
-            suggestion: 'SQL Server constructs like AT TIME ZONE and TRY_CAST are valid in TransactSQL but unsupported by the parser. They were automatically simplified for visualization.',
+            message: 'Rewrote SQL Server-specific syntax (AT TIME ZONE, TRY_CAST, OPENJSON WITH) for parser compatibility',
+            suggestion: 'SQL Server constructs like AT TIME ZONE, TRY_CAST, and OPENJSON WITH schema clauses are valid in TransactSQL but unsupported by the parser. They were automatically simplified for visualization.',
             category: 'best-practice',
             severity: 'low',
         });
