@@ -115,11 +115,70 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
 }
 
 /**
+ * Strip `OPENJSON(...) WITH (col type 'path', ...)` schema clauses.
+ *
+ * The WITH clause is T-SQL-specific syntax that defines the output schema of OPENJSON.
+ * node-sql-parser does not recognise it and raises a parse error. Stripping it leaves
+ * a plain `OPENJSON(...)` call which the parser handles as a normal table-valued function.
+ */
+function stripOpenJsonWithClauses(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    const openjsonRegex = /\bOPENJSON\s*\(/gi;
+    const removals: Array<{ start: number; end: number }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = openjsonRegex.exec(masked)) !== null) {
+        // Find position of the opening paren of OPENJSON(...)
+        const openParenPos = match.index + match[0].length - 1;
+        const closeParenPos = findMatchingParen(sql, openParenPos);
+        if (closeParenPos === -1) {
+            continue;
+        }
+
+        // Skip whitespace after the closing paren
+        let pos = closeParenPos + 1;
+        while (pos < masked.length && /\s/.test(masked[pos])) {
+            pos++;
+        }
+
+        // Check if the next token is WITH followed by (
+        if (!/^WITH\s*\(/i.test(masked.slice(pos))) {
+            continue;
+        }
+
+        const withStart = pos;
+        pos += masked.slice(pos).match(/^WITH\s*/i)![0].length;
+        if (pos >= masked.length || masked[pos] !== '(') {
+            continue;
+        }
+
+        const withCloseParenPos = findMatchingParen(sql, pos);
+        if (withCloseParenPos === -1) {
+            continue;
+        }
+
+        removals.push({ start: withStart, end: withCloseParenPos + 1 });
+    }
+
+    if (removals.length === 0) {
+        return null;
+    }
+
+    let result = sql;
+    for (let i = removals.length - 1; i >= 0; i--) {
+        const r = removals[i];
+        result = result.substring(0, r.start) + result.substring(r.end);
+    }
+    return result;
+}
+
+/**
  * Preprocess SQL Server-specific syntax that node-sql-parser doesn't support.
  *
  * Rewrites:
  * 1. `AT TIME ZONE 'tz'` - removed (timezone projection doesn't affect structure)
  * 2. `TRY_CAST(expr AS type)` → `CAST(expr AS type)` for structural parsing
+ * 3. `OPENJSON(...) WITH (col type 'path', ...)` — WITH schema clause stripped
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
@@ -134,6 +193,12 @@ export function preprocessTransactSqlSyntax(sql: string, dialect: SqlDialect): s
     const strippedAtTimeZoneSql = stripAtTimeZoneClauses(result);
     if (strippedAtTimeZoneSql !== null) {
         result = strippedAtTimeZoneSql;
+        changed = true;
+    }
+
+    const strippedOpenJsonWith = stripOpenJsonWithClauses(result);
+    if (strippedOpenJsonWith !== null) {
+        result = strippedOpenJsonWith;
         changed = true;
     }
 
@@ -1945,7 +2010,7 @@ function stripDoubleColonCasts(sql: string): string | null {
  * Order mirrors `applyParserCompatibilityPreprocessing()` in sqlParser.ts:
  * 1. CTE hoisting (all dialects)
  * 2. PostgreSQL syntax (AT TIME ZONE, type-prefixed literals)
- * 3. TransactSQL syntax (AT TIME ZONE, TRY_CAST)
+ * 3. TransactSQL syntax (AT TIME ZONE, TRY_CAST, OPENJSON WITH)
  * 4. Redshift syntax (SELECT INTO, late-binding views, CTAS physical options)
  * 5. GROUPING SETS rewrite (all dialects)
  * 6. Oracle syntax ((+), MINUS, CONNECT BY, PIVOT, FLASHBACK, MODEL, RETURNING INTO)
