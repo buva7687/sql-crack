@@ -35,6 +35,12 @@ yarn-error.log*
 # OS
 Thumbs.db
 
+# Secrets / tokens (never commit these)
+.env
+.env.*
+*.pat
+*.token
+
 #archive
 archive/
 

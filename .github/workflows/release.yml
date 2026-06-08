@@ -1,23 +1,60 @@
 name: Release
 
+# Fires automatically on every push to main. If package.json contains a version
+# that has not been released yet (no matching git tag), it builds, tags, and
+# publishes a GitHub release with auto-generated notes and the packaged VSIX.
+#
+# Marketplace / Open VSX publishing stays OFF unless the VSCE_PAT / OVSX_PAT
+# repository secrets are configured. No secret values are ever written to logs.
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether a release is needed
+        id: check
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists; nothing to release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No tag for v$VERSION yet; a release will be created."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      TAG_NAME: ${{ github.ref_name }}
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG_NAME: v${{ needs.check.outputs.version }}
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,23 +62,15 @@ jobs:
           node-version: 20.x
           cache: "npm"
 
-      - name: Validate release tag and package version
+      - name: Validate package version
         run: |
           set -euo pipefail
-          TAG_VERSION="${TAG_NAME#v}"
-          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match package.json version ($PACKAGE_VERSION)."
-            exit 1
-          fi
-
           node -e "
             const v = process.argv[1].split('.').map(Number);
             const min = [0, 3, 7];
             const valid = v.length === 3 && v.every(Number.isFinite);
             if (!valid) {
-              console.error('Invalid semver tag: ' + process.argv[1]);
+              console.error('Invalid semver version: ' + process.argv[1]);
               process.exit(1);
             }
             const cmp =
@@ -49,10 +78,10 @@ jobs:
               v[1] - min[1] ||
               v[2] - min[2];
             if (cmp < 0) {
-              console.error('Release tags below v0.3.7 are not supported by this workflow.');
+              console.error('Release versions below v0.3.7 are not supported by this workflow.');
               process.exit(1);
             }
-          " "$TAG_VERSION"
+          " "$VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -94,8 +123,10 @@ jobs:
         if: ${{ env.OVSX_PAT == '' }}
         run: echo "OVSX_PAT not configured; skipping Open VSX publish."
 
-      - name: Create GitHub release
+      - name: Create GitHub release and tag
         uses: softprops/action-gh-release@v2
         with:
-          files: sql-crack-${{ github.ref_name }}.vsix
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.TAG_NAME }}
+          files: sql-crack-${{ env.TAG_NAME }}.vsix
           generate_release_notes: true
