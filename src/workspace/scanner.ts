@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { ProgressCallback, CancellationToken } from './types';
+import { normalizeFileExtensions } from '../shared/fileExtensions';
 import {
     FileAnalysis,
     SqlDialect,
@@ -37,13 +38,11 @@ export class WorkspaceScanner {
     private getSqlExtensions(): string[] {
         const extensions = ['sql']; // Always include .sql
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
-
-        for (const ext of additionalExtensions) {
-            // Normalize: remove leading dot if present, convert to lowercase
-            const normalized = ext.toLowerCase().trim().replace(/^\./, '');
-            if (normalized && !extensions.includes(normalized)) {
-                extensions.push(normalized);
+        // normalizeFileExtensions validates/strips glob and path syntax so the
+        // glob built from these stays well-formed (e.g. no `**/*.{sql,*.hql}`).
+        for (const ext of normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))) {
+            if (!extensions.includes(ext)) {
+                extensions.push(ext);
             }
         }
 

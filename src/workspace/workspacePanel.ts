@@ -379,7 +379,7 @@ export class WorkspacePanel {
 
         // Initialize index manager
         const autoIndexThreshold = resolveAutoIndexThresholdFromConfig();
-        const { autoIndexed, fileCount } = await this._indexManager.initialize(autoIndexThreshold);
+        const { autoIndexed, fileCount, hasValidIndex } = await this._indexManager.initialize(autoIndexThreshold);
         if (this._isDisposed) {
             return;
         }
@@ -392,7 +392,10 @@ export class WorkspacePanel {
             return;
         }
 
-        if (!autoIndexed && fileCount >= autoIndexThreshold) {
+        // Only prompt to index a large workspace when there is no usable index
+        // available. A valid cached index (hasValidIndex) must render immediately
+        // without re-prompting, even though it was not auto-built this session.
+        if (!autoIndexed && !hasValidIndex && fileCount >= autoIndexThreshold) {
             // Large workspace - ask user to confirm indexing
             const result = await vscode.window.showInformationMessage(
                 `Found ${fileCount} SQL files in workspace. Index them now?`,

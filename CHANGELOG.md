@@ -17,12 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cursor-follow scoping and mapping**: Cursor lines are forwarded only from the panel's source document and mapped through the webview parser's authoritative `queryLineRanges`, replacing a duplicate statement splitter in `extension.ts` that could select the wrong query. Rapid query switches are guarded by a request token.
 - **Statement splitter preserves doubled delimiters**: `''`, `""`, and backtick escapes are kept intact in split statement text instead of being dropped, preventing identifier/literal corruption before parsing. Backticks are now treated as MySQL identifier-quote delimiters.
 - **Workspace PNG export unblocked**: Added `img-src data: blob:` to the workspace panel CSP and replaced the CSP-blocked `fetch(dataURL)` clipboard path with `canvas.toBlob()`, with a save-dialog fallback that also handles synchronous clipboard errors.
-- **Workspace index cache identity**: The cached workspace index now carries a fingerprint of its scope, dialect, extension configuration, and schema version, and is rebuilt rather than reused when any of these differ.
+- **Workspace index cache identity & state handling**: The cached workspace index carries a fingerprint of its scope, dialect, extension configuration, and schema version, and is rebuilt when any differ. Initialization now distinguishes missing, stale, version/identity-mismatched, oversized, and valid caches, so a valid cache renders immediately without re-prompting, and an oversized index records a marker instead of looking "missing".
 - **Parser worker timeout no longer freezes the UI**: A timed-out worker parse returns a lightweight result instead of re-running the heavy parse synchronously on the webview thread.
+- **Webpack production builds**: Function-form config detects production from webpack's resolved `argv.mode`, so `webpack --mode production` (space-separated) now correctly minifies and disables source maps — previously it silently shipped an unminified bundle with maps.
+- **Runtime dialect setting no longer goes stale**: A `defaultDialect` settings change now updates the active visualization's dialect when the user hasn't explicitly chosen one (the panel reports the live configured default, normalized).
+- **Per-document diagnostics debounce**: Diagnostics refresh timers are keyed by document URI, so concurrent edits across files no longer cancel each other's pending refresh.
+- **Attribute-context escaping**: The column-trace `title` attribute uses the attribute-context escaper (`escapeHtmlAttr`) so quotes can't break out of the attribute.
+- **DOT & Mermaid export escaping**: DOT node IDs and labels escape quotes, backslashes, and line breaks; Mermaid labels encode quotes and shape-delimiter brackets as HTML entities and collapse backslashes/line breaks.
+- **File-extension setting validation**: `additionalFileExtensions` is validated/normalized in one shared helper that strips glob/path syntax (e.g. `*.hql`, `**/*.hql`), so watcher globs and selectors no longer treat glob forms as literal extensions.
 
 ### Tests
 
-- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-identity rejection, CSP-safe PNG export, and source-scoped auto-refresh/cursor-follow.
+- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-state distinction, CSP-safe PNG export (incl. synchronous clipboard failures), source-scoped auto-refresh/cursor-follow, webpack production detection, runtime dialect propagation, per-document diagnostics debounce, attribute-context escaping, DOT/Mermaid export escaping, and file-extension normalization.
 
 ## [0.8.2] - 2026-05-31
 

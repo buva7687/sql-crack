@@ -2,6 +2,7 @@ import {
     buildWorkspaceGraphDot,
     buildWorkspaceGraphJsonExportData,
     buildWorkspaceGraphSvg,
+    escapeDotString,
 } from '../../../../src/workspace/panel/graphExportBuilders';
 import { createWorkspaceExportContext } from '../../../../src/workspace/exportMetadata';
 import { WorkspaceDependencyGraph } from '../../../../src/workspace/types';
@@ -121,5 +122,30 @@ describe('workspace graph export builders', () => {
         expect(json.metadata.scope.uri).toBe('/repo/sql');
         expect(dot).toContain('// SQL Crack Workspace Export');
         expect(dot).toContain('// Filters: query="orders"');
+    });
+
+    describe('DOT escaping', () => {
+        it('escapes quotes, backslashes, and newlines in escapeDotString', () => {
+            expect(escapeDotString('a"b')).toBe('a\\"b');
+            expect(escapeDotString('a\\b')).toBe('a\\\\b');
+            expect(escapeDotString('a\nb')).toBe('a\\nb');
+            expect(escapeDotString('a\r\nb')).toBe('a\\nb');
+            // Backslash is escaped before the quote so they don't combine wrong.
+            expect(escapeDotString('a\\"b')).toBe('a\\\\\\"b');
+            expect(escapeDotString('')).toBe('');
+        });
+
+        it('escapes node ids and labels so quotes cannot break the DOT', () => {
+            const graph = createGraph([
+                { id: 'we"ird', type: 'table', label: 'a"b\\c', x: 0, y: 0, width: 100, height: 50 },
+                { id: 'n2', type: 'view', label: 'plain', x: 1, y: 1, width: 100, height: 50 },
+            ]);
+
+            const dot = buildWorkspaceGraphDot(graph, false);
+
+            expect(dot).toContain('"we\\"ird" [label="a\\"b\\\\c"');
+            // No raw unescaped double quote inside the identifier/label payloads.
+            expect(dot).not.toContain('"we"ird"');
+        });
     });
 });

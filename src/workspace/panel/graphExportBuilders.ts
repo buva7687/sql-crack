@@ -44,6 +44,19 @@ export function buildWorkspaceGraphJsonExportData(
     };
 }
 
+/**
+ * Escape a value for use inside a double-quoted Graphviz DOT string. Backslashes
+ * must be escaped first (so an already-present `\` doesn't combine with a later
+ * inserted escape), then double quotes, and newlines become DOT's `\n` escape so
+ * IDs/labels containing quotes, backslashes, or line breaks can't break the DOT.
+ */
+export function escapeDotString(value: string): string {
+    return (value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\r\n|\r|\n/g, '\\n');
+}
+
 export function buildWorkspaceGraphDot(
     graph: WorkspaceDependencyGraph,
     isDarkTheme: boolean,
@@ -61,15 +74,18 @@ export function buildWorkspaceGraphDot(
     dot += '    // Nodes\n';
     for (const node of graph.nodes) {
         const color = getWorkspaceNodeColor(node.type, isDarkTheme);
-        const label = node.label.replace(/"/g, '\\"');
-        dot += `    "${node.id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
+        const id = escapeDotString(node.id);
+        const label = escapeDotString(node.label);
+        dot += `    "${id}" [label="${label}", fillcolor="${color}", fontcolor="white"];\n`;
     }
 
     dot += '\n    // Edges\n';
     for (const edge of graph.edges) {
         const color = getReferenceTypeColor(edge.referenceType, isDarkTheme);
-        const label = edge.referenceType || '';
-        dot += `    "${edge.source}" -> "${edge.target}" [color="${color}", label="${label}"];\n`;
+        const source = escapeDotString(edge.source);
+        const target = escapeDotString(edge.target);
+        const label = escapeDotString(edge.referenceType || '');
+        dot += `    "${source}" -> "${target}" [color="${color}", label="${label}"];\n`;
     }
 
     dot += '}\n';

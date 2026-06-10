@@ -278,8 +278,17 @@ describe('Settings Propagation', () => {
             for (const s of settingsRead) {
                 expect(panelSource).toContain(`'${s}'`);
             }
-            // defaultDialect is passed via options.dialect, not read directly from config in the panel
+            // defaultDialect is now read from the live setting (normalized) in the
+            // runtime config so a setting change propagates to the webview.
             expect(panelSource).toContain('defaultDialect');
+        });
+
+        it('reports the live configured default dialect in runtime config', () => {
+            // Must read the current setting (normalized), not the dialect the panel
+            // opened with, so a defaultDialect change is not stale on the next update.
+            expect(panelSource).toContain("config.get<string>('defaultDialect')");
+            expect(panelSource).toContain('normalizeDialect(');
+            expect(panelSource).toContain('defaultDialect: configuredDefaultDialect');
         });
 
         it('reads advanced settings', () => {
@@ -351,6 +360,19 @@ describe('Settings Propagation', () => {
         it('references sqlCrackConfig for modern bootstrap', () => {
             expect(indexSource).toContain('sqlCrackConfig');
         });
+
+        it('syncs currentDialect from a defaultDialect change when not explicitly set', () => {
+            // The runtime dialect must follow a defaultDialect change whenever the
+            // user has not explicitly chosen one — independent of auto-detect mode.
+            const start = indexSource.indexOf('function applyRuntimeConfigUpdate');
+            const end = indexSource.indexOf('const isDark =', start);
+            const body = indexSource.slice(start, end);
+
+            expect(body).toContain('!userExplicitlySetDialect');
+            expect(body).toContain('currentDialect = requestedDefaultDialect;');
+            // The old gate that only synced when auto-detect was OFF must be gone.
+            expect(body).not.toContain("config.autoDetectDialect === false");
+        });
     });
 
     // --------------------------------------------------------
@@ -367,8 +389,8 @@ describe('Settings Propagation', () => {
 
         it('loadAdditionalExtensions reads and normalizes file extensions', () => {
             expect(extSource).toContain("'additionalFileExtensions'");
-            expect(extSource).toContain('.toLowerCase()');
-            expect(extSource).toContain("startsWith('.')");
+            expect(extSource).toContain("from './shared/fileExtensions'");
+            expect(extSource).toContain("normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))");
         });
 
         it('listens for configuration changes', () => {

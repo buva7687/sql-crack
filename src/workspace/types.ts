@@ -41,6 +41,27 @@ export interface WorkspaceIndex {
 /**
  * Serializable version of WorkspaceIndex for persistence
  */
+/**
+ * Outcome of attempting to load the persisted workspace index. Distinguishing
+ * these lets initialization react correctly instead of collapsing every
+ * non-load into "no index" (which caused valid caches to be re-prompted/rebuilt).
+ * - `valid`            — a usable index was loaded.
+ * - `missing`          — no cache entry exists.
+ * - `disabled`         — caching is turned off (TTL = 0).
+ * - `stale`            — cache exists but exceeded its TTL.
+ * - `version-mismatch` — cache schema version differs from the current build.
+ * - `identity-mismatch`— cache was built for a different scope/dialect/config.
+ * - `oversized`        — a prior index was too large to persist (marker only).
+ */
+export type WorkspaceCacheState =
+    | 'valid'
+    | 'missing'
+    | 'disabled'
+    | 'stale'
+    | 'version-mismatch'
+    | 'identity-mismatch'
+    | 'oversized';
+
 export interface SerializedWorkspaceIndex {
     version: number;
     /**
@@ -49,6 +70,12 @@ export interface SerializedWorkspaceIndex {
      * A cached index is only reused when this matches the current identity.
      */
     identity?: string;
+    /**
+     * Marks a lightweight placeholder written when the real index exceeded the
+     * persistable size limit. Lets the next session tell "oversized" apart from
+     * "missing" so it does not re-prompt on every open.
+     */
+    oversized?: boolean;
     lastUpdated: number;
     fileCount: number;
     filesArray: [string, FileAnalysis][];

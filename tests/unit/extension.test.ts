@@ -53,20 +53,15 @@ describe('extension normalizeAdvancedLimit function', () => {
 describe('extension additional file extensions normalization', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('normalizes extensions to lowercase', () => {
-        expect(source).toContain('ext.toLowerCase()');
+    it('delegates validation/normalization to the shared normalizer', () => {
+        // Glob/path validation now lives in shared/fileExtensions so all consumers
+        // share it; see tests/unit/shared/fileExtensions.test.ts for the behavior.
+        expect(source).toContain("from './shared/fileExtensions'");
+        expect(source).toContain("normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))");
     });
 
-    it('trims whitespace from extensions', () => {
-        expect(source).toContain('ext.toLowerCase().trim()');
-    });
-
-    it('filters empty strings', () => {
-        expect(source).toContain('filter(ext => ext.length > 0)');
-    });
-
-    it('ensures extensions start with a dot', () => {
-        expect(source).toContain("ext.startsWith('.') ? ext : '.' + ext");
+    it('prefixes a dot for endsWith-based file matching', () => {
+        expect(source).toContain(".map(ext => '.' + ext)");
     });
 });
 
@@ -96,9 +91,19 @@ describe('extension hasExecutableSql logic', () => {
 describe('extension diagnostics debounce', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('uses separate timer for diagnostics refresh', () => {
-        expect(source).toContain('diagnosticsRefreshTimer');
-        expect(source).toContain('clearTimeout(diagnosticsRefreshTimer)');
+    it('debounces diagnostics per document URI so files do not starve each other', () => {
+        // A single shared timer let one file's edit cancel another's pending
+        // refresh; timers must be keyed by document URI instead.
+        expect(source).toContain('diagnosticsRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()');
+        expect(source).toContain('const docKey = e.document.uri.toString();');
+        expect(source).toContain('diagnosticsRefreshTimers.get(docKey)');
+        expect(source).toContain('diagnosticsRefreshTimers.set(docKey,');
+        expect(source).toContain('diagnosticsRefreshTimers.delete(docKey);');
+    });
+
+    it('cancels a document\'s pending diagnostics timer when it closes', () => {
+        expect(source).toContain('onDidCloseTextDocument');
+        expect(source).toContain('const pendingTimer = diagnosticsRefreshTimers.get(docKey);');
     });
 
     it('debounces diagnostics updates with configurable delay', () => {
@@ -149,9 +154,12 @@ describe('extension auto-refresh timer cleanup', () => {
     it('clears auto-refresh timer in deactivate', () => {
         expect(source).toContain('export function deactivate()');
         expect(source).toContain('clearTimeout(autoRefreshTimer)');
-        expect(source).toContain('clearTimeout(diagnosticsRefreshTimer)');
         expect(source).toContain('autoRefreshTimer = null');
-        expect(source).toContain('diagnosticsRefreshTimer = null');
+    });
+
+    it('clears all per-document diagnostics timers in deactivate', () => {
+        expect(source).toContain('for (const timer of diagnosticsRefreshTimers.values())');
+        expect(source).toContain('diagnosticsRefreshTimers.clear()');
     });
 });
 

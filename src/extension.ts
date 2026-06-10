@@ -9,21 +9,22 @@ import {
     SqlCrackCodeActionProvider,
 } from './diagnostics';
 import { stripSqlComments } from './shared/stringUtils';
+import { normalizeDialect } from './shared/dialect';
+import { normalizeFileExtensions } from './shared/fileExtensions';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
-/** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL" */
-export function normalizeDialect(dialect: string): string {
-    if (dialect === 'SQL Server') { return 'TransactSQL'; }
-    if (dialect === 'PL/SQL') { return 'Oracle'; }
-    return dialect;
-}
+/** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL". Lives in the shared module so the panel can apply the same mapping. */
+export { normalizeDialect };
 
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+// Per-document diagnostics debounce timers, keyed by document URI. A single
+// shared timer let a change in one file cancel the pending diagnostics refresh
+// for another, so rapidly edited files could be starved of updates.
+const diagnosticsRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Cache of additional file extensions
 let additionalExtensions: string[] = [];
@@ -43,12 +44,10 @@ function loadCustomFunctions(): void {
  */
 function loadAdditionalExtensions(): void {
     const config = vscode.workspace.getConfiguration('sqlCrack');
-    additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
-    // Normalize extensions to lowercase, filter empty strings, and ensure they start with a dot
-    additionalExtensions = additionalExtensions
-        .map(ext => ext.toLowerCase().trim())
-        .filter(ext => ext.length > 0)
-        .map(ext => ext.startsWith('.') ? ext : '.' + ext);
+    // Validate/normalize to bare extensions (rejecting glob/path syntax), then
+    // prefix a dot for the endsWith()-based file matching used below.
+    additionalExtensions = normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))
+        .map(ext => '.' + ext);
 }
 
 /**
@@ -434,6 +433,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
         diagnosticsCollection.delete(document.uri);
+        // Cancel any pending diagnostics refresh for the closed document.
+        const docKey = document.uri.toString();
+        const pendingTimer = diagnosticsRefreshTimers.get(docKey);
+        if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            diagnosticsRefreshTimers.delete(docKey);
+        }
         if (lastActiveSqlDocument && lastActiveSqlDocument.uri.toString() === document.uri.toString()) {
             lastActiveSqlDocument = null;
         }
@@ -446,13 +452,17 @@ export function activate(context: vscode.ExtensionContext) {
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
 
         if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh && shouldShowDiagnosticsInProblems()) {
-            if (diagnosticsRefreshTimer) {
-                clearTimeout(diagnosticsRefreshTimer);
+            // Debounce per document URI so concurrent edits across files don't
+            // cancel each other's pending diagnostics refresh.
+            const docKey = e.document.uri.toString();
+            const existingTimer = diagnosticsRefreshTimers.get(docKey);
+            if (existingTimer) {
+                clearTimeout(existingTimer);
             }
-            diagnosticsRefreshTimer = setTimeout(() => {
+            diagnosticsRefreshTimers.set(docKey, setTimeout(() => {
+                diagnosticsRefreshTimers.delete(docKey);
                 updateDiagnosticsForDocument(e.document);
-                diagnosticsRefreshTimer = null;
-            }, autoRefreshDelay);
+            }, autoRefreshDelay));
         }
 
         // Only refresh the panel when the changed document is the exact source
@@ -554,8 +564,9 @@ export function deactivate() {
         clearTimeout(autoRefreshTimer);
         autoRefreshTimer = null;
     }
-    if (diagnosticsRefreshTimer) {
-        clearTimeout(diagnosticsRefreshTimer);
-        diagnosticsRefreshTimer = null;
+    // Clean up all per-document diagnostics timers
+    for (const timer of diagnosticsRefreshTimers.values()) {
+        clearTimeout(timer);
     }
+    diagnosticsRefreshTimers.clear();
 }

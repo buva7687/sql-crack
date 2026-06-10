@@ -192,6 +192,7 @@ let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
+const querySwitchPromises: Map<number, Promise<void>> = new Map();
 const DEFERRED_QUERY_THRESHOLD = 50;
 
 // Store view state per query index for zoom/pan persistence
@@ -331,8 +332,12 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     setParseTimeout(config.parseTimeoutSeconds * 1000);
     setRendererColorblindMode(config.colorblindMode);
 
+    // Sync the runtime dialect to a changed defaultDialect whenever the user has
+    // not explicitly chosen one. This applies even with auto-detect enabled: it
+    // provides the correct base dialect, and the subsequent re-visualize can still
+    // refine it via detection (which only overrides when it is confident).
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
-    if (requestedDefaultDialect && !userExplicitlySetDialect && config.autoDetectDialect === false) {
+    if (requestedDefaultDialect && !userExplicitlySetDialect && requestedDefaultDialect !== currentDialect) {
         currentDialect = requestedDefaultDialect;
         const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
         if (dialectSelect) {
@@ -690,6 +695,7 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 function clearDeferredQueryState(): void {
     deferredQueryIndexes.clear();
     hydrationPromises.clear();
+    querySwitchPromises.clear();
 }
 
 function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void {
@@ -975,18 +981,30 @@ function findQueryIndexForLine(line: number): number | null {
 async function handleCursorPosition(line: number): Promise<void> {
     const token = ++cursorFollowToken;
     const targetIndex = findQueryIndexForLine(line);
-
-    if (
-        targetIndex !== null &&
-        targetIndex !== currentQueryIndex &&
+    const hasValidTarget = targetIndex !== null &&
         batchResult &&
         targetIndex >= 0 &&
-        targetIndex < batchResult.queries.length
-    ) {
-        await switchToQueryIndex(targetIndex);
-        // A newer cursor event superseded this one while we awaited the switch —
-        // abandon this stale highlight so we don't override the current position.
+        targetIndex < batchResult.queries.length;
+
+    if (hasValidTarget) {
+        if (targetIndex !== currentQueryIndex) {
+            await switchToQueryIndex(targetIndex);
+        } else {
+            // switchToQueryIndex updates currentQueryIndex before deferred query
+            // hydration finishes. A newer cursor event in that same query must
+            // await the in-flight render instead of highlighting the previous graph.
+            const inFlightSwitch = querySwitchPromises.get(targetIndex);
+            if (inFlightSwitch) {
+                await inFlightSwitch;
+            }
+        }
+
+        // A newer cursor event or a manual query switch superseded this one while
+        // it awaited hydration. Do not highlight against the wrong rendered graph.
         if (token !== cursorFollowToken) {
+            return;
+        }
+        if (currentQueryIndex !== targetIndex) {
             return;
         }
     }
@@ -1590,6 +1608,24 @@ function renderCurrentQuery(): void {
  * Switch to a different query index, preserving view state
  */
 async function switchToQueryIndex(newIndex: number): Promise<void> {
+    const existingSwitch = querySwitchPromises.get(newIndex);
+    if (existingSwitch) {
+        await existingSwitch;
+        return;
+    }
+
+    const switchPromise = performSwitchToQueryIndex(newIndex);
+    querySwitchPromises.set(newIndex, switchPromise);
+    try {
+        await switchPromise;
+    } finally {
+        if (querySwitchPromises.get(newIndex) === switchPromise) {
+            querySwitchPromises.delete(newIndex);
+        }
+    }
+}
+
+async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
     if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }

@@ -3,6 +3,7 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
+import { normalizeDialect } from './shared/dialect';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
@@ -632,10 +633,20 @@ export class VisualizationPanel {
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
 
+        // Report the live configured default dialect (normalized) rather than the
+        // dialect the panel happened to open with. This is what propagates to the
+        // webview on a `sqlCrack.defaultDialect` settings change, so the runtime
+        // dialect no longer goes stale when the user updates the default. The
+        // initial HTML seed still uses options.dialect, so a pinned view's opened
+        // dialect is preserved on first render.
+        const configuredDefaultDialect = normalizeDialect(
+            config.get<string>('defaultDialect') || options.dialect || 'MySQL'
+        );
+
         return {
             vscodeTheme,
             isHighContrast,
-            defaultDialect: options.dialect,
+            defaultDialect: configuredDefaultDialect,
             autoDetectDialect,
             viewLocation,
             defaultLayout,

@@ -198,8 +198,10 @@ describe('defensive guards in extension.ts', () => {
         expect(source).toContain('e.selections.length > 0');
     });
 
-    it('should filter empty strings from additionalFileExtensions', () => {
-        expect(source).toContain(".filter(ext => ext.length > 0)");
+    it('should validate/normalize additionalFileExtensions via the shared normalizer', () => {
+        // Empty strings (and glob/path syntax) are filtered inside
+        // normalizeFileExtensions; extension.ts delegates to it.
+        expect(source).toContain('normalizeFileExtensions(config.get<string[]>(\'additionalFileExtensions\'))');
     });
 });
 

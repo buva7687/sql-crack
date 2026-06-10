@@ -281,4 +281,23 @@ describe('parser worker migration prep', () => {
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) {');
         expect(indexSource).toContain('if (requestId !== parseRequestId) {');
     });
+
+    it('waits for an in-flight deferred query switch before cursor highlighting', () => {
+        const cursorStart = indexSource.indexOf('async function handleCursorPosition');
+        const cursorEnd = indexSource.indexOf('function handleSwitchToQuery', cursorStart);
+        const cursorBody = indexSource.slice(cursorStart, cursorEnd);
+
+        expect(cursorBody).toContain('querySwitchPromises.get(targetIndex)');
+        expect(cursorBody).toContain('await inFlightSwitch');
+        expect(cursorBody).toContain('currentQueryIndex !== targetIndex');
+
+        const switchStart = indexSource.indexOf('async function switchToQueryIndex');
+        const switchEnd = indexSource.indexOf('async function performSwitchToQueryIndex', switchStart);
+        const switchBody = indexSource.slice(switchStart, switchEnd);
+
+        expect(switchBody).toContain('querySwitchPromises.get(newIndex)');
+        expect(switchBody).toContain('await existingSwitch');
+        expect(switchBody).toContain('querySwitchPromises.set(newIndex, switchPromise)');
+        expect(switchBody).toContain('querySwitchPromises.delete(newIndex)');
+    });
 });
