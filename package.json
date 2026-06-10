@@ -437,6 +437,7 @@
     "test:coverage": "node scripts/runJest.js --coverage --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
     "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts",
     "test:perf": "node scripts/runJest.js --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts",
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
     "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"
@@ -462,7 +463,11 @@
   "dependencies": {
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
-    "jspdf": "^4.2.0",
+    "jspdf": "^4.2.1",
     "node-sql-parser": "5.4.0"
+  },
+  "overrides": {
+    "lodash": "^4.18.1",
+    "dompurify": "^3.4.8"
   }
 }

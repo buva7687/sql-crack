@@ -572,6 +572,32 @@ export class IndexManager {
         return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
     }
 
+    /**
+     * Build a stable identity fingerprint for the cached index. The cache is only
+     * valid when it was produced for the same workspace scope, dialect, relevant
+     * extension configuration, and index schema version. Persisting and validating
+     * this prevents a cache built for one scope/dialect from being served for
+     * another (e.g. switching folders or dialects).
+     */
+    private computeCacheIdentity(): string {
+        const scopeKey = this.scopeUri
+            ? this.canonicalizePathForComparison(this.scopeUri.fsPath)
+            : '<workspace>';
+
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const additionalExtensions = (config.get<string[]>('additionalFileExtensions') || [])
+            .map(ext => ext.toLowerCase().trim().replace(/^\./, ''))
+            .filter(Boolean)
+            .sort();
+
+        return JSON.stringify({
+            schema: INDEX_VERSION,
+            scope: scopeKey,
+            dialect: this.dialect,
+            extensions: additionalExtensions,
+        });
+    }
+
     private canonicalizePathForComparison(filePath: string): string {
         const resolved = path.resolve(filePath);
         try {
@@ -815,6 +841,15 @@ export class IndexManager {
             return null;
         }
 
+        // Reject caches built for a different scope, dialect, configuration, or
+        // schema. Without this, switching scoped folders or dialects would serve
+        // a stale index that belongs to a different identity.
+        const currentIdentity = this.computeCacheIdentity();
+        if (cached.identity !== currentIdentity) {
+            logger.debug('[IndexManager] Cached index identity mismatch - rebuilding index');
+            return null;
+        }
+
         // Check TTL
         const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
         const cacheAge = Date.now() - cached.lastUpdated;
@@ -897,6 +932,7 @@ export class IndexManager {
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {
             version: this.index.version,
+            identity: this.computeCacheIdentity(),
             lastUpdated: this.index.lastUpdated,
             fileCount: this.index.fileCount,
             filesArray: [...this.index.files.entries()],

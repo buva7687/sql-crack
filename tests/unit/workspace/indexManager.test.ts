@@ -758,9 +758,13 @@ describe('IndexManager', () => {
 
     describe('caching', () => {
         it('should load cached index on initialize', async () => {
-            // Pre-populate cache
+            // Pre-populate cache. The identity must match computeCacheIdentity()
+            // for this manager (schema 4, no scope, MySQL dialect, no extra
+            // extensions) or the cache is rejected as belonging to a different
+            // scope/dialect/config.
             const cachedIndex = {
                 version: 4, // Must match INDEX_VERSION
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -800,6 +804,52 @@ describe('IndexManager', () => {
             await indexManager.initialize();
 
             // Should rebuild, not use old cache
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+        });
+
+        it('should ignore cache built for a different identity (scope/dialect/config)', async () => {
+            // Same schema version but an identity that does not match this manager
+            // (e.g. a cache built for a different dialect). It must not be reused.
+            const foreignCache = {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', foreignCache);
+            mockScanner.getFileCount.mockResolvedValue(5);
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+
+            await indexManager.initialize();
+
+            // Should rebuild, not serve a cache from a different identity
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+        });
+
+        it('should ignore cache missing an identity fingerprint', async () => {
+            // Caches persisted before identity tracking have no identity field and
+            // must be rebuilt rather than served against an unknown scope/dialect.
+            const legacyCache = {
+                version: 4,
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', legacyCache);
+            mockScanner.getFileCount.mockResolvedValue(5);
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+
+            await indexManager.initialize();
+
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
         });
 

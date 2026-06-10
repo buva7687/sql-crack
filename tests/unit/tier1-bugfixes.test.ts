@@ -165,11 +165,17 @@ describe('Bug 4+5: splitSqlStatements handles comments and doubled quotes', () =
     });
 
     // --- Source-reading: verify production code has the same fix ---
-    it('production code in extension.ts uses comment and doubled-quote handling', () => {
-        const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
+    // The duplicate splitter in extension.ts was removed; statement splitting is
+    // owned by the webview parser. Verify the comment/doubled-quote handling lives
+    // in that surviving splitter.
+    it('production splitter uses comment and doubled-quote handling', () => {
+        const source = readFileSync(
+            join(__dirname, '../../src/webview/parser/validation/splitting.ts'),
+            'utf8'
+        );
         expect(source).toContain('inLineComment');
         expect(source).toContain('inBlockComment');
-        expect(source).toContain('next === stringChar');
+        expect(source).toContain('nextChar === stringChar');
     });
 });
 

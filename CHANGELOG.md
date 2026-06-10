@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Production dependency vulnerabilities**: Upgraded `jspdf` to `^4.2.1` and pinned `lodash` (`^4.18.1`) and `dompurify` (`^3.4.8`) via `overrides`, clearing the critical/high/moderate advisories. Added an `audit:prod` script and wired `npm run audit:prod` into the release workflow as a gate (`npm audit --omit=dev` now reports 0 vulnerabilities).
+
+### Fixed
+
+- **Cross-document refresh isolation**: The active visualization now refreshes only when the changed document is its exact source document — both at change time and re-validated when the debounced timer fires — so editing or switching to another SQL file no longer hijacks the panel.
+- **Cursor-follow scoping and mapping**: Cursor lines are forwarded only from the panel's source document and mapped through the webview parser's authoritative `queryLineRanges`, replacing a duplicate statement splitter in `extension.ts` that could select the wrong query. Rapid query switches are guarded by a request token.
+- **Statement splitter preserves doubled delimiters**: `''`, `""`, and backtick escapes are kept intact in split statement text instead of being dropped, preventing identifier/literal corruption before parsing. Backticks are now treated as MySQL identifier-quote delimiters.
+- **Workspace PNG export unblocked**: Added `img-src data: blob:` to the workspace panel CSP and replaced the CSP-blocked `fetch(dataURL)` clipboard path with `canvas.toBlob()`, with a save-dialog fallback that also handles synchronous clipboard errors.
+- **Workspace index cache identity**: The cached workspace index now carries a fingerprint of its scope, dialect, extension configuration, and schema version, and is rebuilt rather than reused when any of these differ.
+- **Parser worker timeout no longer freezes the UI**: A timed-out worker parse returns a lightweight result instead of re-running the heavy parse synchronously on the webview thread.
+
+### Tests
+
+- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-identity rejection, CSP-safe PNG export, and source-scoped auto-refresh/cursor-follow.
+
 ## [0.8.2] - 2026-05-31
 
 ### Fixed

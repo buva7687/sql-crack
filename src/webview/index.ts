@@ -176,6 +176,10 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+// Monotonic token guarding async cursor-follow query switches. Rapid cursor
+// movement can fire overlapping switches; only the latest token may complete
+// the highlight, so stale switches don't fight the user's current position.
+let cursorFollowToken = 0;
 let userExplicitlySetDialect = false;
 let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
@@ -901,7 +905,7 @@ function setupVSCodeMessageListener(): void {
                     handleRefresh(message.sql, message.options);
                     break;
                 case 'cursorPosition':
-                    highlightNodeAtLine(message.line);
+                    void handleCursorPosition(message.line);
                     break;
                 case 'switchToQuery':
                     handleSwitchToQuery(message.queryIndex);
@@ -944,6 +948,50 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
     void visualize(sql);
     clearStaleIndicator();
     schedulePersistUiState();
+}
+
+/**
+ * Map an editor cursor line to the query that owns it using the parser's
+ * authoritative line ranges, then (if needed) switch to that query before
+ * highlighting the matching node. Guarded by a request token so a fast burst of
+ * cursor moves resolves to only the latest target.
+ */
+function findQueryIndexForLine(line: number): number | null {
+    const ranges = batchResult?.queryLineRanges;
+    if (!ranges) {
+        return null;
+    }
+
+    for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i];
+        if (range && line >= range.startLine && line <= range.endLine) {
+            return i;
+        }
+    }
+
+    return null;
+}
+
+async function handleCursorPosition(line: number): Promise<void> {
+    const token = ++cursorFollowToken;
+    const targetIndex = findQueryIndexForLine(line);
+
+    if (
+        targetIndex !== null &&
+        targetIndex !== currentQueryIndex &&
+        batchResult &&
+        targetIndex >= 0 &&
+        targetIndex < batchResult.queries.length
+    ) {
+        await switchToQueryIndex(targetIndex);
+        // A newer cursor event superseded this one while we awaited the switch —
+        // abandon this stale highlight so we don't override the current position.
+        if (token !== cursorFollowToken) {
+            return;
+        }
+    }
+
+    highlightNodeAtLine(line);
 }
 
 function handleSwitchToQuery(queryIndex: number): void {

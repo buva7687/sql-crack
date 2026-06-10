@@ -43,6 +43,12 @@ export interface WorkspaceIndex {
  */
 export interface SerializedWorkspaceIndex {
     version: number;
+    /**
+     * Cache identity fingerprint binding this serialized index to the scope,
+     * dialect, extension configuration, and schema version it was built with.
+     * A cached index is only reused when this matches the current identity.
+     */
+    identity?: string;
     lastUpdated: number;
     fileCount: number;
     filesArray: [string, FileAnalysis][];
