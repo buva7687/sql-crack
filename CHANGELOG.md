@@ -10,8 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **Production dependency vulnerabilities**: Upgraded `jspdf` to `^4.2.1` and pinned `lodash` (`^4.18.1`) and `dompurify` (`^3.4.8`) via `overrides`, clearing the critical/high/moderate advisories. Added an `audit:prod` script and wired `npm run audit:prod` into the release workflow as a gate (`npm audit --omit=dev` now reports 0 vulnerabilities).
+- **Cryptographically strong CSP nonces**: Centralized nonce generation in a Node-only helper (`crypto.randomBytes`, 128-bit), replacing three `Math.random()`-based generators; the helper is kept out of the webview/browser bundle.
+- **HTML sanitizer URL hardening**: The extension-HTML sanitizer now strips `href`/`src`/`xlink:href` entirely (the rendered fragments need no URLs), removing the `javascript:`/`data:`/`vbscript:` attack surface instead of matching a single protocol; `on*` handlers and dangerous styles are still removed.
+- **Collision-free identifiers**: Pin and tab IDs use `crypto.randomUUID()` (extension host) / Web Crypto with a fallback (webview) instead of `Date.now()`, which collided within the same millisecond.
 
 ### Fixed
+
+- **View-location setting in empty windows**: Writes to the Workspace config target only when a workspace is open (otherwise Global), and surfaces update failures instead of throwing.
+- **Line navigation validation**: `goToLine` now requires a finite integer and clamps to line 1 before constructing a `vscode.Position`.
 
 - **Cross-document refresh isolation**: The active visualization now refreshes only when the changed document is its exact source document — both at change time and re-validated when the debounced timer fires — so editing or switching to another SQL file no longer hijacks the panel.
 - **Cursor-follow scoping and mapping**: Cursor lines are forwarded only from the panel's source document and mapped through the webview parser's authoritative `queryLineRanges`, replacing a duplicate statement splitter in `extension.ts` that could select the wrong query. Rapid query switches are guarded by a request token.
@@ -28,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-state distinction, CSP-safe PNG export (incl. synchronous clipboard failures), source-scoped auto-refresh/cursor-follow, webpack production detection, runtime dialect propagation, per-document diagnostics debounce, attribute-context escaping, DOT/Mermaid export escaping, and file-extension normalization.
+- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-state distinction, CSP-safe PNG export (incl. synchronous clipboard failures), source-scoped auto-refresh/cursor-follow, webpack production detection, runtime dialect propagation, per-document diagnostics debounce, attribute-context escaping, DOT/Mermaid export escaping, file-extension normalization, crypto-backed CSP nonce generation, collision-free pin/tab IDs, view-location target selection, line-navigation validation, and the sanitizer's URL-attribute stripping.
 
 ## [0.8.2] - 2026-05-31
 

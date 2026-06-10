@@ -22,6 +22,20 @@ export interface PinnedTabsCallbacks {
 
 let pinnedTabs: PinnedTab[] = [];
 let activeTabId: string | null = null;
+
+/**
+ * Generate a collision-free tab id. Uses the Web Crypto `randomUUID()` available
+ * in the VS Code webview; falls back to a time+random id in the rare environment
+ * where it is unavailable. Replaces the previous `Date.now()` id, which collided
+ * when two tabs were pinned within the same millisecond.
+ */
+function createTabId(): string {
+    const cryptoObj = typeof crypto !== 'undefined' ? crypto : undefined;
+    if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+        return 'tab-' + cryptoObj.randomUUID();
+    }
+    return 'tab-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
 let pinnedTabsAbortController: AbortController | null = null;
 
 function getPinnedTabsListenerOptions(): AddEventListenerOptions | undefined {
@@ -47,7 +61,7 @@ export function pinCurrentVisualization(callbacks: PinnedTabsCallbacks, fileName
         return;
     }
 
-    const tabId = 'tab-' + Date.now();
+    const tabId = createTabId();
     const tabName = fileName || `Query ${pinnedTabs.length + 1}`;
 
     const pinnedTab: PinnedTab = {

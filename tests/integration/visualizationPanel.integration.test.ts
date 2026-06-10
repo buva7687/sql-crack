@@ -75,9 +75,11 @@ describe('visualizationPanel.ts integration', () => {
 
     describe('getNonce (module-level function)', () => {
         const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
-        
-        it('generates 32 character nonce', () => {
-            expect(source).toContain('for (let i = 0; i < 32; i++)');
+
+        it('delegates to the centralized crypto-backed nonce generator', () => {
+            expect(source).toContain("import { createCspNonce } from './nonce'");
+            expect(source).toContain('return createCspNonce();');
+            expect(source).not.toContain('Math.random()');
         });
     });
 });

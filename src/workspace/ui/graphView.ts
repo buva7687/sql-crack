@@ -5,6 +5,7 @@ import { WorkspaceDependencyGraph, WorkspaceNode, WorkspaceEdge, SearchFilter } 
 import { getWebviewScript, WebviewScriptParams } from './clientScripts';
 import { ICONS, getWorkspaceNodeIcon } from '../../shared';
 import { escapeHtml } from '../../shared/stringUtils';
+import { createCspNonce } from '../../nonce';
 
 /**
  * Parameters for generating graph view body
@@ -271,10 +272,5 @@ function truncateLabel(label: string, maxLength: number): string {
  * Generate nonce for CSP
  */
 function getNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
+    return createCspNonce();
 }

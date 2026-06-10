@@ -21,16 +21,13 @@ describe('visualizationPanel.ts', () => {
     });
 
     describe('getNonce function', () => {
-        it('generates 32 character nonce', () => {
-            expect(source).toContain('for (let i = 0; i < 32; i++)');
+        it('delegates to the centralized crypto-backed nonce generator', () => {
+            expect(source).toContain("import { createCspNonce } from './nonce'");
+            expect(source).toContain('return createCspNonce();');
         });
 
-        it('uses alphanumeric characters', () => {
-            expect(source).toContain("'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'");
-        });
-
-        it('uses random selection', () => {
-            expect(source).toContain('Math.random()');
+        it('no longer uses Math.random for nonce generation', () => {
+            expect(source).not.toContain('Math.random()');
         });
     });
 
@@ -169,8 +166,11 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain('const editor = vscode.window.activeTextEditor');
         });
 
-        it('converts 1-indexed line to 0-indexed position', () => {
-            expect(source).toContain('Math.max(0, line - 1)');
+        it('validates a finite integer line and clamps to line 1 before Position', () => {
+            expect(source).toContain('Number.isFinite(line)');
+            expect(source).toContain('const safeLine = Math.max(1, Math.floor(line))');
+            expect(source).toContain('const zeroBasedLine = safeLine - 1;');
+            expect(source).toContain('new vscode.Position(zeroBasedLine, 0)');
         });
 
         it('reveals line in center', () => {
@@ -179,6 +179,32 @@ describe('visualizationPanel.ts', () => {
 
         it('logs error on document open failure', () => {
             expect(source).toContain("logger.error('Failed to open document', error)");
+        });
+    });
+
+    describe('_changeViewLocation target selection', () => {
+        it('uses Workspace target when a workspace exists, else Global', () => {
+            expect(source).toContain('(vscode.workspace.workspaceFolders?.length ?? 0) > 0');
+            expect(source).toContain('? vscode.ConfigurationTarget.Workspace');
+            expect(source).toContain(': vscode.ConfigurationTarget.Global');
+        });
+
+        it('handles configuration update failures without throwing', () => {
+            const start = source.indexOf('private async _changeViewLocation');
+            const end = source.indexOf('private async _goToLine', start);
+            const body = source.slice(start, end);
+            expect(body).toContain('try {');
+            expect(body).toContain('await config.update(\'viewLocation\', location, target)');
+            expect(body).toContain('} catch (error) {');
+            expect(body).toContain("showErrorMessage");
+        });
+    });
+
+    describe('pin id generation', () => {
+        it('uses crypto.randomUUID() instead of Date.now() for pin ids', () => {
+            expect(source).toContain("import { randomUUID } from 'crypto'");
+            expect(source).toContain("'pin-' + randomUUID()");
+            expect(source).not.toContain("'pin-' + Date.now()");
         });
     });
 

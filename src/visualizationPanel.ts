@@ -3,7 +3,9 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
+import { randomUUID } from 'crypto';
 import { normalizeDialect } from './shared/dialect';
+import { createCspNonce } from './nonce';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
@@ -140,7 +142,7 @@ export class VisualizationPanel {
     }
 
     public static createPinnedPanel(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions, pinId?: string): string {
-        const id = pinId || 'pin-' + Date.now();
+        const id = pinId || 'pin-' + randomUUID();
         const name = options.fileName.replace('.sql', '') || `Pinned Query`;
 
         // Create panel as a new tab
@@ -431,8 +433,20 @@ export class VisualizationPanel {
 
     private async _changeViewLocation(location: ViewLocation) {
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        await config.update('viewLocation', location, vscode.ConfigurationTarget.Workspace);
-        vscode.window.showInformationMessage(`View location changed to: ${location}`);
+        // Writing to the Workspace target fails in an empty window (no workspace),
+        // so fall back to the Global (user) target there. Update failures must not
+        // crash the message handler.
+        const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+        const target = hasWorkspace
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        try {
+            await config.update('viewLocation', location, target);
+            vscode.window.showInformationMessage(`View location changed to: ${location}`);
+        } catch (error) {
+            logger.error('Failed to update viewLocation setting', error);
+            vscode.window.showErrorMessage(`Could not change view location to "${location}".`);
+        }
     }
 
     /**
@@ -444,15 +458,25 @@ export class VisualizationPanel {
      * @param line - Line number (1-indexed) to navigate to
      */
     private async _goToLine(line: number) {
+        // Validate the incoming (webview-provided) line: it must be a finite
+        // integer. Clamp to the first line so a non-finite or out-of-range value
+        // can't produce an invalid vscode.Position.
+        if (!Number.isFinite(line)) {
+            logger.warn(`Ignoring goToLine with non-finite line: ${line}`);
+            return;
+        }
+        const safeLine = Math.max(1, Math.floor(line)); // 1-indexed, never below 1
+        const zeroBasedLine = safeLine - 1;
+
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
-        
+
         if (targetUri) {
             // Open the document and navigate to the line
             try {
                 const document = await vscode.workspace.openTextDocument(targetUri);
                 const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-                const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
+                const position = new vscode.Position(zeroBasedLine, 0);
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
                 return;
@@ -460,16 +484,16 @@ export class VisualizationPanel {
                 logger.error('Failed to open document', error);
             }
         }
-        
+
         // Fallback to active editor if source document URI is not available
         const editor = vscode.window.activeTextEditor;
         if (editor) {
-            const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
+            const position = new vscode.Position(zeroBasedLine, 0);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         } else {
-            logger.warn(`No active editor found, cannot navigate to line ${line}`);
-            vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);
+            logger.warn(`No active editor found, cannot navigate to line ${safeLine}`);
+            vscode.window.showWarningMessage(`Could not navigate to line ${safeLine}. Please open the SQL file first.`);
         }
     }
 
@@ -834,12 +858,7 @@ export class VisualizationPanel {
 }
 
 function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
+    return createCspNonce();
 }
 
 function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {

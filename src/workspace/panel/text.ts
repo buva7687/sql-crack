@@ -1,3 +1,5 @@
+import { createCspNonce } from '../../nonce';
+
 export function formatDurationText(ms: number): string {
     if (ms < 1000) {
         return '<1s';
@@ -27,10 +29,5 @@ export function escapeForInlineScriptValue(value: unknown): string {
 }
 
 export function generateNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
+    return createCspNonce();
 }
