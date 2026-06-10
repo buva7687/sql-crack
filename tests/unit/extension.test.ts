@@ -33,20 +33,24 @@ describe('extension.ts', () => {
 });
 
 describe('extension normalizeAdvancedLimit function', () => {
-    const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
+    // Behavioral: the implementation is shared (src/shared/limits.ts) and
+    // re-exported from extension.ts; exercise it rather than its source text.
+    const { normalizeAdvancedLimit } = require('../../src/extension');
 
     it('clamps values to min/max range', () => {
-        expect(source).toContain('Math.max(min, Math.min(max, rounded))');
+        expect(normalizeAdvancedLimit(9999, 50, 1, 100)).toBe(100);
+        expect(normalizeAdvancedLimit(-5, 50, 1, 100)).toBe(1);
     });
 
     it('returns fallback for non-number types', () => {
-        expect(source).toContain("typeof raw !== 'number'");
-        expect(source).toContain('!Number.isFinite(raw)');
-        expect(source).toContain('return fallback');
+        expect(normalizeAdvancedLimit('x', 50, 1, 100)).toBe(50);
+        expect(normalizeAdvancedLimit(NaN, 50, 1, 100)).toBe(50);
+        expect(normalizeAdvancedLimit(Infinity, 50, 1, 100)).toBe(50);
     });
 
     it('rounds raw values before clamping', () => {
-        expect(source).toContain('const rounded = Math.round(raw)');
+        expect(normalizeAdvancedLimit(12.6, 50, 1, 100)).toBe(13);
+        expect(normalizeAdvancedLimit(12.4, 50, 1, 100)).toBe(12);
     });
 });
 

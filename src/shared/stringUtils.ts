@@ -41,6 +41,20 @@ export function escapeHtml(value: string): string {
 }
 
 /**
+ * Serialize a value with JSON.stringify and escape the HTML-significant sequences
+ * that could break out of an inline `<script>` context (closing the script tag,
+ * HTML comments, or a CDATA end). Canonical home for what the panel and workspace
+ * previously implemented twice.
+ */
+export function escapeForInlineScriptValue(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/<\/script/gi, '<\\/script')
+        .replace(/<!--/g, '<\\!--')
+        .replace(/-->/g, '--\\>')
+        .replace(/\]\]>/g, ']\\]>');
+}
+
+/**
  * Strip SQL comments while preserving quoted content (strings and identifiers).
  * Handles single-quoted strings (with '' escape), double-quoted identifiers,
  * and backtick-quoted identifiers. Strips --, /* *​/, and # comments.

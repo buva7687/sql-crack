@@ -62,6 +62,7 @@ import {
 import type { ColorblindMode } from '../shared/theme';
 import type { SqlFlowRuntimeConfig, ViewLocation } from '../shared/messages/sqlFlowRuntimeConfig';
 import { stripSqlComments } from '../shared/stringUtils';
+import { normalizeAdvancedLimit } from '../shared/limits';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 
 import {
@@ -226,13 +227,6 @@ function hasExecutableSql(sql: string): boolean {
     return stripSqlComments(rewritten).trim().length > 0;
 }
 
-function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.min(max, Math.max(min, rounded));
-}
 
 function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; deferredQueryThreshold: number; parseTimeoutSeconds: number } {
     const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);

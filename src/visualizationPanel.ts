@@ -5,6 +5,8 @@ import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFl
 import type { ColorblindMode } from './shared/theme';
 import { randomUUID } from 'crypto';
 import { normalizeDialect } from './shared/dialect';
+import { normalizeAdvancedLimit } from './shared/limits';
+import { escapeForInlineScriptValue } from './shared/stringUtils';
 import { createCspNonce } from './nonce';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
@@ -523,9 +525,8 @@ export class VisualizationPanel {
     }
 
     private normalizeWorkspaceDialect(dialect: string): WorkspaceSqlDialect {
-        if (dialect === 'SQL Server') { return 'TransactSQL'; }
-        if (dialect === 'PL/SQL') { return 'Oracle'; }
-        return dialect as WorkspaceSqlDialect;
+        // Same alias mapping as the shared normalizer, typed for the workspace.
+        return normalizeDialect(dialect) as WorkspaceSqlDialect;
     }
 
     private async _traceInWorkspaceLineage(tableName: string, nodeType: 'table' | 'view'): Promise<void> {
@@ -717,19 +718,7 @@ export class VisualizationPanel {
      * that could break out of the script context.
      */
     private _escapeForInlineScript(value: unknown): string {
-        // JSON.stringify handles quotes, backslashes, control chars, and unicode
-        const json = JSON.stringify(value);
-
-        // Escape HTML-specific sequences that could break script context:
-        // 1. </script - could close the script tag (case-insensitive)
-        // 2. <!-- - HTML comment start
-        // 3. --> - HTML comment end
-        // 4. ]]> - CDATA section end
-        return json
-            .replace(/<\/script/gi, '<\\/script')
-            .replace(/<!--/g, '<\\!--')
-            .replace(/-->/g, '--\\>')
-            .replace(/\]\]>/g, ']\\]>');
+        return escapeForInlineScriptValue(value);
     }
 
     private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string, options: VisualizationOptions) {
@@ -875,10 +864,3 @@ function getNonce() {
     return createCspNonce();
 }
 
-function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.max(min, Math.min(max, rounded));
-}

@@ -60,16 +60,12 @@ describe('visualizationPanel.ts integration', () => {
         });
     });
 
-    describe('normalizeAdvancedLimit (module-level function)', () => {
+    describe('normalizeAdvancedLimit (shared)', () => {
         const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
-        
-        it('clamps values to min/max range', () => {
-            expect(source).toContain('Math.max(min, Math.min(max, rounded))');
-        });
 
-        it('returns fallback for non-number types', () => {
-            expect(source).toContain("typeof raw !== 'number'");
-            expect(source).toContain('!Number.isFinite(raw)');
+        it('imports the shared normalizer instead of a local copy', () => {
+            expect(source).toContain("import { normalizeAdvancedLimit } from './shared/limits'");
+            expect(source).not.toContain('function normalizeAdvancedLimit(');
         });
     });
 
@@ -93,22 +89,11 @@ describe('ViewLocation type', () => {
 
 describe('_escapeForInlineScript via source analysis', () => {
     const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
-    
-    it('escapes script tags to prevent XSS', () => {
-        expect(source).toContain(".replace(/<\\/script/gi, '<\\\\/script')");
-    });
 
-    it('escapes HTML comments', () => {
-        expect(source).toContain(".replace(/<!--/g, '<\\\\!--')");
-        expect(source).toContain(".replace(/-->/g, '--\\\\>')");
-    });
-
-    it('escapes CDATA sections', () => {
-        expect(source).toContain(".replace(/\\]\\]>/g, ']\\\\]>");
-    });
-
-    it('uses JSON.stringify for base escaping', () => {
-        expect(source).toContain('JSON.stringify(value)');
+    it('delegates to the shared inline-script escaper', () => {
+        // Behavior is covered in tests/unit/shared/sharedHelpers.test.ts.
+        expect(source).toContain("import { escapeForInlineScriptValue } from './shared/stringUtils'");
+        expect(source).toContain('return escapeForInlineScriptValue(value);');
     });
 });
 

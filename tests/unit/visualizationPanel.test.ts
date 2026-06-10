@@ -4,19 +4,11 @@ import { join } from 'path';
 describe('visualizationPanel.ts', () => {
     const source = readFileSync(join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
 
-    describe('normalizeAdvancedLimit function', () => {
-        it('returns fallback for non-number types', () => {
-            expect(source).toContain("typeof raw !== 'number'");
-            expect(source).toContain('!Number.isFinite(raw)');
-            expect(source).toContain('return fallback');
-        });
-
-        it('rounds values before clamping', () => {
-            expect(source).toContain('const rounded = Math.round(raw)');
-        });
-
-        it('clamps to min/max range', () => {
-            expect(source).toContain('Math.max(min, Math.min(max, rounded))');
+    describe('normalizeAdvancedLimit usage', () => {
+        it('uses the shared normalizer rather than a local copy', () => {
+            // Behavior is covered in tests/unit/shared/sharedHelpers.test.ts.
+            expect(source).toContain("import { normalizeAdvancedLimit } from './shared/limits'");
+            expect(source).not.toContain('function normalizeAdvancedLimit(');
         });
     });
 
@@ -32,24 +24,11 @@ describe('visualizationPanel.ts', () => {
     });
 
     describe('_escapeForInlineScript security', () => {
-        it('uses JSON.stringify for base escaping', () => {
-            expect(source).toContain('JSON.stringify(value)');
-        });
-
-        it('escapes closing script tags', () => {
-            expect(source).toContain(".replace(/<\\/script/gi, '<\\\\/script')");
-        });
-
-        it('escapes HTML comment start', () => {
-            expect(source).toContain(".replace(/<!--/g, '<\\\\!--')");
-        });
-
-        it('escapes HTML comment end', () => {
-            expect(source).toContain(".replace(/-->/g, '--\\\\>')");
-        });
-
-        it('escapes CDATA section end', () => {
-            expect(source).toContain(".replace(/\\]\\]>/g, ']\\\\]>");
+        it('delegates to the shared inline-script escaper', () => {
+            // The escaping logic is consolidated in shared/stringUtils; behavior is
+            // covered in tests/unit/shared/sharedHelpers.test.ts.
+            expect(source).toContain("import { escapeForInlineScriptValue } from './shared/stringUtils'");
+            expect(source).toContain('return escapeForInlineScriptValue(value);');
         });
     });
 

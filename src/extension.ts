@@ -11,6 +11,7 @@ import {
 import { stripSqlComments } from './shared/stringUtils';
 import { normalizeDialect } from './shared/dialect';
 import { normalizeFileExtensions } from './shared/fileExtensions';
+import { normalizeAdvancedLimit } from './shared/limits';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
 
 // Track the last active SQL document for refresh functionality
@@ -124,13 +125,7 @@ async function loadWorkspacePanel() {
     return import('./workspace');
 }
 
-export function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.max(min, Math.min(max, rounded));
-}
+export { normalizeAdvancedLimit };
 
 export function activate(context: vscode.ExtensionContext) {
     // Initialize logger first
