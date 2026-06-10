@@ -2,7 +2,7 @@
  * Phase 1 Regression Tests — Review Bugs & Security Fixes
  *
  * Tests for:
- * 1. Edge attribute consistency (graphView.ts must use data-source/data-target)
+ * 1. Edge attribute consistency (renderWorkspaceGraphSvg must use data-source/data-target)
  * 2. HTML escaping in clientScripts.ts lineage rendering
  * 3. File watcher respecting custom extensions
  * 4. Concurrency guard on buildIndex()

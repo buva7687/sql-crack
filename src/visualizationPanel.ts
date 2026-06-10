@@ -863,4 +863,3 @@ export class VisualizationPanel {
 function getNonce() {
     return createCspNonce();
 }
-
