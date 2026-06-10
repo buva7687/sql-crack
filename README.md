@@ -395,7 +395,7 @@ src/
 │   ├── types/                   # Webview runtime types
 │   ├── ui/                      # Toolbar/context menu/tooltip/layout/command UI
 │   │   └── toolbar/             # Extracted toolbar component modules
-│   └── workers/                 # Worker scripts
+│   └── parser.worker.ts         # Off-main-thread SQL parse worker
 └── workspace/                   # Extension-host workspace analysis runtime
     ├── workspacePanel.ts        # Workspace panel orchestrator
     ├── scanner.ts               # SQL file discovery/scanning
@@ -425,6 +425,8 @@ src/
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
+
+`0.9.0`: Security & reliability hardening — production dependency upgrades (`npm audit --omit=dev` reports 0 advisories), cryptographically strong CSP nonces and collision-free pin/tab IDs, stricter HTML-attribute / DOT / Mermaid export escaping, source-scoped auto-refresh and cursor-follow, a workspace index cache keyed by scope/dialect/config, and a non-blocking parser-worker timeout.
 
 `0.7.0` shipped on `2026-03-23`: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are now part of the released baseline.
 
