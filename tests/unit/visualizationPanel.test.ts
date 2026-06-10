@@ -417,17 +417,20 @@ describe('visualizationPanel.ts', () => {
     });
 
     describe('first run detection', () => {
-        it('checks globalState for hasLaunched flag', () => {
+        it('reads hasLaunched without side effects (_readFirstRun)', () => {
+            expect(source).toContain('private static _readFirstRun()');
             expect(source).toContain("globalState.get<boolean>('sqlCrack.hasLaunched')");
         });
 
-        it('sets hasLaunched flag on first run', () => {
+        it('persists the launched flag in a dedicated mutation helper', () => {
+            expect(source).toContain('private static _markLaunched()');
             expect(source).toContain("globalState.update('sqlCrack.hasLaunched', true)");
         });
 
-        it('returns true only on first run', () => {
-            expect(source).toContain('return true');
-            expect(source).toContain('return false');
+        it('resolves first-run state once at construction, consumed as a one-shot flag', () => {
+            expect(source).toContain('this._pendingFirstRun = VisualizationPanel._readFirstRun();');
+            expect(source).toContain('const isFirstRun = this._pendingFirstRun;');
+            expect(source).toContain('this._pendingFirstRun = false;');
         });
     });
 

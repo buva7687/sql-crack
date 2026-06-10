@@ -21,7 +21,8 @@ import {
     __getFileSystemWatcher,
     ExtensionContext
 } from '../../__mocks__/vscode';
-import { generateGraphBody, GraphBodyParams } from '../../../src/workspace/ui/graphView';
+import { renderWorkspaceGraphSvg } from '../../../src/workspace/panel/graphSvg';
+import { escapeHtmlText } from '../../../src/workspace/panel/text';
 import { getWebviewScript } from '../../../src/workspace/ui/clientScripts';
 
 jest.mock('vscode');
@@ -31,25 +32,27 @@ jest.mock('../../../src/workspace/scanner');
 // 1. Edge Attribute Consistency
 // =========================================================================
 
-describe('Edge attribute consistency (graphView.ts)', () => {
-    it('should render edges with data-source and data-target (not data-source-id)', () => {
-        const params: GraphBodyParams = {
-            graph: {
-                nodes: [
-                    { id: 'node1', label: 'users', type: 'table', filePath: '/a.sql', x: 0, y: 0 },
-                    { id: 'node2', label: 'orders', type: 'table', filePath: '/b.sql', x: 100, y: 100 }
-                ],
-                edges: [
-                    { source: 'node1', target: 'node2' }
-                ],
-                stats: { orphanedDefinitions: [], missingDefinitions: [] }
-            } as any,
-            searchFilter: { query: '', useRegex: false, caseSensitive: false },
-            detailedStats: { orphanedDefinitions: [], missingDefinitions: [] },
-            totalIssues: 0
-        };
+describe('Edge attribute consistency (active workspace graph SVG)', () => {
+    // Migrated from the removed generateGraphBody() to the production renderer
+    // renderWorkspaceGraphSvg(), which is what the workspace panel actually uses.
+    const buildGraph = (nodes: any[], edges: any[]) => ({
+        nodes: nodes.map(n => ({ width: 160, height: 60, ...n })),
+        edges: edges.map(e => ({ id: `${e.source}->${e.target}`, referenceType: 'select', count: 1, tables: [], references: [], ...e })),
+        stats: { orphanedDefinitions: [], missingDefinitions: [] },
+    }) as any;
 
-        const html = generateGraphBody(params);
+    it('should render edges with data-source and data-target (not data-source-id)', () => {
+        const html = renderWorkspaceGraphSvg({
+            graph: buildGraph(
+                [
+                    { id: 'node1', label: 'users', type: 'table', filePath: '/a.sql', x: 0, y: 0 },
+                    { id: 'node2', label: 'orders', type: 'table', filePath: '/b.sql', x: 100, y: 100 },
+                ],
+                [{ source: 'node1', target: 'node2' }],
+            ),
+            isDarkTheme: false,
+            escapeHtml: escapeHtmlText,
+        });
 
         // Should use data-source and data-target (matching clientScripts.ts reads)
         expect(html).toContain('data-source="node1"');
@@ -60,23 +63,17 @@ describe('Edge attribute consistency (graphView.ts)', () => {
     });
 
     it('should HTML-escape edge source and target IDs', () => {
-        const params: GraphBodyParams = {
-            graph: {
-                nodes: [
+        const html = renderWorkspaceGraphSvg({
+            graph: buildGraph(
+                [
                     { id: '<script>alert(1)</script>', label: 'evil', type: 'table', filePath: '/a.sql', x: 0, y: 0 },
-                    { id: 'node2', label: 'safe', type: 'table', filePath: '/b.sql', x: 100, y: 100 }
+                    { id: 'node2', label: 'safe', type: 'table', filePath: '/b.sql', x: 100, y: 100 },
                 ],
-                edges: [
-                    { source: '<script>alert(1)</script>', target: 'node2' }
-                ],
-                stats: { orphanedDefinitions: [], missingDefinitions: [] }
-            } as any,
-            searchFilter: { query: '', useRegex: false, caseSensitive: false },
-            detailedStats: { orphanedDefinitions: [], missingDefinitions: [] },
-            totalIssues: 0
-        };
-
-        const html = generateGraphBody(params);
+                [{ source: '<script>alert(1)</script>', target: 'node2' }],
+            ),
+            isDarkTheme: false,
+            escapeHtml: escapeHtmlText,
+        });
 
         expect(html).toContain('data-source="&lt;script&gt;alert(1)&lt;/script&gt;"');
         expect(html).not.toContain('data-source="<script>');

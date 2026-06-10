@@ -26,7 +26,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
 
-![SQL Crack Demo](./assets/video_demo.gif)
+![SQL Crack Demo](https://raw.githubusercontent.com/buva7687/sql-crack/main/assets/video_demo.gif)
 
 ## Features
 

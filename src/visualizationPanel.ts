@@ -43,6 +43,9 @@ export class VisualizationPanel {
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
     private _disposed: boolean = false;
+    // One-shot first-run flag, resolved (and persisted) once at construction so
+    // the first-run state is computed without mutating globalState during render.
+    private _pendingFirstRun: boolean = false;
 
     private static _createUiStateKey(
         options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string }
@@ -87,14 +90,15 @@ export class VisualizationPanel {
         VisualizationPanel.restorePinnedTabs();
     }
 
-    private static _isFirstRun(): boolean {
+    /** Pure read: has the user launched a panel before? No side effects. */
+    private static _readFirstRun(): boolean {
         if (!VisualizationPanel._context) { return false; }
-        const hasLaunched = VisualizationPanel._context.globalState.get<boolean>('sqlCrack.hasLaunched');
-        if (!hasLaunched) {
-            VisualizationPanel._context.globalState.update('sqlCrack.hasLaunched', true);
-            return true;
-        }
-        return false;
+        return !VisualizationPanel._context.globalState.get<boolean>('sqlCrack.hasLaunched');
+    }
+
+    /** Persist that a panel has now been launched. Kept out of HTML rendering. */
+    private static _markLaunched(): void {
+        VisualizationPanel._context?.globalState.update('sqlCrack.hasLaunched', true);
     }
 
     private static getViewColumn(): vscode.ViewColumn {
@@ -317,6 +321,13 @@ export class VisualizationPanel {
         this._currentOptions = options;
         this._isPinned = isPinned;
         this._pinId = pinId;
+
+        // Resolve first-run state once, here, and persist it — so HTML rendering
+        // stays a pure read of this instance flag rather than a globalState write.
+        this._pendingFirstRun = VisualizationPanel._readFirstRun();
+        if (this._pendingFirstRun) {
+            VisualizationPanel._markLaunched();
+        }
 
         // Set the webview's initial html content
         this._update(sqlCode, options);
@@ -731,7 +742,10 @@ export class VisualizationPanel {
 
         const nonce = getNonce();
         const runtimeConfig = this._readRuntimeConfig(options);
-        const isFirstRun = VisualizationPanel._isFirstRun();
+        // Consume the one-shot first-run flag: show the overlay on the first render
+        // only, without any persistent state mutation here.
+        const isFirstRun = this._pendingFirstRun;
+        this._pendingFirstRun = false;
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
         const initialUiState = VisualizationPanel._getPersistedUiState({
             documentUri: this._sourceDocumentUri,

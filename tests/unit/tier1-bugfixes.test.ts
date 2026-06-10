@@ -254,17 +254,31 @@ describe('Bug 7: UNION result node is the final output', () => {
 // ============================================================
 // Bug 2: _isFirstRun() called once and cached
 // ============================================================
-describe('Bug 2: _isFirstRun() is called once and cached', () => {
-    it('visualizationPanel.ts caches _isFirstRun in a local variable', () => {
-        const source = readFileSync(
-            join(__dirname, '../../src/visualizationPanel.ts'),
-            'utf8'
-        );
-        // Should have a single call cached in a const
-        expect(source).toContain('const isFirstRun = VisualizationPanel._isFirstRun()');
-        // Both usages should reference the cached variable, not call _isFirstRun() again
-        const calls = source.match(/VisualizationPanel\._isFirstRun\(\)/g) || [];
-        expect(calls).toHaveLength(1);
+describe('Bug 2: first-run state is resolved once, without mutating during render', () => {
+    const source = readFileSync(
+        join(__dirname, '../../src/visualizationPanel.ts'),
+        'utf8'
+    );
+
+    it('persists the launched flag once at construction, not in HTML rendering', () => {
+        // The globalState write now happens in the constructor via _markLaunched(),
+        // and _getHtmlForWebview consumes a one-shot instance flag instead.
+        expect(source).toContain('this._pendingFirstRun = VisualizationPanel._readFirstRun();');
+        expect(source).toContain('VisualizationPanel._markLaunched();');
+        expect(source).toContain('const isFirstRun = this._pendingFirstRun;');
+        expect(source).toContain('this._pendingFirstRun = false;');
+        // The old mutating-read helper must be gone.
+        expect(source).not.toContain('VisualizationPanel._isFirstRun()');
+    });
+
+    it('confines the launched-flag write to the _markLaunched helper', () => {
+        // The hasLaunched write must appear exactly once, inside _markLaunched.
+        const writes = source.match(/globalState\.update\('sqlCrack\.hasLaunched', true\)/g) || [];
+        expect(writes).toHaveLength(1);
+
+        const start = source.indexOf('_markLaunched(): void {');
+        const body = source.slice(start, source.indexOf('}', start) + 1);
+        expect(body).toContain("globalState.update('sqlCrack.hasLaunched', true)");
     });
 });
 

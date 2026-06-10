@@ -15,12 +15,6 @@ export { TableExplorer } from './tableExplorer';
 export { LineageView } from './lineageView';
 export { ImpactView } from './impactView';
 
-// Graph View
-export {
-    generateGraphBody,
-    GraphBodyParams
-} from './graphView';
-
 // Styles
 export {
     getCssVariables,
