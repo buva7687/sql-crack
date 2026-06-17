@@ -129,36 +129,53 @@ export function getExportToPngScript(): string {
                     // Convert to PNG and either copy or send to extension for save
                     const pngDataUrl = canvas.toDataURL('image/png');
                     const base64Data = pngDataUrl.split(',')[1];
+                    const filename = 'workspace-dependencies-' + Date.now() + '.png';
 
-                    if (copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-                        fetch(pngDataUrl)
-                            .then(res => res.blob())
-                            .then(blob => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]))
-                            .then(() => {
-                                const existing = document.getElementById('copy-feedback-toast');
-                                if (existing) existing.remove();
-                                const toast = document.createElement('div');
-                                toast.id = 'copy-feedback-toast';
-                                toast.textContent = 'PNG copied to clipboard';
-                                toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
-                                document.body.appendChild(toast);
-                                requestAnimationFrame(() => {
-                                    toast.style.opacity = '1';
-                                    setTimeout(() => {
-                                        toast.style.opacity = '0';
-                                        setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
-                                    }, 1500);
-                                });
-                            })
-                            .catch(() => {
-                                vscode.postMessage({ command: 'savePng', data: base64Data, filename: 'workspace-dependencies-' + Date.now() + '.png' });
-                            });
+                    const saveViaDialog = function() {
+                        vscode.postMessage({ command: 'savePng', data: base64Data, filename: filename });
+                    };
+
+                    if (copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
+                        // Use canvas.toBlob() instead of fetch(dataURL): the panel CSP is
+                        // default-src 'none' with no connect-src, so fetch() against a
+                        // data: URL is blocked. toBlob() builds the Blob directly with no
+                        // network request. Fall back to the save dialog on any failure.
+                        canvas.toBlob(function(blob) {
+                            if (!blob) {
+                                saveViaDialog();
+                                return;
+                            }
+                            // Guard the synchronous parts too: new ClipboardItem() and
+                            // navigator.clipboard.write() can throw synchronously (e.g.
+                            // unsupported type, permissions), which a .catch() alone would
+                            // miss — fall back to the save dialog in that case as well.
+                            try {
+                                navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+                                    .then(() => {
+                                        const existing = document.getElementById('copy-feedback-toast');
+                                        if (existing) existing.remove();
+                                        const toast = document.createElement('div');
+                                        toast.id = 'copy-feedback-toast';
+                                        toast.textContent = 'PNG copied to clipboard';
+                                        toast.style.cssText = 'position: fixed; top: 60px; right: 20px; background: var(--bg-secondary); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent); font-size: 12px; z-index: 9999; opacity: 0; transition: ' + (prefersReducedMotion ? 'none' : 'opacity 0.2s') + '; box-shadow: var(--shadow-md);';
+                                        document.body.appendChild(toast);
+                                        requestAnimationFrame(() => {
+                                            toast.style.opacity = '1';
+                                            setTimeout(() => {
+                                                toast.style.opacity = '0';
+                                                setTimeout(() => toast.remove(), prefersReducedMotion ? 0 : 200);
+                                            }, 1500);
+                                        });
+                                    })
+                                    .catch(() => {
+                                        saveViaDialog();
+                                    });
+                            } catch (clipboardErr) {
+                                saveViaDialog();
+                            }
+                        }, 'image/png');
                     } else {
-                        vscode.postMessage({
-                            command: 'savePng',
-                            data: base64Data,
-                            filename: 'workspace-dependencies-' + Date.now() + '.png'
-                        });
+                        saveViaDialog();
                     }
                 };
 

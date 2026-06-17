@@ -9,21 +9,23 @@ import {
     SqlCrackCodeActionProvider,
 } from './diagnostics';
 import { stripSqlComments } from './shared/stringUtils';
+import { normalizeDialect } from './shared/dialect';
+import { normalizeFileExtensions } from './shared/fileExtensions';
+import { normalizeAdvancedLimit } from './shared/limits';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
 
-/** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL" */
-export function normalizeDialect(dialect: string): string {
-    if (dialect === 'SQL Server') { return 'TransactSQL'; }
-    if (dialect === 'PL/SQL') { return 'Oracle'; }
-    return dialect;
-}
+/** Normalize dialect setting: map user-friendly "SQL Server" → internal "TransactSQL". Lives in the shared module so the panel can apply the same mapping. */
+export { normalizeDialect };
 
 // Auto-refresh debounce timer
 let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+// Per-document diagnostics debounce timers, keyed by document URI. A single
+// shared timer let a change in one file cancel the pending diagnostics refresh
+// for another, so rapidly edited files could be starved of updates.
+const diagnosticsRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Cache of additional file extensions
 let additionalExtensions: string[] = [];
@@ -43,12 +45,10 @@ function loadCustomFunctions(): void {
  */
 function loadAdditionalExtensions(): void {
     const config = vscode.workspace.getConfiguration('sqlCrack');
-    additionalExtensions = config.get<string[]>('additionalFileExtensions') || [];
-    // Normalize extensions to lowercase, filter empty strings, and ensure they start with a dot
-    additionalExtensions = additionalExtensions
-        .map(ext => ext.toLowerCase().trim())
-        .filter(ext => ext.length > 0)
-        .map(ext => ext.startsWith('.') ? ext : '.' + ext);
+    // Validate/normalize to bare extensions (rejecting glob/path syntax), then
+    // prefix a dot for the endsWith()-based file matching used below.
+    additionalExtensions = normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))
+        .map(ext => '.' + ext);
 }
 
 /**
@@ -125,13 +125,7 @@ async function loadWorkspacePanel() {
     return import('./workspace');
 }
 
-export function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.max(min, Math.min(max, rounded));
-}
+export { normalizeAdvancedLimit };
 
 export function activate(context: vscode.ExtensionContext) {
     // Initialize logger first
@@ -406,140 +400,23 @@ export function activate(context: vscode.ExtensionContext) {
         dispose: () => diagnosticCodeActionProvider?.dispose(),
     });
 
-    // Listen for cursor position changes in SQL files
+    // Listen for cursor position changes in SQL files.
+    // Only the raw cursor line is sent to the webview; the webview owns the
+    // authoritative query line ranges (from its parse) and maps the line to the
+    // correct query itself. Re-deriving statement boundaries here with a separate
+    // splitter risked drifting from the parser's view and selecting the wrong query.
     let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
-        if (isSqlLikeDocument(e.textEditor.document) && VisualizationPanel.currentPanel && e.selections.length > 0) {
+        // Scope cursor-follow to the panel's source document only. The webview maps
+        // the line through that document's query ranges, so a cursor line from any
+        // other SQL file would be interpreted against the wrong ranges.
+        const sourceUri = VisualizationPanel.sourceDocumentUri;
+        const isSourceDoc = !!sourceUri &&
+            e.textEditor.document.uri.toString() === sourceUri.toString();
+        if (isSourceDoc && VisualizationPanel.currentPanel && e.selections.length > 0) {
             const line = e.selections[0].active.line + 1; // 1-indexed
-            const sql = e.textEditor.document.getText();
-            
-            // Determine which query this line belongs to
-            const queryIndex = getQueryIndexForLine(sql, line);
-            if (queryIndex !== null && queryIndex >= 0) {
-                VisualizationPanel.sendQueryIndex(queryIndex);
-            }
-            
             VisualizationPanel.sendCursorPosition(line);
         }
     });
-
-    // Helper function to determine which query index a line belongs to.
-    // Uses character-offset search instead of substring heuristic to avoid
-    // false matches when two statements share the same prefix.
-    function getQueryIndexForLine(sql: string, lineNumber: number): number | null {
-        const statements = splitSqlStatements(sql);
-        let searchFrom = 0;
-
-        for (let queryIndex = 0; queryIndex < statements.length; queryIndex++) {
-            const stmt = statements[queryIndex];
-            const charOffset = sql.indexOf(stmt, searchFrom);
-            if (charOffset === -1) {continue;}
-
-            const stmtStartLine = sql.substring(0, charOffset).split('\n').length;
-            const stmtEndLine = stmtStartLine + stmt.split('\n').length - 1;
-
-            if (lineNumber >= stmtStartLine && lineNumber <= stmtEndLine) {
-                return queryIndex;
-            }
-
-            searchFrom = charOffset + stmt.length;
-        }
-
-        return null;
-    }
-
-    // Helper function to split SQL into statements.
-    // Handles string literals (with SQL-standard doubled-quote escaping),
-    // line comments (--), block comments (/* */), and parenthesis depth.
-    function splitSqlStatements(sql: string): string[] {
-        const statements: string[] = [];
-        let current = '';
-        let inString = false;
-        let stringChar = '';
-        let inLineComment = false;
-        let inBlockComment = false;
-        let depth = 0;
-
-        for (let i = 0; i < sql.length; i++) {
-            const char = sql[i];
-            const next = i + 1 < sql.length ? sql[i + 1] : '';
-
-            // Handle line comment state
-            if (inLineComment) {
-                current += char;
-                if (char === '\n') { inLineComment = false; }
-                continue;
-            }
-
-            // Handle block comment state
-            if (inBlockComment) {
-                current += char;
-                if (char === '*' && next === '/') {
-                    current += '/';
-                    i++;
-                    inBlockComment = false;
-                }
-                continue;
-            }
-
-            // Handle string literal state
-            if (inString) {
-                current += char;
-                if (char === stringChar) {
-                    // SQL-standard doubled quote escape: '' or ""
-                    if (next === stringChar) {
-                        current += next;
-                        i++;
-                    } else {
-                        inString = false;
-                    }
-                }
-                continue;
-            }
-
-            // Not inside any quoted/comment context — detect openings
-            if (char === '-' && next === '-') {
-                inLineComment = true;
-                current += char;
-                continue;
-            }
-
-            if (char === '/' && next === '*') {
-                inBlockComment = true;
-                current += char;
-                continue;
-            }
-
-            if (char === "'" || char === '"' || char === '`') {
-                inString = true;
-                stringChar = char;
-                current += char;
-                continue;
-            }
-
-            // Handle parentheses depth
-            if (char === '(') { depth++; }
-            if (char === ')') { depth--; }
-
-            // Split on semicolon at depth 0
-            if (char === ';' && depth === 0) {
-                const trimmed = current.trim();
-                if (trimmed) {
-                    statements.push(trimmed);
-                }
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-
-        // Add last statement
-        const trimmed = current.trim();
-        if (trimmed) {
-            statements.push(trimmed);
-        }
-
-        return statements;
-    }
 
     const documentOpenListener = vscode.workspace.onDidOpenTextDocument((document) => {
         updateDiagnosticsForDocument(document);
@@ -551,6 +428,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
         diagnosticsCollection.delete(document.uri);
+        // Cancel any pending diagnostics refresh for the closed document.
+        const docKey = document.uri.toString();
+        const pendingTimer = diagnosticsRefreshTimers.get(docKey);
+        if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            diagnosticsRefreshTimers.delete(docKey);
+        }
         if (lastActiveSqlDocument && lastActiveSqlDocument.uri.toString() === document.uri.toString()) {
             lastActiveSqlDocument = null;
         }
@@ -563,18 +447,26 @@ export function activate(context: vscode.ExtensionContext) {
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
 
         if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh && shouldShowDiagnosticsInProblems()) {
-            if (diagnosticsRefreshTimer) {
-                clearTimeout(diagnosticsRefreshTimer);
+            // Debounce per document URI so concurrent edits across files don't
+            // cancel each other's pending diagnostics refresh.
+            const docKey = e.document.uri.toString();
+            const existingTimer = diagnosticsRefreshTimers.get(docKey);
+            if (existingTimer) {
+                clearTimeout(existingTimer);
             }
-            diagnosticsRefreshTimer = setTimeout(() => {
+            diagnosticsRefreshTimers.set(docKey, setTimeout(() => {
+                diagnosticsRefreshTimers.delete(docKey);
                 updateDiagnosticsForDocument(e.document);
-                diagnosticsRefreshTimer = null;
-            }, autoRefreshDelay);
+            }, autoRefreshDelay));
         }
 
-        const isSourceDoc = VisualizationPanel.sourceDocumentUri &&
-            e.document.uri.toString() === VisualizationPanel.sourceDocumentUri.toString();
-        if ((isSqlLikeDocument(e.document) || isSourceDoc) && VisualizationPanel.currentPanel) {
+        // Only refresh the panel when the changed document is the exact source
+        // document the visualization was opened from. Edits in any other SQL file
+        // must not hijack or overwrite the active visualization.
+        const sourceUri = VisualizationPanel.sourceDocumentUri;
+        const isSourceDoc = !!sourceUri &&
+            e.document.uri.toString() === sourceUri.toString();
+        if (isSourceDoc && VisualizationPanel.currentPanel) {
             const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
 
             // Always mark as stale immediately for visual feedback
@@ -588,11 +480,20 @@ export function activate(context: vscode.ExtensionContext) {
 
                 // Set new debounced timer
                 autoRefreshTimer = setTimeout(() => {
+                    autoRefreshTimer = null;
                     const document = e.document;
-                    if (document && VisualizationPanel.currentPanel) {
+
+                    // Re-validate the source at fire time: the panel may have been
+                    // switched to a different source document during the debounce
+                    // window, in which case refreshing with this document would
+                    // overwrite the newly selected visualization.
+                    const currentSourceUri = VisualizationPanel.sourceDocumentUri;
+                    const stillSourceDoc = !!currentSourceUri &&
+                        document.uri.toString() === currentSourceUri.toString();
+
+                    if (document && VisualizationPanel.currentPanel && stillSourceDoc) {
                         const sqlCode = document.getText();
                         if (!hasExecutableSql(sqlCode)) {
-                            autoRefreshTimer = null;
                             return;
                         }
                         const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
@@ -603,7 +504,6 @@ export function activate(context: vscode.ExtensionContext) {
                             documentUri: document.uri
                         });
                     }
-                    autoRefreshTimer = null;
                 }, autoRefreshDelay);
             }
         }
@@ -659,8 +559,9 @@ export function deactivate() {
         clearTimeout(autoRefreshTimer);
         autoRefreshTimer = null;
     }
-    if (diagnosticsRefreshTimer) {
-        clearTimeout(diagnosticsRefreshTimer);
-        diagnosticsRefreshTimer = null;
+    // Clean up all per-document diagnostics timers
+    for (const timer of diagnosticsRefreshTimers.values()) {
+        clearTimeout(timer);
     }
+    diagnosticsRefreshTimers.clear();
 }

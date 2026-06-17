@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-16
+
+### Security
+
+- **Production dependency vulnerabilities**: Upgraded `jspdf` to `^4.2.1` and pinned `lodash` (`^4.18.1`) and `dompurify` (`^3.4.8`) via `overrides`, clearing the critical/high/moderate advisories. Added an `audit:prod` script and wired `npm run audit:prod` into the release workflow as a gate (`npm audit --omit=dev` now reports 0 vulnerabilities).
+- **Cryptographically strong CSP nonces**: Centralized nonce generation in a Node-only helper (`crypto.randomBytes`, 128-bit), replacing three `Math.random()`-based generators; the helper is kept out of the webview/browser bundle.
+- **HTML sanitizer URL hardening**: The extension-HTML sanitizer now strips `href`/`src`/`xlink:href` entirely (the rendered fragments need no URLs), removing the `javascript:`/`data:`/`vbscript:` attack surface instead of matching a single protocol; `on*` handlers and dangerous styles are still removed.
+- **Collision-free identifiers**: Pin and tab IDs use `crypto.randomUUID()` (extension host) / Web Crypto with a fallback (webview) instead of `Date.now()`, which collided within the same millisecond.
+
+### Fixed
+
+- **View-location setting in empty windows**: Writes to the Workspace config target only when a workspace is open (otherwise Global), and surfaces update failures instead of throwing.
+- **Line navigation validation**: `goToLine` now requires a finite integer and clamps to line 1 before constructing a `vscode.Position`.
+
+- **Cross-document refresh isolation**: The active visualization now refreshes only when the changed document is its exact source document — both at change time and re-validated when the debounced timer fires — so editing or switching to another SQL file no longer hijacks the panel.
+- **Cursor-follow scoping and mapping**: Cursor lines are forwarded only from the panel's source document and mapped through the webview parser's authoritative `queryLineRanges`, replacing a duplicate statement splitter in `extension.ts` that could select the wrong query. Rapid query switches are guarded by a request token.
+- **Statement splitter preserves doubled delimiters**: `''`, `""`, and backtick escapes are kept intact in split statement text instead of being dropped, preventing identifier/literal corruption before parsing. Backticks are now treated as MySQL identifier-quote delimiters.
+- **Workspace PNG export unblocked**: Added `img-src data: blob:` to the workspace panel CSP and replaced the CSP-blocked `fetch(dataURL)` clipboard path with `canvas.toBlob()`, with a save-dialog fallback that also handles synchronous clipboard errors.
+- **Workspace index cache identity & state handling**: The cached workspace index carries a fingerprint of its scope, dialect, extension configuration, and schema version, and is rebuilt when any differ. Initialization now distinguishes missing, stale, version/identity-mismatched, oversized, and valid caches, so a valid cache renders immediately without re-prompting, and an oversized index records a marker instead of looking "missing" — the marker is honored even after the cache TTL expires, and the panel renders the manual-analysis page for it instead of re-prompting on every open.
+- **Parser worker timeout no longer freezes the UI**: A timed-out worker parse returns a lightweight result instead of re-running the heavy parse synchronously on the webview thread.
+- **Webpack production builds**: Function-form config detects production from webpack's resolved `argv.mode`, so `webpack --mode production` (space-separated) now correctly minifies and disables source maps — previously it silently shipped an unminified bundle with maps.
+- **Runtime dialect setting no longer goes stale**: A genuine `defaultDialect` settings change updates the active visualization's dialect when the user hasn't explicitly chosen one, while an unrelated runtime-config or theme push now preserves an auto-detected dialect instead of resetting it to the configured default.
+- **Per-document diagnostics debounce**: Diagnostics refresh timers are keyed by document URI, so concurrent edits across files no longer cancel each other's pending refresh.
+- **Attribute-context escaping**: The column-trace `title` attribute uses the attribute-context escaper (`escapeHtmlAttr`) so quotes can't break out of the attribute.
+- **DOT & Mermaid export escaping**: DOT node IDs and labels escape quotes, backslashes, and line breaks; Mermaid labels encode quotes and shape-delimiter brackets as HTML entities and collapse backslashes/line breaks.
+- **File-extension setting validation**: `additionalFileExtensions` is validated/normalized in one shared helper that strips glob/path syntax (e.g. `*.hql`, `**/*.hql`) while preserving compound extensions such as `sql.j2`, so watcher globs and selectors no longer treat glob forms as literal extensions or collapse `*.sql.j2` to `j2`.
+
+### Tests
+
+- Added behavioral coverage for quote/backtick statement splitting, parser-worker timeout results, workspace cache-state distinction, CSP-safe PNG export (incl. synchronous clipboard failures), source-scoped auto-refresh/cursor-follow, webpack production detection, runtime dialect propagation, per-document diagnostics debounce, attribute-context escaping, DOT/Mermaid export escaping, file-extension normalization, crypto-backed CSP nonce generation, collision-free pin/tab IDs, view-location target selection, line-navigation validation, and the sanitizer's URL-attribute stripping.
+
 ## [0.8.2] - 2026-05-31
 
 ### Fixed

@@ -758,9 +758,13 @@ describe('IndexManager', () => {
 
     describe('caching', () => {
         it('should load cached index on initialize', async () => {
-            // Pre-populate cache
+            // Pre-populate cache. The identity must match computeCacheIdentity()
+            // for this manager (schema 4, no scope, MySQL dialect, no extra
+            // extensions) or the cache is rejected as belonging to a different
+            // scope/dialect/config.
             const cachedIndex = {
                 version: 4, // Must match INDEX_VERSION
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -800,6 +804,129 @@ describe('IndexManager', () => {
             await indexManager.initialize();
 
             // Should rebuild, not use old cache
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+        });
+
+        it('should ignore cache built for a different identity (scope/dialect/config)', async () => {
+            // Same schema version but an identity that does not match this manager
+            // (e.g. a cache built for a different dialect). It must not be reused.
+            const foreignCache = {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', foreignCache);
+            mockScanner.getFileCount.mockResolvedValue(5);
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+
+            await indexManager.initialize();
+
+            // Should rebuild, not serve a cache from a different identity
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+        });
+
+        it('should reject a persisted cache when the workspace scope changes', async () => {
+            const scopeA = vscode.Uri.file('/workspace/scope-a');
+            const scopeB = vscode.Uri.file('/workspace/scope-b');
+            const scopedManagerA = new IndexManager(
+                mockContext as vscode.ExtensionContext,
+                'MySQL',
+                scopeA
+            );
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/scope-a/cached.sql', [{ name: 'cached_table' }])
+            ]);
+            await scopedManagerA.buildIndex();
+            scopedManagerA.dispose();
+
+            mockScanner.analyzeWorkspace.mockClear();
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+            mockScanner.getFileCount.mockResolvedValue(5);
+
+            const scopedManagerB = new IndexManager(
+                mockContext as vscode.ExtensionContext,
+                'MySQL',
+                scopeB
+            );
+            await scopedManagerB.initialize();
+
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+            expect(scopedManagerB.findDefinition('cached_table')).toBeUndefined();
+            scopedManagerB.dispose();
+        });
+
+        it('should reject a persisted cache when additional file extensions change', async () => {
+            __setMockConfig('sqlCrack', {
+                additionalFileExtensions: ['hql']
+            });
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/cached.hql', [{ name: 'cached_table' }])
+            ]);
+            await indexManager.buildIndex();
+
+            mockScanner.analyzeWorkspace.mockClear();
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+            mockScanner.getFileCount.mockResolvedValue(5);
+            __setMockConfig('sqlCrack', {
+                additionalFileExtensions: ['bteq']
+            });
+
+            const reloadedManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
+            await reloadedManager.initialize();
+
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+            expect(reloadedManager.findDefinition('cached_table')).toBeUndefined();
+            reloadedManager.dispose();
+        });
+
+        it('should reuse a cache when extension configuration is semantically equivalent', async () => {
+            __setMockConfig('sqlCrack', {
+                additionalFileExtensions: [' .HQL ', 'BTEQ']
+            });
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/workspace/cached.hql', [{ name: 'cached_table' }])
+            ]);
+            await indexManager.buildIndex();
+
+            mockScanner.analyzeWorkspace.mockClear();
+            mockScanner.getFileCount.mockResolvedValue(100);
+            __setMockConfig('sqlCrack', {
+                additionalFileExtensions: ['bteq', 'hql']
+            });
+
+            const reloadedManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
+            await reloadedManager.initialize();
+
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(reloadedManager.findDefinition('cached_table')).toBeDefined();
+            reloadedManager.dispose();
+        });
+
+        it('should ignore cache missing an identity fingerprint', async () => {
+            // Caches persisted before identity tracking have no identity field and
+            // must be rebuilt rather than served against an unknown scope/dialect.
+            const legacyCache = {
+                version: 4,
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', legacyCache);
+            mockScanner.getFileCount.mockResolvedValue(5);
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+
+            await indexManager.initialize();
+
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
         });
 
@@ -860,6 +987,133 @@ describe('IndexManager', () => {
 
             expect(indexManager.getIndex()).toBeNull();
             expect(__getWorkspaceState()['sqlWorkspaceIndex']).toBeUndefined();
+        });
+    });
+
+    // =========================================================================
+    // Cache State Distinction Tests
+    // =========================================================================
+
+    describe('cache state distinction', () => {
+        const validCache = () => ({
+            version: 4,
+            identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+            lastUpdated: Date.now(),
+            fileCount: 1,
+            filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
+            fileHashesArray: [['/cached.sql', 'hash-1']],
+            definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+            referenceArray: []
+        });
+
+        it('reports a valid cache and a usable index without rebuilding (large workspace)', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', validCache());
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('valid');
+            expect(result.hasValidIndex).toBe(true);
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+        });
+
+        it('reports a missing cache when none is stored', async () => {
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('missing');
+            expect(result.hasValidIndex).toBe(false);
+        });
+
+        it('reports version-mismatch for an old cache version', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', { ...validCache(), version: 1 });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('version-mismatch');
+            expect(result.hasValidIndex).toBe(false);
+        });
+
+        it('reports identity-mismatch for a different dialect/scope/config', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                ...validCache(),
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+            });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('identity-mismatch');
+            expect(result.hasValidIndex).toBe(false);
+        });
+
+        it('reports stale for a cache past its TTL', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                ...validCache(),
+                lastUpdated: Date.now() - (25 * 60 * 60 * 1000),
+            });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('stale');
+            expect(result.hasValidIndex).toBe(false);
+        });
+
+        it('reports disabled when caching is turned off (TTL = 0)', async () => {
+            __setMockConfig('sqlCrack.advanced', { cacheTTLHours: 0 });
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', validCache());
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('disabled');
+            expect(result.hasValidIndex).toBe(false);
+        });
+
+        it('persists an oversized marker and reports oversized on next load', async () => {
+            // Manually store an oversized marker (as persistIndex would on overflow).
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                oversized: true,
+                lastUpdated: Date.now(),
+                fileCount: 9999,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('oversized');
+            expect(result.hasValidIndex).toBe(false);
+            // Oversized marker carries no payload, so no usable index is produced.
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+        });
+
+        it('reports an expired oversized marker as oversized rather than stale', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                oversized: true,
+                lastUpdated: Date.now() - (25 * 60 * 60 * 1000),
+                fileCount: 9999,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('oversized');
+            expect(result.hasValidIndex).toBe(false);
         });
     });
 

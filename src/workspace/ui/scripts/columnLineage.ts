@@ -379,7 +379,7 @@ export function getColumnLineageScriptFragment(): string {
                     '<span class="stat upstream" title="Upstream sources"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 1L2 7h8z" fill="currentColor"/></svg> ' + upstreamCount + ' sources</span>' +
                     '<span class="stat downstream" title="Downstream consumers"><svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px"><path d="M6 11L2 5h8z" fill="currentColor"/></svg> ' + downstreamCount + ' consumers</span>' +
                 '</div>' +
-                '<div class="info-flow-summary" title="' + escapeHtml(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
+                '<div class="info-flow-summary" title="' + escapeHtmlAttr(flowSummary) + '">' + escapeHtml(flowSummary) + '</div>' +
                 '<div class="info-actions"><button class="info-clear-btn" type="button">Clear trace</button></div>' +
                 '<div class="info-hint">Click another column to trace its lineage, or click background to clear.</div>';
 

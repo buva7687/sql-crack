@@ -33,40 +33,39 @@ describe('extension.ts', () => {
 });
 
 describe('extension normalizeAdvancedLimit function', () => {
-    const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
+    // Behavioral: the implementation is shared (src/shared/limits.ts) and
+    // re-exported from extension.ts; exercise it rather than its source text.
+    const { normalizeAdvancedLimit } = require('../../src/extension');
 
     it('clamps values to min/max range', () => {
-        expect(source).toContain('Math.max(min, Math.min(max, rounded))');
+        expect(normalizeAdvancedLimit(9999, 50, 1, 100)).toBe(100);
+        expect(normalizeAdvancedLimit(-5, 50, 1, 100)).toBe(1);
     });
 
     it('returns fallback for non-number types', () => {
-        expect(source).toContain("typeof raw !== 'number'");
-        expect(source).toContain('!Number.isFinite(raw)');
-        expect(source).toContain('return fallback');
+        expect(normalizeAdvancedLimit('x', 50, 1, 100)).toBe(50);
+        expect(normalizeAdvancedLimit(NaN, 50, 1, 100)).toBe(50);
+        expect(normalizeAdvancedLimit(Infinity, 50, 1, 100)).toBe(50);
     });
 
     it('rounds raw values before clamping', () => {
-        expect(source).toContain('const rounded = Math.round(raw)');
+        expect(normalizeAdvancedLimit(12.6, 50, 1, 100)).toBe(13);
+        expect(normalizeAdvancedLimit(12.4, 50, 1, 100)).toBe(12);
     });
 });
 
 describe('extension additional file extensions normalization', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('normalizes extensions to lowercase', () => {
-        expect(source).toContain('ext.toLowerCase()');
+    it('delegates validation/normalization to the shared normalizer', () => {
+        // Glob/path validation now lives in shared/fileExtensions so all consumers
+        // share it; see tests/unit/shared/fileExtensions.test.ts for the behavior.
+        expect(source).toContain("from './shared/fileExtensions'");
+        expect(source).toContain("normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))");
     });
 
-    it('trims whitespace from extensions', () => {
-        expect(source).toContain('ext.toLowerCase().trim()');
-    });
-
-    it('filters empty strings', () => {
-        expect(source).toContain('filter(ext => ext.length > 0)');
-    });
-
-    it('ensures extensions start with a dot', () => {
-        expect(source).toContain("ext.startsWith('.') ? ext : '.' + ext");
+    it('prefixes a dot for endsWith-based file matching', () => {
+        expect(source).toContain(".map(ext => '.' + ext)");
     });
 });
 
@@ -93,50 +92,63 @@ describe('extension hasExecutableSql logic', () => {
     });
 });
 
-describe('extension splitSqlStatements edge cases', () => {
-    const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
-
-    it('handles string literals with quotes', () => {
-        expect(source).toContain("char === \"'\" || char === '\"'");
-    });
-
-    it('tracks parentheses depth for nested expressions', () => {
-        expect(source).toContain("char === '('");
-        expect(source).toContain("char === ')'");
-        expect(source).toContain('depth');
-    });
-
-    it('splits on semicolon only at depth 0', () => {
-        expect(source).toContain("char === ';'");
-        expect(source).toContain('depth === 0');
-    });
-
-    it('handles SQL-standard doubled-quote escaping', () => {
-        // The new implementation handles doubled quotes ('') not backslash
-        expect(source).toContain('next === stringChar');
-    });
-
-    it('handles line comments (--)', () => {
-        expect(source).toContain('inLineComment');
-        expect(source).toContain("char === '-' && next === '-'");
-    });
-
-    it('handles block comments (/* */)', () => {
-        expect(source).toContain('inBlockComment');
-        expect(source).toContain("char === '/' && next === '*'");
-    });
-});
-
 describe('extension diagnostics debounce', () => {
     const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
 
-    it('uses separate timer for diagnostics refresh', () => {
-        expect(source).toContain('diagnosticsRefreshTimer');
-        expect(source).toContain('clearTimeout(diagnosticsRefreshTimer)');
+    it('debounces diagnostics per document URI so files do not starve each other', () => {
+        // A single shared timer let one file's edit cancel another's pending
+        // refresh; timers must be keyed by document URI instead.
+        expect(source).toContain('diagnosticsRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()');
+        expect(source).toContain('const docKey = e.document.uri.toString();');
+        expect(source).toContain('diagnosticsRefreshTimers.get(docKey)');
+        expect(source).toContain('diagnosticsRefreshTimers.set(docKey,');
+        expect(source).toContain('diagnosticsRefreshTimers.delete(docKey);');
+    });
+
+    it('cancels a document\'s pending diagnostics timer when it closes', () => {
+        expect(source).toContain('onDidCloseTextDocument');
+        expect(source).toContain('const pendingTimer = diagnosticsRefreshTimers.get(docKey);');
     });
 
     it('debounces diagnostics updates with configurable delay', () => {
         expect(source).toContain("get<number>('autoRefreshDelay', 500)");
+    });
+});
+
+describe('extension auto-refresh scoping', () => {
+    const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
+
+    it('only refreshes the panel when the changed doc is the visualization source', () => {
+        // Editing an unrelated SQL file must not hijack the active visualization.
+        // The refresh gate must depend solely on the source-document match, not on
+        // whether the changed document merely happens to be SQL-like.
+        expect(source).toContain('if (isSourceDoc && VisualizationPanel.currentPanel) {');
+        expect(source).not.toContain('if ((isSqlLikeDocument(e.document) || isSourceDoc)');
+        expect(source).toContain('e.document.uri.toString() === sourceUri.toString()');
+    });
+
+    it('re-validates the source at debounce fire time before refreshing', () => {
+        // The panel may switch to a different source during the debounce window;
+        // the timer must not refresh with the stale captured document.
+        expect(source).toContain('const stillSourceDoc =');
+        expect(source).toContain('document.uri.toString() === currentSourceUri.toString()');
+        expect(source).toContain('VisualizationPanel.currentPanel && stillSourceDoc');
+    });
+});
+
+describe('extension cursor-follow scoping', () => {
+    const source = readFileSync(join(__dirname, '../../src/extension.ts'), 'utf8');
+
+    it('only forwards cursor lines from the visualization source document', () => {
+        // A cursor line from another SQL file would be interpreted against the
+        // source document's query ranges, so cursor-follow must be source-scoped.
+        const start = source.indexOf('onDidChangeTextEditorSelection');
+        const end = source.indexOf('onDidOpenTextDocument', start);
+        const body = source.slice(start, end);
+
+        expect(body).toContain('VisualizationPanel.sourceDocumentUri');
+        expect(body).toContain('e.textEditor.document.uri.toString() === sourceUri.toString()');
+        expect(body).toContain('if (isSourceDoc && VisualizationPanel.currentPanel');
     });
 });
 
@@ -146,9 +158,12 @@ describe('extension auto-refresh timer cleanup', () => {
     it('clears auto-refresh timer in deactivate', () => {
         expect(source).toContain('export function deactivate()');
         expect(source).toContain('clearTimeout(autoRefreshTimer)');
-        expect(source).toContain('clearTimeout(diagnosticsRefreshTimer)');
         expect(source).toContain('autoRefreshTimer = null');
-        expect(source).toContain('diagnosticsRefreshTimer = null');
+    });
+
+    it('clears all per-document diagnostics timers in deactivate', () => {
+        expect(source).toContain('for (const timer of diagnosticsRefreshTimers.values())');
+        expect(source).toContain('diagnosticsRefreshTimers.clear()');
     });
 });
 
@@ -178,16 +193,33 @@ describe('extension cursor sync to webview', () => {
         expect(source).toContain('VisualizationPanel.sendCursorPosition(line)');
     });
 
-    it('sends query index based on line number', () => {
-        expect(source).toContain('getQueryIndexForLine(sql, line)');
-        expect(source).toContain('VisualizationPanel.sendQueryIndex(queryIndex)');
+    it('sends only the cursor line and lets the webview map it to a query', () => {
+        // Query-index mapping was moved into the webview, which owns the
+        // authoritative query line ranges from its parse. The extension must no
+        // longer re-derive statement boundaries with its own splitter.
+        expect(source).not.toContain('getQueryIndexForLine');
+        expect(source).not.toContain('VisualizationPanel.sendQueryIndex(queryIndex)');
+        expect(source).not.toContain('function splitSqlStatements');
+    });
+});
+
+describe('webview cursor-to-query mapping', () => {
+    const source = readFileSync(join(__dirname, '../../src/webview/index.ts'), 'utf8');
+
+    it('maps the cursor line through the parser query line ranges', () => {
+        expect(source).toContain('function findQueryIndexForLine');
+        expect(source).toContain('batchResult?.queryLineRanges');
     });
 
-    it('uses character-offset search instead of substring heuristic for query index', () => {
-        // The old approach used stmtFirstLine.substring(0, 30) with .includes(),
-        // which could match the wrong statement when two queries share a prefix.
-        expect(source).toContain('sql.indexOf(stmt, searchFrom)');
-        expect(source).not.toContain('stmtFirstLine.substring(0, Math.min(30');
+    it('guards rapid asynchronous query switches with a request token', () => {
+        const start = source.indexOf('async function handleCursorPosition');
+        const end = source.indexOf('function handleSwitchToQuery', start);
+        const body = source.slice(start, end);
+
+        expect(body).toContain('++cursorFollowToken');
+        expect(body).toContain('await switchToQueryIndex(targetIndex)');
+        expect(body).toContain('token !== cursorFollowToken');
+        expect(body).toContain('highlightNodeAtLine(line)');
     });
 });
 

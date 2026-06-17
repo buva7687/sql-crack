@@ -149,7 +149,6 @@ describe('pinnedTabs', () => {
             createElement: jest.fn((tag: string) => createElement(tag)),
             getElementById: jest.fn((id: string) => elements.get(id) || null),
         } as unknown as Document;
-        Date.now = jest.fn(() => 12345);
 
         const callbacks = {
             onSwitchTab: jest.fn(),
@@ -163,8 +162,11 @@ describe('pinnedTabs', () => {
         pinCurrentVisualization(callbacks, 'users.sql');
 
         expect(getPinnedTabs()).toHaveLength(1);
-        expect(getActiveTabId()).toBe('tab-12345');
-        expect(findPinnedTab('tab-12345')?.name).toBe('users');
+        // Tab ids are now collision-free (crypto.randomUUID with a fallback), so
+        // capture the generated id rather than asserting a Date.now()-derived one.
+        const tabId = getActiveTabId();
+        expect(tabId).toMatch(/^tab-/);
+        expect(findPinnedTab(tabId!)?.name).toBe('users');
 
         const container = root.children.find((child) => child.id === 'pinned-tabs-container');
         expect(container).toBeDefined();
@@ -180,7 +182,7 @@ describe('pinnedTabs', () => {
         expect(callbacks.onSwitchTab).toHaveBeenCalledWith(null);
 
         pinnedTab.emit('click');
-        expect(callbacks.onSwitchTab).toHaveBeenCalledWith('tab-12345');
+        expect(callbacks.onSwitchTab).toHaveBeenCalledWith(tabId);
 
         const closeBtn = pinnedTab.children.find((child) => child.textContent === '×');
         expect(closeBtn).toBeDefined();

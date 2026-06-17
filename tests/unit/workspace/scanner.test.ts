@@ -136,6 +136,21 @@ describe('WorkspaceScanner', () => {
                 expect.any(String)
             );
         });
+
+        it('should preserve compound extensions without matching every final suffix', async () => {
+            __setMockConfig('sqlCrack', {
+                additionalFileExtensions: ['sql.j2']
+            });
+
+            (vscode.workspace.findFiles as jest.Mock).mockResolvedValue([]);
+
+            await scanner.findSqlFiles();
+
+            expect(vscode.workspace.findFiles).toHaveBeenCalledWith(
+                '**/*.{sql,sql.j2}',
+                expect.any(String)
+            );
+        });
     });
 
     // =========================================================================

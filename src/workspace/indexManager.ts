@@ -12,8 +12,10 @@ import {
     ProgressCallback,
     CancellationToken,
     SqlDialect,
+    WorkspaceCacheState,
 } from './types';
 import { WorkspaceScanner } from './scanner';
+import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
@@ -47,6 +49,7 @@ export class IndexManager {
     private _pendingDialectRebuildVersion: number = 0;
     private _completedDialectRebuildVersion: number = 0;
     private _dialectRebuildPromise: Promise<void> | null = null;
+    private _lastCacheState: WorkspaceCacheState = 'missing';
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -59,14 +62,24 @@ export class IndexManager {
      * Initialize the index manager
      * Returns whether auto-indexing was performed and the file count
      */
-    async initialize(autoIndexThreshold: number = DEFAULT_AUTO_INDEX_THRESHOLD): Promise<{ autoIndexed: boolean; fileCount: number }> {
+    async initialize(autoIndexThreshold: number = DEFAULT_AUTO_INDEX_THRESHOLD): Promise<{
+        autoIndexed: boolean;
+        fileCount: number;
+        cacheState: WorkspaceCacheState;
+        hasValidIndex: boolean;
+    }> {
         const fileCount = await this.scanner.getFileCount();
         const shouldAutoIndex = fileCount < autoIndexThreshold && fileCount > 0;
 
-        // Try to load cached index
+        // Try to load cached index. loadCachedIndex() records the precise reason
+        // (valid / missing / stale / version- or identity-mismatch / oversized /
+        // disabled) so callers don't have to infer it from a bare null.
         this.index = await this.loadCachedIndex();
+        const cacheState = this._lastCacheState;
 
-        // Auto-index if small workspace and no valid cache
+        // Auto-index small workspaces when there is no valid cache to reuse. A
+        // freshly loaded valid index already passed the TTL check in
+        // loadCachedIndex, so isIndexStale() only matters on the auto-build path.
         if (shouldAutoIndex && (!this.index || this.isIndexStale())) {
             await this.buildIndex();
         }
@@ -74,7 +87,12 @@ export class IndexManager {
         // Setup file watcher for incremental updates
         this.setupFileWatcher();
 
-        return { autoIndexed: shouldAutoIndex && this.index !== null, fileCount };
+        return {
+            autoIndexed: shouldAutoIndex && this.index !== null,
+            fileCount,
+            cacheState,
+            hasValidIndex: this.index !== null,
+        };
     }
 
     /**
@@ -572,6 +590,29 @@ export class IndexManager {
         return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
     }
 
+    /**
+     * Build a stable identity fingerprint for the cached index. The cache is only
+     * valid when it was produced for the same workspace scope, dialect, relevant
+     * extension configuration, and index schema version. Persisting and validating
+     * this prevents a cache built for one scope/dialect from being served for
+     * another (e.g. switching folders or dialects).
+     */
+    private computeCacheIdentity(): string {
+        const scopeKey = this.scopeUri
+            ? this.canonicalizePathForComparison(this.scopeUri.fsPath)
+            : '<workspace>';
+
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const additionalExtensions = normalizeFileExtensions(config.get<string[]>('additionalFileExtensions')).sort();
+
+        return JSON.stringify({
+            schema: INDEX_VERSION,
+            scope: scopeKey,
+            dialect: this.dialect,
+            extensions: additionalExtensions,
+        });
+    }
+
     private canonicalizePathForComparison(filePath: string): string {
         const resolved = path.resolve(filePath);
         try {
@@ -599,12 +640,11 @@ export class IndexManager {
     private getWatcherGlob(): string {
         const extensions = ['sql'];
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        const additional = config.get<string[]>('additionalFileExtensions') || [];
-
-        for (const ext of additional) {
-            const normalized = ext.toLowerCase().trim().replace(/^\./, '');
-            if (normalized && !extensions.includes(normalized)) {
-                extensions.push(normalized);
+        // Validate/normalize so a value like `*.hql` cannot produce a malformed
+        // glob such as `**/*.{sql,*.hql}`.
+        for (const ext of normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))) {
+            if (!extensions.includes(ext)) {
+                extensions.push(ext);
             }
         }
 
@@ -798,6 +838,14 @@ export class IndexManager {
     /**
      * Load cached index from workspace state
      */
+    /**
+     * The classification of the most recent {@link loadCachedIndex} attempt.
+     * Exposed via {@link initialize} so callers can react to each case.
+     */
+    getLastCacheState(): WorkspaceCacheState {
+        return this._lastCacheState;
+    }
+
     private async loadCachedIndex(): Promise<WorkspaceIndex | null> {
         // Check advanced settings
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
@@ -806,12 +854,39 @@ export class IndexManager {
         // If TTL is 0, caching is disabled
         if (cacheTTLHours === 0) {
             logger.debug('[IndexManager] Caching disabled (TTL=0) - rebuilding index');
+            this._lastCacheState = 'disabled';
             return null;
         }
 
         const cached = this.context.workspaceState.get<SerializedWorkspaceIndex>('sqlWorkspaceIndex');
 
-        if (!cached || cached.version !== INDEX_VERSION) {
+        if (!cached) {
+            this._lastCacheState = 'missing';
+            return null;
+        }
+
+        if (cached.version !== INDEX_VERSION) {
+            logger.debug('[IndexManager] Cached index version mismatch - rebuilding index');
+            this._lastCacheState = 'version-mismatch';
+            return null;
+        }
+
+        // Reject caches built for a different scope, dialect, configuration, or
+        // schema. Without this, switching scoped folders or dialects would serve
+        // a stale index that belongs to a different identity.
+        const currentIdentity = this.computeCacheIdentity();
+        if (cached.identity !== currentIdentity) {
+            logger.debug('[IndexManager] Cached index identity mismatch - rebuilding index');
+            this._lastCacheState = 'identity-mismatch';
+            return null;
+        }
+
+        // Oversized marker: a prior index was too large to persist. There is no
+        // usable index to load, but this is distinct from "missing" so callers can
+        // avoid re-prompting on every open.
+        if (cached.oversized) {
+            logger.debug('[IndexManager] Cached index marked oversized - index was not persisted');
+            this._lastCacheState = 'oversized';
             return null;
         }
 
@@ -820,6 +895,7 @@ export class IndexManager {
         const cacheAge = Date.now() - cached.lastUpdated;
         if (cacheAge > cacheTTLMs) {
             logger.debug(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
+            this._lastCacheState = 'stale';
             return null;
         }
 
@@ -832,6 +908,7 @@ export class IndexManager {
         });
 
         logger.debug(`[IndexManager] Using cached index (age: ${Math.round(cacheAge / 3600000)}h)`);
+        this._lastCacheState = 'valid';
         return {
             version: cached.version,
             lastUpdated: cached.lastUpdated,
@@ -897,6 +974,7 @@ export class IndexManager {
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {
             version: this.index.version,
+            identity: this.computeCacheIdentity(),
             lastUpdated: this.index.lastUpdated,
             fileCount: this.index.fileCount,
             filesArray: [...this.index.files.entries()],
@@ -913,6 +991,24 @@ export class IndexManager {
                 `SQL Crack: Workspace index (${Math.round(sizeBytes / 1024)}KB) exceeds the ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024 / 1024)}MB cache limit. ` +
                 'The index will not persist across restarts. Consider excluding generated SQL folders or reducing workspace file scope.'
             );
+            // Persist a lightweight marker (no payload arrays) so the next session
+            // can tell this apart from a missing cache and skip re-prompting.
+            const marker: SerializedWorkspaceIndex = {
+                version: serializable.version,
+                identity: serializable.identity,
+                oversized: true,
+                lastUpdated: serializable.lastUpdated,
+                fileCount: serializable.fileCount,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            };
+            try {
+                await this.context.workspaceState.update('sqlWorkspaceIndex', marker);
+            } catch (error) {
+                logger.warn(`[IndexManager] Failed to persist oversized marker: ${error instanceof Error ? error.message : String(error)}`);
+            }
             return;
         }
 

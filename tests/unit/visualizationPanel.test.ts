@@ -4,55 +4,31 @@ import { join } from 'path';
 describe('visualizationPanel.ts', () => {
     const source = readFileSync(join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
 
-    describe('normalizeAdvancedLimit function', () => {
-        it('returns fallback for non-number types', () => {
-            expect(source).toContain("typeof raw !== 'number'");
-            expect(source).toContain('!Number.isFinite(raw)');
-            expect(source).toContain('return fallback');
-        });
-
-        it('rounds values before clamping', () => {
-            expect(source).toContain('const rounded = Math.round(raw)');
-        });
-
-        it('clamps to min/max range', () => {
-            expect(source).toContain('Math.max(min, Math.min(max, rounded))');
+    describe('normalizeAdvancedLimit usage', () => {
+        it('uses the shared normalizer rather than a local copy', () => {
+            // Behavior is covered in tests/unit/shared/sharedHelpers.test.ts.
+            expect(source).toContain("import { normalizeAdvancedLimit } from './shared/limits'");
+            expect(source).not.toContain('function normalizeAdvancedLimit(');
         });
     });
 
     describe('getNonce function', () => {
-        it('generates 32 character nonce', () => {
-            expect(source).toContain('for (let i = 0; i < 32; i++)');
+        it('delegates to the centralized crypto-backed nonce generator', () => {
+            expect(source).toContain("import { createCspNonce } from './nonce'");
+            expect(source).toContain('return createCspNonce();');
         });
 
-        it('uses alphanumeric characters', () => {
-            expect(source).toContain("'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'");
-        });
-
-        it('uses random selection', () => {
-            expect(source).toContain('Math.random()');
+        it('no longer uses Math.random for nonce generation', () => {
+            expect(source).not.toContain('Math.random()');
         });
     });
 
     describe('_escapeForInlineScript security', () => {
-        it('uses JSON.stringify for base escaping', () => {
-            expect(source).toContain('JSON.stringify(value)');
-        });
-
-        it('escapes closing script tags', () => {
-            expect(source).toContain(".replace(/<\\/script/gi, '<\\\\/script')");
-        });
-
-        it('escapes HTML comment start', () => {
-            expect(source).toContain(".replace(/<!--/g, '<\\\\!--')");
-        });
-
-        it('escapes HTML comment end', () => {
-            expect(source).toContain(".replace(/-->/g, '--\\\\>')");
-        });
-
-        it('escapes CDATA section end', () => {
-            expect(source).toContain(".replace(/\\]\\]>/g, ']\\\\]>");
+        it('delegates to the shared inline-script escaper', () => {
+            // The escaping logic is consolidated in shared/stringUtils; behavior is
+            // covered in tests/unit/shared/sharedHelpers.test.ts.
+            expect(source).toContain("import { escapeForInlineScriptValue } from './shared/stringUtils'");
+            expect(source).toContain('return escapeForInlineScriptValue(value);');
         });
     });
 
@@ -169,8 +145,11 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain('const editor = vscode.window.activeTextEditor');
         });
 
-        it('converts 1-indexed line to 0-indexed position', () => {
-            expect(source).toContain('Math.max(0, line - 1)');
+        it('validates a finite integer line and clamps to line 1 before Position', () => {
+            expect(source).toContain('Number.isFinite(line)');
+            expect(source).toContain('const safeLine = Math.max(1, Math.floor(line))');
+            expect(source).toContain('const zeroBasedLine = safeLine - 1;');
+            expect(source).toContain('new vscode.Position(zeroBasedLine, 0)');
         });
 
         it('reveals line in center', () => {
@@ -179,6 +158,32 @@ describe('visualizationPanel.ts', () => {
 
         it('logs error on document open failure', () => {
             expect(source).toContain("logger.error('Failed to open document', error)");
+        });
+    });
+
+    describe('_changeViewLocation target selection', () => {
+        it('uses Workspace target when a workspace exists, else Global', () => {
+            expect(source).toContain('(vscode.workspace.workspaceFolders?.length ?? 0) > 0');
+            expect(source).toContain('? vscode.ConfigurationTarget.Workspace');
+            expect(source).toContain(': vscode.ConfigurationTarget.Global');
+        });
+
+        it('handles configuration update failures without throwing', () => {
+            const start = source.indexOf('private async _changeViewLocation');
+            const end = source.indexOf('private async _goToLine', start);
+            const body = source.slice(start, end);
+            expect(body).toContain('try {');
+            expect(body).toContain('await config.update(\'viewLocation\', location, target)');
+            expect(body).toContain('} catch (error) {');
+            expect(body).toContain("showErrorMessage");
+        });
+    });
+
+    describe('pin id generation', () => {
+        it('uses crypto.randomUUID() instead of Date.now() for pin ids', () => {
+            expect(source).toContain("import { randomUUID } from 'crypto'");
+            expect(source).toContain("'pin-' + randomUUID()");
+            expect(source).not.toContain("'pin-' + Date.now()");
         });
     });
 
@@ -391,17 +396,20 @@ describe('visualizationPanel.ts', () => {
     });
 
     describe('first run detection', () => {
-        it('checks globalState for hasLaunched flag', () => {
+        it('reads hasLaunched without side effects (_readFirstRun)', () => {
+            expect(source).toContain('private static _readFirstRun()');
             expect(source).toContain("globalState.get<boolean>('sqlCrack.hasLaunched')");
         });
 
-        it('sets hasLaunched flag on first run', () => {
+        it('persists the launched flag in a dedicated mutation helper', () => {
+            expect(source).toContain('private static _markLaunched()');
             expect(source).toContain("globalState.update('sqlCrack.hasLaunched', true)");
         });
 
-        it('returns true only on first run', () => {
-            expect(source).toContain('return true');
-            expect(source).toContain('return false');
+        it('resolves first-run state once at construction, consumed as a one-shot flag', () => {
+            expect(source).toContain('this._pendingFirstRun = VisualizationPanel._readFirstRun();');
+            expect(source).toContain('const isFirstRun = this._pendingFirstRun;');
+            expect(source).toContain('this._pendingFirstRun = false;');
         });
     });
 

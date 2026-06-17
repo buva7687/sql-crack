@@ -174,14 +174,21 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inDollarQuotes) {
-            if (char === '\'' || char === '"') {
+            // Treat backticks as quote delimiters too (MySQL identifier quoting),
+            // so a semicolon inside a `back``tick` identifier never splits a
+            // statement. Doubled delimiters ('', "", ``) are in-string escapes.
+            if (char === '\'' || char === '"' || char === '`') {
                 if (!inString) {
                     inString = true;
                     stringChar = char;
                 } else if (char === stringChar) {
-                    // SQL-standard doubled quote escape: '' or ""
+                    // SQL-standard doubled quote escape: '' or "" (and `` for backticks)
                     const nextChar = i + 1 < sql.length ? sql[i + 1] : '';
                     if (nextChar === stringChar) {
+                        // Preserve BOTH delimiter characters in the statement text.
+                        // Dropping them corrupts identifiers/literals before parsing
+                        // (e.g. `ab``c` would collapse to `abc`).
+                        current += char + nextChar;
                         i++; // skip the escaped quote
                         continue;
                     }

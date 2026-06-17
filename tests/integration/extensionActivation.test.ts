@@ -43,7 +43,7 @@ jest.mock('../../src/logger', () => ({
 }));
 
 import * as vscode from 'vscode';
-import { normalizeDialect, activate } from '../../src/extension';
+import { normalizeDialect, activate, deactivate } from '../../src/extension';
 import { VisualizationPanel } from '../../src/visualizationPanel';
 import { logger } from '../../src/logger';
 import { isAggregateFunction } from '../../src/dialects/functionRegistry';
@@ -203,12 +203,47 @@ describe('Extension Activation Wiring', () => {
 
     describe('Runtime activation', () => {
         let context: vscode.ExtensionContext;
+        const panelMock = VisualizationPanel as unknown as {
+            currentPanel: unknown;
+            sourceDocumentUri: vscode.Uri | null;
+            refresh: jest.Mock;
+            markAsStale: jest.Mock;
+            sendCursorPosition: jest.Mock;
+        };
+
+        const createDocument = (filePath: string, sql = 'SELECT id FROM users;') => {
+            const uri = vscode.Uri.file(filePath);
+            const lines = sql.split('\n');
+            return {
+                uri,
+                fileName: uri.fsPath,
+                languageId: 'sql',
+                getText: () => sql,
+                lineCount: lines.length,
+                lineAt: (line: number) => ({
+                    text: lines[line] || '',
+                    firstNonWhitespaceCharacterIndex: 0,
+                }),
+            } as unknown as vscode.TextDocument;
+        };
 
         beforeEach(() => {
             jest.clearAllMocks();
             // Use the mock helper from the vscode mock
             const mockVscode = require('vscode');
+            mockVscode.__resetMockConfig();
             context = mockVscode.createMockExtensionContext();
+            panelMock.currentPanel = null;
+            panelMock.sourceDocumentUri = null;
+            (vscode.window.onDidChangeTextEditorSelection as jest.Mock)
+                .mockImplementation(() => ({ dispose: jest.fn() }));
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation(() => ({ dispose: jest.fn() }));
+        });
+
+        afterEach(() => {
+            deactivate();
+            jest.useRealTimers();
         });
 
         it('activate() runs without throwing', () => {
@@ -286,6 +321,231 @@ describe('Extension Activation Wiring', () => {
         it('reads configuration during activation (loads custom functions)', () => {
             activate(context);
             expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith('sqlCrack');
+        });
+
+        it('forwards cursor positions only from the visualization source document', () => {
+            let selectionHandler: ((event: vscode.TextEditorSelectionChangeEvent) => void) | undefined;
+            (vscode.window.onDidChangeTextEditorSelection as jest.Mock)
+                .mockImplementation((handler) => {
+                    selectionHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const sourceUri = vscode.Uri.file('/workspace/source.sql');
+            panelMock.currentPanel = {};
+            panelMock.sourceDocumentUri = sourceUri;
+            activate(context);
+
+            const createSelectionEvent = (uri: vscode.Uri, line: number) => ({
+                textEditor: {
+                    document: {
+                        uri,
+                        fileName: uri.fsPath,
+                        languageId: 'sql',
+                    },
+                },
+                selections: [{ active: { line } }],
+            }) as unknown as vscode.TextEditorSelectionChangeEvent;
+
+            selectionHandler?.(createSelectionEvent(vscode.Uri.file('/workspace/other.sql'), 8));
+            expect(panelMock.sendCursorPosition).not.toHaveBeenCalled();
+
+            selectionHandler?.(createSelectionEvent(sourceUri, 6));
+            expect(panelMock.sendCursorPosition).toHaveBeenCalledWith(7);
+        });
+
+        it('does not refresh when an unrelated SQL document changes', () => {
+            jest.useFakeTimers();
+            let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentChangeHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const sourceUri = vscode.Uri.file('/workspace/source.sql');
+            const otherUri = vscode.Uri.file('/workspace/other.sql');
+            panelMock.currentPanel = {};
+            panelMock.sourceDocumentUri = sourceUri;
+            activate(context);
+
+            documentChangeHandler?.({
+                document: {
+                    uri: otherUri,
+                    fileName: otherUri.fsPath,
+                    languageId: 'sql',
+                    getText: () => 'SELECT 2',
+                },
+                contentChanges: [],
+                reason: undefined,
+            } as unknown as vscode.TextDocumentChangeEvent);
+
+            jest.runOnlyPendingTimers();
+            expect(panelMock.markAsStale).not.toHaveBeenCalled();
+            expect(panelMock.refresh).not.toHaveBeenCalled();
+        });
+
+        it('drops a debounced refresh when the panel source changes before it fires', () => {
+            jest.useFakeTimers();
+            let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentChangeHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', {
+                autoRefresh: true,
+                autoRefreshDelay: 50,
+                defaultDialect: 'MySQL',
+            });
+
+            const sourceUri = vscode.Uri.file('/workspace/source.sql');
+            panelMock.currentPanel = {};
+            panelMock.sourceDocumentUri = sourceUri;
+            activate(context);
+
+            documentChangeHandler?.({
+                document: {
+                    uri: sourceUri,
+                    fileName: sourceUri.fsPath,
+                    languageId: 'sql',
+                    getText: () => 'SELECT 1',
+                },
+                contentChanges: [],
+                reason: undefined,
+            } as unknown as vscode.TextDocumentChangeEvent);
+
+            expect(panelMock.markAsStale).toHaveBeenCalledTimes(1);
+            panelMock.sourceDocumentUri = vscode.Uri.file('/workspace/new-source.sql');
+            jest.advanceTimersByTime(50);
+
+            expect(panelMock.refresh).not.toHaveBeenCalled();
+        });
+
+        it('refreshes the matching source document after the debounce delay', () => {
+            jest.useFakeTimers();
+            let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentChangeHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', {
+                autoRefresh: true,
+                autoRefreshDelay: 50,
+                defaultDialect: 'PostgreSQL',
+            });
+
+            const sourceUri = vscode.Uri.file('/workspace/source.sql');
+            panelMock.currentPanel = {};
+            panelMock.sourceDocumentUri = sourceUri;
+            activate(context);
+
+            documentChangeHandler?.({
+                document: {
+                    uri: sourceUri,
+                    fileName: sourceUri.fsPath,
+                    languageId: 'sql',
+                    getText: () => 'SELECT 1',
+                },
+                contentChanges: [],
+                reason: undefined,
+            } as unknown as vscode.TextDocumentChangeEvent);
+
+            jest.advanceTimersByTime(50);
+
+            expect(panelMock.refresh).toHaveBeenCalledWith('SELECT 1', {
+                dialect: 'PostgreSQL',
+                fileName: 'source.sql',
+                documentUri: sourceUri,
+            });
+        });
+
+        it('debounces diagnostics independently for edits in different documents', () => {
+            jest.useFakeTimers();
+            let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentChangeHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', {
+                autoRefresh: true,
+                autoRefreshDelay: 50,
+                'advanced.showDiagnosticsInProblems': true,
+            });
+
+            activate(context);
+            const diagnostics = (vscode.languages.createDiagnosticCollection as jest.Mock)
+                .mock.results[0].value;
+            const first = createDocument('/workspace/first.sql');
+            const second = createDocument('/workspace/second.sql');
+
+            documentChangeHandler?.({
+                document: first,
+                contentChanges: [],
+                reason: undefined,
+            } as unknown as vscode.TextDocumentChangeEvent);
+            documentChangeHandler?.({
+                document: second,
+                contentChanges: [],
+                reason: undefined,
+            } as unknown as vscode.TextDocumentChangeEvent);
+
+            jest.advanceTimersByTime(50);
+
+            expect(diagnostics.set).toHaveBeenCalledTimes(2);
+            expect(diagnostics.set.mock.calls.map((call: unknown[]) => String(call[0])))
+                .toEqual(expect.arrayContaining([first.uri.toString(), second.uri.toString()]));
+        });
+
+        it('cancels only the closed document diagnostics timer', () => {
+            jest.useFakeTimers();
+            let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
+            let documentCloseHandler: ((document: vscode.TextDocument) => void) | undefined;
+            (vscode.workspace.onDidChangeTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentChangeHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+            (vscode.workspace.onDidCloseTextDocument as jest.Mock)
+                .mockImplementation((handler) => {
+                    documentCloseHandler = handler;
+                    return { dispose: jest.fn() };
+                });
+
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', {
+                autoRefresh: true,
+                autoRefreshDelay: 50,
+                'advanced.showDiagnosticsInProblems': true,
+            });
+
+            activate(context);
+            const diagnostics = (vscode.languages.createDiagnosticCollection as jest.Mock)
+                .mock.results[0].value;
+            const closed = createDocument('/workspace/closed.sql');
+            const remaining = createDocument('/workspace/remaining.sql');
+
+            for (const document of [closed, remaining]) {
+                documentChangeHandler?.({
+                    document,
+                    contentChanges: [],
+                    reason: undefined,
+                } as unknown as vscode.TextDocumentChangeEvent);
+            }
+            documentCloseHandler?.(closed);
+            jest.advanceTimersByTime(50);
+
+            expect(diagnostics.delete).toHaveBeenCalledWith(closed.uri);
+            expect(diagnostics.set).toHaveBeenCalledTimes(1);
+            expect(diagnostics.set).toHaveBeenCalledWith(remaining.uri, expect.any(Array));
         });
     });
 });

@@ -84,4 +84,16 @@ describe('workspace ui script coverage gaps', () => {
         expect(source).toContain("header.setAttribute('aria-expanded', 'true');");
         expect(source).toContain("header.setAttribute('aria-expanded', 'false');");
     });
+
+    it('escapes the column trace title attribute with the attribute-context escaper', () => {
+        // The client-side escapeHtml() does not escape quotes, so an attribute
+        // value (title="...") must use escapeHtmlAttr() to avoid breakout.
+        const source = readWorkspaceScript('columnLineage.ts');
+
+        expect(source).toContain("title=\"' + escapeHtmlAttr(flowSummary) + '\"");
+        // The visible text content keeps the text-context escaper.
+        expect(source).toContain("'\">' + escapeHtml(flowSummary) + '</div>'");
+        // Guard against regressing to the quote-unsafe escaper inside the title.
+        expect(source).not.toContain("title=\"' + escapeHtml(flowSummary)");
+    });
 });

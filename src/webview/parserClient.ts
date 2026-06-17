@@ -48,6 +48,21 @@ interface PendingWorkerRequest {
 
 const PARSER_WORKER_TIMEOUT_MS = 5000;
 
+const PARSE_TIMEOUT_MESSAGE =
+    'Parsing timed out — the query may be too large or complex to visualize.';
+
+/**
+ * Distinguishes a worker timeout from other worker failures (crash, unavailable).
+ * On a timeout we must NOT re-run the heavy parse synchronously on the webview
+ * thread, since that re-freezes the UI — the whole reason the work was offloaded.
+ */
+class ParserWorkerTimeoutError extends Error {
+    constructor() {
+        super('Parser worker timed out');
+        this.name = 'ParserWorkerTimeoutError';
+    }
+}
+
 function yieldToMainLoop(): Promise<void> {
     return new Promise(resolve => {
         setTimeout(resolve, 0);
@@ -101,6 +116,29 @@ function createCancelledBatchParseResult(sql: string): BatchParseResult {
         queries: [createCancelledParseResult(sql)],
         totalStats: createEmptyStats(),
         parseErrors: [{ queryIndex: 0, message: 'Parse cancelled', sql }],
+        successCount: 0,
+        errorCount: 1,
+    };
+}
+
+function createTimedOutParseResult(sql: string): ParseResult {
+    return {
+        nodes: [],
+        edges: [],
+        stats: createEmptyStats(),
+        hints: [],
+        sql,
+        columnLineage: [],
+        tableUsage: new Map(),
+        error: PARSE_TIMEOUT_MESSAGE,
+    };
+}
+
+function createTimedOutBatchParseResult(sql: string): BatchParseResult {
+    return {
+        queries: [createTimedOutParseResult(sql)],
+        totalStats: createEmptyStats(),
+        parseErrors: [{ queryIndex: 0, message: PARSE_TIMEOUT_MESSAGE, sql }],
         successCount: 0,
         errorCount: 1,
     };
@@ -217,7 +255,7 @@ function queueWorkerRequest<T extends WorkerBackedResponse>(
 
             pendingWorkerRequests.delete(requestId);
             destroyWorker();
-            reject(new Error('Parser worker timed out'));
+            reject(new ParserWorkerTimeoutError());
         }, PARSER_WORKER_TIMEOUT_MS);
 
         pendingWorkerRequests.set(requestId, {
@@ -274,11 +312,20 @@ export async function parseAsync(
                     requestId,
                     payload: { sql, dialect, options },
                 });
-            } catch {
+            } catch (error) {
                 destroyWorker();
                 if (isParseRequestStale(requestId)) {
                     return createCancelledParseResult(sql);
                 }
+                // A worker timeout means the parse is genuinely heavy — running it
+                // synchronously here would re-freeze the webview thread. Return a
+                // lightweight result instead. (The worker was already destroyed, so
+                // the next request spins up a fresh one.)
+                if (error instanceof ParserWorkerTimeoutError) {
+                    return createTimedOutParseResult(sql);
+                }
+                // Other worker failures (unavailable/crashed) fall through to the
+                // synchronous parse below as a best-effort fallback.
             }
         }
 
@@ -316,11 +363,20 @@ export async function parseBatchAsync(
                     requestId,
                     payload: { sql, dialect, limits: appliedLimits, options },
                 });
-            } catch {
+            } catch (error) {
                 destroyWorker();
                 if (isParseRequestStale(requestId)) {
                     return createCancelledBatchParseResult(sql);
                 }
+                // A worker timeout means the parse is genuinely heavy — running it
+                // synchronously here would re-freeze the webview thread. Return a
+                // lightweight result instead. (The worker was already destroyed, so
+                // the next request spins up a fresh one.)
+                if (error instanceof ParserWorkerTimeoutError) {
+                    return createTimedOutBatchParseResult(sql);
+                }
+                // Other worker failures (unavailable/crashed) fall through to the
+                // synchronous parse below as a best-effort fallback.
             }
         }
 

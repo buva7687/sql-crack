@@ -379,7 +379,7 @@ export class WorkspacePanel {
 
         // Initialize index manager
         const autoIndexThreshold = resolveAutoIndexThresholdFromConfig();
-        const { autoIndexed, fileCount } = await this._indexManager.initialize(autoIndexThreshold);
+        const { autoIndexed, fileCount, cacheState, hasValidIndex } = await this._indexManager.initialize(autoIndexThreshold);
         if (this._isDisposed) {
             return;
         }
@@ -392,7 +392,22 @@ export class WorkspacePanel {
             return;
         }
 
-        if (!autoIndexed && fileCount >= autoIndexThreshold) {
+        // A previous build already established that this index cannot fit in
+        // workspaceState. Avoid repeating the modal prompt on every panel open;
+        // leave analysis as an explicit action on the existing manual page.
+        if (cacheState === 'oversized' && !hasValidIndex) {
+            this.setWebviewHtml(createManualIndexHtml({
+                fileCount,
+                isDarkTheme: this._isDarkTheme,
+                nonce: generateNonce(),
+            }));
+            return;
+        }
+
+        // Only prompt to index a large workspace when there is no usable index
+        // available. A valid cached index (hasValidIndex) must render immediately
+        // without re-prompting, even though it was not auto-built this session.
+        if (!autoIndexed && !hasValidIndex && fileCount >= autoIndexThreshold) {
             // Large workspace - ask user to confirm indexing
             const result = await vscode.window.showInformationMessage(
                 `Found ${fileCount} SQL files in workspace. Index them now?`,
@@ -768,7 +783,7 @@ export class WorkspacePanel {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Workspace Dependencies</title>
     <style>

@@ -13,7 +13,7 @@ export function getMessageHandlingScriptFragment(): string {
                 el.remove();
             });
 
-            // Strip event handlers and javascript: URLs from remaining elements.
+            // Strip event handlers, URL-bearing attributes, and dangerous styles.
             template.content.querySelectorAll('*').forEach((el) => {
                 Array.from(el.attributes).forEach((attr) => {
                     const name = attr.name.toLowerCase();
@@ -24,7 +24,11 @@ export function getMessageHandlingScriptFragment(): string {
                         return;
                     }
 
-                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                    // None of the fragments rendered here require URLs, so strip
+                    // href/src/xlink:href entirely. This removes the whole
+                    // javascript:/data:/vbscript: attack surface rather than
+                    // relying on per-protocol matching.
+                    if (name === 'href' || name === 'src' || name === 'xlink:href') {
                         el.removeAttribute(attr.name);
                         return;
                     }

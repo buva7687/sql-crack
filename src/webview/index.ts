@@ -62,6 +62,8 @@ import {
 import type { ColorblindMode } from '../shared/theme';
 import type { SqlFlowRuntimeConfig, ViewLocation } from '../shared/messages/sqlFlowRuntimeConfig';
 import { stripSqlComments } from '../shared/stringUtils';
+import { normalizeAdvancedLimit } from '../shared/limits';
+import { shouldSyncRuntimeDefaultDialect } from '../shared/dialect';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 
 import {
@@ -176,6 +178,10 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+// Monotonic token guarding async cursor-follow query switches. Rapid cursor
+// movement can fire overlapping switches; only the latest token may complete
+// the highlight, so stale switches don't fight the user's current position.
+let cursorFollowToken = 0;
 let userExplicitlySetDialect = false;
 let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
@@ -188,6 +194,7 @@ let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
+const querySwitchPromises: Map<number, Promise<void>> = new Map();
 const DEFERRED_QUERY_THRESHOLD = 50;
 
 // Store view state per query index for zoom/pan persistence
@@ -221,13 +228,6 @@ function hasExecutableSql(sql: string): boolean {
     return stripSqlComments(rewritten).trim().length > 0;
 }
 
-function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.min(max, Math.max(min, rounded));
-}
 
 function normalizeRuntimeConfig(): { maxFileSizeKB: number; maxStatements: number; deferredQueryThreshold: number; parseTimeoutSeconds: number } {
     const maxFileSizeKB = normalizeAdvancedLimit(window.sqlCrackConfig?.maxFileSizeKB ?? window.maxFileSizeKB, 100, 10, 10000);
@@ -328,14 +328,27 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     setRendererColorblindMode(config.colorblindMode);
 
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
-    if (requestedDefaultDialect && !userExplicitlySetDialect && config.autoDetectDialect === false) {
+    const defaultDialectChanged = previous.defaultDialect !== config.defaultDialect;
+    const autoDetectChanged = previous.autoDetectDialect !== config.autoDetectDialect;
+    if (
+        requestedDefaultDialect &&
+        shouldSyncRuntimeDefaultDialect(
+            previous.defaultDialect,
+            requestedDefaultDialect,
+            currentDialect,
+            config.autoDetectDialect,
+            userExplicitlySetDialect
+        )
+    ) {
         currentDialect = requestedDefaultDialect;
         const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
         if (dialectSelect) {
             dialectSelect.value = currentDialect;
         }
     }
-    updateAutoDetectIndicator(null);
+    if (!config.autoDetectDialect || defaultDialectChanged || autoDetectChanged) {
+        updateAutoDetectIndicator(null);
+    }
 
     const isDark = config.vscodeTheme !== 'light';
     if (previous.vscodeTheme !== config.vscodeTheme) {
@@ -346,8 +359,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const requiresRevisualize =
-        previous.autoDetectDialect !== config.autoDetectDialect ||
-        previous.defaultDialect !== config.defaultDialect ||
+        autoDetectChanged ||
+        defaultDialectChanged ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||
@@ -686,6 +699,7 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 function clearDeferredQueryState(): void {
     deferredQueryIndexes.clear();
     hydrationPromises.clear();
+    querySwitchPromises.clear();
 }
 
 function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void {
@@ -901,7 +915,7 @@ function setupVSCodeMessageListener(): void {
                     handleRefresh(message.sql, message.options);
                     break;
                 case 'cursorPosition':
-                    highlightNodeAtLine(message.line);
+                    void handleCursorPosition(message.line);
                     break;
                 case 'switchToQuery':
                     handleSwitchToQuery(message.queryIndex);
@@ -944,6 +958,62 @@ function handleRefresh(sql: string, options: { dialect: string; fileName: string
     void visualize(sql);
     clearStaleIndicator();
     schedulePersistUiState();
+}
+
+/**
+ * Map an editor cursor line to the query that owns it using the parser's
+ * authoritative line ranges, then (if needed) switch to that query before
+ * highlighting the matching node. Guarded by a request token so a fast burst of
+ * cursor moves resolves to only the latest target.
+ */
+function findQueryIndexForLine(line: number): number | null {
+    const ranges = batchResult?.queryLineRanges;
+    if (!ranges) {
+        return null;
+    }
+
+    for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i];
+        if (range && line >= range.startLine && line <= range.endLine) {
+            return i;
+        }
+    }
+
+    return null;
+}
+
+async function handleCursorPosition(line: number): Promise<void> {
+    const token = ++cursorFollowToken;
+    const targetIndex = findQueryIndexForLine(line);
+    const hasValidTarget = targetIndex !== null &&
+        batchResult &&
+        targetIndex >= 0 &&
+        targetIndex < batchResult.queries.length;
+
+    if (hasValidTarget) {
+        if (targetIndex !== currentQueryIndex) {
+            await switchToQueryIndex(targetIndex);
+        } else {
+            // switchToQueryIndex updates currentQueryIndex before deferred query
+            // hydration finishes. A newer cursor event in that same query must
+            // await the in-flight render instead of highlighting the previous graph.
+            const inFlightSwitch = querySwitchPromises.get(targetIndex);
+            if (inFlightSwitch) {
+                await inFlightSwitch;
+            }
+        }
+
+        // A newer cursor event or a manual query switch superseded this one while
+        // it awaited hydration. Do not highlight against the wrong rendered graph.
+        if (token !== cursorFollowToken) {
+            return;
+        }
+        if (currentQueryIndex !== targetIndex) {
+            return;
+        }
+    }
+
+    highlightNodeAtLine(line);
 }
 
 function handleSwitchToQuery(queryIndex: number): void {
@@ -1542,6 +1612,24 @@ function renderCurrentQuery(): void {
  * Switch to a different query index, preserving view state
  */
 async function switchToQueryIndex(newIndex: number): Promise<void> {
+    const existingSwitch = querySwitchPromises.get(newIndex);
+    if (existingSwitch) {
+        await existingSwitch;
+        return;
+    }
+
+    const switchPromise = performSwitchToQueryIndex(newIndex);
+    querySwitchPromises.set(newIndex, switchPromise);
+    try {
+        await switchPromise;
+    } finally {
+        if (querySwitchPromises.get(newIndex) === switchPromise) {
+            querySwitchPromises.delete(newIndex);
+        }
+    }
+}
+
+async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
     if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }

@@ -86,6 +86,30 @@ describe('XSS: tooltip sanitization in clientScripts.ts', () => {
 });
 
 // =========================================================================
+// 2b. XSS: extension-HTML sanitizer strips URL-bearing attributes
+// =========================================================================
+
+describe('XSS: sanitizeExtensionHtml URL handling', () => {
+    const source = readFileSync(
+        join(__dirname, '../../src/workspace/ui/scripts/messageHandling.ts'),
+        'utf8'
+    );
+
+    it('strips href/src/xlink:href entirely instead of matching protocols', () => {
+        // Fragments rendered here never need URLs, so removing the attributes
+        // removes the whole javascript:/data:/vbscript: attack surface.
+        expect(source).toContain("if (name === 'href' || name === 'src' || name === 'xlink:href') {");
+        expect(source).toContain('el.removeAttribute(attr.name);');
+        // The old, weaker javascript:-only check must be gone.
+        expect(source).not.toContain("/^\\\\s*javascript:/i.test(value)");
+    });
+
+    it('still strips on* event handler attributes', () => {
+        expect(source).toContain("if (name.startsWith('on')) {");
+    });
+});
+
+// =========================================================================
 // 3. XSS: batchTabs label escaping
 // =========================================================================
 
@@ -198,8 +222,10 @@ describe('defensive guards in extension.ts', () => {
         expect(source).toContain('e.selections.length > 0');
     });
 
-    it('should filter empty strings from additionalFileExtensions', () => {
-        expect(source).toContain(".filter(ext => ext.length > 0)");
+    it('should validate/normalize additionalFileExtensions via the shared normalizer', () => {
+        // Empty strings (and glob/path syntax) are filtered inside
+        // normalizeFileExtensions; extension.ts delegates to it.
+        expect(source).toContain('normalizeFileExtensions(config.get<string[]>(\'additionalFileExtensions\'))');
     });
 });
 

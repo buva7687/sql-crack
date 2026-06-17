@@ -474,6 +474,54 @@ describe('parserClient', () => {
                 jest.useRealTimers();
             }
         });
+
+        it('returns a lightweight result on worker timeout instead of parsing synchronously', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+                const pending = parseAsync('SELECT 1', 'MySQL');
+
+                // Run the macrotask yield so the request is posted to the worker.
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                expect(workerInstances[0].postMessage).toHaveBeenCalled();
+
+                // Fire the worker timeout without ever emitting a response.
+                jest.advanceTimersByTime(5000);
+
+                const result = await pending;
+                // Lightweight timeout result — NOT a synchronous parse of 'SELECT 1'
+                // (which would have produced nodes). The worker was terminated.
+                expect(result.nodes).toHaveLength(0);
+                expect(result.error).toContain('timed out');
+                expect(workerInstances[0].terminate).toHaveBeenCalled();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('returns a lightweight batch result on worker timeout', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+                const pending = parseBatchAsync('SELECT 1; SELECT 2;', 'MySQL');
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                expect(workerInstances[0].postMessage).toHaveBeenCalled();
+
+                jest.advanceTimersByTime(5000);
+
+                const result = await pending;
+                expect(result.errorCount).toBe(1);
+                expect(result.successCount).toBe(0);
+                expect(result.parseErrors?.[0]?.message).toContain('timed out');
+            } finally {
+                jest.useRealTimers();
+            }
+        });
     });
 
     describe('parseWithFallback', () => {

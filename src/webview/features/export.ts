@@ -437,11 +437,23 @@ function sanitizeMermaidId(id: string): string {
 }
 
 function escapeMermaidLabel(label: string): string {
-    return label
-        .replace(/"/g, "'")
-        .replace(/\\/g, '\\\\')
-        .replace(/\n/g, ' ')
-        .substring(0, 50);
+    // Mermaid node labels are wrapped in double quotes and rendered as HTML, so
+    // quotes and the shape-delimiter brackets must become HTML numeric entities
+    // (the form Mermaid decodes, e.g. #34;) rather than being dropped or left raw.
+    // Backslashes and line breaks are collapsed to spaces so they can't act as
+    // escapes or split the label. Truncate the raw text first so escaping never
+    // leaves a dangling entity sequence.
+    return (label ?? '')
+        .substring(0, 50)
+        .replace(/\\/g, ' ')
+        .replace(/\r?\n/g, ' ')
+        .replace(/"/g, '#34;')
+        .replace(/\[/g, '#91;')
+        .replace(/\]/g, '#93;')
+        .replace(/\(/g, '#40;')
+        .replace(/\)/g, '#41;')
+        .replace(/\{/g, '#123;')
+        .replace(/\}/g, '#125;');
 }
 
 function generateStyleAssignments(nodes: FlowNode[]): string[] {

@@ -46,6 +46,10 @@ examples/**
 scripts/**
 youtube/**
 
+# Large demo media — hosted externally (README references the raw GitHub URL)
+# so the ~8.5MB GIF does not need to ship inside the VSIX.
+assets/video_demo.gif
+
 # Package artifacts
 *.vsix
 

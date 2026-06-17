@@ -3,6 +3,11 @@ import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
 import type { SqlFlowRuntimeConfig, ViewLocation } from './shared/messages/sqlFlowRuntimeConfig';
 import type { ColorblindMode } from './shared/theme';
+import { randomUUID } from 'crypto';
+import { normalizeDialect } from './shared/dialect';
+import { normalizeAdvancedLimit } from './shared/limits';
+import { escapeForInlineScriptValue } from './shared/stringUtils';
+import { createCspNonce } from './nonce';
 import type { SqlDialect as WorkspaceSqlDialect } from './workspace';
 
 interface VisualizationOptions {
@@ -40,6 +45,9 @@ export class VisualizationPanel {
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
     private _disposed: boolean = false;
+    // One-shot first-run flag, resolved (and persisted) once at construction so
+    // the first-run state is computed without mutating globalState during render.
+    private _pendingFirstRun: boolean = false;
 
     private static _createUiStateKey(
         options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string }
@@ -84,14 +92,15 @@ export class VisualizationPanel {
         VisualizationPanel.restorePinnedTabs();
     }
 
-    private static _isFirstRun(): boolean {
+    /** Pure read: has the user launched a panel before? No side effects. */
+    private static _readFirstRun(): boolean {
         if (!VisualizationPanel._context) { return false; }
-        const hasLaunched = VisualizationPanel._context.globalState.get<boolean>('sqlCrack.hasLaunched');
-        if (!hasLaunched) {
-            VisualizationPanel._context.globalState.update('sqlCrack.hasLaunched', true);
-            return true;
-        }
-        return false;
+        return !VisualizationPanel._context.globalState.get<boolean>('sqlCrack.hasLaunched');
+    }
+
+    /** Persist that a panel has now been launched. Kept out of HTML rendering. */
+    private static _markLaunched(): void {
+        VisualizationPanel._context?.globalState.update('sqlCrack.hasLaunched', true);
     }
 
     private static getViewColumn(): vscode.ViewColumn {
@@ -139,7 +148,7 @@ export class VisualizationPanel {
     }
 
     public static createPinnedPanel(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions, pinId?: string): string {
-        const id = pinId || 'pin-' + Date.now();
+        const id = pinId || 'pin-' + randomUUID();
         const name = options.fileName.replace('.sql', '') || `Pinned Query`;
 
         // Create panel as a new tab
@@ -315,6 +324,13 @@ export class VisualizationPanel {
         this._isPinned = isPinned;
         this._pinId = pinId;
 
+        // Resolve first-run state once, here, and persist it — so HTML rendering
+        // stays a pure read of this instance flag rather than a globalState write.
+        this._pendingFirstRun = VisualizationPanel._readFirstRun();
+        if (this._pendingFirstRun) {
+            VisualizationPanel._markLaunched();
+        }
+
         // Set the webview's initial html content
         this._update(sqlCode, options);
 
@@ -430,8 +446,20 @@ export class VisualizationPanel {
 
     private async _changeViewLocation(location: ViewLocation) {
         const config = vscode.workspace.getConfiguration('sqlCrack');
-        await config.update('viewLocation', location, vscode.ConfigurationTarget.Workspace);
-        vscode.window.showInformationMessage(`View location changed to: ${location}`);
+        // Writing to the Workspace target fails in an empty window (no workspace),
+        // so fall back to the Global (user) target there. Update failures must not
+        // crash the message handler.
+        const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+        const target = hasWorkspace
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        try {
+            await config.update('viewLocation', location, target);
+            vscode.window.showInformationMessage(`View location changed to: ${location}`);
+        } catch (error) {
+            logger.error('Failed to update viewLocation setting', error);
+            vscode.window.showErrorMessage(`Could not change view location to "${location}".`);
+        }
     }
 
     /**
@@ -443,15 +471,25 @@ export class VisualizationPanel {
      * @param line - Line number (1-indexed) to navigate to
      */
     private async _goToLine(line: number) {
+        // Validate the incoming (webview-provided) line: it must be a finite
+        // integer. Clamp to the first line so a non-finite or out-of-range value
+        // can't produce an invalid vscode.Position.
+        if (!Number.isFinite(line)) {
+            logger.warn(`Ignoring goToLine with non-finite line: ${line}`);
+            return;
+        }
+        const safeLine = Math.max(1, Math.floor(line)); // 1-indexed, never below 1
+        const zeroBasedLine = safeLine - 1;
+
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
-        
+
         if (targetUri) {
             // Open the document and navigate to the line
             try {
                 const document = await vscode.workspace.openTextDocument(targetUri);
                 const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-                const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
+                const position = new vscode.Position(zeroBasedLine, 0);
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
                 return;
@@ -459,16 +497,16 @@ export class VisualizationPanel {
                 logger.error('Failed to open document', error);
             }
         }
-        
+
         // Fallback to active editor if source document URI is not available
         const editor = vscode.window.activeTextEditor;
         if (editor) {
-            const position = new vscode.Position(Math.max(0, line - 1), 0); // Convert to 0-indexed
+            const position = new vscode.Position(zeroBasedLine, 0);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         } else {
-            logger.warn(`No active editor found, cannot navigate to line ${line}`);
-            vscode.window.showWarningMessage(`Could not navigate to line ${line}. Please open the SQL file first.`);
+            logger.warn(`No active editor found, cannot navigate to line ${safeLine}`);
+            vscode.window.showWarningMessage(`Could not navigate to line ${safeLine}. Please open the SQL file first.`);
         }
     }
 
@@ -487,9 +525,8 @@ export class VisualizationPanel {
     }
 
     private normalizeWorkspaceDialect(dialect: string): WorkspaceSqlDialect {
-        if (dialect === 'SQL Server') { return 'TransactSQL'; }
-        if (dialect === 'PL/SQL') { return 'Oracle'; }
-        return dialect as WorkspaceSqlDialect;
+        // Same alias mapping as the shared normalizer, typed for the workspace.
+        return normalizeDialect(dialect) as WorkspaceSqlDialect;
     }
 
     private async _traceInWorkspaceLineage(tableName: string, nodeType: 'table' | 'view'): Promise<void> {
@@ -632,10 +669,20 @@ export class VisualizationPanel {
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
 
+        // Report the live configured default dialect (normalized) rather than the
+        // dialect the panel happened to open with. This is what propagates to the
+        // webview on a `sqlCrack.defaultDialect` settings change, so the runtime
+        // dialect no longer goes stale when the user updates the default. The
+        // initial HTML seed still uses options.dialect, so a pinned view's opened
+        // dialect is preserved on first render.
+        const configuredDefaultDialect = normalizeDialect(
+            config.get<string>('defaultDialect') || options.dialect || 'MySQL'
+        );
+
         return {
             vscodeTheme,
             isHighContrast,
-            defaultDialect: options.dialect,
+            defaultDialect: configuredDefaultDialect,
             autoDetectDialect,
             viewLocation,
             defaultLayout,
@@ -671,19 +718,7 @@ export class VisualizationPanel {
      * that could break out of the script context.
      */
     private _escapeForInlineScript(value: unknown): string {
-        // JSON.stringify handles quotes, backslashes, control chars, and unicode
-        const json = JSON.stringify(value);
-
-        // Escape HTML-specific sequences that could break script context:
-        // 1. </script - could close the script tag (case-insensitive)
-        // 2. <!-- - HTML comment start
-        // 3. --> - HTML comment end
-        // 4. ]]> - CDATA section end
-        return json
-            .replace(/<\/script/gi, '<\\/script')
-            .replace(/<!--/g, '<\\!--')
-            .replace(/-->/g, '--\\>')
-            .replace(/\]\]>/g, ']\\]>');
+        return escapeForInlineScriptValue(value);
     }
 
     private _getHtmlForWebview(webview: vscode.Webview, sqlCode: string, options: VisualizationOptions) {
@@ -696,7 +731,10 @@ export class VisualizationPanel {
 
         const nonce = getNonce();
         const runtimeConfig = this._readRuntimeConfig(options);
-        const isFirstRun = VisualizationPanel._isFirstRun();
+        // Consume the one-shot first-run flag: show the overlay on the first render
+        // only, without any persistent state mutation here.
+        const isFirstRun = this._pendingFirstRun;
+        this._pendingFirstRun = false;
         const pinnedTabs = VisualizationPanel.getPinnedTabs();
         const initialUiState = VisualizationPanel._getPersistedUiState({
             documentUri: this._sourceDocumentUri,
@@ -823,18 +861,5 @@ export class VisualizationPanel {
 }
 
 function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
-
-function normalizeAdvancedLimit(raw: unknown, fallback: number, min: number, max: number): number {
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        return fallback;
-    }
-    const rounded = Math.round(raw);
-    return Math.max(min, Math.min(max, rounded));
+    return createCspNonce();
 }

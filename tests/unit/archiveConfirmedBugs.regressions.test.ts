@@ -114,9 +114,12 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
         expect(source).toContain('const syntheticAst = parseSelectAst(syntheticSelect, context.dialect);');
     });
 
-    it('#N6 treats backticks as quote delimiters in extension statement splitting', () => {
-        const source = readSource('src/extension.ts');
-        expect(source).toContain('if (char === "\'" || char === \'"\' || char === \'`\') {');
+    it('#N6 treats backticks as quote delimiters in statement splitting', () => {
+        // Statement splitting for cursor→query mapping was consolidated onto the
+        // webview parser's splitter; the duplicate splitter in extension.ts was
+        // removed. The backtick-delimiter guard must live in the surviving splitter.
+        const source = readSource('src/webview/parser/validation/splitting.ts');
+        expect(source).toContain("char === '\\'' || char === '\"' || char === '`'");
     });
 
     it('#N7 uses a nullish-style line guard for diagnostics parse errors', () => {

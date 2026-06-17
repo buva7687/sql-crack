@@ -26,7 +26,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
 
-![SQL Crack Demo](./assets/video_demo.gif)
+![SQL Crack Demo](https://raw.githubusercontent.com/buva7687/sql-crack/main/assets/video_demo.gif)
 
 ## Features
 
@@ -290,7 +290,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). With or without the leading dot is accepted and normalized. |
+| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`, `.sql.j2`). With or without the leading dot is accepted and normalized. Compound extensions like `sql.j2` are preserved. |
 
 Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes. Workspace indexing intentionally skips dependency/build folders (`node_modules`, `.git`, `dist`, `build`).
 
@@ -395,7 +395,7 @@ src/
 │   ├── types/                   # Webview runtime types
 │   ├── ui/                      # Toolbar/context menu/tooltip/layout/command UI
 │   │   └── toolbar/             # Extracted toolbar component modules
-│   └── workers/                 # Worker scripts
+│   └── parser.worker.ts         # Off-main-thread SQL parse worker
 └── workspace/                   # Extension-host workspace analysis runtime
     ├── workspacePanel.ts        # Workspace panel orchestrator
     ├── scanner.ts               # SQL file discovery/scanning
@@ -425,6 +425,8 @@ src/
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
+
+`0.9.0`: Security & reliability hardening — production dependency upgrades (`npm audit --omit=dev` reports 0 advisories), cryptographically strong CSP nonces and collision-free pin/tab IDs, stricter HTML-attribute / DOT / Mermaid export escaping, source-scoped auto-refresh and cursor-follow, a workspace index cache keyed by scope/dialect/config, and a non-blocking parser-worker timeout.
 
 `0.7.0` shipped on `2026-03-23`: Web Worker parsing (off-main-thread for large files) and architecture debt remediation (pure computation extraction, fake DOM testing, integration test coverage) are now part of the released baseline.
 
