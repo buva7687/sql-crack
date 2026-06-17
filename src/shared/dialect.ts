@@ -9,3 +9,26 @@ export function normalizeDialect(dialect: string): string {
     if (dialect === 'PL/SQL') { return 'Oracle'; }
     return dialect;
 }
+
+/**
+ * Decide whether a runtime-config update should replace the dialect currently
+ * displayed by the SQL Flow webview.
+ *
+ * With auto-detection enabled, an unrelated config/theme push must preserve the
+ * detected dialect. A genuine default-dialect change still becomes the new base
+ * dialect and triggers re-visualization, while auto-detect disabled always keeps
+ * the runtime dialect aligned with the configured default.
+ */
+export function shouldSyncRuntimeDefaultDialect(
+    previousDefaultDialect: string,
+    requestedDefaultDialect: string,
+    currentDialect: string,
+    autoDetectDialect: boolean,
+    userExplicitlySetDialect: boolean
+): boolean {
+    if (userExplicitlySetDialect || requestedDefaultDialect === currentDialect) {
+        return false;
+    }
+
+    return !autoDetectDialect || previousDefaultDialect !== requestedDefaultDialect;
+}

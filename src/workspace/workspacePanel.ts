@@ -379,13 +379,25 @@ export class WorkspacePanel {
 
         // Initialize index manager
         const autoIndexThreshold = resolveAutoIndexThresholdFromConfig();
-        const { autoIndexed, fileCount, hasValidIndex } = await this._indexManager.initialize(autoIndexThreshold);
+        const { autoIndexed, fileCount, cacheState, hasValidIndex } = await this._indexManager.initialize(autoIndexThreshold);
         if (this._isDisposed) {
             return;
         }
 
         if (fileCount === 0) {
             this.setWebviewHtml(createEmptyWorkspaceHtml({
+                isDarkTheme: this._isDarkTheme,
+                nonce: generateNonce(),
+            }));
+            return;
+        }
+
+        // A previous build already established that this index cannot fit in
+        // workspaceState. Avoid repeating the modal prompt on every panel open;
+        // leave analysis as an explicit action on the existing manual page.
+        if (cacheState === 'oversized' && !hasValidIndex) {
+            this.setWebviewHtml(createManualIndexHtml({
+                fileCount,
                 isDarkTheme: this._isDarkTheme,
                 nonce: generateNonce(),
             }));

@@ -881,21 +881,21 @@ export class IndexManager {
             return null;
         }
 
-        // Check TTL
-        const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
-        const cacheAge = Date.now() - cached.lastUpdated;
-        if (cacheAge > cacheTTLMs) {
-            logger.debug(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
-            this._lastCacheState = 'stale';
-            return null;
-        }
-
         // Oversized marker: a prior index was too large to persist. There is no
         // usable index to load, but this is distinct from "missing" so callers can
         // avoid re-prompting on every open.
         if (cached.oversized) {
             logger.debug('[IndexManager] Cached index marked oversized - index was not persisted');
             this._lastCacheState = 'oversized';
+            return null;
+        }
+
+        // Check TTL
+        const cacheTTLMs = cacheTTLHours * 60 * 60 * 1000;
+        const cacheAge = Date.now() - cached.lastUpdated;
+        if (cacheAge > cacheTTLMs) {
+            logger.debug(`[IndexManager] Cache expired (age: ${Math.round(cacheAge / 3600000)}h, TTL: ${cacheTTLHours}h) - rebuilding index`);
+            this._lastCacheState = 'stale';
             return null;
         }
 

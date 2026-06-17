@@ -63,6 +63,7 @@ import type { ColorblindMode } from '../shared/theme';
 import type { SqlFlowRuntimeConfig, ViewLocation } from '../shared/messages/sqlFlowRuntimeConfig';
 import { stripSqlComments } from '../shared/stringUtils';
 import { normalizeAdvancedLimit } from '../shared/limits';
+import { shouldSyncRuntimeDefaultDialect } from '../shared/dialect';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 
 import {
@@ -326,19 +327,28 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     setParseTimeout(config.parseTimeoutSeconds * 1000);
     setRendererColorblindMode(config.colorblindMode);
 
-    // Sync the runtime dialect to a changed defaultDialect whenever the user has
-    // not explicitly chosen one. This applies even with auto-detect enabled: it
-    // provides the correct base dialect, and the subsequent re-visualize can still
-    // refine it via detection (which only overrides when it is confident).
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
-    if (requestedDefaultDialect && !userExplicitlySetDialect && requestedDefaultDialect !== currentDialect) {
+    const defaultDialectChanged = previous.defaultDialect !== config.defaultDialect;
+    const autoDetectChanged = previous.autoDetectDialect !== config.autoDetectDialect;
+    if (
+        requestedDefaultDialect &&
+        shouldSyncRuntimeDefaultDialect(
+            previous.defaultDialect,
+            requestedDefaultDialect,
+            currentDialect,
+            config.autoDetectDialect,
+            userExplicitlySetDialect
+        )
+    ) {
         currentDialect = requestedDefaultDialect;
         const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
         if (dialectSelect) {
             dialectSelect.value = currentDialect;
         }
     }
-    updateAutoDetectIndicator(null);
+    if (!config.autoDetectDialect || defaultDialectChanged || autoDetectChanged) {
+        updateAutoDetectIndicator(null);
+    }
 
     const isDark = config.vscodeTheme !== 'light';
     if (previous.vscodeTheme !== config.vscodeTheme) {
@@ -349,8 +359,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const requiresRevisualize =
-        previous.autoDetectDialect !== config.autoDetectDialect ||
-        previous.defaultDialect !== config.defaultDialect ||
+        autoDetectChanged ||
+        defaultDialectChanged ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||

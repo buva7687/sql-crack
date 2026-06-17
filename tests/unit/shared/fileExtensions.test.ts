@@ -15,8 +15,9 @@ describe('normalizeFileExtensions', () => {
         expect(normalizeFileExtensions(['src/**/*.ddl'])).toEqual(['ddl']);
     });
 
-    it('takes the final extension segment for dotted names', () => {
-        expect(normalizeFileExtensions(['archive.sql.bak'])).toEqual(['bak']);
+    it('preserves compound extensions', () => {
+        expect(normalizeFileExtensions(['sql.j2', '*.sql.jinja2'])).toEqual(['sql.j2', 'sql.jinja2']);
+        expect(normalizeFileExtensions(['src/**/*.sql.j2'])).toEqual(['sql.j2']);
     });
 
     it('splits comma/space separated values in a single entry', () => {

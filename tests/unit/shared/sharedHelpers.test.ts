@@ -1,6 +1,6 @@
 import { normalizeAdvancedLimit } from '../../../src/shared/limits';
 import { escapeForInlineScriptValue } from '../../../src/shared/stringUtils';
-import { normalizeDialect } from '../../../src/shared/dialect';
+import { normalizeDialect, shouldSyncRuntimeDefaultDialect } from '../../../src/shared/dialect';
 
 describe('normalizeAdvancedLimit (consolidated)', () => {
     it('coerces non-numbers to the fallback', () => {
@@ -44,5 +44,47 @@ describe('normalizeDialect (shared, used by workspace alias mapping)', () => {
         expect(normalizeDialect('SQL Server')).toBe('TransactSQL');
         expect(normalizeDialect('PL/SQL')).toBe('Oracle');
         expect(normalizeDialect('PostgreSQL')).toBe('PostgreSQL');
+    });
+});
+
+describe('shouldSyncRuntimeDefaultDialect', () => {
+    it('preserves an auto-detected dialect on unrelated runtime config updates', () => {
+        expect(shouldSyncRuntimeDefaultDialect(
+            'MySQL',
+            'MySQL',
+            'PostgreSQL',
+            true,
+            false
+        )).toBe(false);
+    });
+
+    it('syncs when the configured default dialect actually changes', () => {
+        expect(shouldSyncRuntimeDefaultDialect(
+            'MySQL',
+            'Snowflake',
+            'PostgreSQL',
+            true,
+            false
+        )).toBe(true);
+    });
+
+    it('keeps auto-detect-disabled state aligned with the configured default', () => {
+        expect(shouldSyncRuntimeDefaultDialect(
+            'MySQL',
+            'MySQL',
+            'PostgreSQL',
+            false,
+            false
+        )).toBe(true);
+    });
+
+    it('never overrides an explicit user dialect selection', () => {
+        expect(shouldSyncRuntimeDefaultDialect(
+            'MySQL',
+            'Snowflake',
+            'PostgreSQL',
+            false,
+            true
+        )).toBe(false);
     });
 });

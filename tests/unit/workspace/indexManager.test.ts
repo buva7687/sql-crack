@@ -1095,6 +1095,26 @@ describe('IndexManager', () => {
             // Oversized marker carries no payload, so no usable index is produced.
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
         });
+
+        it('reports an expired oversized marker as oversized rather than stale', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                oversized: true,
+                lastUpdated: Date.now() - (25 * 60 * 60 * 1000),
+                fileCount: 9999,
+                filesArray: [],
+                fileHashesArray: [],
+                definitionArray: [],
+                referenceArray: []
+            });
+            mockScanner.getFileCount.mockResolvedValue(100);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('oversized');
+            expect(result.hasValidIndex).toBe(false);
+        });
     });
 
     // =========================================================================

@@ -290,7 +290,7 @@ UI transitions and entrance animations also respect `prefers-reduced-motion`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`). With or without the leading dot is accepted and normalized. |
+| `sqlCrack.additionalFileExtensions` | `[]` | Additional file extensions to treat as SQL (e.g. `.hql`, `.bteq`, `.tpt`, `.dbsql`, `.sql.j2`). With or without the leading dot is accepted and normalized. Compound extensions like `sql.j2` are preserved. |
 
 Files with these extensions will show the SQL Crack icon in the editor title bar and can be visualized like `.sql` files. They are also included in workspace analysis (find files, index), trigger incremental index updates on save/create/delete, and watcher patterns are refreshed when the extension setting changes. Workspace indexing intentionally skips dependency/build folders (`node_modules`, `.git`, `dist`, `build`).
 

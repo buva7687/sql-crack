@@ -361,17 +361,16 @@ describe('Settings Propagation', () => {
             expect(indexSource).toContain('sqlCrackConfig');
         });
 
-        it('syncs currentDialect from a defaultDialect change when not explicitly set', () => {
-            // The runtime dialect must follow a defaultDialect change whenever the
-            // user has not explicitly chosen one — independent of auto-detect mode.
+        it('syncs only genuine default-dialect changes while preserving auto-detected state', () => {
             const start = indexSource.indexOf('function applyRuntimeConfigUpdate');
             const end = indexSource.indexOf('const isDark =', start);
             const body = indexSource.slice(start, end);
 
-            expect(body).toContain('!userExplicitlySetDialect');
-            expect(body).toContain('currentDialect = requestedDefaultDialect;');
-            // The old gate that only synced when auto-detect was OFF must be gone.
-            expect(body).not.toContain("config.autoDetectDialect === false");
+            expect(body).toContain('shouldSyncRuntimeDefaultDialect(');
+            expect(body).toContain('previous.defaultDialect');
+            expect(body).toContain('config.autoDetectDialect');
+            expect(body).toContain('userExplicitlySetDialect');
+            expect(body).toContain('if (!config.autoDetectDialect || defaultDialectChanged || autoDetectChanged)');
         });
     });
 

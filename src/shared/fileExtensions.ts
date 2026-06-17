@@ -12,8 +12,9 @@
  * Returned extensions:
  * - are lowercase and de-duplicated,
  * - exclude "sql" (always handled separately by callers),
- * - contain only [a-z0-9_-]; anything else (wildcards, slashes, dots, spaces…)
- *   is stripped or, if the remainder is invalid, the entry is dropped.
+ * - preserve compound extensions such as "sql.j2",
+ * - contain dot-separated [a-z0-9_-] segments; remaining wildcard/path syntax
+ *   causes the entry to be dropped.
  */
 export function normalizeFileExtensions(raw: unknown): string[] {
     if (!Array.isArray(raw)) {
@@ -30,12 +31,15 @@ export function normalizeFileExtensions(raw: unknown): string[] {
 
         // Allow a single value to carry several comma/space separated extensions.
         for (const part of entry.split(/[\s,]+/)) {
-            // Strip any leading glob/wildcard/dot prefix such as `*.`, `**/*.`, `.`.
-            const cleaned = part.toLowerCase().trim().replace(/^.*[*/.]/, '');
+            // Strip path and leading glob syntax, but preserve dots that are part
+            // of a compound extension (`sql.j2`). For example:
+            // `src/**/*.sql.j2` -> `sql.j2`, `.hql` -> `hql`.
+            const basename = part.toLowerCase().trim().split(/[\\/]/).pop() || '';
+            const cleaned = basename.replace(/^(?:\*\.)+/, '').replace(/^\.+/, '');
 
-            // A valid extension is filename-safe characters only. Reject anything
-            // that still contains glob/path characters after stripping.
-            if (!cleaned || !/^[a-z0-9_-]+$/.test(cleaned)) {
+            // A valid extension is one or more filename-safe segments. Reject
+            // anything that still contains glob/path syntax after cleanup.
+            if (!cleaned || !/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/.test(cleaned)) {
                 continue;
             }
 
