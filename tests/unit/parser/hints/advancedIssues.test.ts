@@ -98,7 +98,7 @@ describe('detectAdvancedIssues', () => {
     });
 
     describe('dead column detection', () => {
-        it('detects unused columns in a CTE subquery', () => {
+        it('does not flag CTE outputs consumed by the outer query', () => {
             const ctx = createFreshContext('PostgreSQL');
             const selectNode = makeNode({
                 id: 's1',
@@ -125,12 +125,86 @@ describe('detectAdvancedIssues', () => {
             `;
             detectAdvancedIssues(ctx, nodes, sql);
 
-            const deadHint = ctx.hints.find(h =>
-                h.category === 'quality' && h.message.toLowerCase().includes('unused')
-            );
-            // Dead column detection should find that unused_col is never referenced outside the CTE
-            // The exact behavior depends on the implementation's SQL parsing
-            expect(ctx.hints.length).toBeGreaterThanOrEqual(0);
+            const deadWarnings = selectNode.warnings?.filter(w => w.type === 'dead-column') || [];
+            expect(deadWarnings).toHaveLength(1);
+            expect(deadWarnings[0].message).toContain('unused_col');
+
+            const deadHint = ctx.hints.find(h => h.nodeId === selectNode.id && h.message.includes('dead column'));
+            expect(deadHint?.message).toContain('unused_col');
+            expect(deadHint?.message).not.toContain('id');
+            expect(deadHint?.message).not.toContain('name');
+        });
+
+        it('recognizes CTE output usage through an outer table alias', () => {
+            const ctx = createFreshContext('PostgreSQL');
+            const selectNode = makeNode({
+                id: 's1',
+                type: 'select',
+                label: 'SELECT',
+                parentId: 'cte1',
+                columns: [
+                    { name: 'id', expression: 'id' },
+                    { name: 'total', expression: 'total' },
+                ],
+            });
+            const cteNode = makeNode({
+                id: 'cte1',
+                type: 'cte',
+                label: 'WITH order_totals',
+            });
+            const nodes = [cteNode, selectNode];
+            const sql = `
+                WITH order_totals AS (
+                    SELECT id, total FROM orders
+                )
+                SELECT ot.id
+                FROM order_totals ot
+                WHERE ot.total > 0
+            `;
+            detectAdvancedIssues(ctx, nodes, sql);
+
+            const deadWarnings = selectNode.warnings?.filter(w => w.type === 'dead-column') || [];
+            expect(deadWarnings).toHaveLength(0);
+        });
+
+        it('ignores CTE-looking text inside string literals when finding downstream usage', () => {
+            const ctx = createFreshContext('PostgreSQL');
+            const selectNode = makeNode({
+                id: 's1',
+                type: 'select',
+                label: 'SELECT',
+                parentId: 'cte1',
+                columns: [
+                    { name: 'id', expression: 'id' },
+                    { name: 'unused_col', expression: 'unused_col' },
+                    { name: 'debug_text', expression: 'debug_text' },
+                ],
+            });
+            const cteNode = makeNode({
+                id: 'cte1',
+                type: 'cte',
+                label: 'WITH my_cte',
+            });
+            const nodes = [cteNode, selectNode];
+            const sql = `
+                WITH my_cte AS (
+                    SELECT
+                        id,
+                        unused_col,
+                        ') SELECT unused_col FROM my_cte' AS debug_text
+                    FROM users
+                )
+                SELECT id
+                FROM my_cte
+            `;
+            detectAdvancedIssues(ctx, nodes, sql);
+
+            const deadWarnings = selectNode.warnings?.filter(w => w.type === 'dead-column') || [];
+            expect(deadWarnings.map(w => w.message)).toEqual(expect.arrayContaining([
+                expect.stringContaining('unused_col'),
+                expect.stringContaining('debug_text'),
+            ]));
+            expect(deadWarnings.some(w => w.message.includes('id'))).toBe(false);
         });
 
         it('skips dead column detection for top-level SELECT (no parentId)', () => {

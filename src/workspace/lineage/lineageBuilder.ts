@@ -123,7 +123,7 @@ export class LineageBuilder implements LineageGraph {
         for (const [filePath, analysis] of index.files) {
             // Only process if we don't have queries array (which would have CTEs)
             if (!analysis.queries || analysis.queries.length === 0) {
-                const sql = this.resolveFileSql(filePath, fileSqlByPath, 'debug', 'CTE extraction');
+                const sql = this.resolveFileSql(filePath, analysis, fileSqlByPath, 'debug', 'CTE extraction');
                 if (!sql) {continue;}
 
                 this.extractCTEsFromSQL(sql, filePath, cteNames);
@@ -166,7 +166,7 @@ export class LineageBuilder implements LineageGraph {
 
         // Create edges from file references
         for (const [filePath, analysis] of index.files) {
-            const sql = this.resolveFileSql(filePath, fileSqlByPath, 'warn', 'CTE/alias extraction');
+            const sql = this.resolveFileSql(filePath, analysis, fileSqlByPath, 'warn', 'CTE/alias extraction');
             this.addFileEdges(filePath, analysis, sql);
             this.addColumnEdgesFromTransformations(filePath, analysis);
         }
@@ -200,25 +200,53 @@ export class LineageBuilder implements LineageGraph {
 
     private resolveFileSql(
         filePath: string,
+        analysis: FileAnalysis,
         fileSqlByPath: Map<string, string> | undefined,
         errorLevel: 'debug' | 'warn',
         purpose: string
     ): string | null {
         if (fileSqlByPath) {
-            return fileSqlByPath.get(filePath) ?? null;
+            const preloadedSql = fileSqlByPath.get(filePath);
+            if (preloadedSql !== undefined) {
+                return preloadedSql;
+            }
         }
 
-        try {
-            return fs.readFileSync(filePath, 'utf8');
-        } catch (error) {
-            const message = `[LineageBuilder] Failed reading SQL file for ${purpose} (${filePath}): ${error instanceof Error ? error.message : String(error)}`;
+        const indexedSql = this.getSqlFromAnalysis(analysis);
+        if (indexedSql) {
+            return indexedSql;
+        }
+
+        if (fileSqlByPath) {
+            const message = `[LineageBuilder] SQL content unavailable for ${purpose} (${filePath}); async preload did not return content.`;
             if (errorLevel === 'warn') {
                 logger.warn(message);
             } else {
                 logger.debug(message);
             }
-            return null;
         }
+
+        return null;
+    }
+
+    private getSqlFromAnalysis(analysis: FileAnalysis): string | null {
+        const querySql = (analysis.queries || [])
+            .map(query => typeof query.sql === 'string' ? query.sql.trim() : '')
+            .filter(sql => sql.length > 0);
+
+        if (querySql.length > 0) {
+            return querySql.join('\n;\n');
+        }
+
+        const definitionSql = analysis.definitions
+            .map(def => typeof def.sql === 'string' ? def.sql.trim() : '')
+            .filter(sql => sql.length > 0);
+
+        if (definitionSql.length > 0) {
+            return definitionSql.join('\n;\n');
+        }
+
+        return null;
     }
 
     /**
@@ -937,17 +965,24 @@ export class LineageBuilder implements LineageGraph {
     }
 
     private resolveTableNodeId(tableKey: string): string | null {
-        const directId = this.getTableNodeId('table', tableKey);
-        if (this.nodes.has(directId)) {
-            return directId;
-        }
+        // A referenced object may have been defined as a table, a view, or a CTE
+        // (or already materialized as an external node). Statement edges must
+        // resolve to whichever node already exists; checking only `table:` lets a
+        // view/CTE reference fall through to a fresh `external:` node, leaving the
+        // real `view:`/`cte:` node disconnected from the lineage graph.
+        const candidateTypes = ['table', 'view', 'cte', 'external'];
 
         const parsed = parseQualifiedKey(tableKey);
-        if (parsed.schema) {
-            const fallbackKey = getQualifiedKey(parsed.name);
-            const fallbackId = this.getTableNodeId('table', fallbackKey);
-            if (this.nodes.has(fallbackId)) {
-                return fallbackId;
+        const keysToTry = parsed.schema
+            ? [tableKey, getQualifiedKey(parsed.name)]
+            : [tableKey];
+
+        for (const key of keysToTry) {
+            for (const type of candidateTypes) {
+                const nodeId = this.getTableNodeId(type, key);
+                if (this.nodes.has(nodeId)) {
+                    return nodeId;
+                }
             }
         }
 

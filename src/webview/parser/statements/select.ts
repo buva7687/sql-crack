@@ -77,6 +77,12 @@ function resolveColumnName(col: any): string {
         }
         // Aggregate expression: { type: 'aggr_func', name: 'COUNT' }
         if (col.type === 'aggr_func' && col.name) { return `${col.name}(...)`; }
+        // CASE expression: { type: 'case', args: [...] } or parser variants with expr
+        if (col.type === 'case') { return 'CASE'; }
+        // Window function wrappers often expose the function under expr/over.
+        if ((col.type === 'window_func' || col.over) && col.expr) {
+            return resolveColumnName(col.expr);
+        }
         // Binary expression: { type: 'binary_expr', operator: '+', left, right }
         if (col.type === 'binary_expr' && col.operator) { return `expr(${col.operator})`; }
         // Cast: { type: 'cast', expr, target }

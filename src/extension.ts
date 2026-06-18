@@ -199,7 +199,7 @@ export function activate(context: vscode.ExtensionContext) {
     };
 
     // Track active SQL document and update context for menu visibility
-    let activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    const activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
         const isSqlLike = Boolean(editor && isSqlLikeDocument(editor.document));
         VisualizationPanel.setActiveEditorActivity(isSqlLike);
         if (isSqlLike && editor) {
@@ -221,7 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
     ));
 
     // Command: Visualize SQL
-    let visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
+    const visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
         let document: vscode.TextDocument;
         let sqlCode: string;
 
@@ -281,7 +281,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Command: Refresh visualization
-    let refreshCommand = vscode.commands.registerCommand('sql-crack.refresh', () => {
+    const refreshCommand = vscode.commands.registerCommand('sql-crack.refresh', () => {
         // Use last active SQL document, not current active editor
         const document = lastActiveSqlDocument;
         if (document) {
@@ -301,7 +301,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Command: Restore/open pinned SQL Flow tabs
-    let restorePinnedTabsCommand = vscode.commands.registerCommand('sql-crack.restorePinnedTabs', async () => {
+    const restorePinnedTabsCommand = vscode.commands.registerCommand('sql-crack.restorePinnedTabs', async () => {
         const pinnedTabs = VisualizationPanel.getPinnedTabs()
             .slice()
             .sort((a, b) => b.timestamp - a.timestamp);
@@ -330,7 +330,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Command: Analyze Workspace Dependencies
-    let workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async (uri?: vscode.Uri) => {
+    const workspaceCommand = vscode.commands.registerCommand('sql-crack.analyzeWorkspace', async (uri?: vscode.Uri) => {
         const config = getConfig();
         const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
         const { WorkspacePanel } = await loadWorkspacePanel();
@@ -343,7 +343,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
     });
 
-    let workspaceUxMetricsCommand = vscode.commands.registerCommand('sql-crack.showWorkspaceUxMetrics', async () => {
+    const workspaceUxMetricsCommand = vscode.commands.registerCommand('sql-crack.showWorkspaceUxMetrics', async () => {
         const { WorkspacePanel } = await loadWorkspacePanel();
         const panel = WorkspacePanel.currentPanel;
         if (!panel) {
@@ -405,7 +405,7 @@ export function activate(context: vscode.ExtensionContext) {
     // authoritative query line ranges (from its parse) and maps the line to the
     // correct query itself. Re-deriving statement boundaries here with a separate
     // splitter risked drifting from the parser's view and selecting the wrong query.
-    let cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
+    const cursorChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
         // Scope cursor-follow to the panel's source document only. The webview maps
         // the line through that document's query ranges, so a cursor line from any
         // other SQL file would be interpreted against the wrong ranges.
@@ -441,7 +441,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Listen for document changes with debounced auto-refresh
-    let docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
+    const docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
         const config = getConfig();
         const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);

@@ -265,26 +265,26 @@ let currentSql: string = '';
 let currentColumnLineage: ColumnLineage[] = [];
 let currentTableUsage: Map<string, number> = new Map();
 // Store custom offsets for draggable clouds (nodeId -> { offsetX, offsetY })
-let cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
+const cloudOffsets: Map<string, { offsetX: number; offsetY: number }> = new Map();
 
 const layoutHistory = createLayoutHistory();
 
 // Virtualization state
 let virtualizationEnabled = true;
-let renderedNodeIds: Set<string> = new Set();
-let renderedEdgeIds: Set<string> = new Set();
+const renderedNodeIds: Set<string> = new Set();
+const renderedEdgeIds: Set<string> = new Set();
 let offscreenIndicator: SVGGElement | null = null;
-let renderedNodeElementsById: Map<string, SVGGElement> = new Map();
-let renderedEdgeElementsById: Map<string, SVGPathElement> = new Map();
-let renderedEdgeIdsByNodeId: Map<string, Set<string>> = new Map();
+const renderedNodeElementsById: Map<string, SVGGElement> = new Map();
+const renderedEdgeElementsById: Map<string, SVGPathElement> = new Map();
+const renderedEdgeIdsByNodeId: Map<string, Set<string>> = new Map();
 let activeEdgeSelectionId: string | null = null;
 let activeConnectedHighlightEdgeIds: Set<string> = new Set();
 // Store references to cloud and arrow elements for dynamic updates
-let cloudElements: Map<string, CloudRenderElements> = new Map();
+const cloudElements: Map<string, CloudRenderElements> = new Map();
 // Store per-cloud view state for independent pan/zoom (CloudViewState imported from types)
-let cloudViewStates: Map<string, CloudViewState> = new Map();
+const cloudViewStates: Map<string, CloudViewState> = new Map();
 // Store document event listeners for cleanup
-let documentListeners: Array<{ type: string; handler: EventListener }> = [];
+const documentListeners: Array<{ type: string; handler: EventListener }> = [];
 let spinnerStyleElement: HTMLStyleElement | null = null;
 let reducedMotionStyleElement: HTMLStyleElement | null = null;
 let zeroGravityModeActive = false;
@@ -292,7 +292,7 @@ let zeroGravityAnimationFrameId: number | null = null;
 let zeroGravityLastFrameAt = 0;
 let zeroGravityFrameCount = 0;
 let zeroGravityOriginalNodePositions: Map<string, { x: number; y: number }> = new Map();
-let zeroGravityVelocities: Map<string, { vx: number; vy: number }> = new Map();
+const zeroGravityVelocities: Map<string, { vx: number; vy: number }> = new Map();
 let zeroGravityBounds: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
 let zeroGravityVirtualizationEnabled: boolean | null = null;
 let matrixRainCanvas: HTMLCanvasElement | null = null;

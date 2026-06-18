@@ -107,7 +107,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     };
 
     const firstCtePattern = new RegExp(`\\bWITH\\s+(${identifier})\\s+AS\\s*\\(`, 'giu');
-    let cteMatch = firstCtePattern.exec(commentStripped);
+    const cteMatch = firstCtePattern.exec(commentStripped);
     if (cteMatch) {
         cteNames.add(normalizeObjectName(cteMatch[1]));
         const openParenIdx = cteMatch.index + cteMatch[0].length - 1;

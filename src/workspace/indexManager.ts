@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import {
     WorkspaceIndex,
     SerializedWorkspaceIndex,
@@ -74,7 +75,7 @@ export class IndexManager {
         // Try to load cached index. loadCachedIndex() records the precise reason
         // (valid / missing / stale / version- or identity-mismatch / oversized /
         // disabled) so callers don't have to infer it from a bare null.
-        this.index = await this.loadCachedIndex();
+        this.index = await this.loadCachedIndex(fileCount);
         const cacheState = this._lastCacheState;
 
         // Auto-index small workspaces when there is no valid cache to reuse. A
@@ -846,7 +847,7 @@ export class IndexManager {
         return this._lastCacheState;
     }
 
-    private async loadCachedIndex(): Promise<WorkspaceIndex | null> {
+    private async loadCachedIndex(currentFileCount: number): Promise<WorkspaceIndex | null> {
         // Check advanced settings
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
         const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
@@ -899,6 +900,12 @@ export class IndexManager {
             return null;
         }
 
+        if (!(await this.isCachedIndexCurrent(cached, currentFileCount))) {
+            logger.debug('[IndexManager] Cached index filesystem snapshot changed - rebuilding index');
+            this._lastCacheState = 'stale';
+            return null;
+        }
+
         // Reconstruct Maps from arrays
         // Handle backward compatibility: fileHashesArray may not exist in old cache
         const fileHashesArray = cached.fileHashesArray || [];
@@ -918,6 +925,63 @@ export class IndexManager {
             definitionMap: new Map(definitionArray),
             referenceMap: new Map(cached.referenceArray || [])
         };
+    }
+
+    private async isCachedIndexCurrent(cached: SerializedWorkspaceIndex, currentFileCount: number): Promise<boolean> {
+        if (cached.fileCount !== currentFileCount) {
+            return false;
+        }
+
+        const cachedHashes = new Map(cached.fileHashesArray || []);
+        for (const [filePath, analysis] of cached.filesArray || []) {
+            const uri = vscode.Uri.file(filePath);
+            let stat: vscode.FileStat;
+            try {
+                stat = await vscode.workspace.fs.stat(uri);
+            } catch {
+                return false;
+            }
+
+            if (typeof analysis.lastModified === 'number' && analysis.lastModified === stat.mtime) {
+                continue;
+            }
+
+            const cachedHash = cachedHashes.get(filePath) || analysis.contentHash;
+            if (!cachedHash) {
+                return false;
+            }
+
+            try {
+                const currentHash = await this.computeCurrentContentHash(uri, stat.size);
+                if (currentHash !== cachedHash) {
+                    return false;
+                }
+            } catch {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private async computeCurrentContentHash(uri: vscode.Uri, expectedSize: number): Promise<string> {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        let text: string;
+        if (bytes.length === 0 && expectedSize > 0) {
+            const document = await vscode.workspace.openTextDocument(uri);
+            text = document.getText();
+        } else {
+            text = new TextDecoder('utf-8').decode(bytes);
+            if (text.charCodeAt(0) === 0xFEFF) {
+                text = text.slice(1);
+            }
+            if (text.includes('\uFFFD')) {
+                const document = await vscode.workspace.openTextDocument(uri);
+                text = document.getText();
+            }
+        }
+
+        return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     }
 
     /**

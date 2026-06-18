@@ -1,8 +1,8 @@
 name: Release
 
 # Fires automatically on every push to main. If package.json contains a version
-# that has not been released yet (no matching git tag), it builds, tags, and
-# publishes a GitHub release with auto-generated notes and the packaged VSIX.
+# that has not been released yet (no matching git tag), it builds, creates the
+# GitHub release/tag, then publishes the packaged VSIX to external registries.
 #
 # Marketplace / Open VSX publishing stays OFF unless the VSCE_PAT / OVSX_PAT
 # repository secrets are configured. No secret values are ever written to logs.
@@ -11,6 +11,10 @@ on:
     branches:
       - main
   workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -108,6 +112,14 @@ jobs:
         run: |
           npx @vscode/vsce package --out "sql-crack-${TAG_NAME}.vsix"
 
+      - name: Create GitHub release and tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.TAG_NAME }}
+          files: sql-crack-${{ env.TAG_NAME }}.vsix
+          generate_release_notes: true
+
       - name: Publish to VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' }}
         run: |
@@ -125,11 +137,3 @@ jobs:
       - name: Skip Open VSX publish
         if: ${{ env.OVSX_PAT == '' }}
         run: echo "OVSX_PAT not configured; skipping Open VSX publish."
-
-      - name: Create GitHub release and tag
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          name: ${{ env.TAG_NAME }}
-          files: sql-crack-${{ env.TAG_NAME }}.vsix
-          generate_release_notes: true

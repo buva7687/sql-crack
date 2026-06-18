@@ -424,6 +424,14 @@ export function parseSqlBatch(
         return count;
     };
 
+    const normalizeStatementLineForMatch = (line: string): string => {
+        return line.trim().replace(/;$/, '').trimEnd();
+    };
+
+    const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {
+        return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);
+    };
+
     for (const stmt of statements) {
         const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
         const stmtTrimmed = stmt.trim();
@@ -442,10 +450,10 @@ export function parseSqlBatch(
             ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
             : '';
         for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lines[i].includes(matchPrefix)) {
-                // For short prefixes, verify the next line matches too
-                if (matchPrefix.length < 30 && stmtSecondLine && i + 1 < lines.length) {
-                    if (!lines[i + 1].includes(stmtSecondLine)) {
+            if (lineMatchesStatementLine(lines[i], matchPrefix)) {
+                if (stmtSecondLine && i + 1 < lines.length) {
+                    const secondLineMatches = lineMatchesStatementLine(lines[i + 1], stmtSecondLine);
+                    if (!secondLineMatches) {
                         continue;
                     }
                 }

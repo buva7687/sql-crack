@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - Unreleased
+
+### Fixed
+
+- **Parser worker supersede cancellation**: Newer parse requests now terminate and respawn a busy parser worker after cancelling superseded in-flight work, preventing stale heavy parses from blocking the worker queue and causing false timeouts for the latest request.
+- **Comments-only refresh loader cleanup**: SQL Flow now hides the global loading overlay before the comments-only early return, so a superseded parse cannot leave the loader stuck.
+- **Workspace lineage view/CTE resolution**: Statement lineage edges now resolve existing `view:`, `cte:`, and `external:` nodes instead of checking only `table:`, preventing valid view references from falling through to stray external nodes.
+- **Dead-column CTE output hints**: Dead-column detection keeps scoped CTE-body analysis while also recognizing downstream CTE output usage, including outer `SELECT` projections and table aliases.
+- **Workspace index cache freshness**: Cached workspace indexes are validated against current file count, file stats, and content hashes before reuse, so offline file edits, additions, and deletions trigger a rebuild instead of serving stale definitions.
+- **Release workflow ordering and concurrency**: The release workflow now creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts with workflow-level concurrency.
+- **Performance baseline CI wiring**: Hard perf baseline suites are excluded from normal Jest/coverage runs and are executed through the dedicated `test:perf` script.
+- **Validation byte counting**: SQL size-limit validation uses `TextEncoder` byte length instead of `Blob`, for correct sizing in Node-like contexts.
+- **MySQL backslash escapes in statement splitting**: The statement splitter no longer splits on semicolons inside MySQL backslash-escaped string literals (`\'` / `\"`).
+- **Batch statement line matching**: Statement-start line ranges are matched by exact normalized full-line equality instead of a substring/30-character-prefix heuristic, reducing mismatches on duplicated prefixes.
+- **`resolveColumnName` expression coverage**: `CASE`, window, and other complex AST expression forms render readable labels instead of falling back to `?`.
+
+### Changed
+
+- **Hint analysis helpers**: Dead-column and related hint paths now reuse shared `stripSqlComments` / `maskStringsAndComments` helpers instead of ad-hoc inline regex normalization.
+- **ESLint configuration**: Adopted `eslint:recommended` and `@typescript-eslint/recommended`, replaced the deprecated `@typescript-eslint/semi` rule with the base `semi` rule, and added documented opt-outs for rules incompatible with the parser's intentionally untyped AST handling (e.g. `no-explicit-any`). Converted never-reassigned `let` bindings to `const`.
+- **Coverage configuration**: Tightened Jest coverage wiring and added direct unit coverage for previously integration-only modules (hint generation, workspace graph building, lineage).
+
+### Tests
+
+- Added regression coverage for worker supersede termination, comments-only loader cleanup, CTE output dead-column detection, workspace cache freshness, view-backed lineage edges, performance test wiring, release workflow ordering/concurrency, validation byte counting, backslash-escape statement splitting, full-line batch matching, and `resolveColumnName` expression handling.
+- Branch validation: 274 suites, 3,551 tests passing. `npx tsc --noEmit` (src + tests) and `npm run lint` pass (0 errors; two pre-existing naming warnings in `tests/unit/webview/nodeBorderState.test.ts`).
+
 ## [0.9.0] - 2026-06-16
 
 ### Security
