@@ -185,6 +185,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         }
     }
 
+    const nodeByLabel = new Map(nodes.map(node => [node.label, node]));
     const tableRefPattern = new RegExp(`\\b(FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
     let refMatch;
     const tableRefs: { keyword: string; table: string; pos: number }[] = [];
@@ -200,10 +201,16 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         if (ref.keyword === 'FROM') {
             chainPrev = ref.table;
         } else if (ref.keyword === 'JOIN' && chainPrev && tableNames.has(chainPrev) && tableNames.has(ref.table)) {
+            const sourceNode = nodeByLabel.get(chainPrev);
+            const targetNode = nodeByLabel.get(ref.table);
+            if (!sourceNode || !targetNode) {
+                chainPrev = ref.table;
+                continue;
+            }
             edges.push({
                 id: genId('edge'),
-                source: nodes.find(n => n.label === chainPrev)?.id || '',
-                target: nodes.find(n => n.label === ref.table)?.id || '',
+                source: sourceNode.id,
+                target: targetNode.id,
                 sqlClause: 'JOIN',
                 clauseType: 'join',
             });
@@ -217,8 +224,8 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
             const srcTable = normalizeObjectName(bodyRef[1]);
             if (srcTable && tableNames.has(srcTable) && srcTable !== cteName) {
-                const srcNode = nodes.find(n => n.label === srcTable);
-                const cteNode = nodes.find(n => n.label === cteName);
+                const srcNode = nodeByLabel.get(srcTable);
+                const cteNode = nodeByLabel.get(cteName);
                 if (srcNode && cteNode) {
                     edges.push({
                         id: genId('edge'),
@@ -335,8 +342,8 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
                 operationType: 'MERGE',
             });
 
-            const sourceNode = nodes.find(n => n.label === sourceTable);
-            const targetNode = nodes.find(n => n.label === targetTable);
+            const sourceNode = nodeByLabel.get(sourceTable);
+            const targetNode = nodeByLabel.get(targetTable);
 
             // Both source and target flow INTO the MERGE node
             if (targetNode) {

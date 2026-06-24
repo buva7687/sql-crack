@@ -640,6 +640,10 @@ export class WorkspacePanel {
         let invalidationRetries = 0;
 
         while (!this._lineageGraph) {
+            if (this._isDisposed) {
+                return;
+            }
+
             const index = this._indexManager.getIndex();
             if (!index) {
                 return;
@@ -648,6 +652,9 @@ export class WorkspacePanel {
             if (this._lineageBuildPromise) {
                 const inFlight = this._lineageBuildPromise;
                 await inFlight;
+                if (this._isDisposed) {
+                    return;
+                }
                 if (this._lineageBuildPromise === inFlight) {
                     this._lineageBuildPromise = null;
                 }
@@ -659,7 +666,7 @@ export class WorkspacePanel {
 
             const buildVersion = this._lineageBuildVersion;
             const buildPromise = Promise.resolve().then(async () => {
-                if (this._lineageGraph) {return;}
+                if (this._isDisposed || this._lineageGraph) {return;}
 
                 const currentIndex = this._indexManager.getIndex();
                 if (!currentIndex) {return;}
@@ -668,7 +675,7 @@ export class WorkspacePanel {
                 const graph = await builder.buildFromIndexAsync(currentIndex);
 
                 // If graph state was invalidated while building, discard stale results.
-                if (buildVersion !== this._lineageBuildVersion) {
+                if (this._isDisposed || buildVersion !== this._lineageBuildVersion) {
                     return;
                 }
 

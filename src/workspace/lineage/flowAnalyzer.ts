@@ -58,94 +58,107 @@ export class FlowAnalyzer {
         return this.outgoingEdgesByNodeId.get(nodeId) || [];
     }
 
-    /**
-     * Get all nodes upstream of a target (data sources)
-     */
-    getUpstream(nodeId: string, options: FlowOptions = {}): FlowResult {
+    private collectDirectionalFlow(
+        nodeId: string,
+        direction: 'upstream' | 'downstream',
+        options: FlowOptions
+    ): FlowResult {
         const {
             maxDepth = -1,
             filterTypes,
             excludeExternal = false
         } = options;
 
-        const visited = new Set<string>();
-        const resultNodes: LineageNode[] = [];
-        const resultEdges: any[] = [];
-
-        const traverse = (currentId: string, currentDepth: number): void => {
-            if (maxDepth !== -1 && currentDepth >= maxDepth) {return;}
-            if (visited.has(currentId)) {return;}
-
-            visited.add(currentId);
-
-            for (const edge of this.getIncomingEdges(currentId)) {
-                const sourceNode = this.graph.nodes.get(edge.sourceId);
-
-                if (!sourceNode) {continue;}
-                if (excludeExternal && sourceNode.type === 'external') {continue;}
-                if (filterTypes && !filterTypes.includes(sourceNode.type)) {continue;}
-
-                if (!visited.has(sourceNode.id)) {
-                    resultNodes.push(sourceNode);
-                    resultEdges.push(edge);
-                    traverse(sourceNode.id, currentDepth + 1);
-                }
-            }
+        type TraversalFrame = {
+            currentId: string;
+            currentDepth: number;
+            edges: LineageEdge[];
+            nextEdgeIndex: number;
+            entered: boolean;
         };
 
-        traverse(nodeId, 0);
+        const visited = new Set<string>();
+        const resultNodes: LineageNode[] = [];
+        const resultEdges: LineageEdge[] = [];
+        let reachedDepth = 0;
+        const frames: TraversalFrame[] = [{
+            currentId: nodeId,
+            currentDepth: 0,
+            edges: [],
+            nextEdgeIndex: 0,
+            entered: false
+        }];
+
+        while (frames.length > 0) {
+            const frame = frames[frames.length - 1];
+
+            if (!frame.entered) {
+                if (maxDepth !== -1 && frame.currentDepth >= maxDepth) {
+                    frames.pop();
+                    continue;
+                }
+                if (visited.has(frame.currentId)) {
+                    frames.pop();
+                    continue;
+                }
+
+                visited.add(frame.currentId);
+                frame.edges = direction === 'upstream'
+                    ? this.getIncomingEdges(frame.currentId)
+                    : this.getOutgoingEdges(frame.currentId);
+                frame.entered = true;
+            }
+
+            if (frame.nextEdgeIndex >= frame.edges.length) {
+                frames.pop();
+                continue;
+            }
+
+            const edge = frame.edges[frame.nextEdgeIndex];
+            frame.nextEdgeIndex++;
+
+            const nextId = direction === 'upstream' ? edge.sourceId : edge.targetId;
+            const nextNode = this.graph.nodes.get(nextId);
+
+            if (!nextNode) {continue;}
+            if (excludeExternal && nextNode.type === 'external') {continue;}
+            if (filterTypes && !filterTypes.includes(nextNode.type)) {continue;}
+
+            if (!visited.has(nextNode.id)) {
+                const nextDepth = frame.currentDepth + 1;
+                resultNodes.push(nextNode);
+                resultEdges.push(edge);
+                reachedDepth = Math.max(reachedDepth, nextDepth);
+                frames.push({
+                    currentId: nextNode.id,
+                    currentDepth: nextDepth,
+                    edges: [],
+                    nextEdgeIndex: 0,
+                    entered: false
+                });
+            }
+        }
 
         return {
             nodes: resultNodes,
             edges: resultEdges,
             paths: this.buildPathsFromEdges(resultEdges),
-            depth: this.calculateDepth(resultEdges, nodeId)
+            depth: reachedDepth
         };
+    }
+
+    /**
+     * Get all nodes upstream of a target (data sources)
+     */
+    getUpstream(nodeId: string, options: FlowOptions = {}): FlowResult {
+        return this.collectDirectionalFlow(nodeId, 'upstream', options);
     }
 
     /**
      * Get all nodes downstream of a source (data consumers)
      */
     getDownstream(nodeId: string, options: FlowOptions = {}): FlowResult {
-        const {
-            maxDepth = -1,
-            filterTypes,
-            excludeExternal = false
-        } = options;
-
-        const visited = new Set<string>();
-        const resultNodes: LineageNode[] = [];
-        const resultEdges: any[] = [];
-
-        const traverse = (currentId: string, currentDepth: number): void => {
-            if (maxDepth !== -1 && currentDepth >= maxDepth) {return;}
-            if (visited.has(currentId)) {return;}
-
-            visited.add(currentId);
-
-            for (const edge of this.getOutgoingEdges(currentId)) {
-                const targetNode = this.graph.nodes.get(edge.targetId);
-
-                if (!targetNode) {continue;}
-                if (excludeExternal && targetNode.type === 'external') {continue;}
-                if (filterTypes && !filterTypes.includes(targetNode.type)) {continue;}
-
-                if (!visited.has(targetNode.id)) {
-                    resultNodes.push(targetNode);
-                    resultEdges.push(edge);
-                    traverse(targetNode.id, currentDepth + 1);
-                }
-            }
-        };
-
-        traverse(nodeId, 0);
-
-        return {
-            nodes: resultNodes,
-            edges: resultEdges,
-            paths: this.buildPathsFromEdges(resultEdges),
-            depth: this.calculateDepth(resultEdges, nodeId)
-        };
+        return this.collectDirectionalFlow(nodeId, 'downstream', options);
     }
 
     /**
@@ -301,28 +314,4 @@ export class FlowAnalyzer {
         return paths;
     }
 
-    /**
-     * Calculate maximum depth of edges
-     */
-    private calculateDepth(edges: LineageEdge[], startNodeId: string): number {
-        const depths = new Map<string, number>();
-        depths.set(startNodeId, 0);
-
-        let changed = true;
-        while (changed) {
-            changed = false;
-
-            for (const edge of edges) {
-                const sourceDepth = depths.get(edge.sourceId) ?? 0;
-                const currentDepth = depths.get(edge.targetId) ?? 0;
-
-                if (sourceDepth + 1 > currentDepth) {
-                    depths.set(edge.targetId, sourceDepth + 1);
-                    changed = true;
-                }
-            }
-        }
-
-        return Math.max(0, ...Array.from(depths.values()));
-    }
 }

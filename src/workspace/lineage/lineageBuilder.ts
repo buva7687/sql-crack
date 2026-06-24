@@ -865,56 +865,82 @@ export class LineageBuilder implements LineageGraph {
         return collected;
     }
 
+    private collectDirectionalNodes(nodeId: string, direction: 'upstream' | 'downstream', depth: number): LineageNode[] {
+        type TraversalFrame = {
+            currentId: string;
+            currentDepth: number;
+            edges: LineageEdge[];
+            nextEdgeIndex: number;
+            entered: boolean;
+        };
+
+        const visited = new Set<string>();
+        const result: LineageNode[] = [];
+        const frames: TraversalFrame[] = [{
+            currentId: nodeId,
+            currentDepth: 0,
+            edges: [],
+            nextEdgeIndex: 0,
+            entered: false
+        }];
+
+        while (frames.length > 0) {
+            const frame = frames[frames.length - 1];
+
+            if (!frame.entered) {
+                if (depth !== -1 && frame.currentDepth >= depth) {
+                    frames.pop();
+                    continue;
+                }
+                if (visited.has(frame.currentId)) {
+                    frames.pop();
+                    continue;
+                }
+
+                visited.add(frame.currentId);
+                frame.edges = direction === 'upstream'
+                    ? this.getIncomingEdges(frame.currentId)
+                    : this.getOutgoingEdges(frame.currentId);
+                frame.entered = true;
+            }
+
+            if (frame.nextEdgeIndex >= frame.edges.length) {
+                frames.pop();
+                continue;
+            }
+
+            const edge = frame.edges[frame.nextEdgeIndex];
+            frame.nextEdgeIndex++;
+
+            const nextId = direction === 'upstream' ? edge.sourceId : edge.targetId;
+            const nextNode = this.nodes.get(nextId);
+            if (nextNode && !visited.has(nextNode.id)) {
+                result.push(nextNode);
+                frames.push({
+                    currentId: nextNode.id,
+                    currentDepth: frame.currentDepth + 1,
+                    edges: [],
+                    nextEdgeIndex: 0,
+                    entered: false
+                });
+            }
+        }
+
+        return result;
+    }
+
     /**
      * Get all nodes upstream of a target (data sources)
      */
     getUpstream(nodeId: string, depth: number = -1): LineageNode[] {
-        const visited = new Set<string>();
-        const result: LineageNode[] = [];
-
-        const traverse = (currentId: string, currentDepth: number) => {
-            if (depth !== -1 && currentDepth >= depth) {return;}
-            if (visited.has(currentId)) {return;}
-
-            visited.add(currentId);
-
-            for (const edge of this.getIncomingEdges(currentId)) {
-                const sourceNode = this.nodes.get(edge.sourceId);
-                if (sourceNode && !visited.has(sourceNode.id)) {
-                    result.push(sourceNode);
-                    traverse(sourceNode.id, currentDepth + 1);
-                }
-            }
-        };
-
-        traverse(nodeId, 0);
-        return result;
+        return this.collectDirectionalNodes(nodeId, 'upstream', depth);
     }
 
     /**
      * Get all nodes downstream of a source (data consumers)
      */
     getDownstream(nodeId: string, depth: number = -1): LineageNode[] {
-        const visited = new Set<string>();
-        const result: LineageNode[] = [];
-
-        const traverse = (currentId: string, currentDepth: number) => {
-            if (depth !== -1 && currentDepth >= depth) {return;}
-            if (visited.has(currentId)) {return;}
-
-            visited.add(currentId);
-
-            for (const edge of this.getOutgoingEdges(currentId)) {
-                const targetNode = this.nodes.get(edge.targetId);
-                if (targetNode && !visited.has(targetNode.id)) {
-                    result.push(targetNode);
-                    traverse(targetNode.id, currentDepth + 1);
-                }
-            }
-        };
-
-        traverse(nodeId, 0);
-        return result;
+        return this.collectDirectionalNodes(nodeId, 'downstream', depth);
     }
 
     /**

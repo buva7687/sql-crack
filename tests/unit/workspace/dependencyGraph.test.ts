@@ -126,6 +126,29 @@ describe('workspace dependency graph layout and cycle detection', () => {
         expect(cycles[0]).not.toContain('<->');
     });
 
+    it('builds a deep file dependency chain without overflowing the call stack', () => {
+        const fileCount = 12000;
+        const files: FileAnalysis[] = [];
+
+        for (let i = 0; i < fileCount; i++) {
+            const filePath = `/repo/chain_${i}.sql`;
+            const references = i < fileCount - 1
+                ? [createReference(filePath, `chain_table_${i + 1}`)]
+                : [];
+            files.push(createFileAnalysis(
+                filePath,
+                createDefinition(filePath, `chain_table_${i}`),
+                references
+            ));
+        }
+
+        const graph = buildDependencyGraph(createIndex(files), 'files');
+
+        expect(graph.nodes).toHaveLength(fileCount);
+        expect(graph.edges).toHaveLength(fileCount - 1);
+        expect(graph.stats.circularDependencies).toHaveLength(0);
+    });
+
     it('scopes table-mode view edges to the matching statement when a file defines multiple views', () => {
         const viewsFile = '/repo/views.sql';
         const sourceAFile = '/repo/source_a.sql';

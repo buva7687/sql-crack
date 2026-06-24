@@ -193,5 +193,28 @@ describe('Logger', () => {
             expect(freshMock.appendLine.mock.calls[0][0]).toContain('pre-init message 1');
             expect(freshMock.appendLine.mock.calls[1][0]).toContain('pre-init message 2');
         });
+
+        it('caps pre-init buffering and keeps the newest messages', () => {
+            logger._reset();
+            for (let i = 0; i < 505; i++) {
+                logger.info(`pre-init capped message ${i}`);
+            }
+
+            const freshMock = {
+                appendLine: jest.fn(),
+                show: jest.fn(),
+                clear: jest.fn(),
+                append: jest.fn(),
+                hide: jest.fn(),
+                dispose: jest.fn()
+            };
+            (vscodeMock.window.createOutputChannel as jest.Mock).mockReturnValue(freshMock);
+            const ctx = vscodeMock.createMockExtensionContext();
+            logger.initialize(ctx);
+
+            expect(freshMock.appendLine).toHaveBeenCalledTimes(500);
+            expect(freshMock.appendLine.mock.calls[0][0]).toContain('pre-init capped message 5');
+            expect(freshMock.appendLine.mock.calls[499][0]).toContain('pre-init capped message 504');
+        });
     });
 });

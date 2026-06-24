@@ -572,6 +572,34 @@ describe('LineageBuilder', () => {
             const downstream = builder.getDownstream('table:source');
             expect(downstream.some(n => n.id === 'table:target')).toBe(true);
         });
+
+        it('handles deep graph-interface traversals without overflowing the call stack', () => {
+            const nodeCount = 12000;
+            const builder = new LineageBuilder();
+
+            for (let i = 0; i < nodeCount; i++) {
+                const nodeId = `table:chain_${i}`;
+                builder.nodes.set(nodeId, {
+                    id: nodeId,
+                    type: 'table',
+                    name: `chain_${i}`,
+                    metadata: {}
+                });
+
+                if (i > 0) {
+                    (builder as any).addEdge({
+                        id: `edge_${i - 1}_${i}`,
+                        sourceId: `table:chain_${i - 1}`,
+                        targetId: nodeId,
+                        type: 'direct',
+                        metadata: {}
+                    });
+                }
+            }
+
+            expect(builder.getDownstream('table:chain_0')).toHaveLength(nodeCount - 1);
+            expect(builder.getUpstream(`table:chain_${nodeCount - 1}`)).toHaveLength(nodeCount - 1);
+        });
     });
 
     describe('getColumnLineage', () => {

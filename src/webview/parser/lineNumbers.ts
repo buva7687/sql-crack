@@ -140,10 +140,10 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
 
                 let foundLine: number | undefined;
                 const searchStartLine = anchorLines.length > 0 ? Math.min(...anchorLines) : 1;
+                const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
 
                 for (let i = 0; i < sqlLines.length; i++) {
                     const line = commentStrippedLines[i].toLowerCase();
-                    const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
                     if (tableRegex.test(line)) {
                         const previousLine = i > 0 ? commentStrippedLines[i - 1].toLowerCase() : '';
                         if (i >= searchStartLine - 1 ||

@@ -463,22 +463,29 @@ function findFileCycleGroups(fileDeps: Map<string, Set<string>>): string[] {
     const onStack = new Set<string>();
     const cycleGroups: string[] = [];
 
-    const visit = (nodeId: string): void => {
+    type TarjanFrame = {
+        nodeId: string;
+        targets: string[];
+        nextTargetIndex: number;
+        parentId?: string;
+    };
+
+    const createFrame = (nodeId: string, parentId?: string): TarjanFrame => {
         indices.set(nodeId, indexCounter);
         lowLinks.set(nodeId, indexCounter);
         indexCounter++;
         stack.push(nodeId);
         onStack.add(nodeId);
 
-        for (const targetId of fileDeps.get(nodeId) || []) {
-            if (!indices.has(targetId)) {
-                visit(targetId);
-                lowLinks.set(nodeId, Math.min(lowLinks.get(nodeId)!, lowLinks.get(targetId)!));
-            } else if (onStack.has(targetId)) {
-                lowLinks.set(nodeId, Math.min(lowLinks.get(nodeId)!, indices.get(targetId)!));
-            }
-        }
+        return {
+            nodeId,
+            targets: Array.from(fileDeps.get(nodeId) || []),
+            nextTargetIndex: 0,
+            parentId
+        };
+    };
 
+    const completeNode = (nodeId: string): void => {
         if (lowLinks.get(nodeId) !== indices.get(nodeId)) {
             return;
         }
@@ -503,8 +510,32 @@ function findFileCycleGroups(fileDeps: Map<string, Set<string>>): string[] {
     };
 
     for (const nodeId of fileDeps.keys()) {
-        if (!indices.has(nodeId)) {
-            visit(nodeId);
+        if (indices.has(nodeId)) {
+            continue;
+        }
+
+        const frames: TarjanFrame[] = [createFrame(nodeId)];
+        while (frames.length > 0) {
+            const frame = frames[frames.length - 1];
+
+            if (frame.nextTargetIndex < frame.targets.length) {
+                const targetId = frame.targets[frame.nextTargetIndex];
+                frame.nextTargetIndex++;
+
+                if (!indices.has(targetId)) {
+                    frames.push(createFrame(targetId, frame.nodeId));
+                } else if (onStack.has(targetId)) {
+                    lowLinks.set(frame.nodeId, Math.min(lowLinks.get(frame.nodeId)!, indices.get(targetId)!));
+                }
+                continue;
+            }
+
+            frames.pop();
+            completeNode(frame.nodeId);
+
+            if (frame.parentId !== undefined) {
+                lowLinks.set(frame.parentId, Math.min(lowLinks.get(frame.parentId)!, lowLinks.get(frame.nodeId)!));
+            }
         }
     }
 
@@ -605,26 +636,62 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         }
     }
 
-    // Assign levels using longest path from roots.
-    // Uses in-place visited set with backtracking to avoid exponential copy overhead.
-    function longestPathFrom(nodeId: string, currentLevel: number, visited: Set<string>): void {
-        if (visited.has(nodeId)) {return;}
-
-        const existingLevel = levels.get(nodeId) ?? -1;
-        if (currentLevel <= existingLevel) {return;}
-
-        levels.set(nodeId, currentLevel);
-        visited.add(nodeId);
-
-        for (const targetId of outEdges.get(nodeId) || []) {
-            longestPathFrom(targetId, currentLevel + 1, visited);
-        }
-
-        visited.delete(nodeId);
-    }
-
+    // Assign levels using longest path from roots with an explicit stack so
+    // deep workspace dependency chains cannot overflow the JS call stack.
+    type LongestPathFrame = {
+        nodeId: string;
+        currentLevel: number;
+        targets: string[];
+        nextTargetIndex: number;
+        entered: boolean;
+    };
     for (const rootId of roots) {
-        longestPathFrom(rootId, 0, new Set());
+        const visitedPath = new Set<string>();
+        const frames: LongestPathFrame[] = [{
+            nodeId: rootId,
+            currentLevel: 0,
+            targets: [],
+            nextTargetIndex: 0,
+            entered: false
+        }];
+
+        while (frames.length > 0) {
+            const frame = frames[frames.length - 1];
+
+            if (!frame.entered) {
+                if (visitedPath.has(frame.nodeId)) {
+                    frames.pop();
+                    continue;
+                }
+
+                const existingLevel = levels.get(frame.nodeId) ?? -1;
+                if (frame.currentLevel <= existingLevel) {
+                    frames.pop();
+                    continue;
+                }
+
+                levels.set(frame.nodeId, frame.currentLevel);
+                visitedPath.add(frame.nodeId);
+                frame.targets = outEdges.get(frame.nodeId) || [];
+                frame.entered = true;
+            }
+
+            if (frame.nextTargetIndex < frame.targets.length) {
+                const targetId = frame.targets[frame.nextTargetIndex];
+                frame.nextTargetIndex++;
+                frames.push({
+                    nodeId: targetId,
+                    currentLevel: frame.currentLevel + 1,
+                    targets: [],
+                    nextTargetIndex: 0,
+                    entered: false
+                });
+                continue;
+            }
+
+            visitedPath.delete(frame.nodeId);
+            frames.pop();
+        }
     }
 
     // Handle any unassigned nodes

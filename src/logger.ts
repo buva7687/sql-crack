@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+const MAX_PRE_INIT_BUFFER_LINES = 500;
+
 /**
  * Logger utility using VS Code's OutputChannel for proper extension logging.
  * Provides log, info, warn, error, and debug methods.
@@ -63,6 +65,9 @@ class Logger {
         if (this.outputChannel) {
             this.outputChannel.appendLine(formatted);
         } else {
+            if (this.preInitBuffer.length >= MAX_PRE_INIT_BUFFER_LINES) {
+                this.preInitBuffer.shift();
+            }
             this.preInitBuffer.push(formatted);
         }
     }

@@ -56,6 +56,53 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(context._lineageBuildPromise).toBeNull();
     });
 
+    it('does not attach lineage state when disposed during an in-flight build', async () => {
+        const mockGraph = {
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        } as any;
+
+        let resolveBuild: ((graph: any) => void) | undefined;
+        const buildSpy = jest
+            .spyOn(LineageBuilder.prototype, 'buildFromIndexAsync')
+            .mockImplementation(() => new Promise(resolve => {
+                resolveBuild = resolve;
+            }));
+
+        const context: any = {
+            _isDisposed: false,
+            _lineageGraph: null,
+            _lineageBuilder: null,
+            _flowAnalyzer: null,
+            _impactAnalyzer: null,
+            _columnLineageTracker: null,
+            _lineageBuildPromise: null,
+            _lineageBuildVersion: 0,
+            _indexManager: {
+                getIndex: jest.fn(() => ({ files: [] })),
+            },
+        };
+
+        const buildPromise = (WorkspacePanel.prototype as any).buildLineageGraph.call(context);
+        await Promise.resolve();
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+
+        context._isDisposed = true;
+        resolveBuild?.(mockGraph);
+        await buildPromise;
+
+        expect(context._lineageGraph).toBeNull();
+        expect(context._lineageBuilder).toBeNull();
+        expect(context._flowAnalyzer).toBeNull();
+        expect(context._impactAnalyzer).toBeNull();
+        expect(context._columnLineageTracker).toBeNull();
+        expect(context._lineageBuildPromise).toBeNull();
+    });
+
     it('retries lineage build when awaited in-flight promise resolves without graph', async () => {
         const mockGraph = {
             nodes: new Map(),
