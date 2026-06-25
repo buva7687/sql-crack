@@ -40,6 +40,42 @@ function extractColumnHintLabel(columnRef: any): string | null {
     return normalized.includes('.') ? normalized.split('.').pop() || normalized : normalized;
 }
 
+function getAstList(value: any): any[] {
+    if (Array.isArray(value)) {
+        return value;
+    }
+    if (value && Array.isArray(value.columns)) {
+        return value.columns;
+    }
+    return [];
+}
+
+function getJoinType(node: FlowNode): string {
+    const raw = node.joinType || node.label || '';
+    const upper = String(raw).toUpperCase();
+    if (upper.includes('CROSS JOIN') || upper === 'CROSS') {
+        return 'CROSS';
+    }
+    if (upper.includes('LEFT JOIN') || upper === 'LEFT') {
+        return 'LEFT';
+    }
+    if (upper.includes('RIGHT JOIN') || upper === 'RIGHT') {
+        return 'RIGHT';
+    }
+    if (upper.includes('FULL JOIN') || upper === 'FULL') {
+        return 'FULL';
+    }
+    if (upper.includes('INNER JOIN') || upper === 'INNER') {
+        return 'INNER';
+    }
+    return upper;
+}
+
+function isCountStarArg(args: any): boolean {
+    const expr = args?.expr;
+    return expr === '*' || expr?.type === 'star' || expr?.value === '*';
+}
+
 // Helper function to extract column references from an expression
 function extractColumnReferences(expr: any): string[] {
     const columns: string[] = [];
@@ -220,13 +256,13 @@ function analyzeJoinOrder(
     
     joinNodes.forEach((joinNode, index) => {
         // Check for CROSS JOINs appearing early
-        if (joinNode.joinType === 'CROSS' && index < joinNodes.length - 1) {
+        if (getJoinType(joinNode) === 'CROSS' && index < joinNodes.length - 1) {
             hasCrossJoinEarly = true;
         }
     });
     
     if (hasCrossJoinEarly) {
-        const crossJoinNode = joinNodes.find(n => n.joinType === 'CROSS');
+        const crossJoinNode = joinNodes.find(n => getJoinType(n) === 'CROSS');
         hints.push({
             type: 'warning',
             message: 'CROSS JOIN appears before other JOINs',
@@ -453,16 +489,18 @@ function generateIndexHints(
     }
 
     // Extract ORDER BY columns
-    if (ast.orderby && Array.isArray(ast.orderby)) {
-        ast.orderby.forEach((orderItem: any) => {
+    const orderByItems = getAstList(ast.orderby);
+    if (orderByItems.length > 0) {
+        orderByItems.forEach((orderItem: any) => {
             const columns = extractColumnReferences(orderItem.expr || orderItem);
             columns.forEach(col => columnsByPurpose.sort.add(col));
         });
     }
 
     // Extract GROUP BY columns
-    if (ast.groupby && Array.isArray(ast.groupby)) {
-        ast.groupby.forEach((groupItem: any) => {
+    const groupByItems = getAstList(ast.groupby);
+    if (groupByItems.length > 0) {
+        groupByItems.forEach((groupItem: any) => {
             const columns = extractColumnReferences(groupItem.expr || groupItem);
             columns.forEach(col => columnsByPurpose.group.add(col));
         });
@@ -746,7 +784,7 @@ function analyzeAggregatePerformance(
             if (!funcName) {return;}
             
             if (funcName === 'COUNT') {
-                if (col.expr.args && col.expr.args.expr === '*') {
+                if (isCountStarArg(col.expr.args)) {
                     hasCountStar = true;
                 } else if (col.expr.args && col.expr.args.distinct) {
                     hasCountDistinct = true;
@@ -756,8 +794,9 @@ function analyzeAggregatePerformance(
     });
     
     // Check GROUP BY column count
-    if (ast.groupby && Array.isArray(ast.groupby)) {
-        groupByColumnCount = ast.groupby.length;
+    const groupByItems = getAstList(ast.groupby);
+    if (groupByItems.length > 0) {
+        groupByColumnCount = groupByItems.length;
         if (groupByColumnCount > 5) {
             hints.push({
                 type: 'warning',

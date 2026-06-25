@@ -530,7 +530,10 @@ export class WorkspacePanel {
             getLineageLegendVisible: () => this._lineageLegendVisible,
             setLineageLegendVisible: (visible) => {
                 this._lineageLegendVisible = visible;
-                void this._extensionContext.workspaceState.update(LINEAGE_LEGEND_VISIBILITY_STATE_KEY, visible);
+                void this._extensionContext.workspaceState.update(LINEAGE_LEGEND_VISIBILITY_STATE_KEY, visible).then(
+                    undefined,
+                    err => logger.warn(`[WorkspacePanel] Failed to persist lineage legend visibility: ${err instanceof Error ? err.message : String(err)}`)
+                );
             },
             getLineageDetailNodeId: () => this._lineageDetailNodeId,
             setLineageDetailNodeId: (nodeId) => { this._lineageDetailNodeId = nodeId; },
@@ -603,6 +606,10 @@ export class WorkspacePanel {
         this._flowAnalyzer = null;
         this._impactAnalyzer = null;
         this._columnLineageTracker = null;
+        this._currentImpactReport = null;
+        this._lineageDetailNodeId = null;
+        this._lineageDetailDirection = 'both';
+        this._lineageDetailExpandedNodes = [];
     }
 
     /**

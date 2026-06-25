@@ -275,6 +275,7 @@ const renderedNodeIds: Set<string> = new Set();
 const renderedEdgeIds: Set<string> = new Set();
 let offscreenIndicator: SVGGElement | null = null;
 const renderedNodeElementsById: Map<string, SVGGElement> = new Map();
+const renderedNodeRectsById: Map<string, SVGRectElement> = new Map();
 const renderedEdgeElementsById: Map<string, SVGPathElement> = new Map();
 const renderedEdgeIdsByNodeId: Map<string, Set<string>> = new Map();
 let activeEdgeSelectionId: string | null = null;
@@ -549,9 +550,9 @@ function applyNodePositionsToDom(): void {
     if (!mainGroup) { return; }
 
     currentNodes.forEach(node => {
-        const nodeGroup = mainGroup!.querySelector(`.node[data-id="${node.id}"]`) as SVGGElement | null;
+        const nodeGroup = renderedNodeElementsById.get(node.id);
         if (!nodeGroup) { return; }
-        const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement | null;
+        const rect = renderedNodeRectsById.get(node.id);
         if (!rect) { return; }
         const origX = Number.parseFloat(rect.getAttribute('x') || '0');
         const origY = Number.parseFloat(rect.getAttribute('y') || '0');
@@ -565,14 +566,17 @@ function applyEdgePositionsToDom(): void {
     if (!mainGroup) { return; }
 
     const layoutType = state.layoutType || 'vertical';
-    const edgeElements = mainGroup.querySelectorAll('.edge:not(.column-flow-edge)');
+    const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
+    const edgeElements = renderedEdgeElementsById.size > 0
+        ? Array.from(renderedEdgeElementsById.values())
+        : Array.from(mainGroup.querySelectorAll('.edge:not(.column-flow-edge)')) as SVGPathElement[];
     edgeElements.forEach(edgeEl => {
         const sourceId = edgeEl.getAttribute('data-source');
         const targetId = edgeEl.getAttribute('data-target');
         if (!sourceId || !targetId) { return; }
 
-        const sourceNode = currentNodes.find(node => node.id === sourceId);
-        const targetNode = currentNodes.find(node => node.id === targetId);
+        const sourceNode = renderNodeMap.get(sourceId) || currentNodeMap.get(sourceId);
+        const targetNode = renderNodeMap.get(targetId) || currentNodeMap.get(targetId);
         if (!sourceNode || !targetNode) { return; }
 
         edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
@@ -1316,6 +1320,7 @@ export function cleanupRenderer(): void {
     panelResizerCleanup.forEach(cleanup => cleanup());
     panelResizerCleanup = [];
     renderedNodeElementsById.clear();
+    renderedNodeRectsById.clear();
     renderedEdgeElementsById.clear();
     renderedEdgeIdsByNodeId.clear();
     activeConnectedHighlightEdgeIds.clear();
@@ -1368,6 +1373,7 @@ function updateVisibleNodes(): void {
         edgeElementsById: renderedEdgeElementsById,
         onNodeRemoved: (nodeId) => {
             renderedNodeElementsById.delete(nodeId);
+            renderedNodeRectsById.delete(nodeId);
         },
         onEdgeRemoved: (edgeId) => {
             unregisterRenderedEdgeElement(edgeId);
@@ -1395,6 +1401,7 @@ export function setVirtualizationEnabled(enabled: boolean): void {
         edgeElementsById: renderedEdgeElementsById,
         onNodeRemoved: (nodeId) => {
             renderedNodeElementsById.delete(nodeId);
+            renderedNodeRectsById.delete(nodeId);
         },
         onEdgeRemoved: (edgeId) => {
             unregisterRenderedEdgeElement(edgeId);
@@ -1456,6 +1463,7 @@ function clearMainGroupContent(): void {
         return;
     }
     renderedNodeElementsById.clear();
+    renderedNodeRectsById.clear();
     renderedEdgeElementsById.clear();
     renderedEdgeIdsByNodeId.clear();
     activeEdgeSelectionId = null;
@@ -1610,6 +1618,8 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         cloudOffsets.clear();
         cloudElements.clear();
         cloudViewStates.clear();
+        currentClusters = [];
+        clusterNodeMap = new Map();
     }
 
     // Reset highlight state
@@ -1833,6 +1843,12 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
     const renderedGroup = parent.lastElementChild as SVGGElement | null;
     if (renderedGroup) {
         renderedNodeElementsById.set(node.id, renderedGroup);
+        const renderedRect = renderedGroup.querySelector('.node-rect') as SVGRectElement | null;
+        if (renderedRect) {
+            renderedNodeRectsById.set(node.id, renderedRect);
+        } else {
+            renderedNodeRectsById.delete(node.id);
+        }
     }
 }
 

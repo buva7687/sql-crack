@@ -153,6 +153,17 @@ describe('Audit regression: #7 — GROUP BY / ORDER BY object form', () => {
         expect(sortNode).toBeDefined();
         expect(sortNode!.label).toBe('ORDER BY');
     });
+
+    it('ORDER BY ordinal details use the numeric expression instead of unresolved column fallback', () => {
+        const sql = `SELECT name, age FROM users ORDER BY 2 DESC`;
+        const result = parseSql(sql, DIALECT);
+        expect(result.error).toBeUndefined();
+
+        const sortNode = result.nodes.find(n => n.type === 'sort');
+        expect(sortNode).toBeDefined();
+        expect(sortNode!.details?.join(' ')).toContain('2 DESC');
+        expect(sortNode!.details?.join(' ')).not.toContain('? DESC');
+    });
 });
 
 describe('Audit regression: #8 — HAVING conditions counted in stats', () => {

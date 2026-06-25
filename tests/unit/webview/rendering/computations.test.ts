@@ -488,12 +488,16 @@ describe('calculateStackedCloudOffsets', () => {
     });
 
     it('returns empty array for no expandable nodes', () => {
+        const minSpy = jest.spyOn(Math, 'min');
         const result = calculateStackedCloudOffsets({
             expandableNodes: [],
             currentEdges: [],
             layoutSubflowNodesVertical: mockLayout,
         });
         expect(result).toEqual([]);
+        expect(mockLayout).not.toHaveBeenCalled();
+        expect(minSpy).not.toHaveBeenCalled();
+        minSpy.mockRestore();
     });
 
     it('returns one offset for a single node', () => {
