@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SQL Flow performance hints**: CROSS JOIN hints now read the normalized join type, GROUP BY / ORDER BY hint analysis handles object-form AST lists, and `COUNT(*)` detection recognizes parser `star` nodes.
+- **ORDER BY ordinal labels**: `ORDER BY 2 DESC` now falls back to the numeric expression instead of rendering unresolved `? DESC` labels.
+- **Workspace lineage invalidation**: Rebuilding or refreshing the workspace index now clears cached impact reports and lineage-detail state so stale or deleted-node details are not reused.
+- **Cluster state isolation**: Large-graph cluster expand/collapse state is reset for each new SQL Flow render so cluster state no longer bleeds between queries.
+- **Workspace graph tracing performance**: Lineage tracing and shortest-path lookup now use prebuilt adjacency maps instead of repeatedly scanning all SVG edges.
+- **Workspace indexing performance**: Table reference line lookup now builds per-file lookup context once instead of splitting the full SQL text and recompiling regexes per reference.
+- **Zero-gravity animation performance**: The animation loop now uses cached node maps and rendered element lookups instead of per-frame DOM queries and linear edge endpoint searches.
+- **Lineage legend persistence errors**: Rejected workspace-state writes for lineage legend visibility are now logged instead of silently ignored.
+- **Empty stacked-cloud offset input**: `calculateStackedCloudOffsets()` now returns before empty-input spread calculations.
 - **Parser worker supersede cancellation**: Newer parse requests now terminate and respawn a busy parser worker after cancelling superseded in-flight work, preventing stale heavy parses from blocking the worker queue and causing false timeouts for the latest request.
 - **Comments-only refresh loader cleanup**: SQL Flow now hides the global loading overlay before the comments-only early return, so a superseded parse cannot leave the loader stuck.
 - **Workspace lineage view/CTE resolution**: Statement lineage edges now resolve existing `view:`, `cte:`, and `external:` nodes instead of checking only `table:`, preventing valid view references from falling through to stray external nodes.
@@ -29,8 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added regression coverage for worker supersede termination, comments-only loader cleanup, CTE output dead-column detection, workspace cache freshness, view-backed lineage edges, performance test wiring, release workflow ordering/concurrency, validation byte counting, backslash-escape statement splitting, full-line batch matching, and `resolveColumnName` expression handling.
-- Branch validation: 274 suites, 3,551 tests passing. `npx tsc --noEmit` (src + tests) and `npm run lint` pass (0 errors; two pre-existing naming warnings in `tests/unit/webview/nodeBorderState.test.ts`).
+- Added regression coverage for worker supersede termination, comments-only loader cleanup, CTE output dead-column detection, workspace cache freshness, view-backed lineage edges, performance test wiring, release workflow ordering/concurrency, validation byte counting, backslash-escape statement splitting, full-line batch matching, `resolveColumnName` expression handling, SQL Flow hint AST variants, workspace reference line lookup performance, zero-gravity animation lookup performance, workspace graph adjacency reuse, lineage state invalidation, and stacked-cloud empty input.
+- Branch validation: 279 suites, 3,585 tests passing. `npx tsc --noEmit` and `npm run lint` pass.
 
 ## [0.9.0] - 2026-06-16
 
