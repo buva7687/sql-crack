@@ -1,4 +1,4 @@
-import { parseSql } from '../../../src/webview/sqlParser';
+import { parseSql, parseSqlBatch } from '../../../src/webview/sqlParser';
 import type { SqlDialect } from '../../../src/webview/types/parser';
 
 const TSQL = 'TransactSQL' as SqlDialect;
@@ -57,6 +57,34 @@ join   source_table s on t.id = s.id`;
     });
 
     describe('issue #87: UPDATE ... OUTPUT [...] INTO', () => {
+        it('parses the full issue sample when INSERT before UPDATE is not semicolon-terminated', () => {
+            const sql = `create table #temp_table (active bit);
+create table #output_table (active bit);
+
+insert #temp_table (active) values (0)
+
+update  tt
+set     tt.active = 1
+output  inserted.active
+into    #output_table
+from    #temp_table tt;`;
+            const result = parseSqlBatch(sql, TSQL);
+
+            expect(result.errorCount).toBe(0);
+            expect(result.parseErrors ?? []).toHaveLength(0);
+            expect(result.queries.some((query: any) => query.partial)).toBe(false);
+
+            const updateQuery = result.queries.find((query: any) =>
+                query.nodes.some((node: any) => node.type === 'result' && node.label === 'UPDATE')
+            );
+            expect(updateQuery).toBeDefined();
+            expect(updateQuery?.error).toBeUndefined();
+            expect(updateQuery?.hints.some((h: any) => /OUTPUT via compatibility parser/i.test(h.message))).toBe(true);
+            expect(updateQuery?.nodes.some((node: any) =>
+                node.type === 'table' && node.label?.toLowerCase() === '#output_table' && node.accessMode === 'write'
+            )).toBe(true);
+        });
+
         it('parses UPDATE ... OUTPUT ... INTO without a parse error', () => {
             const sql = `update  tt
 set     tt.active = 1

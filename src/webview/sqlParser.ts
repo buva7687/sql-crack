@@ -21,6 +21,7 @@ import {
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
+    maskStringsAndComments,
     stripSqlComments,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
@@ -264,6 +265,60 @@ function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
     return selected?.dialect ?? null;
 }
 
+function splitTransactSqlImplicitUpdateOutputStatements(statement: string): string[] {
+    const stripped = stripLeadingComments(statement).trimStart();
+    if (!/^INSERT\b/i.test(stripped) || !/\bUPDATE\b/i.test(stripped) || !/\bOUTPUT\b/i.test(stripped)) {
+        return [statement];
+    }
+
+    const masked = maskStringsAndComments(statement);
+    const updateStartRegex = /(?:^|[\r\n])[ \t]*UPDATE\b/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = updateStartRegex.exec(masked)) !== null) {
+        const updateKeywordOffset = match[0].search(/UPDATE/i);
+        if (updateKeywordOffset < 0) {
+            continue;
+        }
+
+        const updateStart = match.index + updateKeywordOffset;
+        if (updateStart <= 0 || !/\bOUTPUT\b/i.test(masked.slice(updateStart))) {
+            continue;
+        }
+
+        let depth = 0;
+        for (let i = 0; i < updateStart; i++) {
+            if (masked[i] === '(') {
+                depth++;
+            } else if (masked[i] === ')') {
+                depth = Math.max(0, depth - 1);
+            }
+        }
+        if (depth !== 0) {
+            continue;
+        }
+
+        const before = statement.slice(0, updateStart).trim();
+        const after = statement.slice(updateStart).trim();
+        if (!before || !after || !/^INSERT\b/i.test(stripLeadingComments(before).trimStart())) {
+            continue;
+        }
+
+        return [before, after];
+    }
+
+    return [statement];
+}
+
+function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
+    const statements = splitSqlStatements(sql);
+    if (dialect !== 'TransactSQL') {
+        return statements;
+    }
+
+    return statements.flatMap(splitTransactSqlImplicitUpdateOutputStatements);
+}
+
 // Parse multiple SQL statements
 export function parseSqlBatch(
     sql: string,
@@ -345,7 +400,7 @@ export function parseSqlBatch(
         };
     }
 
-    const statements = splitSqlStatements(sql);
+    const statements = splitSqlStatementsForDialect(sql, dialect);
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
