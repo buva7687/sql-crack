@@ -60,6 +60,7 @@ import {
     tryProcessDdlStatement,
     tryParseBulkDataStatement,
     tryParseCompatibleDeleteStatement,
+    tryParseCompatibleUpdateStatement,
     tryParseCompatibleMergeStatement,
     tryParseCompatibleOracleInsertStatement,
     tryParseSessionCommand,
@@ -1238,6 +1239,18 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
         assignLineNumbers(deleteCompatibilityResult.nodes, sql);
         return deleteCompatibilityResult;
+    }
+
+    const updateCompatibilityResult = tryParseCompatibleUpdateStatement({
+        context,
+        sql,
+        genId: (prefix) => genId(context, prefix),
+        parseSql,
+    });
+    if (updateCompatibilityResult) {
+        layoutGraph(updateCompatibilityResult.nodes, updateCompatibilityResult.edges);
+        assignLineNumbers(updateCompatibilityResult.nodes, sql);
+        return updateCompatibilityResult;
     }
 
     const oracleInsertCompatibilityResult = tryParseCompatibleOracleInsertStatement({

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **T-SQL `UPDATE <alias> ... FROM <table> <alias>`**: The update-target alias is now resolved back to its real FROM table instead of being counted as a separate table, so single-table aliased updates no longer produce a false "Possible Cartesian product" hint. WHERE predicates on `UPDATE`/`DELETE ... FROM` are now counted as filter conditions. (#88)
+- **T-SQL `UPDATE ... OUTPUT [...] INTO`**: `UPDATE` statements with an `OUTPUT`/`OUTPUT ... INTO` clause now parse via a compatibility path (mirroring the existing `DELETE ... OUTPUT` handling) instead of failing with a syntax error, and the `OUTPUT INTO` target is rendered as a write node. (#87)
+
 - **SQL Flow performance hints**: CROSS JOIN hints now read the normalized join type, GROUP BY / ORDER BY hint analysis handles object-form AST lists, and `COUNT(*)` detection recognizes parser `star` nodes.
 - **ORDER BY ordinal labels**: `ORDER BY 2 DESC` now falls back to the numeric expression instead of rendering unresolved `? DESC` labels.
 - **Workspace lineage invalidation**: Rebuilding or refreshing the workspace index now clears cached impact reports and lineage-detail state so stale or deleted-node details are not reused.

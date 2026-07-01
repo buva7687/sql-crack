@@ -3,7 +3,7 @@ import type { FlowEdge, FlowNode, ParseResult, QueryStats, SqlDialect } from '..
 import type { ParserContext } from '../context';
 import { findMatchingParen, maskStringsAndComments, stripSqlComments } from '../dialects/preprocessing';
 
-type GenIdFn = (prefix: string) => string;
+export type GenIdFn = (prefix: string) => string;
 type ProcessSelectFn = (
     context: ParserContext,
     stmt: any,
@@ -31,7 +31,7 @@ function normalizeIdentifier(raw: string): string {
     return parts[parts.length - 1] || raw.replace(IDENTIFIER_WRAPPER_PATTERN, '');
 }
 
-function createFlowEdge(genId: GenIdFn, source: string, target: string, sqlClause?: string, clauseType: FlowEdge['clauseType'] = 'flow'): FlowEdge {
+export function createFlowEdge(genId: GenIdFn, source: string, target: string, sqlClause?: string, clauseType: FlowEdge['clauseType'] = 'flow'): FlowEdge {
     return {
         id: genId('e'),
         source,
@@ -322,13 +322,16 @@ function createApproximateUsingSource(context: ParserContext, usingClause: strin
     return sourceRootId;
 }
 
-interface DeleteOutputInfo {
+export interface OutputIntoInfo {
     columns: string[];
     intoTarget?: string;
     sanitizedSql: string;
 }
 
-function extractDeleteOutputInfo(sql: string): DeleteOutputInfo | null {
+// Extracts a T-SQL `OUTPUT <cols> [INTO <target>]` clause and returns the columns, the
+// optional INTO target, and the SQL with the OUTPUT/INTO span removed. Shared by the
+// DELETE and UPDATE compatibility paths (node-sql-parser rejects OUTPUT).
+export function extractOutputIntoInfo(sql: string): OutputIntoInfo | null {
     const outputRange = findTopLevelClauseRange(sql, 'OUTPUT', ['INTO', 'FROM', 'WHERE', 'OPTION']);
     if (!outputRange) {
         return null;
@@ -384,7 +387,7 @@ function tryParseTransactSqlDeleteOutput(args: TryParseCompatibleDeleteArgs): Pa
         return null;
     }
 
-    const outputInfo = extractDeleteOutputInfo(commentStripped);
+    const outputInfo = extractOutputIntoInfo(commentStripped);
     if (!outputInfo || !outputInfo.sanitizedSql) {
         return null;
     }

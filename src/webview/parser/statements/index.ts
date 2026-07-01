@@ -10,6 +10,7 @@ export {
     type StatementPresentation
 } from './ddl';
 export { tryParseCompatibleDeleteStatement } from './delete';
+export { tryParseCompatibleUpdateStatement } from './update';
 export { tryParseBulkDataStatement } from './bulk';
 export { tryParseWarehouseDdlStatement } from './warehouseDdl';
 export { resolveDeleteTargetTableNames, tryProcessDmlStatements, type ProcessDmlStatementsArgs } from './dml';
